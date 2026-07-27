@@ -1,0 +1,86 @@
+[build-system]
+requires = ["uv_build>=0.11.28"]
+build-backend = "uv_build"
+
+[project]
+name = "aranami"
+version = "0.1.0"
+description = "A tool for maintaining on-wiki reports."
+readme = "README.md"
+authors = [
+    { name = "For Each ... Next", email = "for_each_next@outlook.com" },
+]
+license = "CC0-1.0"
+requires-python = ">=3.12"
+keywords = ["mediawiki", "pywikibot", "wikipedia"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content :: Wiki",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+    "Private :: Do Not Upload",
+]
+dependencies = [
+    "great-tables",
+    "polars-u64-idx",
+    "pywikibot",
+    "python-dateutil",
+    "ratelimit",
+    "sqlalchemy",
+    "tqdm",
+]
+
+[dependency-groups]
+dev = [
+    "pyrefly",
+    "ruff",
+    "ty",
+]
+
+[tool.ruff]
+fix = true
+line-length = 79
+preview = true
+show-fixes = true
+target-version = "py312"
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = 72
+
+[tool.ruff.lint]
+ignore = [
+    "missing-copyright-notice",
+    "unnecessary-assign",
+]
+select = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["assert", "implicit-namespace-package"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 72
+max-line-length = 79
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pyrefly]
+project-includes = ["**/*.py"]
+python-version = "3.12"
+
+[tool.ty.environment]
+python-version = "3.12"

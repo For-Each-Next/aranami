@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Build and packaging
+build/
+dist/
+*.egg
+*.egg-info/
+.eggs/
+wheels/
+MANIFEST
+
+# Virtual environments and local configuration
+.venv/
+venv/
+env/
+ENV/
+.env
+
+# Pywikibot runtime and private configuration
+user-config.py
+user-password.py
+user-password.cfg
+user-fixes.py
+*.lwp
+throttle.ctrl
+logs/
+
+# Tests, coverage, and tool caches
+apicache/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.hypothesis/
+.tox/
+.nox/
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# PAWS notebooks live outside this development repository
+*.ipynb
+.ipynb_checkpoints/
+
+# Editors and local development tools
+.idea/
+.vscode/
+.codex/
+
+# Operating system files
+.DS_Store
+._*
