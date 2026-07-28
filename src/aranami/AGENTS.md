@@ -10,17 +10,20 @@ repository-wide instructions.
   wheel, imports `aranami`, and calls the public package API.
 - Runtime package code must behave as ordinary Python and must not detect
   or depend on a notebook environment.
-- Keep Aranami buildable as a pure-Python wheel with `uv build --wheel`.
-- The future `aranami.run(dry_run=False)` call performs one complete run
-  and returns. Do not implement a scheduler, daemon, sleep loop, or
-  notebook callback.
+- Keep Aranami buildable as a pure-Python wheel with
+  `uv build --wheel --clear`.
+- The `aranami.run(dry_run=False)` call performs one complete run and
+  returns. Do not implement a scheduler, daemon, sleep loop, or notebook
+  callback.
 - `aranami.run(dry_run=True)` performs the same report construction but
   writes proposed edits locally and must not modify Wikipedia.
 - On PAWS, runtime data belongs under the caller's current directory:
-  `logs/` for logs, `cache/` for disposable cached data, and `dry-run/`
-  for proposed-edit artifacts.
+  `logs/` for UTC daily logs, `cache/` for disposable cached data, and
+  `dry-run/` for proposed-edit artifacts.
+- Append all runs on one UTC date to one file under `logs/` and retain
+  the latest 90 UTC dates.
 - Keep `logs/`, `cache/`, and `dry-run/` visible; do not rename them to
-  hidden directories.
+  hidden paths.
 - Treat `cache/` as an optimization only. Deleting it must never lose
   authoritative data or change the final report.
 - Never write runtime data into the installed package or `site-packages`.
@@ -32,8 +35,7 @@ repository-wide instructions.
 
 Keep dependencies flowing down through these layers:
 
-- `aranami.__init__` is the small public API. It will eventually export
-  `run`.
+- `aranami.__init__` is the small public API and exports `run`.
 - `runner.py` orchestrates one run by invoking jobs. It contains no report
   implementation or scheduling loop.
 - `jobs/` contains one independently runnable report task per module.

@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "aranami"
-version = "0.1.0"
+version = "0.1.1"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [
@@ -33,6 +33,7 @@ classifiers = [
 dependencies = [
     "great-tables",
     "polars-u64-idx",
+    "pymysql",
     "pywikibot",
     "python-dateutil",
     "ratelimit",
