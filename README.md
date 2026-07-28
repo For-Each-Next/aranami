@@ -99,7 +99,8 @@ Aranami requires Python 3.12 or newer and uses [`uv`][2]:
 
 ```shell
 uv sync
-uv run python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests/unit -v
+uv run python -m unittest discover -s tests/integration -v
 uv build --wheel --clear
 ```
 

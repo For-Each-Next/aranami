@@ -5,6 +5,16 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.2
 
+### 0.1.1.post1 (2026-07-28 16:55 UTC)
+
+`refactor(logging): rotate run logs at UTC midnight`
+
+Overview: Simplified daily run logging while preserving UTC separation and
+retention.
+
+- **Logging:** Appended runs to `logs/aranami.log`, rolled the active file at
+  UTC midnight, and retained the latest 90 daily archives.
+
 ### 0.1.1 (2026-07-28 16:19 UTC)
 
 `feat(runtime): add typed replica access and run logging`
