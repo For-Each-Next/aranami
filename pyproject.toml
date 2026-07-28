@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "aranami"
-version = "0.1.2"
+version = "0.1.2.post2"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [

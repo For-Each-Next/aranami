@@ -1,4 +1,4 @@
-"""Test compact Great Tables previews of Polars frames."""
+"""Test ``gtshow`` previews of Polars frames."""
 
 import re
 from unittest import TestCase
@@ -89,30 +89,33 @@ class TestGtShow(TestCase):
 
         abbreviated = _shown_table(frame, first=1, last=2)
         complete = _shown_table(frame, first=3, last=3)
+        all_from_first = _shown_table(frame, first=0, last=2)
+        all_from_last = _shown_table(frame, first=2, last=-1)
 
         assert "6 rows x 1 columns" in abbreviated.as_raw_html()
         assert _body_cells(abbreviated) == ["0", "...", "4", "5"]
         assert _body_cells(complete) == [str(value) for value in range(6)]
+        assert _body_cells(all_from_first) == [
+            str(value) for value in range(6)
+        ]
+        assert _body_cells(all_from_last) == [str(value) for value in range(6)]
 
-    def test_preview_validates_counts_columns_and_escapes_labels(self) -> None:
-        """Reject invalid inputs and escape typed column headings."""
+    @staticmethod
+    def test_preview_displays_empty_frames_and_escapes_labels() -> None:
+        """Display empty frames and escape typed column headings."""
         frame = pl.DataFrame({"<value>": [1]})
 
         rendered = _shown_table(frame).as_raw_html()
+        empty = _shown_table(pl.DataFrame())
+        structured_empty = _shown_table(
+            pl.DataFrame(schema={"value": pl.Int64}),
+        )
 
         assert "&lt;value&gt;<br><small>Int64</small>" in rendered
-        with self.assertRaisesRegex(  # ruff: ignore[pytest-unittest-raises-assertion]
-            ValueError,
-            "nonnegative",
-        ):
-            gtshow(frame, first=-1)
-        with self.assertRaisesRegex(  # ruff: ignore[pytest-unittest-raises-assertion]
-            ValueError,
-            "nonnegative",
-        ):
-            gtshow(frame, last=-1)
-        with self.assertRaisesRegex(  # ruff: ignore[pytest-unittest-raises-assertion]
-            ValueError,
-            "at least one column",
-        ):
-            gtshow(pl.DataFrame())
+        assert "0 rows x 0 columns" in empty.as_raw_html()
+        assert _body_cells(empty) == []
+        structured_rendered = structured_empty.as_raw_html()
+
+        assert "value<br><small>Int64</small>" in structured_rendered
+        assert "0 rows x 1 columns" in structured_empty.as_raw_html()
+        assert _body_cells(structured_empty) == []

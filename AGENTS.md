@@ -77,17 +77,12 @@ layer-specific rules for `src/aranami/`.
   `### <major.minor.patch>[.devN|.postN] (YYYY-MM-DD HH:MM UTC)` heading.
 - Keep version groups and package versions newest first. Do not assign
   permanent sequential numbers to history entries.
-- Put exactly one backticked Conventional Commit-style message immediately
-  below each package version heading. Treat it as a simulated summary of the
-  entire version, not as a record of an individual Git commit or intermediate
-  build.
-- Before a formal release, add one concise `Overview:` paragraph beneath the
-  simulated message that describes the release as a whole.
+- Put one concise `Overview:` paragraph immediately below each package version
+  heading that describes the release as a whole.
 - Follow the overview with concise, past-tense bullets covering only material
   completed outcomes.
 - When more work, `.devN` builds, or `.postN` builds belong to an existing
-  version, revise its one summary and bullet list. Never add another simulated
-  commit message to that version section.
+  version, revise its overview and bullet list.
 - Before finalizing the base version, consolidate overlapping bullets and
   remove transient build notes, superseded implementation details, and other
   trivia. Preserve user-visible changes, significant technical decisions,

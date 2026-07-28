@@ -5,9 +5,15 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.2
 
-### 0.1.2 (2026-07-28 18:11 UTC)
+### 0.1.2.post2 (2026-07-28 18:39 UTC)
 
-`feat(runtime): release version 0.1.2`
+Overview: Made frame previews handle unrestricted limits and empty results.
+
+- **Result previews:** Displayed every row when either edge limit was
+  nonpositive and rendered empty frames without error, preserving any
+  available column structure.
+
+### 0.1.2 (2026-07-28 18:11 UTC)
 
 Overview: Added compact Polars previews, streamlined PAWS wheel updates, and
 simplified UTC daily log rotation.
@@ -21,8 +27,6 @@ simplified UTC daily log rotation.
   already loaded.
 
 ### 0.1.1 (2026-07-28 16:19 UTC)
-
-`feat(runtime): add typed replica access and run logging`
 
 Overview: Added typed Wiki Replica access and a public PAWS runner with durable
 logging, plus safer wheel management and focused operational documentation.
@@ -41,7 +45,8 @@ logging, plus safer wheel management and focused operational documentation.
 
 ### 0.1.0 (2026-07-27 21:38 UTC)
 
-`chore: initialize aranami 0.1.0`
+Overview: Initialized the Aranami package, documented PAWS workflows, and
+established locked development tooling.
 
 - **Package:** Initialized the pure-Python package and its source, service,
   support, job, and runner layers.
