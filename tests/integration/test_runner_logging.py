@@ -1,5 +1,6 @@
 """Test the public runner and its daily log lifecycle."""
 
+import os
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,46 +16,24 @@ class TestRunnerLoggingIntegration(TestCase):
     """Test the public runner with real temporary files."""
 
     @staticmethod
-    def test_public_run_writes_one_daily_log_and_expires_old_logs() -> None:
-        """Write start messages under ``logs`` and enforce retention."""
-        now = datetime(2026, 7, 28, 12, 30, tzinfo=UTC)
+    def test_public_run_appends_to_the_active_log() -> None:
+        """Append start messages to the active log under ``logs``."""
         expected_run_count = 2
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            log_directory = root / "logs"
-            log_directory.mkdir()
-            expired_date = now.date() - timedelta(days=90)
-            retained_date = now.date() - timedelta(days=89)
-            expired_log = (
-                log_directory / f"aranami-{expired_date.isoformat()}.log"
-            )
-            retained_log = (
-                log_directory / f"aranami-{retained_date.isoformat()}.log"
-            )
-            expired_log.write_text("expired\n", encoding="utf-8")
-            retained_log.write_text("retained\n", encoding="utf-8")
-
-            with (
-                patch(
-                    "aranami.support.logs.Path.cwd",
-                    return_value=root,
-                ),
-                patch(
-                    "aranami.support.logs._utc_now",
-                    return_value=now,
-                ),
+            with patch(
+                "aranami.support.logs.Path.cwd",
+                return_value=root,
             ):
                 first_result = aranami.run(dry_run=True)
                 second_result = aranami.run(dry_run=True)
 
-            daily_log = log_directory / "aranami-2026-07-28.log"
-            content = daily_log.read_text(encoding="utf-8")
+            active_log = root / "logs" / "aranami.log"
+            content = active_log.read_text(encoding="utf-8")
 
             assert aranami.run is run
             assert first_result is None
             assert second_result is None
-            assert not expired_log.exists()
-            assert retained_log.exists()
             assert (
                 content.count(
                     "INFO [runner.run]: Aranami run started (dry_run=True).",
@@ -70,4 +49,64 @@ class TestRunnerLoggingIntegration(TestCase):
                 )
                 for line in content.splitlines()
             )
-            assert not tuple(root.glob("aranami-*.log"))
+            assert tuple((root / "logs").iterdir()) == (active_log,)
+            assert not tuple(root.glob("aranami*.log*"))
+
+    @staticmethod
+    def test_public_run_rotates_at_midnight_and_retains_archives() -> None:
+        """Rotate an overdue log and retain 90 daily archives."""
+        now = datetime(2026, 7, 28, 0, 30, tzinfo=UTC)
+        previous_run = now - timedelta(hours=1)
+        retained_archive_count = 90
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            log_directory = root / "logs"
+            log_directory.mkdir()
+            active_log = log_directory / "aranami.log"
+            active_log.write_text("previous run\n", encoding="utf-8")
+            previous_timestamp = previous_run.timestamp()
+            os.utime(
+                active_log,
+                (previous_timestamp, previous_timestamp),
+            )
+
+            archives = tuple(
+                log_directory
+                / (
+                    "aranami.log."
+                    f"{previous_run.date() - timedelta(days=offset)}"
+                )
+                for offset in range(retained_archive_count, 0, -1)
+            )
+            for archive in archives:
+                archive.write_text("archived\n", encoding="utf-8")
+
+            with (
+                patch(
+                    "aranami.support.logs.Path.cwd",
+                    return_value=root,
+                ),
+                patch(
+                    "logging.handlers.time.time",
+                    return_value=now.timestamp(),
+                ),
+            ):
+                result = aranami.run(dry_run=True)
+
+            newest_archive = log_directory / "aranami.log.2026-07-27"
+            retained_archives = tuple(
+                log_directory.glob("aranami.log.*"),
+            )
+            newest_content = newest_archive.read_text(encoding="utf-8")
+
+            assert result is None
+            assert not archives[0].exists()
+            assert newest_content == "previous run\n"
+            assert len(retained_archives) == retained_archive_count
+            assert len(tuple(log_directory.iterdir())) == (
+                retained_archive_count + 1
+            )
+            assert (
+                "INFO [runner.run]: Aranami run started (dry_run=True)."
+                in active_log.read_text(encoding="utf-8")
+            )

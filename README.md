@@ -24,12 +24,7 @@ DRY_RUN = True
 
 
 def install() -> None:
-    """Install the newest local Aranami wheel."""
-    if "aranami" in sys.modules:
-        raise RuntimeError(
-            "Restart the kernel before running this cell again.",
-        )
-
+    """Install or update from the newest local Aranami wheel."""
     versioned_wheels: list[tuple[Version, Path]] = []
     for wheel_file in Path.cwd().glob("aranami-*.whl"):
         try:
@@ -99,7 +94,8 @@ Aranami requires Python 3.12 or newer and uses [`uv`][2]:
 
 ```shell
 uv sync
-uv run python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests/unit -v
+uv run python -m unittest discover -s tests/integration -v
 uv build --wheel --clear
 ```
 

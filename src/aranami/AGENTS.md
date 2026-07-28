@@ -21,7 +21,7 @@ repository-wide instructions.
   `logs/` for UTC daily logs, `cache/` for disposable cached data, and
   `dry-run/` for proposed-edit artifacts.
 - Append all runs on one UTC date to one file under `logs/` and retain
-  the latest 90 UTC dates.
+  the latest 90 completed UTC-dated archives.
 - Keep `logs/`, `cache/`, and `dry-run/` visible; do not rename them to
   hidden paths.
 - Treat `cache/` as an optimization only. Deleting it must never lose

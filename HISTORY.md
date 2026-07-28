@@ -5,6 +5,21 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.2
 
+### 0.1.2 (2026-07-28 18:11 UTC)
+
+`feat(runtime): release version 0.1.2`
+
+Overview: Added compact Polars previews, streamlined PAWS wheel updates, and
+simplified UTC daily log rotation.
+
+- **Result previews:** Added `aranami.support.gtshow` to display configurable
+  leading and trailing Polars rows in JupyterLab, mark omitted records, label
+  field types, and report the complete frame shape.
+- **Logging:** Replaced UTC date-named active logs with a stable
+  `logs/aranami.log` that rotates at UTC midnight and retains 90 archives.
+- **PAWS workflow:** Allowed the newest local wheel to install when Aranami was
+  already loaded.
+
 ### 0.1.1 (2026-07-28 16:19 UTC)
 
 `feat(runtime): add typed replica access and run logging`
