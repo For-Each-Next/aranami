@@ -1,16 +1,17 @@
 [build-system]
-requires = ["uv_build>=0.11.28"]
+requires = ["uv_build>=0.11.28,<0.12"]
 build-backend = "uv_build"
 
 [project]
 name = "aranami"
-version = "0.1.2.post2"
+version = "0.1.2.post3"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [
     { name = "For Each ... Next", email = "for_each_next@outlook.com" },
 ]
 license = "CC0-1.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 keywords = ["mediawiki", "pywikibot", "wikipedia"]
 classifiers = [
@@ -47,6 +48,9 @@ dev = [
     "ruff",
     "ty",
 ]
+
+[tool.uv.build-backend]
+wheel-exclude = ["AGENTS.md"]
 
 [tool.ruff]
 fix = true

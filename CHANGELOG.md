@@ -1,17 +1,25 @@
-# History
+# Changelog
 
 This file records completed repository changes, including work that has not
 been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.2
 
-### 0.1.2.post2 (2026-07-28 18:39 UTC)
+### 0.1.2.post3 (2026-07-29 11:11 UTC)
 
-Overview: Made frame previews handle unrestricted limits and empty results.
+Overview: Improved frame preview edge cases and aligned logging,
+documentation, licensing, and wheel contents with Python project conventions.
 
 - **Result previews:** Displayed every row when either edge limit was
   nonpositive and rendered empty frames without error, preserving any
   available column structure.
+- **Logging:** Replaced timestamp-named per-run loggers with the stable
+  `aranami` hierarchy and documented the rotating UTC file-log lifecycle.
+- **Project documentation:** Renamed the release record to `CHANGELOG.md` and
+  added the complete CC0 1.0 Universal legal text.
+- **Packaging:** Included the license in wheels, omitted development-only
+  `AGENTS.md` files, and bounded the build backend to its compatible minor
+  release line.
 
 ### 0.1.2 (2026-07-28 18:11 UTC)
 

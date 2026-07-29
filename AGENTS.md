@@ -56,7 +56,7 @@ layer-specific rules for `src/aranami/`.
   Remove temporary scaffolding and trivial details, consolidate overlapping
   implementation and documentation, and keep all material behavior and
   decisions intact.
-- Keep one evolving `HISTORY.md` section for the active wheel version. Include
+- Keep one evolving `CHANGELOG.md` section for the active wheel version. Include
   its current suffix in the heading, such as `0.1.1.dev3` or `0.1.1.post2`,
   and replace it with the formal base or next patch version when published.
 - Documentation-only, comment-only, and formatting-only changes do not change
@@ -64,11 +64,11 @@ layer-specific rules for `src/aranami/`.
 - Use one base-version decision for one cohesive change; do not bump the base
   once per edit.
 
-### Change history
+### Changelog
 
-- Maintain `HISTORY.md` as the durable record of completed repository changes,
+- Maintain `CHANGELOG.md` as the durable record of completed repository changes,
   including work that has not been committed to Git.
-- Use UTC for every date and time recorded in `HISTORY.md`. Include the
+- Use UTC for every date and time recorded in `CHANGELOG.md`. Include the
   explicit `UTC` suffix on version timestamps.
 - Group package versions by the next minor-version boundary and use
   `## Until <major.minor>` as the group heading. For example,
@@ -89,7 +89,7 @@ layer-specific rules for `src/aranami/`.
   compatibility notes, and migration requirements.
 - Record documentation-only, comment-only, and formatting-only work even though
   it does not require a package version bump.
-- Add the history entry as part of the change before handing it off.
+- Add the changelog entry as part of the change before handing it off.
 
 ### Git commits
 
