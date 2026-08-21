@@ -5,14 +5,14 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.2
 
-### 0.1.2.post3 (2026-07-29 11:11 UTC)
+### 0.1.3 (2026-07-29 11:11 UTC)
 
-Overview: Improved frame preview edge cases and aligned logging,
-documentation, licensing, and wheel contents with Python project conventions.
+Overview: Improved frame preview edge cases and aligned logging, documentation,
+licensing, and wheel contents with Python project conventions.
 
 - **Result previews:** Displayed every row when either edge limit was
-  nonpositive and rendered empty frames without error, preserving any
-  available column structure.
+  nonpositive and rendered empty frames without error, preserving any available
+  column structure.
 - **Logging:** Replaced timestamp-named per-run loggers with the stable
   `aranami` hierarchy and documented the rotating UTC file-log lifecycle.
 - **Project documentation:** Renamed the release record to `CHANGELOG.md` and
@@ -43,8 +43,8 @@ logging, plus safer wheel management and focused operational documentation.
   Polars results and reusable postprocessing.
 - **Replica coverage:** Supported wiki projects, Pywikibot sites, Wikidata term
   data, and MediaWiki, PageAssessments, and Wikibase table metadata.
-- **Runner:** Provided the public `aranami.run(dry_run=...)` entry point for one
-  complete invocation.
+- **Runner:** Provided the public `aranami.run(dry_run=...)` entry point for
+  one complete invocation.
 - **Logging:** Appended each invocation to a UTC daily log under the caller's
   `logs/` directory and retained the latest 90 dates.
 - **PAWS and development:** Installed the newest valid local wheel, removed

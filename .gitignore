@@ -31,6 +31,7 @@ logs/
 
 # Tests, coverage, and tool caches
 apicache/
+.cache/
 .coverage
 .coverage.*
 htmlcov/
