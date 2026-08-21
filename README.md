@@ -88,6 +88,13 @@ PAWS environments are temporary, so reinstall the wheel after a server
 restart. Runtime files are written beneath the notebook's current directory.
 See [Python with pip on PAWS][3] for platform guidance.
 
+## Logging
+
+`aranami.run()` appends package log records at `INFO` or above to
+`logs/aranami.log`. The active file rotates at UTC midnight and retains the
+latest 90 dated archives. Its handler exists only for the duration of the run;
+importing Aranami does not configure the root logger or create runtime files.
+
 ## Development
 
 Aranami requires Python 3.12 or newer and uses [`uv`][2]:
@@ -101,14 +108,15 @@ uv build --wheel --clear
 
 Repository rules and verification requirements are maintained in
 [AGENTS.md][4] and its scoped package instructions. Completed changes are
-recorded in [HISTORY.md][5].
+recorded in [CHANGELOG.md][5].
 
 ## License
 
-Aranami is released under CC0-1.0.
+Aranami is released under [CC0 1.0 Universal][6].
 
 [1]: https://wikitech.wikimedia.org/wiki/PAWS
 [2]: https://docs.astral.sh/uv/
 [3]: https://wikitech.wikimedia.org/wiki/PAWS/Python_with_Pip
 [4]: AGENTS.md
-[5]: HISTORY.md
+[5]: CHANGELOG.md
+[6]: LICENSE

@@ -1,4 +1,4 @@
-"""Display compact Great Tables previews of Polars data frames."""
+"""Provide ``gtshow`` for compact Polars frame previews."""
 
 from __future__ import annotations
 
@@ -15,8 +15,6 @@ if TYPE_CHECKING:
 
 _DEFAULT_EDGE_ROWS: Final = 5
 _OMISSION_TEXT: Final = "..."
-_INVALID_ROW_COUNT: Final = "first and last must be nonnegative"
-_NO_COLUMNS: Final = "frame must contain at least one column"
 
 
 def gtshow(
@@ -31,26 +29,20 @@ def gtshow(
     and trailing rows, and inserts an ellipsis row when records are
     omitted from the middle. Each column header shows its original
     Polars data type beneath its field name, while the footer reports
-    the shape of the complete frame.
+    the shape of the complete frame. A nonpositive edge count displays
+    every row.
 
     Args:
         frame: Data frame to preview.
-        first: Number of leading rows to show.
-        last: Number of trailing rows to show.
-
-    Raises:
-        ValueError: If either row count is negative or the frame has no
-            columns.
+        first: Number of leading rows to show, or all rows when
+            nonpositive.
+        last: Number of trailing rows to show, or all rows when
+            nonpositive.
 
     """
-    if first < 0 or last < 0:
-        raise ValueError(_INVALID_ROW_COUNT)
-    if frame.width == 0:
-        raise ValueError(_NO_COLUMNS)
-
     omitted_row = None
     preview = frame
-    if frame.height > first + last:
+    if first > 0 and last > 0 and frame.height > first + last:
         omitted_row = first
         separator = frame.clear().select(
             pl.lit(None, dtype=dtype).alias(name)
