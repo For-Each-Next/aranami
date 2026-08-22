@@ -40,6 +40,8 @@ from importlib.metadata import version
 from typing import TYPE_CHECKING, Final, Self, TypedDict, cast
 
 import polars as pl
+
+# noinspection PyPackageRequirements
 from ratelimit import limits, sleep_and_retry
 from tqdm import tqdm
 

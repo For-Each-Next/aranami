@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "aranami"
-version = "0.1.3.post6"
+version = "0.1.3.post8"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [
@@ -44,9 +44,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pyrefly",
     "ruff",
-    "ty",
+    "types-ratelimit",
 ]
 
 [tool.uv.build-backend]
