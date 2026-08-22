@@ -310,7 +310,7 @@ def _track_progress(
         titles,
         desc="Fetching page views",
         disable=not show_progress,
-        mininterval=1 / 2.4,
+        mininterval=10 / 29,
         unit="page",
     )
 

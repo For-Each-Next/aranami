@@ -81,7 +81,7 @@ class TestPageviewValues(TestCase):
     def test_progress_refresh_rate_and_visibility(self) -> None:
         """Limit progress rendering and preserve visibility control."""
         titles = ("B", "A")
-        expected_interval = 1 / 2.4
+        expected_interval = 10 / 29
         for show_progress in (True, False):
             with (
                 self.subTest(show_progress=show_progress),

@@ -5,7 +5,7 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.2
 
-### 0.1.4.post2 (2026-08-22 14:12 UTC)
+### 0.1.4.post3 (2026-08-22 14:29 UTC)
 
 Overview: Simplified Pageviews request handling and progress rendering while
 preserving sequential data collection.
@@ -15,7 +15,7 @@ preserving sequential data collection.
   non-404 HTTP errors propagating directly to callers.
 - **Compatibility:** Removed the public `Pageviews.user_agent` attribute and
   the corresponding constructor and `from_site()` arguments.
-- **Progress:** Limited Pageviews progress rendering to at most 2.4 refreshes
+- **Progress:** Limited Pageviews progress rendering to at most 2.9 refreshes
   per second while preserving page counts and visibility controls.
 - **Dependencies:** Removed the runtime `ratelimit` package and its development
   stubs.
