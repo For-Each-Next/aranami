@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "aranami"
-version = "0.1.3.post8"
+version = "0.1.4"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [
@@ -81,10 +81,3 @@ max-line-length = 79
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-[tool.pyrefly]
-project-includes = ["**/*.py"]
-python-version = "3.12"
-
-[tool.ty.environment]
-python-version = "3.12"

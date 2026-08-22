@@ -5,32 +5,29 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.2
 
-### 0.1.3.post8 (2026-08-22 11:22 UTC)
+### 0.1.4 (2026-08-22 11:22 UTC)
 
 Overview: Added a PAWS-ready Wikimedia Pageviews source adapter with a primary
-Polars interface, typed diagnostic observations, and aligned runtime, typing,
-and IDE handling for its rate limiter.
+Polars interface, typed diagnostic observations, rate-limited API access, and
+documentation aligned with the package's current capabilities.
 
 - **Pageviews:** Added a Quarry-style
   `Pageviews.query(...).pipe(...).collect()` interface for cumulative Polars
   aggregation across multiple titles and half-open periods, including
   Pywikibot site configuration, typed unaggregated observations for debugging,
-  and explicit null totals when Wikimedia returned no observations.
-- **PAWS access:** Identified requests with a configurable Aranami User-Agent
-  and limited sequential API calls to two per second.
-- **Live verification:** Added a PAWS script that selects featured video-game
-  pages through Quarry, derives both source identifiers from one Pywikibot
-  site, collects two rolling years of daily views, and previews the first and
-  last 20 records.
-- **Source package:** Exposed `aranami.sources.pageviews` alongside the Quarry
-  adapter.
-- **Dependencies:** Replaced `polars-u64-idx` with standard `polars`, pinned
-  Great Tables 0.23.0, refreshed SQLAlchemy within its existing requirement,
-  and used PyPI `ratelimit` at runtime with maintained development stubs.
-- **Development tooling:** Kept Ruff as the declared development checker while
-  removing Pyrefly and ty from project-managed dependencies.
-- **IDE analysis:** Suppressed PyCharm's incorrect package-requirement warning
-  for the canonical `ratelimit` import without adding a Django package.
+  explicit null totals when Wikimedia returned no observations, and exposure
+  through `aranami.sources` alongside Quarry.
+- **PAWS access:** Identified requests with a configurable Aranami User-Agent,
+  limited sequential API calls to two per second, and added a live workflow
+  that combines Quarry selection with two rolling years of daily views.
+- **Dependencies and tooling:** Replaced `polars-u64-idx` with standard
+  `polars`, pinned Great Tables 0.23.0, refreshed SQLAlchemy within its existing
+  requirement, adopted PyPI `ratelimit` with maintained development stubs, and
+  removed stale ty and Pyrefly configuration in favor of Ruff-only project
+  verification.
+- **Documentation:** Documented the available Quarry, Pageviews, and frame
+  preview capabilities, clarified the current bootstrap-only runner, and
+  aligned package documentation with the exported source adapters.
 
 ### 0.1.3 (2026-07-29 11:11 UTC)
 
