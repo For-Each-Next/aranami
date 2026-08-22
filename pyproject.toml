@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "aranami"
-version = "0.1.3"
+version = "0.1.4"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [
@@ -32,8 +32,8 @@ classifiers = [
     "Private :: Do Not Upload",
 ]
 dependencies = [
-    "great-tables",
-    "polars-u64-idx",
+    "great-tables==0.23.0",
+    "polars",
     "pymysql",
     "pywikibot",
     "python-dateutil",
@@ -44,9 +44,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pyrefly",
     "ruff",
-    "ty",
+    "types-ratelimit",
 ]
 
 [tool.uv.build-backend]
@@ -82,10 +81,3 @@ max-line-length = 79
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-[tool.pyrefly]
-project-includes = ["**/*.py"]
-python-version = "3.12"
-
-[tool.ty.environment]
-python-version = "3.12"

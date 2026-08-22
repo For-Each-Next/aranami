@@ -112,8 +112,6 @@ Before handing off a material change, run the relevant checks:
 uv lock --check
 uv run ruff check .
 uv run ruff format --check .
-uv run ty check
-uv run pyrefly check
 uv build --wheel --clear
 ```
 

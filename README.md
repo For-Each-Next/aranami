@@ -4,13 +4,33 @@ Aranami (荒波, "rough waves") maintains on-wiki reports, primarily for
 WikiProject Video games on the Chinese Wikipedia. It is developed and built
 locally, then installed as a wheel in [Wikimedia PAWS][1].
 
-> **Status:** Aranami is in early development.
+> **Status:** Aranami is in early development. Its data-source adapters are
+> usable, but no report jobs are wired into `aranami.run()` yet.
+
+## Current capabilities
+
+- **Wiki Replicas:** `aranami.sources.quarry.Replica` binds read-only SQLAlchemy
+  selections to Wikimedia Wiki Replicas and collects their results through
+  composable Polars pipelines.
+- **Pageviews:** `aranami.sources.pageviews.Pageviews` aggregates daily,
+  all-access user traffic into cumulative totals for one or more page titles
+  and half-open date periods through the same deferred
+  `query(...).pipe(...).collect()` pattern.
+- **Frame previews:** `aranami.support.gtshow` displays compact Polars previews
+  with field types, frame dimensions, and configurable leading and trailing
+  rows in JupyterLab.
+
+The [live Quarry example][7] exercises replica access from PAWS, while the
+[combined Pageviews example][8] uses Quarry-selected pages to collect and
+preview two rolling years of daily traffic.
 
 ## Run on PAWS
 
 Upload one or more Aranami wheels beside the PAWS notebook, then copy the
-following Python into its first code cell. Keep `DRY_RUN = True` while reviewing
-local output; set it to `False` only for an intentional on-wiki run.
+following Python into its first code cell. The current `aranami.run()` bootstrap
+initializes per-run logging and returns without running a report job or editing
+a wiki. Keep `DRY_RUN = True` while developing so future report jobs default to
+local proposed output; set it to `False` only for an intentional on-wiki run.
 
 ```python
 import subprocess
@@ -120,3 +140,5 @@ Aranami is released under [CC0 1.0 Universal][6].
 [4]: AGENTS.md
 [5]: CHANGELOG.md
 [6]: LICENSE
+[7]: tests/live/quarry_paws.py
+[8]: tests/live/pageviews_paws.py
