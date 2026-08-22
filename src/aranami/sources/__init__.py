@@ -7,6 +7,6 @@ Examples:
 
 """
 
-__all__ = ("quarry",)
+__all__ = ("pageviews", "quarry")
 
-from aranami.sources import quarry
+from aranami.sources import pageviews, quarry

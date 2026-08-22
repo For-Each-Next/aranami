@@ -5,6 +5,28 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.2
 
+### 0.1.3.post6 (2026-08-22 10:55 UTC)
+
+Overview: Added a PAWS-ready Wikimedia Pageviews source adapter with a primary
+Polars interface and typed diagnostic observations.
+
+- **Pageviews:** Added a Quarry-style
+  `Pageviews.query(...).pipe(...).collect()` interface for cumulative Polars
+  aggregation across multiple titles and half-open periods, including
+  Pywikibot site configuration, typed unaggregated observations for debugging,
+  and explicit null totals when Wikimedia returned no observations.
+- **PAWS access:** Identified requests with a configurable Aranami User-Agent
+  and limited sequential API calls to two per second.
+- **Live verification:** Added a PAWS script that selects featured video-game
+  pages through Quarry, derives both source identifiers from one Pywikibot
+  site, collects two rolling years of daily views, and previews the first and
+  last 20 records.
+- **Source package:** Exposed `aranami.sources.pageviews` alongside the Quarry
+  adapter.
+- **Dependencies:** Replaced `polars-u64-idx` with standard `polars`, pinned
+  Great Tables 0.23.0, and refreshed SQLAlchemy within its existing
+  requirement.
+
 ### 0.1.3 (2026-07-29 11:11 UTC)
 
 Overview: Improved frame preview edge cases and aligned logging, documentation,
