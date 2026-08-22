@@ -4,8 +4,7 @@ The adapter reads daily, all-access user traffic from Wikimedia's
 Pageviews API. Configure a :class:`Pageviews` source, call ``query()``,
 and then call :meth:`PageviewFrame.collect` for normal analysis. Use
 :meth:`Pageviews.fetch_daily_views` to inspect unaggregated observations
-while debugging. Requests run sequentially and are limited to 200 per
-second for comfortable use from Wikimedia PAWS.
+while debugging. Requests run sequentially from Wikimedia PAWS.
 
 Examples:
     >>> import datetime as dt
@@ -36,13 +35,9 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from http import HTTPStatus
-from importlib.metadata import version
-from typing import TYPE_CHECKING, Final, Self, TypedDict, cast
+from typing import TYPE_CHECKING, Self, TypedDict, cast
 
 import polars as pl
-
-# noinspection PyPackageRequirements
-from ratelimit import limits, sleep_and_retry
 from tqdm import tqdm
 
 if TYPE_CHECKING:
@@ -51,12 +46,6 @@ if TYPE_CHECKING:
     from pywikibot.site import BaseSite
 
 type FramePostprocessor = Callable[[pl.LazyFrame], pl.LazyFrame]
-
-
-_REQUEST_TIMEOUT_SECONDS: Final = 30
-_DEFAULT_USER_AGENT: Final = (
-    f"Aranami/{version('aranami')} (mailto:for_each_next@outlook.com)"
-)
 
 
 class _ViewItem(TypedDict):
@@ -100,29 +89,23 @@ class Pageviews:
     Attributes:
         project: Wikimedia project domain, such as
             ``"en.wikipedia.org"``.
-        user_agent: Identifying User-Agent sent with each request.
     """
 
     project: str
-    user_agent: str = _DEFAULT_USER_AGENT
 
     def __post_init__(self) -> None:
-        """Normalize request metadata when creating the source."""
+        """Normalize the project domain when creating the source."""
         object.__setattr__(self, "project", self.project.strip().lower())
-        object.__setattr__(self, "user_agent", self.user_agent.strip())
 
     @classmethod
     def from_site(
         cls,
         site: BaseSite,
-        *,
-        user_agent: str = _DEFAULT_USER_AGENT,
     ) -> Self:
         """Create Pageviews configuration from a Pywikibot site.
 
         Args:
             site: Site whose hostname identifies the project.
-            user_agent: Identifying User-Agent sent with each request.
 
         Returns:
             Pageviews configuration for the site's project.
@@ -135,7 +118,7 @@ class Pageviews:
             'zh.wikipedia.org'
 
         """
-        return cls(site.hostname(), user_agent=user_agent)
+        return cls(site.hostname())
 
     def query(
         self,
@@ -187,7 +170,6 @@ class Pageviews:
             title.strip(),
             start,
             stop,
-            self.user_agent,
         )
 
 
@@ -328,6 +310,7 @@ def _track_progress(
         titles,
         desc="Fetching page views",
         disable=not show_progress,
+        mininterval=1 / 2.4,
         unit="page",
     )
 
@@ -337,7 +320,6 @@ def _build_request(
     title: str,
     start: dt.date,
     stop: dt.date,
-    user_agent: str,
 ) -> urllib.request.Request:
     """Build a Pageviews request from normalized arguments.
 
@@ -358,28 +340,22 @@ def _build_request(
     # ruff: ignore[suspicious-url-open-usage]
     return urllib.request.Request(
         f"{base}{'/'.join(segments)}",
-        headers={
-            "Accept": "application/json",
-            "User-Agent": user_agent,
-        },
+        headers={"Accept": "application/json"},
     )
 
 
-@sleep_and_retry
-@limits(calls=200, period=1)
 def _request_daily_views(
     project: str,
     title: str,
     start: dt.date,
     stop: dt.date,
-    user_agent: str,
 ) -> list[DailyView]:
-    """Make one rate-limited daily Pageviews request.
+    """Make one daily Pageviews request.
 
     Returns:
         Decoded daily observations.
     """
-    request = _build_request(project, title, start, stop, user_agent)
+    request = _build_request(project, title, start, stop)
     return _open_request(request)
 
 
@@ -394,10 +370,7 @@ def _open_request(request: urllib.request.Request) -> list[DailyView]:
     """
     try:
         # ruff: ignore[suspicious-url-open-usage]
-        with urllib.request.urlopen(
-            request,
-            timeout=_REQUEST_TIMEOUT_SECONDS,
-        ) as response:
+        with urllib.request.urlopen(request) as response:
             payload = cast("dict[str, list[_ViewItem]]", json.load(response))
     except urllib.error.HTTPError as error:
         if error.code == HTTPStatus.NOT_FOUND:

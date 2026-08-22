@@ -7,7 +7,6 @@ import json
 import urllib.error
 from datetime import date
 from email.message import Message
-from importlib.metadata import version
 from io import BytesIO
 from unittest import TestCase
 from unittest.mock import MagicMock, call, patch
@@ -39,10 +38,7 @@ class TestPageviewValues(TestCase):
     def test_daily_inputs_are_normalized_before_transport() -> None:
         """Normalize text arguments before making a request."""
         expected = [DailyView(date(2026, 1, 1), 7)]
-        source = Pageviews(
-            " EN.WIKIPEDIA.ORG ",
-            user_agent=" TestBot/1.0 (test@example.org) ",
-        )
+        source = Pageviews(" EN.WIKIPEDIA.ORG ")
         with patch.object(
             pageviews,
             "_request_daily_views",
@@ -56,32 +52,11 @@ class TestPageviewValues(TestCase):
 
         assert actual == expected
         assert source.project == "en.wikipedia.org"
-        assert source.user_agent == "TestBot/1.0 (test@example.org)"
         request_daily_views.assert_called_once_with(
             "en.wikipedia.org",
             "Video game",
             date(2026, 1, 1),
             date(2026, 1, 2),
-            "TestBot/1.0 (test@example.org)",
-        )
-
-    @staticmethod
-    def test_default_user_agent_identifies_aranami() -> None:
-        """Identify the package and maintainer by default."""
-        source = Pageviews("en.wikipedia.org")
-        with patch.object(
-            pageviews,
-            "_request_daily_views",
-            return_value=[],
-        ) as request_daily_views:
-            source.fetch_daily_views(
-                "Video game",
-                date(2026, 1, 1),
-                date(2026, 1, 2),
-            )
-
-        assert request_daily_views.call_args.args[-1] == (
-            f"Aranami/{version('aranami')} (mailto:for_each_next@outlook.com)"
         )
 
     @staticmethod
@@ -90,13 +65,9 @@ class TestPageviewValues(TestCase):
         site = MagicMock()
         site.hostname.return_value = "zh.wikipedia.org"
 
-        source = Pageviews.from_site(
-            site,
-            user_agent="TestBot/1.0 (test@example.org)",
-        )
+        source = Pageviews.from_site(site)
 
         assert source.project == "zh.wikipedia.org"
-        assert source.user_agent == "TestBot/1.0 (test@example.org)"
         site.hostname.assert_called_once_with()
 
     @staticmethod
@@ -106,6 +77,33 @@ class TestPageviewValues(TestCase):
         assert "pageviews" in sources.__all__
         assert "Pageviews" in pageviews.__all__
         assert "PageviewFrame" in pageviews.__all__
+
+    def test_progress_refresh_rate_and_visibility(self) -> None:
+        """Limit progress rendering and preserve visibility control."""
+        titles = ("B", "A")
+        expected_interval = 1 / 2.4
+        for show_progress in (True, False):
+            with (
+                self.subTest(show_progress=show_progress),
+                patch.object(
+                    pageviews,
+                    "tqdm",
+                    return_value=titles,
+                ) as progress,
+            ):
+                tracked = pageviews._track_progress(
+                    titles,
+                    show_progress=show_progress,
+                )
+
+            assert tracked is titles
+            progress.assert_called_once_with(
+                titles,
+                desc="Fetching page views",
+                disable=not show_progress,
+                mininterval=expected_interval,
+                unit="page",
+            )
 
 
 class TestPageviewTransport(TestCase):
@@ -119,7 +117,6 @@ class TestPageviewTransport(TestCase):
             "C++ / %20",
             date(2026, 1, 1),
             date(2026, 1, 3),
-            "TestBot/1.0 (test@example.org)",
         )
         response = BytesIO(
             json.dumps(
@@ -144,15 +141,13 @@ class TestPageviewTransport(TestCase):
             "C%2B%2B%20%2F%20%2520/daily/2026010100/2026010200"
         )
         assert request.get_header("Accept") == "application/json"
-        assert request.get_header("User-agent") == (
-            "TestBot/1.0 (test@example.org)"
-        )
+        assert request.get_header("User-agent") is None
         assert observations == [
             DailyView(date(2026, 1, 1), 5),
             DailyView(date(2026, 1, 2), 8),
         ]
         assert response.closed
-        urlopen.assert_called_once_with(request, timeout=30)
+        urlopen.assert_called_once_with(request)
 
     @staticmethod
     def test_not_found_means_no_observations() -> None:
@@ -170,7 +165,6 @@ class TestPageviewTransport(TestCase):
             "Unknown",
             date(2026, 1, 1),
             date(2026, 1, 2),
-            "TestBot/1.0 (test@example.org)",
         )
 
         with patch(
@@ -196,19 +190,19 @@ class TestPageviewTransport(TestCase):
             "Video game",
             date(2026, 1, 1),
             date(2026, 1, 2),
-            "TestBot/1.0 (test@example.org)",
         )
 
         with (
             patch(
                 "aranami.sources.pageviews.urllib.request.urlopen",
                 side_effect=error,
-            ),
+            ) as urlopen,
             self.assertRaises(urllib.error.HTTPError) as caught,
         ):
             pageviews._open_request(request)
 
         assert caught.exception is error
+        urlopen.assert_called_once_with(request)
 
 
 class TestPageviewFrames(TestCase):
@@ -253,10 +247,7 @@ class TestPageviewFrames(TestCase):
             [DailyView(date(2026, 1, 3), 9)],
         )
 
-        query = Pageviews(
-            "en.wikipedia.org",
-            user_agent="TestBot/1.0 (test@example.org)",
-        ).query(
+        query = Pageviews("en.wikipedia.org").query(
             ["B", "A"],
             periods,
             show_progress=False,
@@ -302,14 +293,12 @@ class TestPageviewFrames(TestCase):
                 "B",
                 date(2026, 1, 1),
                 date(2026, 1, 4),
-                "TestBot/1.0 (test@example.org)",
             ),
             call(
                 "en.wikipedia.org",
                 "A",
                 date(2026, 1, 1),
                 date(2026, 1, 4),
-                "TestBot/1.0 (test@example.org)",
             ),
         ]
 

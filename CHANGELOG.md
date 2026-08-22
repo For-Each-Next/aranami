@@ -5,13 +5,20 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.2
 
-### 0.1.4.post1 (2026-08-22 13:10 UTC)
+### 0.1.4.post2 (2026-08-22 14:12 UTC)
 
-Overview: Increased Wikimedia Pageviews request throughput while preserving
-sequential fetching and wait-and-retry enforcement.
+Overview: Simplified Pageviews request handling and progress rendering while
+preserving sequential data collection.
 
-- **Pageviews:** Raised the Pageviews API rate limit from two to 200 requests
-  per second and aligned the module documentation with the new ceiling.
+- **Pageviews:** Stopped configuring a User-Agent header and request timeout,
+  removed fixed pacing, and made one attempt per sequential request, with
+  non-404 HTTP errors propagating directly to callers.
+- **Compatibility:** Removed the public `Pageviews.user_agent` attribute and
+  the corresponding constructor and `from_site()` arguments.
+- **Progress:** Limited Pageviews progress rendering to at most 2.4 refreshes
+  per second while preserving page counts and visibility controls.
+- **Dependencies:** Removed the runtime `ratelimit` package and its development
+  stubs.
 
 ### 0.1.4 (2026-08-22 11:22 UTC)
 
