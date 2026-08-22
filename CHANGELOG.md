@@ -5,6 +5,14 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.2
 
+### 0.1.4.post1 (2026-08-22 13:10 UTC)
+
+Overview: Increased Wikimedia Pageviews request throughput while preserving
+sequential fetching and wait-and-retry enforcement.
+
+- **Pageviews:** Raised the Pageviews API rate limit from two to 200 requests
+  per second and aligned the module documentation with the new ceiling.
+
 ### 0.1.4 (2026-08-22 11:22 UTC)
 
 Overview: Added a PAWS-ready Wikimedia Pageviews source adapter with a primary

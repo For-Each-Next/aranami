@@ -4,7 +4,7 @@ The adapter reads daily, all-access user traffic from Wikimedia's
 Pageviews API. Configure a :class:`Pageviews` source, call ``query()``,
 and then call :meth:`PageviewFrame.collect` for normal analysis. Use
 :meth:`Pageviews.fetch_daily_views` to inspect unaggregated observations
-while debugging. Requests run sequentially and are limited to two per
+while debugging. Requests run sequentially and are limited to 200 per
 second for comfortable use from Wikimedia PAWS.
 
 Examples:
@@ -366,7 +366,7 @@ def _build_request(
 
 
 @sleep_and_retry
-@limits(calls=2, period=1)
+@limits(calls=200, period=1)
 def _request_daily_views(
     project: str,
     title: str,
