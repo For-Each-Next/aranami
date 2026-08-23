@@ -11,14 +11,19 @@ locally, then installed as a wheel in [Wikimedia PAWS][1].
 
 - **Wiki Replicas:** `aranami.sources.quarry.Replica` binds read-only SQLAlchemy
   selections to Wikimedia Wiki Replicas and collects their results through
-  composable Polars pipelines.
-- **Pageviews:** `aranami.sources.pageviews.Pageviews` aggregates daily,
-  all-access user traffic into cumulative totals for one or more page titles
-  and half-open date periods through the same deferred
-  `query(...).pipe(...).collect()` pattern.
+  composable eager Polars DataFrame pipelines.
+- **Pageviews:** `aranami.sources.pageviews.fetch_data` reads one page's raw
+  daily observations, `fetch_data_dataframe` converts one page to an eager
+  `page`/`date`/`pageview` Polars frame, and `massive` sequentially concatenates
+  the same half-open date range for an iterable of pages.
 - **Frame previews:** `aranami.support.gtshow` displays compact Polars previews
   with field types, frame dimensions, and configurable leading and trailing
   rows in JupyterLab.
+- **Wikitext templates:** `aranami.support.get_templates` recursively finds
+  editable `mwparserfromhell` template nodes using site-aware Pywikibot page
+  titles, ignores leading spaces and colons, compares remaining
+  namespace-like prefixes as literal main-page text, and skips candidates that
+  are not valid pages.
 
 The [live Quarry example][7] exercises replica access from PAWS, while the
 [combined Pageviews example][8] uses Quarry-selected pages to collect and

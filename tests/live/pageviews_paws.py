@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-from functools import partial
 from typing import TYPE_CHECKING, cast
 
 import polars as pl
@@ -11,7 +10,7 @@ import pywikibot
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import select
 
-from aranami.sources.pageviews import DatePeriod, Pageviews
+from aranami.sources.pageviews import massive
 from aranami.sources.quarry import Replica
 from aranami.sources.quarry.tables import (
     Page,
@@ -36,8 +35,8 @@ def featured_video_game_pages_statement() -> Select[Any]:
         A read-only statement selecting mainspace titles and assessment
         classes from the Video Games WikiProject.
     """
-    return (
-        select(Page.page_title.label("title"), Pa.pa_class)
+    statement = (
+        select(Page.page_title.label("page"), Pa.pa_class)
         .join(Pa, Pa.pa_page_id == Page.page_id)
         .join(Pap, Pap.pap_project_id == Pa.pa_project_id)
         .where(
@@ -47,79 +46,61 @@ def featured_video_game_pages_statement() -> Select[Any]:
         )
         .order_by(Page.page_title)
     )
-
-
-def _daily_periods(stop: dt.date) -> tuple[DatePeriod, ...]:
-    """Build daily periods for the two years preceding ``stop``.
-
-    Args:
-        stop: First UTC date to exclude.
-
-    Returns:
-        Consecutive one-day periods in chronological order.
-    """
-    start = stop - relativedelta(years=_PAGEVIEW_YEARS)
-    periods: list[DatePeriod] = []
-    day = start
-    while day < stop:
-        periods.append(DatePeriod(day, day + dt.timedelta(days=1)))
-        day += dt.timedelta(days=1)
-    return tuple(periods)
+    return statement
 
 
 def _prepare_daily_views(
-    frame: pl.LazyFrame,
+    frame: pl.DataFrame,
     *,
     pages: pl.DataFrame,
-) -> pl.LazyFrame:
+) -> pl.DataFrame:
     """Attach assessment classes and shape the daily result.
 
     Args:
-        frame: Unprocessed cumulative Pageviews frame.
-        pages: Assessed page titles and classes from Quarry.
+        frame: Raw daily Pageviews frame.
+        pages: Assessed page names and classes from Quarry.
 
     Returns:
         Daily views with assessment metadata in display order.
     """
-    return (
+    result = (
         frame
         .join(
-            pages.lazy(),
-            on="title",
+            pages,
+            on="page",
             how="inner",
         )
         .select(
-            "title",
+            "page",
             "pa_class",
-            pl.col("start").alias("date"),
-            "views",
+            "date",
+            "pageview",
         )
-        .sort("title", "date")
+        .sort("page", "date")
     )
+    return result
 
 
 def main() -> None:
     """Display two years of daily views from Wikimedia PAWS."""
     site = pywikibot.Site("zh", "wikipedia")
     replica = Replica.from_site(site)
-    pageviews = Pageviews.from_site(site)
     pages = (
         replica
         .query(featured_video_game_pages_statement())
         .pipe(
             lambda frame: frame.with_columns(
-                pl.col("title").str.replace_all("_", " "),
+                pl.col("page").str.replace_all("_", " "),
             ),
         )
         .collect()
     )
-    titles = cast("list[str]", pages.get_column("title").to_list())
+    page_names = cast("list[str]", pages.get_column("page").to_list())
     stop = dt.datetime.now(dt.UTC).date()
-    result = (
-        pageviews
-        .query(titles, _daily_periods(stop))
-        .pipe(partial(_prepare_daily_views, pages=pages))
-        .collect()
+    start = stop - relativedelta(years=_PAGEVIEW_YEARS)
+    result = _prepare_daily_views(
+        massive(site, page_names, start, stop),
+        pages=pages,
     )
     gtshow(result, first=_PREVIEW_ROWS, last=_PREVIEW_ROWS)
 
