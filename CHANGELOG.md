@@ -3,22 +3,42 @@
 This file records completed repository changes, including work that has not
 been committed to Git. Entries are grouped by package release line.
 
-## Until 0.2
+## Until 0.3
 
-### 0.1.4.post3 (2026-08-22 14:29 UTC)
+### 0.2.0 (2026-08-23 08:49 UTC)
 
-Overview: Simplified Pageviews request handling and progress rendering while
-preserving sequential data collection.
+Overview: Replaced deferred Pageviews totals with identified direct daily-data
+functions, aligned Quarry pipelines with eager Polars DataFrames, and added
+site-aware template lookup and clearer frame previews.
 
-- **Pageviews:** Stopped configuring a User-Agent header and request timeout,
-  removed fixed pacing, and made one attempt per sequential request, with
-  non-404 HTTP errors propagating directly to callers.
-- **Compatibility:** Removed the public `Pageviews.user_agent` attribute and
-  the corresponding constructor and `from_site()` arguments.
-- **Progress:** Limited Pageviews progress rendering to at most 2.9 refreshes
-  per second while preserving page counts and visibility controls.
+- **Pageviews:** Sent a versioned Aranami User-Agent with the operator's
+  Meta-Wiki user page as its contact, made one attempt per sequential call,
+  treated HTTP 404 as no observations, propagated other transport failures,
+  stopped configuring request timeouts, and removed fixed pacing.
+- **Compatibility:** Replaced `DailyView`, `DatePeriod`, `Pageviews`,
+  `PageviewFrame`, and deferred `query().pipe().collect()` totals with
+  `DailyPageviews`, `fetch_data()`, `fetch_data_dataframe()`, and `massive()`,
+  changing cumulative `title`/`start`/`stop`/`views` rows to raw
+  `page`/`date`/`pageview` rows.
+- **Daily data:** Returned typed eager frames, concatenated iterable page
+  occurrences sequentially with a 0.24-second progress refresh interval,
+  preserved duplicates, API row order, and explicit zeroes, omitted missing
+  observations, and returned typed empty frames without requests.
+- **Frame pipelines:** Changed Quarry `pipe()` postprocessors from LazyFrame
+  callbacks to DataFrame callbacks and built eager results directly from
+  database rows.
 - **Dependencies:** Removed the runtime `ratelimit` package and its development
-  stubs.
+  stubs, and added `mwparserfromhell` as a direct runtime dependency.
+- **Template lookup:** Added recursive `get_templates(...)` matching for source
+  strings and `Wikicode`, ignored leading spaces and colons through forced
+  main-namespace title comparison, treated remaining namespace-like prefixes
+  literally, skipped invalid candidate page titles, and preserved source order,
+  duplicates, and editable parser objects.
+- **Result previews:** Formatted frame-shape source notes with thousands
+  separators, the multiplication sign, and singular labels for dimensions of
+  one.
+
+## Until 0.2
 
 ### 0.1.4 (2026-08-22 11:22 UTC)
 

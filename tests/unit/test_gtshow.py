@@ -79,7 +79,7 @@ class TestGtShow(TestCase):
 
         assert "number<br><small>Int64</small>" in rendered
         assert "label<br><small>String</small>" in rendered
-        assert "12 rows x 2 columns" in rendered
+        assert "12 rows \N{MULTIPLICATION SIGN} 2 columns" in rendered
         assert _body_cells(table) == expected_cells
 
     @staticmethod
@@ -92,13 +92,34 @@ class TestGtShow(TestCase):
         all_from_first = _shown_table(frame, first=0, last=2)
         all_from_last = _shown_table(frame, first=2, last=-1)
 
-        assert "6 rows x 1 columns" in abbreviated.as_raw_html()
+        assert (
+            "6 rows \N{MULTIPLICATION SIGN} 1 column"
+            in abbreviated.as_raw_html()
+        )
         assert _body_cells(abbreviated) == ["0", "...", "4", "5"]
         assert _body_cells(complete) == [str(value) for value in range(6)]
         assert _body_cells(all_from_first) == [
             str(value) for value in range(6)
         ]
         assert _body_cells(all_from_last) == [str(value) for value in range(6)]
+
+    @staticmethod
+    def test_shape_note_formats_large_dimensions() -> None:
+        """Format large frame dimensions with thousands separators."""
+        frame = pl.DataFrame({"value": range(1_234)})
+
+        rendered = _shown_table(frame).as_raw_html()
+
+        assert "1,234 rows \N{MULTIPLICATION SIGN} 1 column" in rendered
+
+    @staticmethod
+    def test_shape_note_uses_singular_labels_for_one() -> None:
+        """Use singular labels for one row and one column."""
+        frame = pl.DataFrame({"value": [1]})
+
+        rendered = _shown_table(frame).as_raw_html()
+
+        assert "1 row \N{MULTIPLICATION SIGN} 1 column" in rendered
 
     @staticmethod
     def test_preview_displays_empty_frames_and_escapes_labels() -> None:
@@ -112,10 +133,14 @@ class TestGtShow(TestCase):
         )
 
         assert "&lt;value&gt;<br><small>Int64</small>" in rendered
-        assert "0 rows x 0 columns" in empty.as_raw_html()
+        assert "0 rows \N{MULTIPLICATION SIGN} 0 columns" in (
+            empty.as_raw_html()
+        )
         assert _body_cells(empty) == []
         structured_rendered = structured_empty.as_raw_html()
 
         assert "value<br><small>Int64</small>" in structured_rendered
-        assert "0 rows x 1 columns" in structured_empty.as_raw_html()
+        assert "0 rows \N{MULTIPLICATION SIGN} 1 column" in (
+            structured_empty.as_raw_html()
+        )
         assert _body_cells(structured_empty) == []

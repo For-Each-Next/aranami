@@ -59,12 +59,18 @@ def gtshow(
         )
         for name, dtype in frame.schema.items()
     }
+    row_label = "row" if frame.height == 1 else "rows"
+    column_label = "column" if frame.width == 1 else "columns"
+    source_note = (
+        f"{frame.height:,} {row_label}"
+        f" \N{MULTIPLICATION SIGN}"
+        f" {frame.width:,} {column_label}"
+    )
+
     table = (
         GT(preview)
         .cols_label(cases=labels)
-        .tab_source_note(
-            source_note=f"{frame.height} rows x {frame.width} columns",
-        )
+        .tab_source_note(source_note=source_note)
     )
     if omitted_row is not None:
         table = table.sub_missing(

@@ -1,30 +1,19 @@
-"""Collect Wikimedia page-view analytics into Polars frames.
+"""Fetch Wikimedia daily pageview observations and Polars frames.
 
-The adapter reads daily, all-access user traffic from Wikimedia's
-Pageviews API. Configure a :class:`Pageviews` source, call ``query()``,
-and then call :meth:`PageviewFrame.collect` for normal analysis. Use
-:meth:`Pageviews.fetch_daily_views` to inspect unaggregated observations
-while debugging. Requests run sequentially from Wikimedia PAWS.
-
-Examples:
-    >>> import datetime as dt
-    >>> from aranami.sources.pageviews import DatePeriod, Pageviews
-    >>> query = Pageviews("en.wikipedia.org").query(
-    ...     "Video game",
-    ...     DatePeriod(dt.date(2026, 1, 1), dt.date(2026, 2, 1)),
-    ...     show_progress=False,
-    ... )
-    >>> query.titles
-    ('Video game',)
+Use :func:`fetch_data` for one page's typed observations,
+:func:`fetch_data_dataframe` for the same data as an eager Polars
+DataFrame, and :func:`massive` to concatenate sequential requests for
+multiple pages. All date ranges are half-open and include ``start`` but
+exclude ``stop``.
 """
 
 from __future__ import annotations
 
 __all__ = (
-    "DailyView",
-    "DatePeriod",
-    "PageviewFrame",
-    "Pageviews",
+    "DailyPageviews",
+    "fetch_data",
+    "fetch_data_dataframe",
+    "massive",
 )
 
 import datetime as dt
@@ -32,10 +21,10 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Self, TypedDict, cast
+from importlib.metadata import version
+from typing import TYPE_CHECKING, Final, TypedDict, cast
 
 import polars as pl
 from tqdm import tqdm
@@ -45,7 +34,18 @@ if TYPE_CHECKING:
 
     from pywikibot.site import BaseSite
 
-type FramePostprocessor = Callable[[pl.LazyFrame], pl.LazyFrame]
+
+_USER_AGENT: Final[str] = (
+    f"Aranami/{version('aranami')} "
+    "(https://meta.wikimedia.org/wiki/User:For_Each_..._Next/)"
+)
+_DATA_FRAME_SCHEMA: Final[pl.Schema] = pl.Schema(
+    {
+        "page": pl.String,
+        "date": pl.Date,
+        "pageview": pl.Int64,
+    },
+)
 
 
 class _ViewItem(TypedDict):
@@ -56,275 +56,166 @@ class _ViewItem(TypedDict):
 
 
 @dataclass(frozen=True, slots=True)
-class DailyView:
-    """Store one daily page-view observation.
+class DailyPageviews:
+    """Store one daily pageview observation.
 
     Attributes:
         date: UTC calendar date of the observation.
-        views: Views recorded for the page on that date.
+        pageview: Views recorded for the page on that date.
     """
 
     date: dt.date
-    views: int
+    pageview: int
 
 
-@dataclass(frozen=True, slots=True)
-class DatePeriod:
-    """Describe a half-open date period containing start but not stop.
+def fetch_data(
+    site: BaseSite,
+    page: str,
+    start: dt.date,
+    stop: dt.date,
+) -> list[DailyPageviews]:
+    """Fetch one page's daily observations.
 
-    Attributes:
-        start: First date included in the period.
-        stop: First date excluded from the period.
+    Wikimedia may omit dates with no observations. An API response with
+    no observations, including HTTP 404, therefore produces an empty
+    list.
 
-    """
-
-    start: dt.date
-    stop: dt.date
-
-
-@dataclass(frozen=True, slots=True)
-class Pageviews:
-    """Configure access to one Wikimedia project's Pageviews data.
-
-    Attributes:
-        project: Wikimedia project domain, such as
-            ``"en.wikipedia.org"``.
-    """
-
-    project: str
-
-    def __post_init__(self) -> None:
-        """Normalize the project domain when creating the source."""
-        object.__setattr__(self, "project", self.project.strip().lower())
-
-    @classmethod
-    def from_site(
-        cls,
-        site: BaseSite,
-    ) -> Self:
-        """Create Pageviews configuration from a Pywikibot site.
-
-        Args:
-            site: Site whose hostname identifies the project.
-
-        Returns:
-            Pageviews configuration for the site's project.
-
-        Examples:
-            >>> from unittest.mock import Mock
-            >>> site = Mock()
-            >>> site.hostname.return_value = "zh.wikipedia.org"
-            >>> Pageviews.from_site(site).project
-            'zh.wikipedia.org'
-
-        """
-        return cls(site.hostname())
-
-    def query(
-        self,
-        titles: Iterable[str] | str,
-        periods: Iterable[DatePeriod] | DatePeriod,
-        *,
-        show_progress: bool = True,
-    ) -> PageviewFrame:
-        """Create a deferred Pageviews frame.
-
-        Args:
-            titles: One raw page title or an iterable of titles.
-            periods: One half-open date period or an iterable of
-                periods.
-            show_progress: Whether collection displays a progress bar.
-
-        Returns:
-            A reusable frame that has not made an HTTP request.
-        """
-        return PageviewFrame(
-            self,
-            tuple(_normalize_titles(titles)),
-            tuple(_normalize_periods(periods)),
-            show_progress=show_progress,
-        )
-
-    def fetch_daily_views(
-        self,
-        title: str,
-        start: dt.date,
-        stop: dt.date,
-    ) -> list[DailyView]:
-        """Fetch unaggregated daily views for inspection and debugging.
-
-        Wikimedia may omit observations for zero views or unavailable
-        data. An API response with no observations, including HTTP 404,
-        therefore produces an empty list.
-
-        Args:
-            title: Raw page title, such as ``"Video game"``.
-            start: First date to include.
-            stop: First date to exclude.
-
-        Returns:
-            Materialized daily observations returned by Wikimedia.
-        """
-        return _request_daily_views(
-            self.project,
-            title.strip(),
-            start,
-            stop,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class PageviewFrame:
-    """Defer Pageviews requests and their Polars postprocessors.
-
-    Attributes:
-        pageviews: Source configuration used during collection.
-        titles: Page titles in result order.
-        periods: Half-open periods in result order.
-        show_progress: Whether collection displays a progress bar.
-    """
-
-    pageviews: Pageviews
-    titles: tuple[str, ...]
-    periods: tuple[DatePeriod, ...]
-    show_progress: bool = True
-    _postprocessors: tuple[FramePostprocessor, ...] = field(
-        default=(),
-        repr=False,
-    )
-
-    def pipe(self, postprocessor: FramePostprocessor) -> Self:
-        """Append a lazy Polars postprocessor.
-
-        Args:
-            postprocessor: Function that accepts and returns a
-                LazyFrame.
-
-        Returns:
-            A new frame containing the appended postprocessor.
-        """
-        return replace(
-            self,
-            _postprocessors=(*self._postprocessors, postprocessor),
-        )
-
-    def collect(self) -> pl.DataFrame:
-        """Fetch the observations and collect their Polars frame.
-
-        Returns:
-            The cumulative frame after applying all postprocessors. Its
-            base columns are ``title``, ``start``, ``stop``, and
-            ``views``.
-        """
-        rows = _fetch_cumulative_rows(self)
-        lazy_frame = pl.LazyFrame(
-            rows,
-            schema={
-                "title": pl.String,
-                "start": pl.Date,
-                "stop": pl.Date,
-                "views": pl.Int64,
-            },
-            orient="row",
-        )
-        for postprocessor in self._postprocessors:
-            lazy_frame = postprocessor(lazy_frame)
-        return lazy_frame.collect()
-
-
-def _fetch_cumulative_rows(
-    frame: PageviewFrame,
-) -> list[tuple[str, dt.date, dt.date, int | None]]:
-    """Fetch and aggregate the rows backing one Pageview frame.
+    Args:
+        site: Site whose hostname identifies the Wikimedia project.
+        page: Raw page title, such as ``"Video game"``.
+        start: First UTC date to include.
+        stop: First UTC date to exclude.
 
     Returns:
-        Title-major rows preserving the configured period order.
-    """
-    fetch_start = min(period.start for period in frame.periods)
-    fetch_stop = max(period.stop for period in frame.periods)
+        Materialized daily observations in API order.
 
-    rows: list[tuple[str, dt.date, dt.date, int | None]] = []
-    for title in _track_progress(
-        frame.titles,
-        show_progress=frame.show_progress,
-    ):
-        observations = frame.pageviews.fetch_daily_views(
-            title,
-            fetch_start,
-            fetch_stop,
-        )
-        views_by_date = {
-            observation.date: observation.views for observation in observations
-        }
-
-        for period in frame.periods:
-            matching_views = [
-                views
-                for date, views in views_by_date.items()
-                if period.start <= date < period.stop
-            ]
-            rows.append(
-                (
-                    title,
-                    period.start,
-                    period.stop,
-                    sum(matching_views) if matching_views else None,
-                ),
-            )
-
-    return rows
+    Raises:
+        urllib.error.URLError: If the Wikimedia request fails for a
+            reason other than HTTP 404.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    project = site.hostname().strip().lower()
+    normalized_page = page.strip()
+    return _request_daily_pageviews(project, normalized_page, start, stop)
 
 
-def _normalize_titles(titles: Iterable[str] | str) -> list[str]:
-    """Materialize and trim page titles.
+def fetch_data_dataframe(
+    site: BaseSite,
+    page: str,
+    start: dt.date,
+    stop: dt.date,
+) -> pl.DataFrame:
+    """Fetch one page's daily observations into a typed DataFrame.
+
+    Args:
+        site: Site whose hostname identifies the Wikimedia project.
+        page: Raw page title, such as ``"Video game"``.
+        start: First UTC date to include.
+        stop: First UTC date to exclude.
 
     Returns:
-        Page titles in input order.
-    """
-    normalized = [titles] if isinstance(titles, str) else list(titles)
-    return [title.strip() for title in normalized]
+        Observations with ``page``, ``date``, and ``pageview`` columns.
+        An empty API response produces a typed empty frame.
+
+    Raises:
+        urllib.error.URLError: If the Wikimedia request fails for a
+            reason other than HTTP 404.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    normalized_page = page.strip()
+    raw_data = fetch_data(site, normalized_page, start, stop)
+    data = [
+        (normalized_page, observation.date, observation.pageview)
+        for observation in raw_data
+    ]
+    return pl.DataFrame(data, schema=_DATA_FRAME_SCHEMA, orient="row")
 
 
-def _normalize_periods(
-    periods: Iterable[DatePeriod] | DatePeriod,
-) -> list[DatePeriod]:
-    """Materialize date periods.
+def massive(
+    site: BaseSite,
+    pages: Iterable[str],
+    start: dt.date,
+    stop: dt.date,
+) -> pl.DataFrame:
+    """Fetch and concatenate daily observations for multiple pages.
+
+    Pages are requested sequentially in input order. Duplicate page
+    occurrences produce duplicate requests and rows. A page with no
+    observations contributes no rows.
+
+    Args:
+        site: Site whose hostname identifies the Wikimedia project.
+        pages: Page titles to fetch. The iterable is consumed once.
+        start: First UTC date to include for every page.
+        stop: First UTC date to exclude for every page.
 
     Returns:
-        Date periods in input order.
-    """
-    return [periods] if isinstance(periods, DatePeriod) else list(periods)
+        Concatenated ``page``, ``date``, and ``pageview`` observations,
+        or a typed empty frame when ``pages`` is empty.
+
+    Raises:
+        urllib.error.URLError: If any Wikimedia request fails for a
+            reason other than HTTP 404. Pages after the failing page are
+            not requested.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    normalized_pages = tuple(page.strip() for page in pages)
+    if not normalized_pages:
+        return _empty_data_frame()
+
+    frames = [
+        fetch_data_dataframe(site, page, start, stop)
+        for page in _track_progress(normalized_pages)
+    ]
+    return pl.concat(frames)
 
 
-def _track_progress(
-    titles: Iterable[str],
-    *,
-    show_progress: bool,
-) -> Iterable[str]:
-    """Wrap page titles in the configured progress display.
+def _empty_data_frame() -> pl.DataFrame:
+    """Build the typed empty frame shared by empty batch results.
 
     Returns:
-        An iterable that updates while titles are consumed.
+        An empty frame with the public daily-data schema.
     """
-    return tqdm(
-        titles,
+    return pl.DataFrame(schema=_DATA_FRAME_SCHEMA)
+
+
+def _track_progress(pages: Iterable[str]) -> Iterable[str]:
+    """Wrap page titles in the standard progress display.
+
+    Args:
+        pages: Page titles to yield, each counted as one progress unit.
+
+    Returns:
+        A progress-aware iterable with a 0.24-second minimum refresh
+        interval.
+    """
+    progress = tqdm(
+        pages,
         desc="Fetching page views",
-        disable=not show_progress,
-        mininterval=10 / 29,
-        unit="page",
+        mininterval=0.24,
+        unit=" pages",
     )
+    return progress
 
 
 def _build_request(
     project: str,
-    title: str,
+    page: str,
     start: dt.date,
     stop: dt.date,
 ) -> urllib.request.Request:
     """Build a Pageviews request from normalized arguments.
 
+    The caller supplies normalized values; this helper does not validate
+    them.
+
+    Args:
+        project: Wikimedia project domain identifying the data source.
+        page: Page title to percent-encode as one URL path segment.
+        start: First UTC date included in the request.
+        stop: First UTC date excluded from the request. One day is
+            subtracted for the API's inclusive end bound.
+
     Returns:
-        A request targeting the fixed Wikimedia API endpoint.
+        A GET request to Wikimedia's daily all-access user endpoint with
+        JSON acceptance and Aranami identification headers.
     """
     inclusive_end = stop - dt.timedelta(days=1)
     base = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/"
@@ -332,41 +223,65 @@ def _build_request(
         project,
         "all-access",
         "user",
-        urllib.parse.quote(title, safe=""),
+        urllib.parse.quote(page, safe=""),
         "daily",
         start.strftime("%Y%m%d00"),
         inclusive_end.strftime("%Y%m%d00"),
     )
     # ruff: ignore[suspicious-url-open-usage]
-    return urllib.request.Request(
+    request = urllib.request.Request(
         f"{base}{'/'.join(segments)}",
-        headers={"Accept": "application/json"},
+        headers={
+            "Accept": "application/json",
+            "User-Agent": _USER_AGENT,
+        },
     )
+    return request
 
 
-def _request_daily_views(
+def _request_daily_pageviews(
     project: str,
-    title: str,
+    page: str,
     start: dt.date,
     stop: dt.date,
-) -> list[DailyView]:
-    """Make one daily Pageviews request.
+) -> list[DailyPageviews]:
+    """Make one attempt to fetch daily Pageviews observations.
+
+    HTTP 404 produces no observations. Other transport and response
+    decoding errors propagate to the caller.
+
+    Args:
+        project: Wikimedia project domain identifying the data source.
+        page: Normalized page title to request.
+        start: First UTC date included in the request.
+        stop: First UTC date excluded from the request.
 
     Returns:
-        Decoded daily observations.
+        Decoded daily observations in API order, or an empty list for
+        HTTP 404.
     """
-    request = _build_request(project, title, start, stop)
+    request = _build_request(project, page, start, stop)
     return _open_request(request)
 
 
-def _open_request(request: urllib.request.Request) -> list[DailyView]:
+def _open_request(
+    request: urllib.request.Request,
+) -> list[DailyPageviews]:
     """Open and decode a prepared Pageviews request.
 
+    Successful response bodies and HTTP 404 error bodies are closed
+    before this helper returns.
+
+    Args:
+        request: Prepared Wikimedia daily Pageviews request to open.
+
     Returns:
-        Decoded daily observations, or an empty list for HTTP 404.
+        Decoded daily observations in payload order, or an empty list
+        for HTTP 404.
 
     Raises:
-        urllib.error.HTTPError: If the response status is not 404.
+        urllib.error.HTTPError: If opening the request raises an HTTP
+            error other than 404.
     """
     try:
         # ruff: ignore[suspicious-url-open-usage]
@@ -378,10 +293,15 @@ def _open_request(request: urllib.request.Request) -> list[DailyView]:
             return []
         raise
 
-    observations: list[DailyView] = []
+    observations: list[DailyPageviews] = []
     for item in payload["items"]:
-        ts = item["timestamp"]
-        date = dt.date(int(ts[0:4]), int(ts[4:6]), int(ts[6:8]))
-        views = item["views"]
-        observations.append(DailyView(date, views))
+        timestamp = item["timestamp"]
+        observation_date = dt.date(
+            int(timestamp[0:4]),
+            int(timestamp[4:6]),
+            int(timestamp[6:8]),
+        )
+        observations.append(
+            DailyPageviews(observation_date, item["views"]),
+        )
     return observations

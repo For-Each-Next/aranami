@@ -1,4 +1,4 @@
-"""Test Wikimedia Pageviews requests and cumulative aggregation."""
+"""Test Wikimedia Pageviews requests and daily Polars frames."""
 
 # These focused unit tests exercise private transport seams.
 # ruff: file-ignore[private-member-access, pytest-unittest-raises-assertion]
@@ -7,6 +7,7 @@ import json
 import urllib.error
 from datetime import date
 from email.message import Message
+from importlib.metadata import version
 from io import BytesIO
 from unittest import TestCase
 from unittest.mock import MagicMock, call, patch
@@ -16,101 +17,92 @@ import polars as pl
 from aranami import sources
 from aranami.sources import pageviews
 from aranami.sources.pageviews import (
-    DailyView,
-    DatePeriod,
-    PageviewFrame,
-    Pageviews,
+    DailyPageviews,
+    fetch_data,
+    fetch_data_dataframe,
+    massive,
 )
+
+_FRAME_SCHEMA = {
+    "page": pl.String,
+    "date": pl.Date,
+    "pageview": pl.Int64,
+}
 
 
 class TestPageviewValues(TestCase):
     """Test public values, normalization, and exports."""
 
     @staticmethod
-    def test_date_period_is_half_open() -> None:
-        """Store the half-open period bounds."""
-        period = DatePeriod(date(2026, 1, 1), date(2026, 1, 2))
+    def test_fetch_data_normalizes_inputs_before_transport() -> None:
+        """Normalize site and page text before making a request."""
+        site = MagicMock()
+        site.hostname.return_value = " EN.WIKIPEDIA.ORG "
+        start = date(2026, 1, 1)
+        stop = date(2026, 1, 2)
+        expected = [DailyPageviews(start, 7)]
 
-        assert period.start == date(2026, 1, 1)
-        assert period.stop == date(2026, 1, 2)
-
-    @staticmethod
-    def test_daily_inputs_are_normalized_before_transport() -> None:
-        """Normalize text arguments before making a request."""
-        expected = [DailyView(date(2026, 1, 1), 7)]
-        source = Pageviews(" EN.WIKIPEDIA.ORG ")
         with patch.object(
             pageviews,
-            "_request_daily_views",
+            "_request_daily_pageviews",
             return_value=expected,
-        ) as request_daily_views:
-            actual = source.fetch_daily_views(
-                " Video game ",
-                date(2026, 1, 1),
-                date(2026, 1, 2),
-            )
+        ) as request_daily_pageviews:
+            actual = fetch_data(site, " Video game ", start, stop)
 
         assert actual == expected
-        assert source.project == "en.wikipedia.org"
-        request_daily_views.assert_called_once_with(
+        site.hostname.assert_called_once_with()
+        request_daily_pageviews.assert_called_once_with(
             "en.wikipedia.org",
             "Video game",
-            date(2026, 1, 1),
-            date(2026, 1, 2),
+            start,
+            stop,
         )
 
     @staticmethod
-    def test_pageviews_from_site() -> None:
-        """Read a project hostname from a Pywikibot site."""
-        site = MagicMock()
-        site.hostname.return_value = "zh.wikipedia.org"
-
-        source = Pageviews.from_site(site)
-
-        assert source.project == "zh.wikipedia.org"
-        site.hostname.assert_called_once_with()
+    def test_user_agent_identifies_package_and_maintainer() -> None:
+        """Include the installed version and maintainer contact."""
+        assert (
+            f"Aranami/{version('aranami')} "
+            "(https://meta.wikimedia.org/wiki/User:For_Each_..._Next/)"
+        ) == pageviews._USER_AGENT
 
     @staticmethod
     def test_sources_exports_the_pageviews_module() -> None:
-        """Expose Pageviews alongside the other source adapters."""
+        """Expose the simple Pageviews functions through the module."""
         assert sources.pageviews is pageviews
         assert "pageviews" in sources.__all__
-        assert "Pageviews" in pageviews.__all__
-        assert "PageviewFrame" in pageviews.__all__
+        assert pageviews.__all__ == (
+            "DailyPageviews",
+            "fetch_data",
+            "fetch_data_dataframe",
+            "massive",
+        )
 
-    def test_progress_refresh_rate_and_visibility(self) -> None:
-        """Limit progress rendering and preserve visibility control."""
-        titles = ("B", "A")
-        expected_interval = 10 / 29
-        for show_progress in (True, False):
-            with (
-                self.subTest(show_progress=show_progress),
-                patch.object(
-                    pageviews,
-                    "tqdm",
-                    return_value=titles,
-                ) as progress,
-            ):
-                tracked = pageviews._track_progress(
-                    titles,
-                    show_progress=show_progress,
-                )
+    @staticmethod
+    def test_progress_refresh_rate() -> None:
+        """Limit progress rendering while preserving page counts."""
+        pages = ("B", "A")
+        with patch.object(
+            pageviews,
+            "tqdm",
+            return_value=pages,
+        ) as progress:
+            tracked = pageviews._track_progress(pages)
 
-            assert tracked is titles
-            progress.assert_called_once_with(
-                titles,
-                desc="Fetching page views",
-                disable=not show_progress,
-                mininterval=expected_interval,
-                unit="page",
-            )
+        assert tracked is pages
+        progress.assert_called_once_with(
+            pages,
+            desc="Fetching page views",
+            mininterval=0.24,
+            unit=" pages",
+        )
 
 
 class TestPageviewTransport(TestCase):
     """Test request construction and Wikimedia response handling."""
 
     @staticmethod
-    def test_request_encodes_title_bounds_headers_and_response() -> None:
+    def test_request_encodes_page_bounds_headers_and_response() -> None:
         """Build the expected request and parse its observations."""
         request = pageviews._build_request(
             "en.wikipedia.org",
@@ -141,10 +133,10 @@ class TestPageviewTransport(TestCase):
             "C%2B%2B%20%2F%20%2520/daily/2026010100/2026010200"
         )
         assert request.get_header("Accept") == "application/json"
-        assert request.get_header("User-agent") is None
+        assert request.get_header("User-agent") == pageviews._USER_AGENT
         assert observations == [
-            DailyView(date(2026, 1, 1), 5),
-            DailyView(date(2026, 1, 2), 8),
+            DailyPageviews(date(2026, 1, 1), 5),
+            DailyPageviews(date(2026, 1, 2), 8),
         ]
         assert response.closed
         urlopen.assert_called_once_with(request)
@@ -206,157 +198,198 @@ class TestPageviewTransport(TestCase):
 
 
 class TestPageviewFrames(TestCase):
-    """Test the normal Polars interface."""
+    """Test one-page and multi-page Polars results."""
 
     @staticmethod
-    def test_query_is_deferred_and_materializes_inputs() -> None:
-        """Capture reusable inputs without making a request."""
-        source = Pageviews("en.wikipedia.org")
-        titles = (title for title in [" B ", "A"])
-        periods = (
-            period
-            for period in [
-                DatePeriod(date(2026, 1, 1), date(2026, 1, 2)),
-            ]
-        )
-
-        with patch.object(pageviews, "_request_daily_views") as daily:
-            query = source.query(titles, periods, show_progress=False)
-
-        assert isinstance(query, PageviewFrame)
-        assert query.pageviews is source
-        assert query.titles == ("B", "A")
-        assert query.periods == (
-            DatePeriod(date(2026, 1, 1), date(2026, 1, 2)),
-        )
-        daily.assert_not_called()
-
-    @staticmethod
-    def test_collect_returns_cumulative_frame() -> None:
-        """Aggregate observations into an ordered Polars frame."""
-        periods = [
-            DatePeriod(date(2026, 1, 1), date(2026, 1, 3)),
-            DatePeriod(date(2026, 1, 2), date(2026, 1, 3)),
-            DatePeriod(date(2026, 1, 3), date(2026, 1, 4)),
+    def test_fetch_data_dataframe_preserves_raw_order_and_zero() -> None:
+        """Map raw observations without sorting or dropping zeroes."""
+        site = MagicMock()
+        start = date(2026, 1, 1)
+        stop = date(2026, 1, 3)
+        raw_data = [
+            DailyPageviews(date(2026, 1, 2), 0),
+            DailyPageviews(date(2026, 1, 1), 6),
         ]
-        observations = (
-            [
-                DailyView(date(2026, 1, 1), 4),
-                DailyView(date(2026, 1, 2), 0),
-            ],
-            [DailyView(date(2026, 1, 3), 9)],
-        )
-
-        query = Pageviews("en.wikipedia.org").query(
-            ["B", "A"],
-            periods,
-            show_progress=False,
-        )
 
         with patch.object(
             pageviews,
-            "_request_daily_views",
-            side_effect=observations,
-        ) as daily:
-            frame = query.collect()
+            "fetch_data",
+            return_value=raw_data,
+        ) as fetch:
+            frame = fetch_data_dataframe(site, " A ", start, stop)
 
-        assert isinstance(frame, pl.DataFrame)
         assert frame.to_dict(as_series=False) == {
-            "title": ["B", "B", "B", "A", "A", "A"],
-            "start": [
-                date(2026, 1, 1),
-                date(2026, 1, 2),
-                date(2026, 1, 3),
-                date(2026, 1, 1),
-                date(2026, 1, 2),
-                date(2026, 1, 3),
-            ],
-            "stop": [
-                date(2026, 1, 3),
-                date(2026, 1, 3),
-                date(2026, 1, 4),
-                date(2026, 1, 3),
-                date(2026, 1, 3),
-                date(2026, 1, 4),
-            ],
-            "views": [4, 0, None, None, None, 9],
+            "page": ["A", "A"],
+            "date": [date(2026, 1, 2), date(2026, 1, 1)],
+            "pageview": [0, 6],
         }
-        assert frame.schema == {
-            "title": pl.String,
-            "start": pl.Date,
-            "stop": pl.Date,
-            "views": pl.Int64,
-        }
-        assert daily.call_args_list == [
-            call(
-                "en.wikipedia.org",
-                "B",
-                date(2026, 1, 1),
-                date(2026, 1, 4),
-            ),
-            call(
-                "en.wikipedia.org",
-                "A",
-                date(2026, 1, 1),
-                date(2026, 1, 4),
-            ),
-        ]
+        assert frame.schema == _FRAME_SCHEMA
+        fetch.assert_called_once_with(site, "A", start, stop)
 
     @staticmethod
-    def test_scalar_title_and_period_are_accepted() -> None:
-        """Accept scalar inputs for a one-row result."""
-        period = DatePeriod(date(2026, 1, 1), date(2026, 1, 2))
+    def test_fetch_data_dataframe_returns_typed_empty() -> None:
+        """Keep the daily schema when Wikimedia returns no data."""
+        site = MagicMock()
+        start = date(2026, 1, 1)
+        stop = date(2026, 1, 2)
+
         with patch.object(
             pageviews,
-            "_request_daily_views",
+            "fetch_data",
             return_value=[],
+        ) as fetch:
+            frame = fetch_data_dataframe(site, "A", start, stop)
+
+        assert frame.is_empty()
+        assert frame.schema == _FRAME_SCHEMA
+        assert frame.to_dict(as_series=False) == {
+            "page": [],
+            "date": [],
+            "pageview": [],
+        }
+        fetch.assert_called_once_with(site, "A", start, stop)
+
+    @staticmethod
+    def test_massive_preserves_page_and_observation_order() -> None:
+        """Materialize one iterable and concatenate each occurrence."""
+        site = MagicMock()
+        start = date(2026, 1, 1)
+        stop = date(2026, 1, 4)
+        pages = (page for page in (" B ", "A", "B"))
+        frames = (
+            pl.DataFrame(
+                [
+                    ("B", date(2026, 1, 2), 2),
+                    ("B", date(2026, 1, 1), 3),
+                ],
+                schema=_FRAME_SCHEMA,
+                orient="row",
+            ),
+            pl.DataFrame(
+                [("A", date(2026, 1, 1), 5)],
+                schema=_FRAME_SCHEMA,
+                orient="row",
+            ),
+            pl.DataFrame(
+                [("B", date(2026, 1, 3), 7)],
+                schema=_FRAME_SCHEMA,
+                orient="row",
+            ),
+        )
+
+        with (
+            patch.object(
+                pageviews,
+                "_track_progress",
+                side_effect=lambda values: values,
+            ) as track_progress,
+            patch.object(
+                pageviews,
+                "fetch_data_dataframe",
+                side_effect=frames,
+            ) as fetch_frame,
         ):
-            frame = (
-                Pageviews("en.wikipedia.org")
-                .query(
-                    "Video game",
-                    period,
-                    show_progress=False,
-                )
-                .collect()
-            )
+            frame = massive(site, pages, start, stop)
 
         assert frame.to_dict(as_series=False) == {
-            "title": ["Video game"],
-            "start": [date(2026, 1, 1)],
-            "stop": [date(2026, 1, 2)],
-            "views": [None],
+            "page": ["B", "B", "A", "B"],
+            "date": [
+                date(2026, 1, 2),
+                date(2026, 1, 1),
+                date(2026, 1, 1),
+                date(2026, 1, 3),
+            ],
+            "pageview": [2, 3, 5, 7],
         }
+        assert frame.schema == _FRAME_SCHEMA
+        track_progress.assert_called_once_with(("B", "A", "B"))
+        assert fetch_frame.call_args_list == [
+            call(site, "B", start, stop),
+            call(site, "A", start, stop),
+            call(site, "B", start, stop),
+        ]
 
     @staticmethod
-    def test_collect_refetches_and_pipe_is_immutable() -> None:
-        """Refetch reusable queries and apply lazy Polars processing."""
-        period = DatePeriod(date(2026, 1, 1), date(2026, 1, 2))
-        query = Pageviews("en.wikipedia.org").query(
-            "Video game",
-            period,
-            show_progress=False,
-        )
-        piped = query.pipe(
-            lambda frame: frame.select(
-                "title",
-                pl.col("views").fill_null(0),
+    def test_massive_empty_pages_skips_fetching() -> None:
+        """Skip progress and requests when no pages are supplied."""
+        site = MagicMock()
+        start = date(2026, 1, 1)
+        stop = date(2026, 1, 2)
+
+        with (
+            patch.object(pageviews, "_track_progress") as track_progress,
+            patch.object(
+                pageviews,
+                "fetch_data_dataframe",
+            ) as fetch_frame,
+        ):
+            frame = massive(site, iter(()), start, stop)
+
+        assert frame.is_empty()
+        assert frame.schema == _FRAME_SCHEMA
+        track_progress.assert_not_called()
+        fetch_frame.assert_not_called()
+
+    @staticmethod
+    def test_massive_keeps_schema_when_every_page_is_empty() -> None:
+        """Preserve schema when concatenating empty results."""
+        site = MagicMock()
+        start = date(2026, 1, 1)
+        stop = date(2026, 1, 2)
+        pages = ("A", "B")
+        empty = pl.DataFrame(schema=_FRAME_SCHEMA)
+
+        with (
+            patch.object(
+                pageviews,
+                "_track_progress",
+                return_value=pages,
             ),
+            patch.object(
+                pageviews,
+                "fetch_data_dataframe",
+                side_effect=(empty, empty.clone()),
+            ) as fetch_frame,
+        ):
+            frame = massive(site, pages, start, stop)
+
+        assert frame.is_empty()
+        assert frame.schema == _FRAME_SCHEMA
+        assert fetch_frame.call_args_list == [
+            call(site, "A", start, stop),
+            call(site, "B", start, stop),
+        ]
+
+    def test_massive_propagates_failure_and_stops(self) -> None:
+        """Propagate a failed request without fetching later pages."""
+        site = MagicMock()
+        start = date(2026, 1, 1)
+        stop = date(2026, 1, 2)
+        pages = ("A", "B", "C")
+        first_frame = pl.DataFrame(
+            [("A", start, 5)],
+            schema=_FRAME_SCHEMA,
+            orient="row",
         )
+        error = urllib.error.URLError("unavailable")
 
-        with patch.object(
-            pageviews,
-            "_request_daily_views",
-            return_value=[],
-        ) as daily:
-            original = query.collect()
-            processed = piped.collect()
+        with (
+            patch.object(
+                pageviews,
+                "_track_progress",
+                return_value=pages,
+            ),
+            patch.object(
+                pageviews,
+                "fetch_data_dataframe",
+                side_effect=(first_frame, error),
+            ) as fetch_frame,
+            self.assertRaises(urllib.error.URLError) as caught,
+        ):
+            massive(site, pages, start, stop)
 
-        assert piped is not query
-        assert original.columns == ["title", "start", "stop", "views"]
-        assert processed.to_dict(as_series=False) == {
-            "title": ["Video game"],
-            "views": [0],
-        }
-        expected_fetches = 2
-        assert daily.call_count == expected_fetches
+        assert caught.exception is error
+        assert fetch_frame.call_args_list == [
+            call(site, "A", start, stop),
+            call(site, "B", start, stop),
+        ]

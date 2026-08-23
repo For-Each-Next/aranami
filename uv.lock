@@ -4,10 +4,11 @@ requires-python = ">=3.12"
 
 [[package]]
 name = "aranami"
-version = "0.1.4.post3"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "great-tables" },
+    { name = "mwparserfromhell" },
     { name = "polars" },
     { name = "pymysql" },
     { name = "python-dateutil" },
@@ -24,6 +25,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "great-tables", specifier = "==0.23.0" },
+    { name = "mwparserfromhell" },
     { name = "polars" },
     { name = "pymysql" },
     { name = "python-dateutil" },

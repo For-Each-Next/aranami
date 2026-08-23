@@ -2,7 +2,7 @@
 
 Use :class:`Replica` to bind a SQLAlchemy ``select()`` statement to a
 Wiki Replica database. The resulting :class:`QueryFrame` defers the
-query until ``collect()`` and supports lazy Polars postprocessing.
+query until ``collect()`` and supports eager Polars postprocessing.
 
 Examples:
     >>> from aranami.sources.quarry import QueryFrame, Replica
@@ -33,7 +33,7 @@ from sqlalchemy.sql.selectable import CompoundSelect, Select
 if TYPE_CHECKING:
     from pywikibot.site import BaseSite
 
-type FramePostprocessor = Callable[[pl.LazyFrame], pl.LazyFrame]
+type FramePostprocessor = Callable[[pl.DataFrame], pl.DataFrame]
 type PolarsDataType = DataTypeClass | DataType
 type ReplicaStatement = Select[Any] | CompoundSelect[Any]
 
@@ -171,7 +171,7 @@ class Replica:
 
 @dataclass(frozen=True, slots=True)
 class QueryFrame:
-    """Defer one replica select and its Polars postprocessors.
+    """Defer one replica select and its eager Polars postprocessors.
 
     Attributes:
         replica: Wiki Replica on which to execute the statement.
@@ -185,7 +185,7 @@ class QueryFrame:
         ...     select(literal(1).label("value")),
         ... )
         >>> piped = frame.pipe(
-        ...     lambda lazy_frame: lazy_frame.select("value"),
+        ...     lambda data_frame: data_frame.select("value"),
         ... )
         >>> piped is frame
         False
@@ -204,11 +204,11 @@ class QueryFrame:
     )
 
     def pipe(self, postprocessor: FramePostprocessor) -> Self:
-        """Append a lazy Polars postprocessor.
+        """Append an eager Polars postprocessor.
 
         Args:
             postprocessor: Function that accepts and returns a
-                LazyFrame.
+                DataFrame.
 
         Returns:
             A new frame containing the appended postprocessor.
@@ -220,10 +220,11 @@ class QueryFrame:
         )
 
     def collect(self) -> pl.DataFrame:
-        """Execute the query and collect its Polars postprocessors.
+        """Execute the query and apply its Polars postprocessors.
 
         Returns:
-            The collected query result.
+            The eager query result after applying each postprocessor in
+            registration order.
 
         """
         names, rows = _fetch(
@@ -231,15 +232,15 @@ class QueryFrame:
             self.statement,
             self.parameters,
         )
-        lazy_frame = pl.LazyFrame(
+        frame = pl.DataFrame(
             rows,
             schema=names,
             schema_overrides=dict(self.schema_overrides),
             orient="row",
         )
         for postprocessor in self._postprocessors:
-            lazy_frame = postprocessor(lazy_frame)
-        return lazy_frame.collect()
+            frame = postprocessor(frame)
+        return frame
 
 
 def _create_engine(replica: Replica) -> Engine:
