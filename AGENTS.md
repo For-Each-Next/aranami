@@ -2,6 +2,10 @@
 
 These instructions apply to the entire repository.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the shared engineering conventions,
+including per-wiki extractors, verified template contracts, configurable HTML
+comment ranges, Polars/Parquet processing, daily logs, and disposable caches.
+
 ## Repository boundary
 
 - This repository is only for developing, testing, and building the Aranami
@@ -27,6 +31,24 @@ layer-specific rules for `src/aranami/`.
   applicable. The parameter heading is `Args:`, not `Params:`.
 - Describe behavior and semantics without repeating types already present in
   annotations.
+
+## Polars conventions
+
+- Use Polars for tabular data and Parquet for disposable tabular caches.
+  Read the [stable Python API reference][5] and the [Pandas migration
+  guide][6] when implementing or reviewing data transformations.
+- Write Polars-native expressions with `select`, `with_columns`, `filter`,
+  `join`, `group_by().agg()`, and window expressions. Combine independent
+  expressions in one context instead of chaining trivial frame callbacks.
+- Use explicit columns as keys; do not emulate Pandas indexes, mutable
+  column assignment, row-wise `apply`, or conversions through Pandas.
+- Preserve explicit schemas and distinguish null observations from zero.
+  Prefer expressions to Python element or row UDFs for tabular calculations.
+- Use lazy scans and deferred collection when they improve file-backed
+  processing. Keep the established eager source-adapter contracts intact.
+- Python iteration is appropriate at external-request and wikitext-parser
+  boundaries, or for small scalar mappings; do not use it for joins,
+  grouping, aggregation, ranking, or other native tabular operations.
 
 ## Change management
 
@@ -119,3 +141,5 @@ uv build --wheel --clear
 [2]: https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings
 [3]: https://semver.org/
 [4]: https://www.conventionalcommits.org/en/v1.0.0/
+[5]: https://docs.pola.rs/api/python/stable/reference/index.html
+[6]: https://docs.pola.rs/user-guide/migration/pandas/

@@ -5,6 +5,75 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.3
 
+### 0.2.0.post7 (2026-10-03 02:23 UTC)
+
+Overview: Integrated Chinese Wikipedia's video-game report routines into the
+PAWS wheel, with one-call execution, plain wikitext dry-run exports, shared
+daily logging, disposable Polars caches, and separate, source-verified English
+and Chinese template semantics.
+
+- **Routine execution:** Connected DYK records and statistics, new-page
+  discovery, project assessment lists, popularity rankings, English-article
+  comparisons, and subscribed PexBot refreshes to `aranami.run()`. Reused PAWS
+  authentication, continued independent jobs after failures, and kept
+  scheduling outside the package.
+- **Publication:** Added structured edit proposals, checks against concurrent
+  changes, unchanged-page skips, and one compact Markdown task summary per
+  dry run with UTC start/end times, aggregate and per-routine statuses, and
+  links to exact UTF-8 `.wikitext` companions. Grouped PexBot refresh
+  proposals as one task and removed embedded proposed text. Added a
+  `scripts/run_aranami.py` launcher that saves results beside itself, retains
+  earlier runs, and preserves completed proposals when another job fails.
+  Suppressed wiki saves and delegated PexBot refreshes in dry runs.
+- **PAWS scripts:** Added a standalone `scripts/install_aranami.py` installer
+  using the active Python interpreter's pip, with an explicit wheel path or
+  discovery of a single local wheel. Made pasted notebook cells ignore
+  kernel arguments during installation and use the notebook's current
+  directory for dry-run storage, while preserving script arguments and
+  output placement. Documented installation and dry-run commands.
+- **Hourly reports:** Retained the latest 100 completed new-page dates and
+  filled gaps. Advanced Pageviews by at most one missing report date per call,
+  with a default two-day lag; skipped publication and cache replacement when
+  at least 95% of articles lacked observations for that date. Added bounded
+  retries for transient 502/503/504 responses and deferred exhausted requests
+  without treating them as missing observations or zeroes.
+- **Storage and logs:** Appended all routine activity to one UTC-dated log
+  file, retained 90 completed daily archives, and added visible disposable
+  `cache/` storage with `run(clear_cache=True)`. Cached Pageviews in atomic
+  Parquet snapshots, extended sufficient histories, and rebuilt short ones
+  with an 800-day default buffer. Preserved completed Pageviews requests in
+  separate pending snapshots so deferred runs could resume while retaining
+  the healthy cache. Cached DYK dates against actual revisions.
+- **Configuration and wikitext:** Added validated HTML-comment ranges and
+  settings, preserved surrounding text and transclusion tags, and migrated
+  legacy markers. Used parser-built wikitext and verified template contracts;
+  moved PexBot's configurable prefix list into wheel configuration and
+  restricted its service to Chinese Wikipedia. Moved destination pages,
+  existing-page reads, publication proposals, and concrete report settings
+  into jobs, including Pageviews periods and task-force selections. Kept
+  services as content processors accepting supplied text and explicit
+  configuration. Preserved target-day availability checks independently of
+  displayed ranking periods and made report group headings configurable.
+- **Site semantics:** Separated Chinese reports and English/Chinese extractors,
+  used Pywikibot namespace normalization, and represented unknown dates as
+  null. Replaced guessed Article history aliases with verified module rules,
+  including English GAR listings and Chinese GAR's delisting-only semantics.
+- **Manual analysis and sources:** Preserved character reports and English/
+  Chinese quality analysis as manual Polars services. Added read-only replica
+  queries, explicit-key tag joins, batched/preloaded wiki reads, and documented
+  dependencies for date parsing, Chinese conversion, and segmentation.
+- **Quality-analysis structure:** Moved reusable date parsing, template-value
+  access, prose extraction, and language word counting into support modules.
+  Kept quality workflows, promotion-history interpretation, and per-wiki
+  profiles in services. Injected per-wiki projects, grade names, template
+  contracts, and measurement rules into the shared analysis workflow and
+  replica query. Replaced `services.quality_prose` with explicit
+  support APIs while preserving `analyze_quality_contents()` and its outputs.
+- **Engineering:** Removed the imported `package/` tree and its ignore rule,
+  documented architecture and Polars conventions in `CONTRIBUTING.md` and
+  scoped instructions, and added offline regressions for reports, storage,
+  publication, logging, and cross-wiki extraction.
+
 ### 0.2.0 (2026-08-23 08:49 UTC)
 
 Overview: Replaced deferred Pageviews totals with identified direct daily-data

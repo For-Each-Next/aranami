@@ -39,10 +39,12 @@ Keep dependencies flowing down through these layers:
 - `runner.py` orchestrates one run by invoking jobs. It contains no report
   implementation or scheduling loop.
 - `jobs/` contains one independently runnable report task per module.
-  Jobs coordinate services and select intentional on-wiki publication or
-  local dry-run output.
+  Jobs select report destinations and settings, read current target text,
+  and wrap processed content for intentional on-wiki publication or local
+  dry-run output.
 - `services/` contains reusable, higher-level report workflows shared by
-  jobs.
+  jobs. Services accept caller-supplied text and report settings and return
+  processed content without selecting destination pages.
 - `sources/` contains low-level, read-only external data access. Use a
   Quarry source adapter for Wiki Replica queries and a Pageviews source
   adapter for the Wikimedia Pageviews API. Either adapter may be a module
@@ -62,7 +64,7 @@ directories add rules for their own layer:
 - [Source adapter instructions][1] cover Wiki Replica queries, read-only
   Pywikibot fallbacks, and page preloading.
 - [Service instructions][2] cover Polars data processing, wikitext
-  construction, and proposed-edit values.
+  construction, and destination-free report values.
 - [Job instructions][3] cover report coordination, intentional
   publication, and dry-run artifacts.
 

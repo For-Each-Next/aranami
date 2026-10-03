@@ -6,8 +6,18 @@ template nodes by their page titles without expanding MediaWiki syntax.
 
 from __future__ import annotations
 
-__all__ = ("get_templates",)
+__all__ = (
+    "clean_value",
+    "get_templates",
+    "has_region",
+    "integer_option",
+    "managed_region",
+    "region_content",
+    "region_options",
+    "replace_by_tag",
+)
 
+import re
 from typing import TYPE_CHECKING
 
 import mwparserfromhell
@@ -15,12 +25,54 @@ from pywikibot import Page
 from pywikibot.exceptions import InvalidTitleError
 from pywikibot.site import Namespace
 
+from aranami.support.regions import (
+    has_region,
+    integer_option,
+    managed_region,
+    region_content,
+    region_options,
+    replace_by_tag,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from mwparserfromhell.nodes import Template
     from mwparserfromhell.wikicode import Wikicode
     from pywikibot.site import BaseSite
+
+COMMENT_RE = re.compile(r"<!--.*?-->", flags=re.DOTALL)
+REF_RE = re.compile(r"<ref\b.*?>.*?</ref>", flags=re.IGNORECASE | re.DOTALL)
+SELF_CLOSING_REF_RE = re.compile(
+    r"<ref\b[^>]*/>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+TAG_RE = re.compile(r"<.*?>", flags=re.DOTALL)
+
+
+def clean_value(value: object) -> str | None:
+    """Read a scalar value without comments or reference content.
+
+    Links contribute their displayed text and formatting tags contribute
+    their contents. Unexpanded templates do not contribute a value.
+    The original parser nodes remain unchanged.
+
+    Args:
+        value: Raw text or parser value, or a missing observation.
+
+    Returns:
+        Whitespace-normalized plain text, or ``None`` when empty.
+    """
+    if value is None:
+        return None
+    code = mwparserfromhell.parse(str(value))
+    for comment in reversed(code.filter_comments(recursive=True)):
+        code.remove(comment, recursive=True)
+    for tag in reversed(code.filter_tags(recursive=True)):
+        if str(tag.tag).strip().casefold() == "ref":
+            code.remove(tag, recursive=True)
+    cleaned = re.sub(r"\s+", " ", code.strip_code()).strip()
+    return cleaned or None
 
 
 def get_templates(

@@ -1,14 +1,16 @@
 """Exercise the public runner safely from Wikimedia PAWS."""
 
+import datetime as dt
 from pathlib import Path
 
 import aranami
 
 
 def main() -> None:
-    """Run the PAWS-safe bootstrap and print the active log."""
+    """Construct routine proposals and print today's shared UTC log."""
     aranami.run(dry_run=True)
-    log_path = Path.cwd() / "logs" / "aranami.log"
+    today = dt.datetime.now(dt.UTC).date()
+    log_path = Path.cwd() / "logs" / f"aranami.{today.isoformat()}.log"
     print(  # ruff: ignore[print]
         log_path.read_text(encoding="utf-8"),
         end="",

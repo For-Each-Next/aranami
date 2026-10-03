@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "aranami"
-version = "0.2.0"
+version = "0.2.0.post7"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [
@@ -32,8 +32,11 @@ classifiers = [
     "Private :: Do Not Upload",
 ]
 dependencies = [
-    "great-tables==0.23.0",
+    "dateparser",
+    "great-tables",
+    "jieba",
     "mwparserfromhell",
+    "opencc-python-reimplemented",
     "polars",
     "pymysql",
     "pywikibot",
@@ -69,6 +72,7 @@ ignore = [
 select = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["implicit-namespace-package"]
 "tests/**/*.py" = ["assert", "implicit-namespace-package"]
 
 [tool.ruff.lint.isort]
