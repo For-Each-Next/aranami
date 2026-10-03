@@ -12,8 +12,8 @@ import urllib.request
 from importlib.metadata import version
 from typing import TYPE_CHECKING
 
-from aranami import config
 from aranami.jobs import JobContext, job_run
+from aranami.monitor import TASK_DEFINITIONS
 from aranami.services.zhwiki.pexbot import (
     parse_event,
     require_zhwiki,
@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from pywikibot.site import BaseSite
+
+PEXBOT_PREFIXES: tuple[str, ...] = TASK_DEFINITIONS["pexbot"].prefixes
 
 _LOGGER = logging.getLogger(__name__)
 _ENDPOINT = "https://pexbot.toolforge.org/database-report/stream"
@@ -69,29 +71,29 @@ def _refresh(site: BaseSite, title: str) -> None:
 
 def run(
     *,
-    dry_run: bool = False,
+    dry: bool = False,
     context: JobContext | None = None,
     prefixes: Sequence[str] | None = None,
 ) -> None:
     """Refresh subscribed reports or describe delegated dry-run actions.
 
     Args:
-        dry_run: Suppress external requests for a standalone run.
+        dry: Suppress external requests for a standalone run.
         context: Parent context whose output mode takes precedence.
-        prefixes: Allowed report roots, overriding wheel configuration.
+        prefixes: Allowed report roots, overriding this job's defaults.
             An empty sequence disables delegated refreshes.
 
     Raises:
         ExceptionGroup: At least one delegated refresh failed.
     """
-    with job_run("pexbot", dry_run=dry_run, context=context) as active:
+    with job_run("pexbot", dry=dry, context=context) as active:
         require_zhwiki(active.site)
-        allowed = config.PEXBOT_PREFIXES if prefixes is None else prefixes
+        allowed = PEXBOT_PREFIXES if prefixes is None else prefixes
         titles = subscribed_titles(active.site, allowed)
         _LOGGER.info("Selected %d subscribed PexBot reports.", len(titles))
         failures: list[Exception] = []
         for title in titles:
-            if active.dry_run:
+            if active.dry:
                 active.notes.append(
                     f"PexBot refresh proposed: {title}. External generation "
                     "was not triggered; proposed wikitext is unavailable.",

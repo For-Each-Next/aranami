@@ -72,13 +72,30 @@ class TaskForce:
 
 @dataclass(frozen=True, slots=True)
 class PageviewReport:
-    """Carry report wikitext and its edit-summary metadata."""
+    """Carry report wikitext and its edit-summary metadata.
+
+    Attributes:
+        text: Generated ranking sections and their report-date marker.
+        data_date: Last day included in the report.
+        daily_top: First observed article in the daily ranking.
+        weekly_top: First observed article in the weekly ranking.
+        monthly_top: First observed article in the monthly ranking.
+        daily_top_gain: Places gained by the daily leader; zero if
+            unchanged, or None without a previous rank.
+        weekly_top_gain: Places gained by the weekly leader; zero if
+            unchanged, or None without a previous rank.
+        monthly_top_gain: Places gained by the monthly leader; zero if
+            unchanged, or None without a previous rank.
+    """
 
     text: str
     data_date: dt.date
     daily_top: str | None
     weekly_top: str | None
     monthly_top: str | None
+    daily_top_gain: int | None = None
+    weekly_top_gain: int | None = None
+    monthly_top_gain: int | None = None
 
 
 class PageviewsUnavailableError(RuntimeError):
@@ -439,7 +456,7 @@ def _section(
     stop: dt.date,
     config: ReportPeriod,
     tag: str,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, int | None]:
     """Render a ranked section with parser-created template nodes.
 
     Args:
@@ -450,7 +467,9 @@ def _section(
         tag: Identifier consumed by the report's header template.
 
     Returns:
-        Section text and its first article with available observations.
+        Section text, its first article with available observations, and
+        places gained since the previous period. A missing previous rank
+        produces None; a previously first-ranked article produces zero.
     """
     data = _ranked_data(articles, views, stop, config.delta)
     start, end = stop - config.delta, stop - dt.timedelta(days=1)
@@ -486,12 +505,14 @@ def _section(
         items.append(str(item))
     available = data.filter(pl.col("views").is_not_null())
     top = str(available.item(0, "title")) if available.height else None
+    old_rank = available.item(0, "old_rank") if available.height else None
+    gain = int(old_rank) - 1 if old_rank is not None else None
     code = mwparserfromhell.parse(f"\n=== {config.heading} ===\n\n")
     code.append(header)
     code.append("\n" + "\n".join(items) + "\n")
     code.append(Template("PJ:VG/HOT/footer"))
     code.append("\n")
-    return str(code), top
+    return str(code), top, gain
 
 
 def _project_articles(site: BaseSite, project: str) -> pl.DataFrame:
@@ -581,9 +602,9 @@ def build_report(
         f"<!-- {REPORT_DATA_DATE_MARKER}: {data_date.isoformat()} -->\n",
         f"== {settings.project_heading} ==",
     ]
-    top_titles: dict[str, str | None] = {}
+    leaders: dict[str, tuple[str | None, int | None]] = {}
     for config in settings.periods:
-        text, top = _section(
+        text, top, gain = _section(
             articles,
             views,
             stop,
@@ -591,7 +612,7 @@ def build_report(
             settings.project_tag,
         )
         sections.append(text)
-        top_titles[config.key] = top
+        leaders[config.key] = top, gain
     if settings.task_forces:
         sections.append(f"== {settings.task_force_heading} ==")
     for task_force in settings.task_forces:
@@ -603,14 +624,17 @@ def build_report(
             settings.task_force_period,
             heading=task_force.heading,
         )
-        text, _ = _section(members, views, stop, config, task_force.tag)
+        text, _, _ = _section(members, views, stop, config, task_force.tag)
         sections.append(text)
     return PageviewReport(
         "".join(sections),
         data_date,
-        top_titles.get("daily"),
-        top_titles.get("weekly"),
-        top_titles.get("monthly"),
+        leaders.get("daily", (None, None))[0],
+        leaders.get("weekly", (None, None))[0],
+        leaders.get("monthly", (None, None))[0],
+        leaders.get("daily", (None, None))[1],
+        leaders.get("weekly", (None, None))[1],
+        leaders.get("monthly", (None, None))[1],
     )
 
 

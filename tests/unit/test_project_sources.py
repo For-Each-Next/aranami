@@ -1,15 +1,23 @@
 """Verify bounded project queries and ordered page preloading."""
 
-from datetime import date
+from datetime import UTC, date, datetime
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
 import polars as pl
 import pywikibot
+from sqlalchemy import (
+    Column,
+    Integer,
+    LargeBinary,
+    MetaData,
+    Table,
+    create_engine,
+)
 from wiki_fixtures import OfflineSite
 
 from aranami.sources import wiki
-from aranami.sources.quarry import projects
+from aranami.sources.quarry import Replica, projects
 
 
 class TestProjectTags(TestCase):
@@ -101,24 +109,50 @@ class TestProjectStatements(TestCase):
         }
 
     @staticmethod
+    def test_talk_category_members_include_stable_article_ids() -> None:
+        """Keep article and talk-page IDs distinct in category rows."""
+        site = OfflineSite("zh", "wikipedia")
+        columns = (
+            "page_id",
+            "page_namespace",
+            "page_title",
+            "article_page_id",
+        )
+        with patch(
+            "aranami.sources.quarry.query._fetch",
+            return_value=(
+                columns,
+                [(11, 1, "Game", 7), (12, 1, "Orphan", None)],
+            ),
+        ) as fetch:
+            result = projects.category_members(
+                site,
+                "Category:Assessed games",
+                namespace=1,
+            )
+        statement = fetch.call_args.args[1]
+        compiled = statement.compile()
+        assert statement.is_select
+        assert "LEFT OUTER JOIN page AS article" in str(compiled)
+        assert "article.page_title = page.page_title" in str(compiled)
+        assert compiled.params["page_namespace_1"] == 0
+        assert compiled.params["page_namespace_2"] == 1
+        assert result["page_id"].to_list() == [11, 12]
+        assert result["article_page_id"].to_list() == [7, None]
+        assert result.schema["article_page_id"] == pl.Int64
+
+    @staticmethod
     def test_project_name_is_bound_and_empty_metadata_remains_typed() -> None:
-        """Pass exact project names as bound values."""
+        """Bind project names and retain typed routine metadata."""
         site = OfflineSite("zh", "wikipedia")
         name = "Project with ' quotes; and spaces"
         columns = (
             "page_id",
             "page_namespace",
             "page_title",
-            "page_len",
-            "page_is_redirect",
-            "page_latest",
-            "latest_timestamp",
-            "defaultsort",
             "talk_page_id",
-            "talk_page_latest",
             "pa_class",
             "pa_importance",
-            "wikibase_item",
         )
         with patch(
             "aranami.sources.quarry.query._fetch",
@@ -132,9 +166,19 @@ class TestProjectStatements(TestCase):
         assert name in compiled.params.values()
         assert name not in str(compiled)
         assert "talk.page_namespace" in str(compiled)
+        assert "revision" not in str(compiled)
+        assert "page_props" not in str(compiled)
+        assert tuple(statement.selected_columns.keys()) == columns
         assert result.is_empty()
-        assert result.schema["full_title"] == pl.String
-        assert result.schema["wikibase_qid"] == pl.Int64
+        assert result.schema == {
+            "page_id": pl.Int64,
+            "page_namespace": pl.Int64,
+            "page_title": pl.String,
+            "talk_page_id": pl.Int64,
+            "pa_class": pl.String,
+            "pa_importance": pl.String,
+            "full_title": pl.String,
+        }
 
     @staticmethod
     def test_membership_queries_bind_namespaces_names_and_page_ids() -> None:
@@ -206,6 +250,379 @@ class TestProjectStatements(TestCase):
         assert compiled.params["page_is_redirect_1"] == 0
         assert "page.page_namespace %" in str(compiled)
         assert "page.page_namespace !=" in str(compiled)
+
+    @staticmethod
+    def test_redirect_query_binds_revision_dates_tag_and_content_filters() -> (
+        None
+    ):
+        """Find tagged rewrites independently of creation revisions."""
+        site = OfflineSite("zh", "wikipedia")
+        with patch(
+            "aranami.sources.quarry.query._fetch",
+            return_value=(("page_id",), [(123,)]),
+        ) as fetch:
+            result = projects.redirect_converted_page_ids(
+                site,
+                date(2026, 9, 1),
+                date(2026, 9, 2),
+            )
+        replica, statement, _ = fetch.call_args.args
+        compiled = statement.compile()
+        query = str(compiled)
+        assert result == [123]
+        assert replica.project == "zhwiki"
+        assert statement.is_select
+        assert tuple(statement.selected_columns.keys()) == ("page_id",)
+        assert compiled.params["rev_timestamp_1"] == "20260901000000"
+        assert compiled.params["rev_timestamp_2"] == "20260902000000"
+        assert compiled.params["ctd_name_1"] == "mw-removed-redirect"
+        assert "mw-removed-redirect" not in query
+        assert "change_tag.ct_rev_id = revision.rev_id" in query
+        assert "change_tag.ct_tag_id = change_tag_def.ctd_id" in query
+        assert "revision.rev_page = page.page_id" in query
+        assert "revision.rev_timestamp >=" in query
+        assert "revision.rev_timestamp <" in query
+        assert "rev_parent_id" not in query
+        assert compiled.params["page_is_redirect_1"] == 0
+        assert compiled.params["page_namespace_1"] == 2  # ruff: ignore[magic-value-comparison]
+        assert compiled.params["param_1"] == 0
+        assert compiled.params["page_namespace_2"] == 2  # ruff: ignore[magic-value-comparison]
+        assert "page.page_namespace %" in query
+        assert "page.page_namespace !=" in query
+        assert "SELECT DISTINCT page.page_id" in query
+        assert "ORDER BY page.page_id" in query
+
+    @staticmethod
+    def test_redirect_query_empty_result_remains_an_identifier_list() -> None:
+        """Keep empty revision results typed."""
+        site = OfflineSite("zh", "wikipedia")
+        with (
+            patch(
+                "aranami.sources.quarry.query._fetch",
+                return_value=(("page_id",), []),
+            ),
+            patch.object(
+                Replica,
+                "query",
+                autospec=True,
+                side_effect=Replica.query,
+            ) as query,
+        ):
+            result = projects.redirect_converted_page_ids(
+                site,
+                date(2026, 9, 1),
+                date(2026, 9, 2),
+            )
+        assert result == []
+        assert query.call_args.kwargs["schema_overrides"] == {
+            "page_id": pl.Int64,
+        }
+
+    @staticmethod
+    def test_redirect_query_executes_bounds_filters_and_deduplication() -> (
+        None
+    ):
+        """Filter daily rewrites and deduplicate eligible page IDs."""
+        metadata = MetaData()
+        page = Table(
+            "page",
+            metadata,
+            Column("page_id", Integer),
+            Column("page_namespace", Integer),
+            Column("page_is_redirect", Integer),
+        )
+        revision = Table(
+            "revision",
+            metadata,
+            Column("rev_id", Integer),
+            Column("rev_page", Integer),
+            Column("rev_timestamp", LargeBinary),
+            Column("rev_parent_id", Integer),
+        )
+        tag = Table(
+            "change_tag",
+            metadata,
+            Column("ct_rev_id", Integer),
+            Column("ct_tag_id", Integer),
+        )
+        definition = Table(
+            "change_tag_def",
+            metadata,
+            Column("ctd_id", Integer),
+            Column("ctd_name", LargeBinary),
+        )
+        engine = create_engine("sqlite://")
+        replica = Replica("zhwiki")
+        replica._engine = engine  # ruff: ignore[private-member-access]
+        try:
+            with engine.begin() as connection:
+                metadata.create_all(connection)
+                connection.execute(
+                    page.insert(),
+                    [
+                        {
+                            "page_id": identifier,
+                            "page_namespace": namespace,
+                            "page_is_redirect": redirect,
+                        }
+                        for identifier, namespace, redirect in (
+                            (8, 4, 0),
+                            (1, 0, 0),
+                            (2, 0, 1),
+                            (3, 2, 0),
+                            (4, 1, 0),
+                            (5, 0, 0),
+                            (6, 0, 0),
+                            (7, 0, 0),
+                            (9, 0, 0),
+                        )
+                    ],
+                )
+                connection.execute(
+                    revision.insert(),
+                    [
+                        {
+                            "rev_id": identifier,
+                            "rev_page": page_id,
+                            "rev_timestamp": timestamp,
+                            "rev_parent_id": 999,
+                        }
+                        for identifier, page_id, timestamp in (
+                            (80, 8, b"20260901235959"),
+                            (10, 1, b"20260901000000"),
+                            (11, 1, b"20260901120000"),
+                            (20, 2, b"20260901120000"),
+                            (30, 3, b"20260901120000"),
+                            (40, 4, b"20260901120000"),
+                            (50, 5, b"20260831235959"),
+                            (60, 6, b"20260902000000"),
+                            (70, 7, b"20260901120000"),
+                            (90, 9, b"20260901120000"),
+                            (100, 100, b"20260901120000"),
+                        )
+                    ],
+                )
+                connection.execute(
+                    tag.insert(),
+                    [
+                        {"ct_rev_id": identifier, "ct_tag_id": tag_id}
+                        for identifier, tag_id in (
+                            (80, 1),
+                            (10, 1),
+                            (11, 1),
+                            (20, 1),
+                            (30, 1),
+                            (40, 1),
+                            (50, 1),
+                            (60, 1),
+                            (70, 2),
+                            (100, 1),
+                        )
+                    ],
+                )
+                connection.execute(
+                    definition.insert(),
+                    [
+                        {"ctd_id": 1, "ctd_name": b"mw-removed-redirect"},
+                        {
+                            "ctd_id": 2,
+                            "ctd_name": b"mw-removed-redirect-extra",
+                        },
+                    ],
+                )
+            with patch(
+                "aranami.sources.quarry.projects._replica",
+                return_value=replica,
+            ):
+                result = projects.redirect_converted_page_ids(
+                    OfflineSite("zh", "wikipedia"),
+                    date(2026, 9, 1),
+                    date(2026, 9, 2),
+                )
+            assert result == [1, 8]
+        finally:
+            engine.dispose()
+
+
+class TestPageCreationMetadata(TestCase):
+    """Verify bounded identity queries and original revision times."""
+
+    @staticmethod
+    def test_empty_titles_never_open_a_replica() -> None:
+        """Retain the result schema without querying unrelated pages."""
+        with patch("aranami.sources.quarry.projects._replica") as replica:
+            result = projects.page_creation_metadata(
+                OfflineSite("zh", "wikipedia"),
+                [],
+            )
+        replica.assert_not_called()
+        assert result.is_empty()
+        assert result.schema == {
+            "full_title": pl.String,
+            "page_id": pl.Int64,
+            "created_at": pl.Datetime(time_unit="us", time_zone="UTC"),
+        }
+
+    @staticmethod
+    def test_titles_normalize_bind_and_deduplicate_before_batching() -> None:
+        """Normalize namespace aliases and bound database-title keys."""
+        site = OfflineSite("zh", "wikipedia")
+        titles = [
+            "PJ:Good_games",
+            "WikiProject:Good games",
+            "维基专题:Good games#Details",
+            *[f"Game {number}" for number in range(1000)],
+            "Game_0",
+        ]
+        with patch(
+            "aranami.sources.quarry.query._fetch",
+            return_value=(
+                ("page_id", "page_namespace", "page_title", "created_at"),
+                [],
+            ),
+        ) as fetch:
+            result = projects.page_creation_metadata(site, titles)
+        batches = []
+        for call in fetch.call_args_list:
+            replica, statement, _ = call.args
+            compiled = statement.compile()
+            assert replica.project == "zhwiki"
+            assert statement.is_select
+            assert tuple(statement.selected_columns.keys()) == (
+                "page_id",
+                "page_namespace",
+                "page_title",
+                "created_at",
+            )
+            query = str(compiled)
+            assert "min(revision.rev_timestamp)" in query
+            assert "revision.rev_page = page.page_id" in query
+            assert "page_is_redirect" not in query
+            assert "Good_games" not in query
+            batches.append(compiled.params["param_1"])
+        assert [len(batch) for batch in batches] == [500, 500, 1]
+        assert [key for batch in batches for key in batch] == [
+            (102, "Good_games"),
+            *[(0, f"Game_{number}") for number in range(1000)],
+        ]
+        assert result.is_empty()
+        assert result.schema["created_at"] == pl.Datetime(
+            time_unit="us",
+            time_zone="UTC",
+        )
+
+    @staticmethod
+    def test_unavailable_revision_time_remains_null() -> None:
+        """Keep page identities without inventing a creation date."""
+        with patch(
+            "aranami.sources.quarry.query._fetch",
+            return_value=(
+                ("page_id", "page_namespace", "page_title", "created_at"),
+                [(123, 102, "Good_games", None)],
+            ),
+        ):
+            result = projects.page_creation_metadata(
+                OfflineSite("zh", "wikipedia"),
+                ["PJ:Good games"],
+            )
+        assert result.to_dicts() == [
+            {
+                "full_title": "WikiProject:Good games",
+                "page_id": 123,
+                "created_at": None,
+            },
+        ]
+        assert result.schema["created_at"] == pl.Datetime(
+            time_unit="us",
+            time_zone="UTC",
+        )
+
+    @staticmethod
+    def test_query_reads_first_revision_for_each_current_identity() -> None:
+        """Keep original times for rewrites and current redirects."""
+        metadata = MetaData()
+        page = Table(
+            "page",
+            metadata,
+            Column("page_id", Integer),
+            Column("page_namespace", Integer),
+            Column("page_title", LargeBinary),
+            Column("page_is_redirect", Integer),
+        )
+        revision = Table(
+            "revision",
+            metadata,
+            Column("rev_id", Integer),
+            Column("rev_page", Integer),
+            Column("rev_timestamp", LargeBinary),
+        )
+        engine = create_engine("sqlite://")
+        replica = Replica("zhwiki")
+        replica._engine = engine  # ruff: ignore[private-member-access]
+        try:
+            with engine.begin() as connection:
+                metadata.create_all(connection)
+                connection.execute(
+                    page.insert(),
+                    [
+                        {
+                            "page_id": identifier,
+                            "page_namespace": namespace,
+                            "page_title": title,
+                            "page_is_redirect": redirect,
+                        }
+                        for identifier, namespace, title, redirect in (
+                            (7, 0, b"Game", 1),
+                            (8, 4, b"Good_games", 0),
+                            (9, 0, b"No_history", 0),
+                            (10, 0, b"Good_games", 0),
+                        )
+                    ],
+                )
+                connection.execute(
+                    revision.insert(),
+                    [
+                        {
+                            "rev_id": identifier,
+                            "rev_page": page_id,
+                            "rev_timestamp": timestamp,
+                        }
+                        for identifier, page_id, timestamp in (
+                            (1, 7, b"20260901120000"),
+                            (2, 7, b"20260805112233"),
+                            (3, 8, b"20260901000000"),
+                            (4, 8, b"20240101000000"),
+                            (5, 10, b"20000101000000"),
+                        )
+                    ],
+                )
+            with patch(
+                "aranami.sources.quarry.projects._replica",
+                return_value=replica,
+            ):
+                result = projects.page_creation_metadata(
+                    OfflineSite("zh", "wikipedia"),
+                    ["Game", "Project:Good games", "No history", "Missing"],
+                )
+            assert result.to_dicts() == [
+                {
+                    "full_title": "Game",
+                    "page_id": 7,
+                    "created_at": datetime(2026, 8, 5, 11, 22, 33, tzinfo=UTC),
+                },
+                {
+                    "full_title": "Project:Good games",
+                    "page_id": 8,
+                    "created_at": datetime(2024, 1, 1, tzinfo=UTC),
+                },
+                {
+                    "full_title": "No history",
+                    "page_id": 9,
+                    "created_at": None,
+                },
+            ]
+        finally:
+            engine.dispose()
 
 
 class TestWikiPreloading(TestCase):

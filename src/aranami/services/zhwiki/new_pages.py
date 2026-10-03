@@ -1,22 +1,32 @@
-"""Discover new video-game pages and refresh assessment icons.
+"""Discover video-game pages created or converted from redirects.
 
-Match keywords in preloaded text after a bounded creation-date query.
+Match keywords in preloaded text for dated creations and conversions.
 Repeated runs fill gaps without duplicating existing dates.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import re
 from typing import TYPE_CHECKING
 
 import mwparserfromhell
-from mwparserfromhell.nodes import Heading, Tag, Template, Text, Wikilink
+from mwparserfromhell.nodes import (
+    Comment,
+    Heading,
+    Tag,
+    Template,
+    Text,
+    Wikilink,
+)
 from pywikibot import Page
 
 from aranami.sources.quarry.projects import (
     new_page_ids,
+    page_creation_metadata,
     query_pages_by_wikiproject,
+    redirect_converted_page_ids,
 )
 from aranami.sources.wiki import read_page_ids
 from aranami.support.templates import template_page
@@ -31,8 +41,10 @@ from aranami.support.wikitext import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from mwparserfromhell.wikicode import Wikicode
     from pywikibot.site import BaseSite
 
+_LOGGER = logging.getLogger(__name__)
 _KEYWORDS = (
     "\\{\\{\\s*infobox[ _](?:C?VG|video[ _]game)",
     "\\{\\{\\s*vgname",
@@ -189,6 +201,67 @@ _DATE_HEADING = re.compile(
     r"\s*(?P<year>\d{4})年\s*(?P<month>\d{1,2})月\s*"
     r"(?P<day>\d{1,2})日\s*",
 )
+_ITEM_METADATA = re.compile(
+    r"\s*页面ID\s+\d+\s*·\s*创建时间\s+"
+    r"(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|未知)\s*",
+)
+
+
+def _annotate_items(text: str, site: BaseSite) -> str:
+    """Add page IDs and first-revision UTC dates to unannotated rows.
+
+    Retain existing metadata comments so historical identities survive
+    page moves or deletions. Missing identities leave the row unchanged;
+    an unavailable creation date is explicitly marked as unknown.
+
+    Args:
+        text: Retained daily sections, including newly generated rows.
+        site: Site whose namespaces and replica metadata apply.
+
+    Returns:
+        Sections with one trailing metadata comment per resolved item.
+    """
+    lines = text.splitlines(keepends=True)
+    pending: dict[int, tuple[Wikicode, str, str]] = {}
+    for index, line in enumerate(lines):
+        if not line.lstrip().startswith("*"):
+            continue
+        content = line.rstrip("\r\n")
+        code = mwparserfromhell.parse(content)
+        links = code.filter_wikilinks(recursive=False)
+        if not links or any(
+            _ITEM_METADATA.fullmatch(str(comment.contents))
+            for comment in code.filter_comments(recursive=False)
+        ):
+            continue
+        title = Page(site, str(links[0].title)).title(with_section=False)
+        pending[index] = code, title, line[len(content) :]
+    if not pending:
+        return text
+    titles = list(dict.fromkeys(title for _, title, _ in pending.values()))
+    metadata = {
+        title: (page_id, created_at)
+        for title, page_id, created_at in page_creation_metadata(
+            site,
+            titles,
+        )
+        .select("full_title", "page_id", "created_at")
+        .iter_rows()
+    }
+    for index, (code, title, ending) in pending.items():
+        if title not in metadata:
+            _LOGGER.warning("No creation metadata for listed page %s", title)
+            continue
+        page_id, created_at = metadata[title]
+        timestamp = (
+            created_at.strftime("%Y-%m-%d %H:%M:%S")
+            if created_at is not None
+            else "未知"
+        )
+        code.append(Text(" "))
+        code.append(Comment(f" 页面ID {page_id} · 创建时间 {timestamp} "))
+        lines[index] = str(code) + ending
+    return "".join(lines)
 
 
 def _heading_date(node: object) -> dt.date | None:
@@ -211,12 +284,14 @@ def _heading_date(node: object) -> dt.date | None:
 
 
 def _build_section(site: BaseSite, day: dt.date) -> str:
-    """Read one creation day and render a complete report section.
+    """Read pages created or converted from redirects on one UTC day.
 
     Returns:
-        Wikitext headed by a Chinese date and including empty results.
+        A complete dated section with notes on redirect conversions.
     """
-    candidates = new_page_ids(site, day, day + dt.timedelta(days=1))
+    stop = day + dt.timedelta(days=1)
+    converted_ids = set(redirect_converted_page_ids(site, day, stop))
+    candidates = sorted(set(new_page_ids(site, day, stop)) | converted_ids)
     pages = read_page_ids(site, candidates)
     matches = sorted(
         (
@@ -249,6 +324,8 @@ def _build_section(site: BaseSite, day: dt.date) -> str:
         small = Tag("small", f"〔{talk}〕")  # ruff: ignore[ambiguous-unicode-character-string]
         small.add("style", "margin-left: 0.33em;")
         body.append(small)
+        if page.pageid in converted_ids:
+            body.append(Text(" — 自重定向页改写"))
     body.append(Text("\n"))
     body.append(Template("Div col end"))
     body.append(Text("\n\n"))
@@ -306,6 +383,44 @@ def record_dates(text: str) -> set[dt.date]:
     return set(sections)
 
 
+def record_counts(
+    text: str,
+    site: BaseSite,
+    days: set[dt.date],
+) -> tuple[int, int]:
+    """Count matched article and non-article pages in selected records.
+
+    Args:
+        text: Complete report text with daily headings and page lists.
+        site: Site whose namespace aliases and title rules apply.
+        days: Report dates whose matched pages should be counted.
+
+    Returns:
+        Article and non-article counts, excluding talk-template links,
+        unrelated page content, and records outside the selected dates.
+    """
+    managed_text = region_content(text, "new-pages")
+    _, _, sections = _extract_sections(
+        text if managed_text is None else managed_text,
+    )
+    articles = non_articles = 0
+    for day in days:
+        for line in sections.get(day, "").splitlines():
+            if not line.lstrip().startswith("*"):
+                continue
+            links = mwparserfromhell.parse(line).filter_wikilinks(
+                recursive=False,
+            )
+            if not links:
+                continue
+            page = Page(site, str(links[0].title))
+            if page.namespace() == 0:
+                articles += 1
+            else:
+                non_articles += 1
+    return articles, non_articles
+
+
 def update_text(
     original_text: str,
     site: BaseSite,
@@ -315,9 +430,14 @@ def update_text(
 ) -> str:
     """Keep the latest 100 complete UTC dates and fill missing records.
 
-    Existing dates are reused, even when they contain no matches. Each
-    absent date is queried once per successful run. The saved page holds
-    the authoritative record, so clearing caches cannot lose a date.
+    Existing dates are reused, including dates without matches. Missing
+    dates include creations and ``mw-removed-redirect`` edits from the
+    same UTC day. Converted pages receive a ``自重定向页改写`` note.
+    Each resolved item ends with its page ID and first-revision UTC time
+    in an HTML comment. Existing rows receive missing comments once.
+    Each page appears once per day, even when also created that day.
+    The saved page holds the authoritative record, so clearing caches
+    cannot lose a date.
 
     Args:
         original_text: Existing page text with dated report records.
@@ -344,6 +464,7 @@ def update_text(
     for day in reversed(missing):
         existing[day] = _build_section(site, day)
     records = "".join(existing[day].rstrip() + "\n\n" for day in days)
+    records = _annotate_items(records, site)
     metadata = query_pages_by_wikiproject(site, project)
     grades = dict(metadata.select("full_title", "pa_class").iter_rows())
     records = update_icons(records, grades, site)

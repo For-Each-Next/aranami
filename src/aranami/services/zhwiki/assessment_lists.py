@@ -19,6 +19,10 @@ from pywikibot import Page
 
 from aranami.sources.quarry.projects import category_members
 from aranami.sources.wiki import read_pages
+from aranami.support.report_membership import (
+    MembershipReport,
+    member_identifier,
+)
 from aranami.support.wikitext import (
     has_region,
     managed_region,
@@ -198,6 +202,33 @@ def _replace_section(code: Wikicode, name: str, content: str) -> None:
     code.nodes[begin + 1 : end] = mwparserfromhell.parse(content).nodes
 
 
+def article_members(text: str) -> dict[str, int | None]:
+    """Read article titles and any legacy IDs from the managed list.
+
+    Args:
+        text: Report content containing the managed list section.
+
+    Returns:
+        Article titles and optional IDs, excluding review links.
+
+    Raises:
+        ValueError: If list sections are ambiguous or missing.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    code = mwparserfromhell.parse(text)
+    begin, end = _section_bounds(code, "list")
+    content = "".join(str(node) for node in code.nodes[begin + 1 : end])
+    members: dict[str, int | None] = {}
+    for line in content.splitlines():
+        if line.lstrip().startswith("#"):
+            row = mwparserfromhell.parse(line)
+            links = row.filter_wikilinks()
+            if links:
+                title = str(links[0].title).split("#", 1)[0]
+                normalized = title.replace("_", " ").lstrip(":").strip()
+                members[normalized] = member_identifier(row)
+    return members
+
+
 def article_titles(text: str) -> set[str]:
     """Read article links from the managed numbered list.
 
@@ -210,17 +241,7 @@ def article_titles(text: str) -> set[str]:
     Raises:
         ValueError: If list sections are ambiguous or missing.
     """  # ruff: ignore[docstring-extraneous-exception]
-    code = mwparserfromhell.parse(text)
-    begin, end = _section_bounds(code, "list")
-    content = "".join(str(node) for node in code.nodes[begin + 1 : end])
-    titles: set[str] = set()
-    for line in content.splitlines():
-        if line.lstrip().startswith("#"):
-            links = mwparserfromhell.parse(line).filter_wikilinks()
-            if links:
-                title = str(links[0].title).split("#", 1)[0]
-                titles.add(title.replace("_", " ").lstrip(":").strip())
-    return titles
+    return set(article_members(text))
 
 
 def _icon(config: AssessmentList) -> Template:
@@ -277,6 +298,8 @@ def update_text(
     original_text: str,
     titles: Sequence[str],
     review_targets: Mapping[str, str],
+    *,
+    member_ids: Mapping[str, int | None] | None = None,  # ruff: ignore[unused-function-argument]
 ) -> str:
     """Update one assessment list in the supplied page content.
 
@@ -285,6 +308,8 @@ def update_text(
         original_text: Preloaded report text with count/list sections.
         titles: Current article titles from the category query.
         review_targets: Review-link destinations by article title.
+        member_ids: Accepted for compatibility; callers keep identities
+            locally rather than rendering them in page content.
 
     Returns:
         Updated wikitext preserving all unmanaged text.
@@ -307,11 +332,11 @@ def update_text(
     return str(code)
 
 
-def prepare_text(
+def prepare_report(
     site: BaseSite,
     config: AssessmentList,
     original_text: str,
-) -> str:
+) -> MembershipReport:
     """Fetch category members and current review anchors for one list.
 
     Args:
@@ -320,7 +345,7 @@ def prepare_text(
         original_text: Current page content to transform.
 
     Returns:
-        Updated content with current members and review links.
+        Updated content and stable article IDs for local tracking.
 
     Raises:
         ValueError: If a configured category title is empty.
@@ -332,11 +357,15 @@ def prepare_text(
         raise ValueError(message)
     config = replace(config, category_title=category)
     members = category_members(site, config.category_title, namespace=1)
+    member_ids = {
+        str(title).replace("_", " ").lstrip(":").strip(): identifier
+        for title, identifier in members.select(
+            "page_title",
+            "article_page_id",
+        ).iter_rows()
+    }
     titles = sorted(
-        {
-            str(title).replace("_", " ")
-            for title in members.get_column("page_title")
-        },
+        member_ids,
         key=_sort_key,
     )
     logger.info("Found %d articles in %s", len(titles), config.category_title)
@@ -354,4 +383,28 @@ def prepare_text(
             targets[title] = (
                 f"{page.title()}#{heading}" if heading else page.title()
             )
-    return update_text(config, original_text, titles, targets)
+    return MembershipReport(
+        text=update_text(config, original_text, titles, targets),
+        members=member_ids,
+    )
+
+
+def prepare_text(
+    site: BaseSite,
+    config: AssessmentList,
+    original_text: str,
+) -> str:
+    """Fetch current members and return clean assessment-list wikitext.
+
+    Args:
+        site: Chinese Wikipedia site and its replica identity.
+        config: Category and list-rendering configuration.
+        original_text: Current page content to transform.
+
+    Returns:
+        Updated content with current members and review links.
+
+    Raises:
+        ValueError: If a configured category title is empty.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    return prepare_report(site, config, original_text).text

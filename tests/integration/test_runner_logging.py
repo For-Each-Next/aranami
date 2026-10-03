@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from contextlib import ExitStack, contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
+from importlib import import_module
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -59,7 +60,7 @@ def _offline_runner(root: Path) -> Iterator[dict[str, Mock]]:
         yield {
             name: stack.enter_context(
                 patch.object(
-                    getattr(runner, name),
+                    import_module(f"aranami.jobs.{name}"),
                     "run",
                     side_effect=partial(_routine, name=name),
                 ),
@@ -71,8 +72,27 @@ def _offline_runner(root: Path) -> Iterator[dict[str, Mock]]:
 class TestRunnerLoggingIntegration(TestCase):
     """Exercise the public runner with temporary logs and reports."""
 
+    def test_public_run_dispatches_both_modes_to_monitor(self) -> None:
+        """Dispatch live and preview modes to the monitor."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for dry in (False, True):
+                with (
+                    self.subTest(dry=dry),
+                    _offline_runner(root) as calls,
+                    patch.object(runner.monitor, "start") as start,
+                ):
+                    result = aranami.run(dry=True) if dry else aranami.run()
+                    assert result is start.return_value
+                    start.assert_called_once_with(
+                        dry=dry,
+                        clear_cache=False,
+                    )
+                    for call in calls.values():
+                        call.assert_not_called()
+
     @staticmethod
-    def test_public_run_appends_every_routine_to_one_daily_file() -> None:
+    def test_public_run_once_appends_every_routine_to_one_daily_file() -> None:
         """Append repeated runs and every job to the UTC daily log."""
         now = datetime(2026, 10, 3, 0, 1, tzinfo=UTC)
         runs = 2
@@ -82,11 +102,11 @@ class TestRunnerLoggingIntegration(TestCase):
         ):
             root = Path(directory)
             with _offline_runner(root) as calls:
-                results = [aranami.run(dry_run=True) for _ in range(runs)]
+                results = [aranami.run_once(dry=True) for _ in range(runs)]
             files = list((root / "logs").iterdir())
             assert [path.name for path in files] == ["aranami.2026-10-03.log"]
             content = files[0].read_text(encoding="utf-8")
-            assert aranami.run is runner.run
+            assert aranami.run_once is runner.run_once
             assert results == [None, None]
             assert content.count("Aranami run started") == runs
             assert content.count("Aranami run finished") == runs
@@ -152,7 +172,7 @@ class TestRunnerLoggingIntegration(TestCase):
                 calls["dyks"].side_effect = fail
                 calls["new_pages"].side_effect = propose
                 with self.assertRaises(ExceptionGroup) as captured:  # ruff: ignore[pytest-unittest-raises-assertion]
-                    aranami.run(dry_run=True)
+                    aranami.run_once(dry=True)
             assert len(captured.exception.exceptions) == 1
             for call in calls.values():
                 call.assert_called_once()
@@ -213,7 +233,7 @@ class TestRunnerLoggingIntegration(TestCase):
             with _offline_runner(root) as calls:
                 calls["pageviews"].side_effect = defer
                 calls["enwp_key_articles"].side_effect = propose
-                assert aranami.run(dry_run=True) is None
+                assert aranami.run_once(dry=True) is None
             summary = next((root / "dry-run").glob("*.md")).read_text(
                 encoding="utf-8",
             )
@@ -231,6 +251,74 @@ class TestRunnerLoggingIntegration(TestCase):
             )
             assert "Routine deferred" in log
             assert "6 jobs, 0 failures, 1 deferred" in log
+
+    @staticmethod
+    def test_selected_task_uses_supplied_date_and_writes_one_preview() -> None:
+        """Run one selected routine with a UTC date anchor."""
+        anchor = date(2026, 9, 30)
+        selected = "new_pages"
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                _offline_runner(root) as calls,
+                patch.object(runner.monitor, "start") as start,
+            ):
+                result = aranami.run_once(
+                    date=anchor,
+                    dry=True,
+                    tasks=[selected],
+                )
+                start.assert_not_called()
+            assert result is None
+            for name, call in calls.items():
+                if name == selected:
+                    call.assert_called_once()
+                else:
+                    call.assert_not_called()
+            context = calls[selected].call_args.kwargs["context"]
+            assert context.today == anchor
+            assert context.dry is True
+            reports = list((root / "dry-run").glob("*.md"))
+            assert len(reports) == 1
+            summary = reports[0].read_text(encoding="utf-8")
+            assert summary.startswith(f"# Aranami dry run — {anchor} UTC\n")
+            assert summary.count("  - task ") == 1
+            assert r"task 1: new\_pages — success" in summary
+
+    @staticmethod
+    def test_one_named_task_defaults_to_immediate_live_execution() -> None:
+        """Execute one named routine immediately in live mode."""
+        selected = "new_pages"
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                _offline_runner(root) as calls,
+                patch.object(runner.monitor, "start") as start,
+            ):
+                assert aranami.run_once(tasks=selected) is None
+                start.assert_not_called()
+            calls[selected].assert_called_once()
+            context = calls[selected].call_args.kwargs["context"]
+            assert context.dry is False
+            assert context.tasks[0].status == "success"
+            for name, call in calls.items():
+                if name != selected:
+                    call.assert_not_called()
+            assert not (root / "dry-run").exists()
+
+    def test_unknown_task_is_rejected_before_site_creation(self) -> None:
+        """Reject unknown task names before opening a wiki session."""
+        with (
+            TemporaryDirectory() as directory,
+            patch(
+                "aranami.support.logs.Path.cwd",
+                return_value=Path(directory),
+            ),
+            patch("aranami.runner.pywikibot.Site") as site,
+        ):
+            with self.assertRaises(ValueError):  # ruff: ignore[pytest-unittest-raises-assertion]
+                aranami.run_once(dry=True, tasks=["unknown"])
+            site.assert_not_called()
 
 
 class TestRunLogManagerIntegration(TestCase):

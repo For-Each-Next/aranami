@@ -8,7 +8,7 @@ import aranami
 
 def main() -> None:
     """Construct routine proposals and print today's shared UTC log."""
-    aranami.run(dry_run=True)
+    aranami.run_once(dry=True)
     today = dt.datetime.now(dt.UTC).date()
     log_path = Path.cwd() / "logs" / f"aranami.{today.isoformat()}.log"
     print(  # ruff: ignore[print]

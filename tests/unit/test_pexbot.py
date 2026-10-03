@@ -15,7 +15,6 @@ from urllib.parse import parse_qs, urlparse
 import polars as pl
 from pywikibot.site import BaseSite, Namespace
 
-from aranami import config
 from aranami.jobs import JobContext, pexbot as job
 from aranami.services.zhwiki import pexbot as service
 
@@ -233,11 +232,11 @@ class TestPexbotJob(TestCase):
     @staticmethod
     def test_dry_run_reads_wheel_defaults_without_refreshing() -> None:
         """Use configured defaults and record proposed actions."""
-        context = JobContext(_site(), dt.date(2026, 10, 3), dry_run=True)
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=True)
         configured = ("Wikipedia:Custom", "User:Another/")
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
-            patch.object(config, "PEXBOT_PREFIXES", configured),
+            patch.object(job, "PEXBOT_PREFIXES", configured),
             patch.object(
                 job,
                 "subscribed_titles",
@@ -253,7 +252,7 @@ class TestPexbotJob(TestCase):
     @staticmethod
     def test_explicit_prefix_override_including_disable() -> None:
         """Honor an explicit empty list instead of wheel defaults."""
-        context = JobContext(_site(), dt.date(2026, 10, 3), dry_run=False)
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(job, "_refresh") as refresh,
@@ -265,7 +264,7 @@ class TestPexbotJob(TestCase):
 
     def test_failed_report_does_not_skip_remaining_reports(self) -> None:
         """Continue other refreshes and report aggregate failure."""
-        context = JobContext(_site(), dt.date(2026, 10, 3), dry_run=False)
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(job, "subscribed_titles", return_value=["A", "B"]),

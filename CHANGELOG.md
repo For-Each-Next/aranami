@@ -5,74 +5,116 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.3
 
-### 0.2.0.post7 (2026-10-03 02:23 UTC)
+### 0.2.1a1 (2026-10-03 05:15 UTC)
 
-Overview: Integrated Chinese Wikipedia's video-game report routines into the
-PAWS wheel, with one-call execution, plain wikitext dry-run exports, shared
-daily logging, disposable Polars caches, and separate, source-verified English
-and Chinese template semantics.
+Overview: Added scheduled PAWS monitoring and immediate selected passes for
+Chinese Wikipedia's video-game reports, with safe publication, dry-run
+previews, shared logs, and disposable caches. Improved new-page discovery,
+Pageviews readiness and recovery, and summaries of dated reports and
+membership changes. Preserved manual English and Chinese quality analysis,
+consolidated installation, documented usage in three languages, and retired
+the character-report workflow.
 
 - **Routine execution:** Connected DYK records and statistics, new-page
-  discovery, project assessment lists, popularity rankings, English-article
-  comparisons, and subscribed PexBot refreshes to `aranami.run()`. Reused PAWS
-  authentication, continued independent jobs after failures, and kept
-  scheduling outside the package.
-- **Publication:** Added structured edit proposals, checks against concurrent
-  changes, unchanged-page skips, and one compact Markdown task summary per
-  dry run with UTC start/end times, aggregate and per-routine statuses, and
-  links to exact UTF-8 `.wikitext` companions. Grouped PexBot refresh
-  proposals as one task and removed embedded proposed text. Added a
-  `scripts/run_aranami.py` launcher that saves results beside itself, retains
-  earlier runs, and preserves completed proposals when another job fails.
-  Suppressed wiki saves and delegated PexBot refreshes in dry runs.
-- **PAWS scripts:** Added a standalone `scripts/install_aranami.py` installer
-  using the active Python interpreter's pip, with an explicit wheel path or
-  discovery of a single local wheel. Made pasted notebook cells ignore
-  kernel arguments during installation and use the notebook's current
-  directory for dry-run storage, while preserving script arguments and
-  output placement. Documented installation and dry-run commands.
-- **Hourly reports:** Retained the latest 100 completed new-page dates and
-  filled gaps. Advanced Pageviews by at most one missing report date per call,
-  with a default two-day lag; skipped publication and cache replacement when
-  at least 95% of articles lacked observations for that date. Added bounded
-  retries for transient 502/503/504 responses and deferred exhausted requests
-  without treating them as missing observations or zeroes.
-- **Storage and logs:** Appended all routine activity to one UTC-dated log
-  file, retained 90 completed daily archives, and added visible disposable
-  `cache/` storage with `run(clear_cache=True)`. Cached Pageviews in atomic
-  Parquet snapshots, extended sufficient histories, and rebuilt short ones
-  with an 800-day default buffer. Preserved completed Pageviews requests in
-  separate pending snapshots so deferred runs could resume while retaining
-  the healthy cache. Cached DYK dates against actual revisions.
-- **Configuration and wikitext:** Added validated HTML-comment ranges and
-  settings, preserved surrounding text and transclusion tags, and migrated
-  legacy markers. Used parser-built wikitext and verified template contracts;
-  moved PexBot's configurable prefix list into wheel configuration and
-  restricted its service to Chinese Wikipedia. Moved destination pages,
-  existing-page reads, publication proposals, and concrete report settings
-  into jobs, including Pageviews periods and task-force selections. Kept
-  services as content processors accepting supplied text and explicit
-  configuration. Preserved target-day availability checks independently of
-  displayed ranking periods and made report group headings configurable.
-- **Site semantics:** Separated Chinese reports and English/Chinese extractors,
-  used Pywikibot namespace normalization, and represented unknown dates as
-  null. Replaced guessed Article history aliases with verified module rules,
-  including English GAR listings and Chinese GAR's delisting-only semantics.
-- **Manual analysis and sources:** Preserved character reports and English/
-  Chinese quality analysis as manual Polars services. Added read-only replica
-  queries, explicit-key tag joins, batched/preloaded wiki reads, and documented
-  dependencies for date parsing, Chinese conversion, and segmentation.
-- **Quality-analysis structure:** Moved reusable date parsing, template-value
-  access, prose extraction, and language word counting into support modules.
-  Kept quality workflows, promotion-history interpretation, and per-wiki
-  profiles in services. Injected per-wiki projects, grade names, template
-  contracts, and measurement rules into the shared analysis workflow and
-  replica query. Replaced `services.quality_prose` with explicit
-  support APIs while preserving `analyze_quality_contents()` and its outputs.
-- **Engineering:** Removed the imported `package/` tree and its ignore rule,
-  documented architecture and Polars conventions in `CONTRIBUTING.md` and
-  scoped instructions, and added offline regressions for reports, storage,
-  publication, logging, and cross-wiki extraction.
+  discovery, assessment lists, popularity rankings, English-article
+  comparisons, and subscribed PexBot refreshes. Reused PAWS authentication
+  and continued independent jobs after failures. Defined six UTC cron
+  schedules and default targets in `monitor.py`, using APScheduler 3.x
+  with one active instance per task and coalesced missed executions.
+- **Public API migration:** Changed `run(dry=False)` to start recurring
+  publication and `run(dry=True)` to generate recurring previews. Returned
+  the scheduler, reused active monitors, and required shutdown before mode
+  changes or cache clearing. Added `run_once(date=..., dry=..., tasks=...)`
+  for immediate all-task or selected-task passes with an optional UTC anchor.
+  Kept both defaults live. Callers of the former one-shot `run()` must use
+  `run_once()`; callers of public, job, and context interfaces must replace
+  `dry_run` with `dry`.
+- **Publication and previews:** Added structured proposals, concurrent-change
+  checks, unchanged-page skips, and one compact Markdown summary per dry run
+  with UTC times, run and task statuses, and links to exact UTF-8 `.wikitext`
+  companions. Retained completed proposals when another job failed, grouped
+  PexBot actions under one task, and suppressed saves and refresh requests
+  during previews.
+- **Edit summaries:** Centralized factual English summaries under a 255-byte
+  UTF-8 limit, preserving complete wiki links and `«...»` article-title
+  delimiters. Included report dates, Pageviews leaders and rank gains,
+  new-page article/non-article counts and backfilled dates, and current
+  totals with grouped membership additions and removals. Ended live and
+  preview summaries with measured routine time, such as
+  `Executed in 21′53.95″.` or `Executed in 7.12″.`, reserving space for the
+  complete suffix.
+- **Membership tracking:** Cached stable article IDs in Parquet snapshots to
+  recognize renames, grade changes, and DYK promotions. Validated snapshots
+  against destination text and advanced them only after successful live
+  publication; previews and failed saves preserved prior membership. Kept
+  title/Wikidata fallback matching for missing or stale snapshots and removed
+  legacy ID comments from real-time report rows. Both English key-article
+  reports used English page IDs across renames and English interwiki links
+  for additions and removals.
+- **PAWS launcher:** Consolidated installation and previews in
+  `scripts/run_aranami.py`, replacing the separate installer. Used the active
+  interpreter to install an explicit wheel or the newest `aranami-*.whl`
+  by modification time, then started a fresh routine process. Stopped on
+  installation failure and removed older wheels only after success,
+  preserving newer uploads for explicit selections. Saved script output
+  beside the launcher and pasted-cell output in the notebook's current
+  directory. Replaced `find_wheel()` and `main(argv=None)` with
+  `install_wheel(argv=None)` and `run()`.
+- **New-page discovery:** Retained 100 completed UTC dates, filled gaps,
+  and reused daily records. Combined creations with replica revisions tagged
+  `mw-removed-redirect`, deduplicated page IDs, retained keyword and namespace
+  filters and assessment icons, and labeled conversions
+  ` — 自重定向页改写`. Appended resolved rows with page-ID and earliest-revision
+  UTC timestamp comments, enriched retained rows without repeating discovery,
+  and preserved metadata across updates. Kept unknown creation dates explicit
+  and unresolved identities unchanged.
+- **Pageviews readiness and recovery:** Processed at most one missing report
+  date per call. Made yesterday eligible from actual invocation time at
+  18:00 UTC, allowed older catch-up beforehand, and prevented manual anchors
+  from bypassing readiness. Removed the `lag-days` setting. Skipped edits
+  and healthy-cache replacement when at least 95% of queried articles lacked
+  observations, preserving explicit zeroes. Retried 502/503/504 responses up
+  to three times and deferred exhausted requests. Kept completed requests in
+  separate pending Parquet checkpoints for resumption, committed them after
+  the availability guard passed, and discarded them when it rejected a day.
+- **Storage and logs:** Added visible disposable `cache/` storage and
+  `run(clear_cache=True)`, atomic Parquet snapshots, and one shared UTC-dated
+  routine log with 90 completed daily archives. Cached Pageviews with an
+  800-day default history, reused sufficient coverage, fetched missing tails
+  and new-article histories, and rebuilt insufficient intervals. Distinguished
+  queried empty intervals from unqueried data. Cached DYK dates against actual
+  revisions.
+- **Configuration and architecture:** Added validated HTML-comment ranges
+  and settings, preserved surrounding text and transclusion tags, and
+  migrated legacy markers. Used parser-built wikitext and verified template
+  contracts. Centralized targets, schedules, and PexBot roots in `monitor.py`
+  while keeping Pageviews readiness in its job and manual overrides available.
+  Restricted PexBot to Chinese Wikipedia. Kept page reads, report settings,
+  and proposals in jobs, with services processing supplied text and explicit
+  configuration; separated target-day availability from displayed periods
+  and made report group headings configurable.
+- **Quality analysis and site semantics:** Preserved manual Polars analysis
+  and `analyze_quality_contents()` outputs. Added read-only replica queries,
+  explicit-key joins, and batched/preloaded wiki reads. Moved reusable date,
+  template, prose, and word-counting mechanics into support, replacing
+  `services.quality_prose` with explicit support APIs. Kept workflows and
+  verified per-wiki profiles in services and injected projects, grade names,
+  contracts, and measurement rules into shared analysis and queries. Used
+  Pywikibot namespace normalization, null unknown dates, and verified Article
+  history semantics, including English GAR listings and Chinese delistings.
+- **Documentation and engineering:** Added English, Traditional Chinese,
+  and Simplified Chinese READMEs covering public APIs, manual analysis,
+  destinations, UTC schedules, catch-up behavior, icon updates, PexBot
+  subscriptions, and output locations. Documented dependencies for date
+  parsing, Chinese conversion, and segmentation. Added runtime requirements
+  for `APScheduler>=3.11,<4` and `ipykernel>=7.4.0`, established purpose-first
+  documentation guidance, and recorded architecture and Polars conventions
+  in `CONTRIBUTING.md` and scoped instructions. Removed the imported
+  `package/` tree and added offline report, storage, publication, logging,
+  and cross-wiki regressions.
+- **Retired character tool:** Removed character-report APIs and tests, the
+  unused Wikidata franchise reader, character-only project-query fields and
+  joins, and multilingual selectors in shared sitelink and label lookups.
 
 ### 0.2.0 (2026-08-23 08:49 UTC)
 

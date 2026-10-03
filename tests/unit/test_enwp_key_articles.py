@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -15,6 +18,10 @@ from wiki_fixtures import OfflineSite
 from aranami.jobs import enwp_key_articles as job
 from aranami.services.zhwiki import enwp_key_articles as reports
 from aranami.sources.quarry import enwp
+from aranami.support.report_membership import load_membership, save_membership
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
 
 
 def _old_text(spec: reports.ReportSpec, body: str = "old body") -> str:
@@ -46,6 +53,7 @@ def _english_rows() -> pl.DataFrame:
         Important-only and quality-only English articles.
     """
     return pl.DataFrame({
+        "page_id": [1001, 1002],
         "en_title": ["Alpha_Game", "Éclair"],
         "qid": ["Q1", "Q2"],
         "en_defaultsort": [None, "Éclair"],
@@ -53,6 +61,92 @@ def _english_rows() -> pl.DataFrame:
         "en_class": ["B", "GA"],
         "en_importance": ["Top", "Low"],
     })
+
+
+def _old_change_reports() -> dict[str, str]:
+    """Provide both report pages before their memberships change.
+
+    Returns:
+        Existing report text without embedded page identities.
+    """
+    body = (
+        "* {{PJ:VG/DBR/EN/item|en=Old title|wd=1}}\n"
+        "* {{PJ:VG/DBR/EN/item|en=Gone|wd=2}}"
+    )
+    return {spec.name: _old_text(spec, body) for spec in job.REPORT_SPECS}
+
+
+@contextmanager
+def _report_change_sources(
+    context: Mock,
+    existing: Mapping[str, str],
+) -> Iterator[Mock]:
+    """Supply offline source data for actual report construction.
+
+    Args:
+        context: Publication context used by the job.
+        existing: Both current target texts.
+
+    Yields:
+        English source mock for verifying the shared query count.
+    """
+    english = pl.DataFrame(
+        {
+            "page_id": [101, 103, 104],
+            "en_title": ["Renamed", "New_important", "New_quality"],
+            "qid": ["Q9", "Q3", "Q4"],
+            "en_defaultsort": [None, None, None],
+            "en_displaytitle": [None, None, None],
+            "en_class": ["GA", "B", "GA"],
+            "en_importance": ["Top", "High", "Low"],
+        },
+        schema_overrides={
+            "en_defaultsort": pl.String,
+            "en_displaytitle": pl.String,
+        },
+    )
+    with (
+        patch.object(job, "job_run", return_value=nullcontext(context)),
+        patch.object(
+            job,
+            "read_pages",
+            return_value=[
+                Mock(text=existing[name]) for name in job.REPORT_TARGETS
+            ],
+        ),
+        patch.object(
+            enwp,
+            "fetch_en_key_pages",
+            return_value=english,
+        ) as source,
+        patch.object(
+            enwp,
+            "fetch_wikidata_sitelinks",
+            return_value=pl.DataFrame(
+                schema={"item_id": pl.Int64, "zh_title": pl.String},
+            ),
+        ),
+        patch.object(
+            enwp,
+            "fetch_wikidata_labels",
+            return_value=pl.DataFrame(
+                schema={"item_id": pl.Int64, "label": pl.String},
+            ),
+        ),
+        patch.object(
+            enwp,
+            "fetch_zh_page_states",
+            return_value=pl.DataFrame(
+                schema={
+                    "zh_title": pl.String,
+                    "zh_is_redirect": pl.Int64,
+                    "zh_class": pl.String,
+                    "zh_importance": pl.String,
+                },
+            ),
+        ),
+    ):
+        yield source
 
 
 class TestEnglishReportService(TestCase):
@@ -84,6 +178,7 @@ class TestEnglishReportService(TestCase):
             "Éclair",
         ]
         assert result.get_column("item_id").to_list() == [1, 2]
+        assert result.get_column("page_id").to_list() == [1001, 1002]
         assert result.get_column("en_display_title").to_list() == [
             "Alpha Game",
             "<i>Éclair</i>",
@@ -112,6 +207,7 @@ class TestEnglishReportService(TestCase):
     def test_templates_escape_delimiters_and_parse_old_items() -> None:
         """Keep literal delimiters inside article parameters."""
         row = {
+            "page_id": 123,
             "display_title": "A|B={C}",
             "final_zh_class": "请求",
             "final_zh_importance": "无",
@@ -133,6 +229,19 @@ class TestEnglishReportService(TestCase):
         ) == {
             "A|B": reports.OldArticle("A|B", 9),
         }
+        item = reports.render_item(row)
+        assert "page-id" not in item
+        assert reports.parse_old_articles(
+            item,
+            OfflineSite("zh", "wikipedia"),
+        ) == {"A|B": reports.OldArticle("A|B", 9)}
+        legacy_item = item + '<!-- aranami-enwp page-id="123" -->'
+        assert reports.parse_old_articles(
+            legacy_item,
+            OfflineSite("zh", "wikipedia"),
+        ) == {"A|B": reports.OldArticle("A|B", 9, 123)}
+        managed = _old_text(job.REPORT_SPECS[0], item)
+        assert item in reports.replace_body(managed, item)
 
     @staticmethod
     def test_summary_reports_removed_sitelinks_and_bounds_utf8() -> None:
@@ -140,8 +249,10 @@ class TestEnglishReportService(TestCase):
         old = {"Old": reports.OldArticle("Old", 8)}
         new = pl.DataFrame({"en_title": ["New"], "item_id": [9]})
         summary = reports.build_edit_summary(old, new, {8: "舊", 9: "新"})
-        assert "add [[:en:New|New]] ([[新|新]])" in summary
-        assert "remove [[:en:Old|Old]] ([[舊|舊]])" in summary
+        assert summary == (
+            "1 item total. Added «[[:en:New]]» («[[新]]»); "
+            "removed «[[:en:Old]]» («[[舊]]»)."
+        )
         long_rows = pl.DataFrame({
             "en_title": ["中文" * 200],
             "item_id": [1],
@@ -149,7 +260,79 @@ class TestEnglishReportService(TestCase):
         short = reports.build_edit_summary({}, long_rows, {}, max_bytes=50)
         summary_budget = 50
         assert len(short.encode()) <= summary_budget
-        assert "1 article changes" in short
+        assert short == "1 item total. Added 1 more."
+
+    @staticmethod
+    def test_summary_ignores_renames_and_assessment_changes() -> None:
+        """Keep only the total for renamed or reassessed pages."""
+        old = {"Old": reports.OldArticle("Old", 8, 123)}
+        new = pl.DataFrame({
+            "page_id": [123],
+            "en_title": ["New"],
+            "item_id": [9],
+            "en_class": ["FA"],
+            "en_importance": ["Top"],
+        })
+        assert reports.build_edit_summary(old, new, {}) == "1 item total."
+
+    @staticmethod
+    def test_summary_reports_recreated_pages_with_the_same_title() -> None:
+        """Treat a different page ID as changed report membership."""
+        old = {"Same": reports.OldArticle("Same", 8, 123)}
+        new = pl.DataFrame({
+            "page_id": [456],
+            "en_title": ["Same"],
+            "item_id": [8],
+        })
+        assert reports.build_edit_summary(old, new, {}) == (
+            "1 item total. Added «[[:en:Same]]»; removed «[[:en:Same]]»."
+        )
+
+    @staticmethod
+    def test_summary_migrates_legacy_identity_and_formats_totals() -> None:
+        """Match legacy IDs and separate thousands in the total."""
+        old = {"Old": reports.OldArticle("Old", 8)}
+        new = pl.DataFrame({
+            "page_id": [123],
+            "en_title": ["New"],
+            "item_id": [8],
+        })
+        assert reports.build_edit_summary(old, new, {}) == "1 item total."
+        count = 1234
+        titles = [f"Article {index}" for index in range(count)]
+        new = pl.DataFrame({
+            "page_id": list(range(1, count + 1)),
+            "en_title": titles,
+            "item_id": list(range(1, count + 1)),
+        })
+        old = {
+            title: reports.OldArticle(title, index, index)
+            for index, title in enumerate(titles, start=1)
+        }
+        assert reports.build_edit_summary(old, new, {}) == "1,234 items total."
+
+    @staticmethod
+    def test_summary_caps_utf8_bytes_and_preserves_complete_links() -> None:
+        """Honor byte budgets while retaining complete article links."""
+        old = {"Old": reports.OldArticle("Old", 8, 100)}
+        new = pl.DataFrame({
+            "page_id": list(range(1, 11)),
+            "en_title": [f"New {index} 中文中文中文" for index in range(10)],
+            "item_id": list(range(1, 11)),
+        })
+        for requested, budget in [(90, 90), (500, 255)]:
+            summary = reports.build_edit_summary(
+                old,
+                new,
+                {},
+                max_bytes=requested,
+            )
+            assert len(summary.encode("utf-8")) <= budget
+            assert summary.startswith("10 items total.")
+            assert summary.count("[[") == summary.count("]]")
+            assert summary.count("«") == summary.count("»")
+            assert "more" in summary
+        assert not reports.build_edit_summary(old, new, {}, max_bytes=0)
 
     @staticmethod
     def test_builds_both_reports_with_shared_reads() -> None:
@@ -212,7 +395,7 @@ class TestEnglishReportService(TestCase):
             for text in texts.values()
         )
         assert all(
-            "remove [[:en:Old|Old]] ([[舊|舊]])" in summary
+            "removed «[[:en:Old]]» («[[舊]]»)" in summary
             for summary in summaries.values()
         )
         custom = reports.ReportSpec(
@@ -245,21 +428,29 @@ class TestEnglishReplicaSource(TestCase):
         replica.query.return_value.collect.side_effect = [
             pl.DataFrame({"project_title": ["Video games"]}),
             pl.DataFrame(
-                schema=dict.fromkeys(_english_rows().columns, pl.String),
+                schema={
+                    **dict.fromkeys(_english_rows().columns, pl.String),
+                    "page_id": pl.Int64,
+                },
             ),
         ]
         with patch.object(enwp, "Replica", return_value=replica):
             result = enwp.fetch_en_key_pages()
         statement = replica.query.call_args.args[0]
         assert isinstance(statement, Select)
+        assert "page_id" in statement.selected_columns
         compiled = statement.compile(dialect=mysql.dialect())
         sql = str(compiled)
         assert "LEFT OUTER JOIN page_props" in sql
         assert "page_namespace" in sql
+        assert "page.page_id" in sql
         assert "Video games" in compiled.params.values()
         assert "Video games" not in sql
         expected_schema = pl.Schema(
-            dict.fromkeys(_english_rows().columns, pl.String),
+            {
+                **dict.fromkeys(_english_rows().columns, pl.String),
+                "page_id": pl.Int64,
+            },
         )
         assert result.schema == expected_schema
 
@@ -287,23 +478,6 @@ class TestEnglishReplicaSource(TestCase):
         compiled = statement.compile(dialect=mysql.dialect())
         assert "JOIN wbt_type" in str(compiled)
         assert "label" in compiled.params.values()
-
-    @staticmethod
-    def test_label_languages_can_be_prioritized_by_another_report() -> None:
-        """Honor language priority for shared character reports."""
-        replica = Mock()
-        replica.query.return_value.collect.return_value = pl.DataFrame({
-            "item_id": [1, 1],
-            "lang": ["zh", "en"],
-            "label": ["中文", "English"],
-        })
-        with patch.object(
-            enwp.Replica,
-            "wikidata_terms",
-            return_value=replica,
-        ):
-            labels = enwp.fetch_wikidata_labels([1], languages=("en", "zh"))
-        assert labels.get_column("label").to_list() == ["English"]
 
     @staticmethod
     def test_sitelinks_batch_deduplicated_ids() -> None:
@@ -342,6 +516,7 @@ class TestEnglishReportJob(TestCase):
         """Read targets and wrap processed text for publication."""
         context = Mock()
         context.site = OfflineSite("zh", "wikipedia")
+        context.dry = True
         existing = {spec.name: _old_text(spec) for spec in job.REPORT_SPECS}
         pages = [Mock(text=existing[name]) for name in job.REPORT_TARGETS]
         data = reports.ReportData(
@@ -367,11 +542,13 @@ class TestEnglishReportJob(TestCase):
                 "build_reports",
                 return_value=texts,
             ) as build,
+            patch.object(job, "load_membership", return_value={}) as load,
+            patch.object(job, "save_membership") as save,
         ):
-            job.run(dry_run=True, context=context)
+            job.run(dry=True, context=context)
         run.assert_called_once_with(
             "enwp_key_articles",
-            dry_run=True,
+            dry=True,
             context=context,
         )
         read.assert_called_once_with(
@@ -384,6 +561,11 @@ class TestEnglishReportJob(TestCase):
             context.site,
         )
         build.assert_called_once_with(existing, data, job.REPORT_SPECS)
+        assert load.call_count == len(job.REPORT_SPECS)
+        assert save.call_args_list == [
+            ((context.site, title, existing[name], {}), {})
+            for name, title in job.REPORT_TARGETS.items()
+        ]
         edits = [call.args[0] for call in context.publish.call_args_list]
         assert [edit.title for edit in edits] == list(
             job.REPORT_TARGETS.values(),
@@ -393,4 +575,156 @@ class TestEnglishReportJob(TestCase):
             assert edit.text == texts[name]
             assert edit.original_text == existing[name]
             assert edit.tags == ("enwp-key-articles", name)
-            assert "add [[:en:" in edit.summary
+            assert edit.summary.startswith("1 item total. Added «[[:en:")
+
+    @staticmethod
+    def test_both_reports_cache_ids_and_summarize_english_membership() -> None:
+        """List English changes and suppress same-ID renames."""
+        context = Mock(site=OfflineSite("zh", "wikipedia"), dry=False)
+        existing = _old_change_reports()
+        old_members = {"Old title": 101, "Gone": 102}
+        with (
+            TemporaryDirectory() as directory,
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+            _report_change_sources(context, existing) as source,
+        ):
+            for name, title in job.REPORT_TARGETS.items():
+                save_membership(
+                    context.site,
+                    title,
+                    existing[name],
+                    old_members,
+                )
+            job.run(context=context)
+            source.assert_called_once_with()
+            edits = [call.args[0] for call in context.publish.call_args_list]
+            assert [edit.title for edit in edits] == list(
+                job.REPORT_TARGETS.values(),
+            )
+            for spec, edit in zip(job.REPORT_SPECS, edits, strict=True):
+                added_title = f"New {spec.name}"
+                assert edit.summary == (
+                    f"2 items total. Added «[[:en:{added_title}]]»; "
+                    "removed «[[:en:Gone]]»."
+                )
+                assert "page-id" not in edit.text
+                assert "en=Renamed" in edit.text
+                assert "wd=9" in edit.text
+                assert "en=Old title" not in edit.text
+                added_id = 103 if spec.name == "important" else 104
+                assert load_membership(
+                    context.site,
+                    edit.title,
+                    edit.text,
+                ) == {
+                    "Renamed": 101,
+                    added_title: added_id,
+                }
+                assert (
+                    load_membership(
+                        context.site,
+                        edit.title,
+                        existing[spec.name],
+                    )
+                    == {}
+                )
+
+    @staticmethod
+    def test_dry_run_keeps_original_cached_report_membership() -> None:
+        """Preserve live membership and text hashes during previews."""
+        context = Mock(site=OfflineSite("zh", "wikipedia"), dry=True)
+        existing = _old_change_reports()
+        old_members = {"Old title": 101, "Gone": 102}
+        with (
+            TemporaryDirectory() as directory,
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+            _report_change_sources(context, existing),
+        ):
+            for name, title in job.REPORT_TARGETS.items():
+                save_membership(
+                    context.site,
+                    title,
+                    existing[name],
+                    old_members,
+                )
+            job.run(dry=True, context=context)
+            for spec, call in zip(
+                job.REPORT_SPECS,
+                context.publish.call_args_list,
+                strict=True,
+            ):
+                edit = call.args[0]
+                assert (
+                    load_membership(
+                        context.site,
+                        edit.title,
+                        existing[spec.name],
+                    )
+                    == old_members
+                )
+                assert (
+                    load_membership(context.site, edit.title, edit.text) == {}
+                )
+                assert "Old title" not in edit.summary
+                assert "Renamed" not in edit.summary
+
+    @staticmethod
+    def test_dry_run_seeds_only_exact_original_titles() -> None:
+        """Seed IDs for exact original titles during previews."""
+        context = Mock(site=OfflineSite("zh", "wikipedia"), dry=True)
+        existing = _old_change_reports()
+        existing = {
+            name: text.replace("en=Old title|wd=1", "en=Renamed|wd=9")
+            for name, text in existing.items()
+        }
+        with (
+            TemporaryDirectory() as directory,
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+            _report_change_sources(context, existing),
+        ):
+            job.run(dry=True, context=context)
+            for name, title in job.REPORT_TARGETS.items():
+                assert load_membership(
+                    context.site,
+                    title,
+                    existing[name],
+                ) == {
+                    "Renamed": 101,
+                    "Gone": None,
+                }
+
+    @staticmethod
+    def test_failed_publication_preserves_cached_report_membership() -> None:
+        """Keep the live snapshot after publication fails."""
+        context = Mock(site=OfflineSite("zh", "wikipedia"), dry=False)
+        context.publish.side_effect = RuntimeError("Publication failed.")
+        existing = _old_change_reports()
+        old_members = {"Old title": 101, "Gone": 102}
+        with (
+            TemporaryDirectory() as directory,
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+            _report_change_sources(context, existing),
+        ):
+            for name, title in job.REPORT_TARGETS.items():
+                save_membership(
+                    context.site,
+                    title,
+                    existing[name],
+                    old_members,
+                )
+            failure = None
+            try:
+                job.run(context=context)
+            except RuntimeError as error:
+                failure = error
+            assert failure is not None
+            assert str(failure) == "Publication failed."
+            for name, title in job.REPORT_TARGETS.items():
+                assert load_membership(
+                    context.site,
+                    title,
+                    existing[name],
+                ) == (old_members)
+            context.publish.assert_called_once()
+            edit = context.publish.call_args.args[0]
+            assert load_membership(context.site, edit.title, edit.text) == {}

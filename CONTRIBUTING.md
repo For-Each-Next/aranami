@@ -5,18 +5,41 @@ pure-Python wheel is installed on Wikimedia PAWS. PAWS supplies the existing
 Wikipedia OAuth session and Wiki Replica credentials; do not add credential
 prompts, a user/password interface, or secrets to the wheel.
 
+## Documentation
+
+Describe what each component does and the results it produces before
+discussing technology. Keep the README focused on capabilities and usage,
+and keep docstrings focused on behavior, inputs, outputs, and relevant side
+effects. Include implementation details only when they explain a requirement
+the reader needs to use or maintain the component correctly.
+
 ## Runtime and architecture
 
-`aranami.run()` executes the routine once and returns. The caller may invoke
-it hourly; the package must not run a scheduler, background daemon, sleep
-loop, or notebook callback. Dependency installation belongs in the wheel's
-metadata, not in runtime code or a setup notebook.
+`aranami.run(dry=False)` starts a background monitor and returns its
+scheduler. Define default target pages, per-routine UTC cron triggers, and
+PexBot subscription roots together in
+`src/aranami/monitor.py` through `TASK_DEFINITIONS`. Jobs read their defaults
+from those definitions. The monitor uses independent
+job contexts. Repeated starts reuse the active monitor; stop it with
+`scheduler.shutdown(wait=True)` before changing its
+output mode or clearing caches. `aranami.run(dry=True)` also monitors
+continuously, writing previews at each scheduled time. The caller keeps
+its process alive. Keep notebook detection, sleep loops, and dependency
+installation out of runtime code. Dependencies belong in wheel metadata.
+
+`aranami.run_once(date=None, dry=False, tasks=None)` executes immediately
+without starting or changing schedules. The optional date is a UTC report
+anchor; task names select independently runnable reports. Both entry points
+default to live publication. Job-level APIs use the same `dry` keyword and
+accept an optional `context`.
 
 Keep dependencies flowing from the public API and runner through jobs,
 services, sources, and support:
 
-- The public API exposes the single-run entry point; the runner coordinates
-  independently runnable jobs and reports failures after remaining jobs run.
+- The public API starts monitoring or requests an immediate pass. The
+  monitor dispatches independently runnable jobs on their schedules; the
+  runner coordinates selected jobs in a single pass and reports failures
+  after the remaining selected jobs run.
 - Jobs select destination pages, read their current text, choose report
   settings, and construct publication proposals. Shared execution
   infrastructure
@@ -54,12 +77,12 @@ counts text by language. Support must not import services or choose quality
 classes. Complete promotion dates use `parse_complete_date`; DYK's historical
 partial-date handling uses `parse_date`. Preserve that distinction.
 
-The former temporary quality-analysis and character workflows remain
-explicitly callable; they are not part of the routine runner.
+Quality analysis remains explicitly callable outside the routine runner.
 
 PexBot refreshes are restricted to Chinese Wikipedia. Configure their
-allowed page roots in `src/aranami/config.py` through `PEXBOT_PREFIXES`
-before building a replacement wheel. The subscription service receives
+allowed page roots in `src/aranami/monitor.py` through
+`TASK_DEFINITIONS["pexbot"].prefixes` before building a replacement wheel.
+The job's `PEXBOT_PREFIXES` alias uses that definition. The service receives
 these prefixes explicitly and contains no project-specific scope. A root
 matches its exact page and slash-delimited subpages; a trailing slash
 matches only descendants. Titles and namespace aliases are normalized by
@@ -69,7 +92,7 @@ subscription category. A manual invocation may override the wheel defaults:
 ```python
 from aranami.jobs import pexbot
 
-pexbot.run(prefixes=["WikiProject:电子游戏/数据库报告"], dry_run=True)
+pexbot.run(prefixes=["WikiProject:电子游戏/数据库报告"], dry=True)
 ```
 
 Other sites are rejected before category queries or refresh requests.
@@ -125,10 +148,33 @@ installed package or `site-packages`:
 
 The new-page routine retains the latest 100 complete UTC dates by default,
 through yesterday. It fills absent dates, prunes older records, and reuses
-existing daily records without duplication on hourly calls.
+existing daily records without duplication on hourly calls. Each missing
+date combines page creations with revisions tagged `mw-removed-redirect`
+in the same half-open UTC interval. Use replica revision tags for historical
+dates; recent changes do not cover the full retained window. Deduplicate
+the combined candidates by page ID before preloading their current text.
+Keep the same namespace, non-redirect, and keyword filters for both sources,
+and append ` — 自重定向页改写` to matching conversion entries.
+End each resolved list item with
+`<!-- 页面ID 12345 · 创建时间 2026-08-05 11:22:33 -->`, using the page's
+earliest revision timestamp in UTC. Append it after the conversion note
+when present. Enrich retained rows with missing metadata comments without
+rerunning daily discovery, and preserve saved comments during icon refreshes
+and later runs. Missing creation timestamps are `未知`; unresolved page
+identities leave the row unchanged with a diagnostic.
 
-Pageviews processes at most one missing report date per call. The default
-publication lag is two days. If at least 95% of queried articles have no
+Pageviews processes at most one missing report date per call.
+Keep `DATA_READY_HOUR=18` in
+`src/aranami/jobs/pageviews.py` as the routine's data-readiness rule.
+Yesterday becomes eligible
+when the actual invocation starts at or after 18:00 UTC; the hourly `HH:59`
+schedule first attempts it at 18:59 UTC. Before 18:00, older missing dates
+remain eligible. Apply the same cutoff to live, dry, and manual job
+invocations, using `JobContext.started_at` rather than the chosen report
+anchor for readiness. Report dates must also be before the requested anchor;
+a supplied anchor cannot bypass the actual cutoff. Existing `lag-days`
+attributes no longer affect the selected report date. If at least 95% of
+queried articles have no
 observation for that date, skip the edit and leave both the wiki date marker
 and healthy cache unchanged so the next call retries. Explicit zeroes remain valid.
 Its Parquet cache keeps an 800-day history by default, reuses sufficient
@@ -158,14 +204,14 @@ Use HTML comments to mark generated ranges. The canonical form is:
 Settings belong on the opening comment where practical. For example:
 
 ```wikitext
-<!-- aranami begin="page_views" history-days="800" lag-days="2" missing-percent="95" -->
+<!-- aranami begin="page_views" history-days="800" missing-percent="95" -->
 ...generated popularity report...
 <!-- aranami end="page_views" -->
 ```
 
 Preserve the attributes when replacing content and validate values before
 requests or publication. Code supplies documented defaults. Current settings
-include new-page retention, Pageviews history/lag/availability threshold,
+include new-page retention, Pageviews history and availability threshold,
 and assessment-list source categories.
 
 Migrate legacy update comments during a successful rewrite. Keep functional
@@ -209,6 +255,43 @@ data or transformed text; jobs create structured edit proposals and save
 pages with informative summaries and check that source text has not changed
 during report construction.
 
+Compose English edit summaries through `support.edit_summary.EditSummary`
+with a maximum of 255 UTF-8 bytes. Chinese characters typically use three
+bytes; shorten complete mentions or clauses without splitting wiki links.
+Mark every article-title link with `«...»`, including optional Chinese
+sitelinks in English-report summaries and Pageviews leaders. Preserve
+complete delimiter pairs when shortening a summary.
+At publication, end every live edit and dry-run proposal summary with
+`Executed in 21′53.95″.` using the measured minutes, seconds, and hundredths.
+For durations below one minute, omit zero minutes and the leading seconds
+zero, for example `Executed in 7.12″.`.
+Measure from the current routine's start until each proposal is ready,
+before checking or saving its target. Direct publications use context
+creation time. Reserve space for the complete suffix within the same
+255-byte limit and replace an earlier suffix if the proposal is reused.
+Dated summaries name the report date. Pageviews adds daily, weekly, and
+monthly leaders with places gained, omitting movement when the leader
+remains first or has no previous rank. New-page summaries count matched
+article and non-article pages for the latest daily list and mention older
+daily records filled during the run.
+
+Real-time summaries state the current item total, grouped additions and
+removals, and elapsed time. Keep summaries factual, without instructions
+or suggested actions. Store stable article page IDs in local Parquet
+membership snapshots under `cache/`, never in generated report wikitext.
+Use IDs to recognize renames, grade changes, and movement between DYK
+candidate and completed lists. Validate each snapshot against the exact
+destination text and advance it only after successful live publication.
+Dry runs may seed the original membership but must not advance it to the
+proposed report. Missing or stale snapshots fall back to title matching,
+or existing Wikidata IDs for English reports, without changing the report
+body. In real-time membership reports, read old ID comments only for
+migration and remove them when rewriting generated rows. The dated
+new-page list retains its requested ID and creation-time comments.
+Both English key-article reports list English
+additions and removals as `[[:en:Title]]` links and match English page IDs
+across title changes.
+
 ## Verification and releases
 
 Follow [AGENTS.md](AGENTS.md) and the scoped package instructions for complete
@@ -225,6 +308,18 @@ uv run ruff check .
 uv run ruff format --check .
 uv build --wheel --clear
 ```
+
+The standalone `scripts/run_aranami.py` launcher installs the newest local
+Aranami wheel by modification time from the current directory and `dist/`,
+then runs the routine once in dry-run mode. Keep its main block to the two
+calls `install_wheel()` and `run()`, with wheel discovery and cleanup in
+private helpers. Match `aranami-*.whl` without
+parsing or comparing filename versions. After successful installation,
+keep the selected wheel and remove other local wheels with equal or earlier
+modification times. Explicit selections preserve more recent uploads.
+Use the active interpreter for both pip and a fresh routine process so
+notebook imports cannot keep an older package loaded. Anchor runtime output beside
+the script, or in the notebook's current directory for pasted cells.
 
 Before every explicit wheel build, advance to an unused `.devN` or `.postN`
 version and regenerate `uv.lock`. Only the user chooses major/minor versions.

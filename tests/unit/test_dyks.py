@@ -1,5 +1,8 @@
 """Verify DYK parsing, counts, cache reuse, and proposed edits."""
 
+# Keep calls to internal routines available to focused offline tests.
+# ruff: file-ignore[private-member-access]
+
 from contextlib import nullcontext
 from datetime import date
 from pathlib import Path
@@ -15,9 +18,10 @@ from aranami.jobs import JobContext, dyks as dyk_job
 from aranami.services.zhwiki import dyks
 from aranami.services.zhwiki.dyk_dates import extract_dates
 from aranami.sources.dyk import TalkPage
-from aranami.support import dyk_cache
+from aranami.support import dyk_cache, report_membership
 from aranami.support.dates import parse_date
 from aranami.support.regions import region_content
+from aranami.support.report_membership import MembershipReport
 
 
 class _OfflineSite(BaseSite):
@@ -166,6 +170,7 @@ class TestDykReports(TestCase):
                 "title": ["游戏甲", "游戏乙", "游戏丙"],
                 "class": ["优良", "初级", "初级"],
                 "importance": ["高", "低", "低"],
+                "page_id": [1, 2, 3],
                 "dyk_dates": [
                     [date(2022, 1, 2), date(2024, 4, 3)],
                     [None, date(2023, 1, 1)],
@@ -192,6 +197,8 @@ class TestDykReports(TestCase):
         )
         assert "8888" not in completed_text
         assert len(parsed.filter_comments()) == 1
+        assert "aranami-member" not in completed_text
+        assert "aranami-member" not in nomination_text
         assert "for [[:c:Data:Example statistics.tab]]" in completed_text
         assert (
             '"sources": "See [[:w:zh:Project:Example DYK report]]"'
@@ -231,10 +238,10 @@ class TestDykCache(TestCase):
                 ],
             ) as read,
         ):
-            first = dyks._dated_pages(site, members)  # ruff: ignore[private-member-access]
+            first = dyks._dated_pages(site, members)
             read.reset_mock()
             read.return_value = []
-            second = dyks._dated_pages(site, members)  # ruff: ignore[private-member-access]
+            second = dyks._dated_pages(site, members)
             assert first.equals(second)
             assert read.call_args.args[1] == []
             latest.return_value = pl.DataFrame(
@@ -243,7 +250,7 @@ class TestDykCache(TestCase):
             read.return_value = [
                 TalkPage(11, 102, "{{DYKtalk|date=2025-01-01}}"),
             ]
-            changed = dyks._dated_pages(site, members)  # ruff: ignore[private-member-access]
+            changed = dyks._dated_pages(site, members)
             assert read.call_args.args[1] == [11]
             assert changed["dyk_dates"].to_list() == [[date(2025, 1, 1)]]
             assert dyk_cache.load()["oldid"].to_list() == [102]
@@ -311,7 +318,7 @@ class TestDykEdit(TestCase):
             ),
             patch("aranami.sources.wiki.read_pages") as read_pages,
         ):
-            updated = dyks.update_text(
+            report = dyks.prepare_report(
                 original_text,
                 site,
                 date(2024, 5, 1),
@@ -320,7 +327,7 @@ class TestDykEdit(TestCase):
                 statistics_title="c:Data:Example statistics.tab",
             )
             repeated = dyks.update_text(
-                updated,
+                report.text,
                 site,
                 date(2024, 5, 1),
                 project="Example project",
@@ -329,6 +336,7 @@ class TestDykEdit(TestCase):
             )
         read_pages.assert_not_called()
         query_members.assert_called_with(site, "Example project")
+        updated = report.text
         assert isinstance(updated, str)
         assert repeated == updated
         assert "游戏甲" in updated
@@ -339,13 +347,32 @@ class TestDykEdit(TestCase):
         assert updated.startswith("Introduction\n")
         assert "\nMiddle\n" in updated
         assert updated.endswith("\nFooter")
+        assert report.members == {"游戏甲": 1, "游戏乙": 2}
+        assert dyks.article_members(updated) == {
+            "游戏甲": None,
+            "游戏乙": None,
+        }
+        assert "aranami-member" not in updated
 
     @staticmethod
+    @patch("aranami.jobs._execution.perf_counter", new=lambda: 0.0)
     def test_job_reads_target_and_owns_proposal_metadata() -> None:
         """Pass target text to the service and retain the source."""
         site = Mock()
-        context = JobContext(site, date(2024, 5, 1), dry_run=True)
-        page = Mock(text="original page text")
+        context = JobContext(site, date(2024, 5, 1), dry=True)
+        original = (
+            '<!-- aranami begin="dyk" -->\n'
+            '# {{PJ:VG/DYK/item|Old|初级}}<!-- aranami-member id="1" -->\n'
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n<!-- aranami end="dykn" -->'
+        )
+        updated = (
+            original
+            .replace("Old", "Renamed")
+            .replace("初级", "优良")
+            .replace('<!-- aranami-member id="1" -->', "")
+        )
+        page = Mock(text=original)
         title = "WikiProject:电子游戏/新条目推荐"
         with (
             patch.object(
@@ -360,14 +387,16 @@ class TestDykEdit(TestCase):
             ) as read_pages,
             patch.object(
                 dyk_job,
-                "update_text",
-                return_value="updated page text",
-            ) as update_text,
+                "prepare_report",
+                return_value=MembershipReport(updated, {"Renamed": 1}),
+            ) as prepare_report,
+            patch.object(dyk_job, "load_membership", return_value={}),
+            patch.object(dyk_job, "save_membership") as save,
         ):
             dyk_job.run(context=context)
         read_pages.assert_called_once_with(site, [title])
-        update_text.assert_called_once_with(
-            "original page text",
+        prepare_report.assert_called_once_with(
+            original,
             site,
             context.today,
             project="电子游戏",
@@ -379,7 +408,214 @@ class TestDykEdit(TestCase):
         [edit] = context.edits
         assert edit.site is site
         assert edit.title == title
-        assert edit.original_text == "original page text"
-        assert edit.text == "updated page text"
-        assert edit.summary == "更新电子游戏专题新条目推荐及候选列表"
+        assert edit.original_text == original
+        assert edit.text == updated
+        assert edit.summary == "1 item total. Executed in 0.00\u2033."
+        assert "aranami-member" not in edit.text
+        save.assert_called_once_with(site, title, original, {"Old": 1})
         page.save.assert_not_called()
+
+    @staticmethod
+    def test_membership_changes_cover_completed_and_nominated_items() -> None:
+        """Describe additions and removals while recognizing renames."""
+        original = (
+            '<!-- update start="dyk" -->\n'
+            '# {{PJ:VG/DYK/item|Old|初级}}<!-- aranami-member id="1" -->\n'
+            '# {{PJ:VG/DYK/item|Removed|初级}}<!-- aranami-member id="2" -->\n'
+            '<!-- update end="dyk" -->\n'
+            '<!-- update start="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Candidate|初级}}"
+            '<!-- aranami-member id="3" -->\n'
+            '<!-- update end="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Unmanaged|初级}}"
+        )
+        updated = original.replace("Old", "Renamed").replace("初级", "优良")
+        updated = updated.replace(
+            '# {{PJ:VG/DYK/item|Removed|优良}}<!-- aranami-member id="2" -->',
+            '# {{PJ:VG/DYK/item|Added|优良}}<!-- aranami-member id="4" -->',
+        )
+        assert dyk_job._content_summary(original, updated) == (
+            "3 items total. Added «[[Added]]»; removed «[[Removed]]»."
+        )
+        assert "Unmanaged" not in dyks.article_members(updated)
+
+    @staticmethod
+    def test_candidate_promotion_only_reports_total() -> None:
+        """Count an article once when it moves between report ranges."""
+        ranges = (
+            '<!-- aranami begin="dyk" -->{completed}'
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->{nominated}'
+            '<!-- aranami end="dykn" -->'
+        )
+        item = (
+            '\n# {{PJ:VG/DYK/item|Game|初级}}<!-- aranami-member id="1" -->\n'
+        )
+        original = ranges.format(completed="\n", nominated=item)
+        updated = ranges.format(completed=item, nominated="\n")
+        assert dyk_job._content_summary(original, updated) == "1 item total."
+
+    @staticmethod
+    def test_legacy_title_membership_and_grade_only_changes() -> None:
+        """Ignore class changes in unmarked template items."""
+        original = (
+            '<!-- update start="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Video_Game|初级}}\n"
+            '<!-- update end="dyk" -->'
+        )
+        updated = original.replace("Video_Game", "Video Game").replace(
+            "初级",
+            "优良",
+        )
+        assert dyk_job._content_summary(original, updated) == "1 item total."
+
+    @staticmethod
+    def test_clean_candidate_promotion_and_rename_use_cached_ids() -> None:
+        """Recognize promotions and renames from cached identities."""
+        original = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Removed|初级}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Candidate|初级}}\n"
+            '<!-- aranami end="dykn" -->'
+        )
+        updated = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Renamed|优良|date=2024-01-01}}\n"
+            "# {{PJ:VG/DYK/item|Added|初级|date=2024-01-02}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            '<!-- aranami end="dykn" -->'
+        )
+        site = _OfflineSite("zh", "wikipedia")
+        context = Mock(site=site, today=date(2024, 5, 1), dry=False)
+        with (
+            patch.object(
+                dyk_job,
+                "job_run",
+                return_value=nullcontext(context),
+            ),
+            patch.object(
+                dyk_job,
+                "read_pages",
+                return_value=[Mock(text=original)],
+            ),
+            patch.object(
+                dyk_job,
+                "prepare_report",
+                return_value=MembershipReport(
+                    updated,
+                    {"Renamed": 1, "Added": 3},
+                ),
+            ) as prepare,
+            patch.object(
+                dyk_job,
+                "load_membership",
+                return_value={"Candidate": 1, "Removed": 2},
+            ),
+            patch.object(dyk_job, "save_membership") as save,
+        ):
+            dyk_job.run(title="Report", context=context)
+        prepare.assert_called_once()
+        [call] = context.publish.call_args_list
+        edit = call.args[0]
+        assert edit.summary == (
+            "2 items total. Added «[[Added]]»; removed «[[Removed]]»."
+        )
+        assert "aranami-member" not in edit.text
+        save.assert_called_once_with(
+            site,
+            "Report",
+            updated,
+            {"Renamed": 1, "Added": 3},
+        )
+
+    @staticmethod
+    def test_repeated_dry_runs_save_only_original_membership() -> None:
+        """Keep original identities through repeated previews."""
+        site = _OfflineSite("zh", "wikipedia")
+        context = Mock(site=site, today=date(2024, 5, 1), dry=True)
+        original = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            '<!-- aranami end="dykn" -->'
+        )
+        updated = original.replace(
+            '<!-- aranami end="dyk" -->',
+            '# {{PJ:VG/DYK/item|Added|初级}}\n<!-- aranami end="dyk" -->',
+        )
+        with (
+            TemporaryDirectory() as directory,
+            patch.object(
+                report_membership.Path,
+                "cwd",
+                return_value=Path(directory),
+            ),
+            patch.object(
+                dyk_job,
+                "job_run",
+                return_value=nullcontext(context),
+            ),
+            patch.object(
+                dyk_job,
+                "read_pages",
+                return_value=[Mock(text=original)],
+            ),
+            patch.object(
+                dyk_job,
+                "prepare_report",
+                return_value=MembershipReport(
+                    updated,
+                    {"Game": 1, "Added": 2},
+                ),
+            ) as prepare,
+        ):
+            dyk_job.run(title="Report", context=context)
+            dyk_job.run(title="Report", context=context)
+            assert dyk_job.load_membership(site, "Report", original) == {
+                "Game": 1,
+            }
+            assert dyk_job.load_membership(site, "Report", updated) == {}
+        assert prepare.call_count == 2  # ruff: ignore[magic-value-comparison]
+        summaries = [
+            call.args[0].summary for call in context.publish.call_args_list
+        ]
+        assert summaries == ["2 items total. Added «[[Added]]»."] * 2
+
+    def test_failed_publication_does_not_save_membership(self) -> None:
+        """Preserve cached identities when publication fails."""
+        site = _OfflineSite("zh", "wikipedia")
+        context = Mock(site=site, today=date(2024, 5, 1), dry=False)
+        context.publish.side_effect = RuntimeError("publication failed")
+        original = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            '<!-- aranami end="dykn" -->'
+        )
+        with (
+            patch.object(
+                dyk_job,
+                "job_run",
+                return_value=nullcontext(context),
+            ),
+            patch.object(
+                dyk_job,
+                "read_pages",
+                return_value=[Mock(text=original)],
+            ),
+            patch.object(
+                dyk_job,
+                "prepare_report",
+                return_value=MembershipReport(original, {"Game": 1}),
+            ),
+            patch.object(dyk_job, "load_membership", return_value={"Game": 1}),
+            patch.object(dyk_job, "save_membership") as save,
+            self.assertRaises(RuntimeError),  # ruff: ignore[pytest-unittest-raises-assertion]
+        ):
+            dyk_job.run(title="Report", context=context)
+        save.assert_not_called()

@@ -5,6 +5,7 @@
 
 import datetime as dt
 from contextlib import chdir, nullcontext
+from dataclasses import replace
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
@@ -15,6 +16,7 @@ from dateutil.relativedelta import relativedelta
 
 from aranami.jobs import JobContext, pageviews as job
 from aranami.services.zhwiki import pageviews
+from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
 
 _DAY = dt.date(2026, 1, 10)
 _STOP = dt.date(2026, 1, 11)
@@ -118,11 +120,18 @@ class TestPeriodAggregation(TestCase):
             relativedelta(days=1),
             50,
         )
-        text, top = pageviews._section(articles, views, _STOP, config, "vg")
+        text, top, gain = pageviews._section(
+            articles,
+            views,
+            _STOP,
+            config,
+            "vg",
+        )
         templates = mwparserfromhell.parse(text).filter_templates()
         header = templates[0]
         items = templates[1:-1]
         assert top == "A"
+        assert gain == 1
         assert str(header.get("total_views").value) == "16"
         assert str(header.get("page_count").value) == "3"
         assert [str(item.get("rank").value) for item in items] == [
@@ -198,6 +207,12 @@ class TestReportState(TestCase):
         assert (
             report.daily_top == report.weekly_top == report.monthly_top == "A"
         )
+        assert (
+            report.daily_top_gain
+            == report.weekly_top_gain
+            == report.monthly_top_gain
+            == 0
+        )
         assert report.data_date == _DAY
         assert query.call_count == len(responses)
         assert [call.args[1] for call in query.call_args_list] == [
@@ -206,6 +221,84 @@ class TestReportState(TestCase):
         ]
         assert set(fetch.call_args.args[1]) == {"A", "B"}
         load_cache.return_value.save.assert_called_once()
+
+    @staticmethod
+    def test_leader_gains_reuse_previous_period_ranks() -> None:
+        """Report gains while preserving unchanged and unknown ranks."""
+        periods = job.PROJECT_PERIODS[:3]
+        articles = pl.DataFrame({
+            "title": ["A", "B", "C", "D"],
+            "class": ["B"] * 4,
+            "importance": ["低"] * 4,
+        })
+        values = (
+            ((40, 30, 20, 10), (10, 40, 30, 20)),
+            ((30, 40, 20, 10), (30, 40, 20, 10)),
+            ((20, 30, 40, 10), (30, 20, None, 10)),
+        )
+        views = pl.DataFrame(
+            [
+                (title, start, stop, value)
+                for config, (current, previous) in zip(
+                    periods,
+                    values,
+                    strict=True,
+                )
+                for title, count, old_count in zip(
+                    articles.get_column("title"),
+                    current,
+                    previous,
+                    strict=True,
+                )
+                for start, stop, value in (
+                    (_STOP - config.delta, _STOP, count),
+                    (
+                        _STOP - config.delta - config.delta,
+                        _STOP - config.delta,
+                        old_count,
+                    ),
+                )
+            ],
+            schema=pageviews._VIEWS_SCHEMA,
+            orient="row",
+        )
+        settings = pageviews.ReportSettings(
+            project="Fixture",
+            periods=periods,
+            task_forces=(),
+            task_force_period=periods[2],
+            project_heading="Fixture rankings",
+            task_force_heading="Unused",
+            project_tag="fixture",
+        )
+        with (
+            patch.object(
+                pageviews,
+                "_project_articles",
+                return_value=articles,
+            ),
+            patch.object(pageviews, "aggregate_views", return_value=views),
+            patch.object(pageviews.PageviewsCache, "load"),
+        ):
+            report = pageviews.build_report(
+                MagicMock(),
+                _STOP,
+                settings=settings,
+            )
+        assert (report.daily_top, report.weekly_top, report.monthly_top) == (
+            "A",
+            "B",
+            "C",
+        )
+        assert (
+            report.daily_top_gain,
+            report.weekly_top_gain,
+            report.monthly_top_gain,
+        ) == (3, 0, None)
+        assert job._edit_summary(report) == (
+            "Updated records for 10 January 2026. Daily leader «[[A]]» (▲3). "
+            "Weekly leader «[[B]]». Monthly leader «[[C]]»."
+        )
 
     @staticmethod
     def test_marker_and_legacy_header_dates() -> None:
@@ -411,9 +504,10 @@ class TestPageviewJob(TestCase):
     """Verify one-day catch-up, dry runs, and failed checkpoints."""
 
     @staticmethod
+    @patch("aranami.jobs._execution.perf_counter", new=lambda: 0.0)
     def test_dry_run_builds_only_one_missing_day() -> None:
         """Build one missing day without publishing or looping."""
-        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry_run=True)
+        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry=True)
         page = MagicMock(text=_TEXT)
         with (
             TemporaryDirectory() as directory,
@@ -437,13 +531,20 @@ class TestPageviewJob(TestCase):
         assert len(context.edits) == 1
         assert context.edits[0].original_text == _TEXT
         assert context.edits[0].title == job.REPORT_TITLE
-        assert "prima diurna [[A]]" in context.edits[0].summary
+        assert context.edits[0].summary == (
+            "Updated records for 10 January 2026. Daily leader «[[A]]». "
+            "Weekly leader «[[B]]». Monthly leader «[[C]]». "
+            "Executed in 0.00\u2033."
+        )
         assert "2026-01-10" in context.edits[0].text
         page.save.assert_not_called()
 
     def test_failed_save_stops_before_later_days(self) -> None:
         """Leave later days unbuilt after a failed publication."""
-        context = MagicMock(today=dt.date(2026, 1, 14))
+        context = MagicMock(
+            today=dt.date(2026, 1, 14),
+            started_at=dt.datetime(2026, 1, 14, 18, tzinfo=dt.UTC),
+        )
         context.publish.side_effect = RuntimeError("save failed")
         page = MagicMock(text=_TEXT)
         with (
@@ -470,13 +571,17 @@ class TestPageviewJob(TestCase):
     @staticmethod
     def test_current_report_requires_no_api_fetch() -> None:
         """Skip work when the page is at the latest complete date."""
-        context = MagicMock(today=dt.date(2026, 1, 11))
+        context = MagicMock(
+            today=dt.date(2026, 1, 11),
+            started_at=dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC),
+        )
+        text = _TEXT.replace("2026-01-09", "2026-01-10")
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(
                 job,
                 "read_pages",
-                return_value=[MagicMock(text=_TEXT)],
+                return_value=[MagicMock(text=text)],
             ),
             patch.object(pageviews, "build_report") as build,
         ):
@@ -485,14 +590,14 @@ class TestPageviewJob(TestCase):
         context.publish.assert_not_called()
 
     @staticmethod
-    def test_page_marker_configures_lag_history_and_missing_limit() -> None:
+    def test_page_marker_configures_history_and_missing_limit() -> None:
         """Read settings and retain their marker attributes."""
         text = _TEXT.replace(
             'update start="page_views"',
             'aranami begin="page_views" history-days="900" '
-            'lag-days="3" missing-percent="90"',
+            'missing-percent="90"',
         ).replace('update end="page_views"', 'aranami end="page_views"')
-        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry_run=True)
+        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry=True)
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(
@@ -515,10 +620,16 @@ class TestPageviewJob(TestCase):
             missing_percent=90,
         )
         assert 'history-days="900"' in context.edits[0].text
+        assert 'missing-percent="90"' in context.edits[0].text
 
     def test_unavailable_daily_data_skips_publication(self) -> None:
-        """Retain the wiki checkpoint for the next hourly retry."""
-        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry_run=True)
+        """Defer unavailable yesterday data after its UTC cutoff."""
+        context = JobContext(
+            MagicMock(),
+            dt.date(2026, 1, 11),
+            dry=True,
+            started_at=dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC),
+        )
         page = MagicMock(text=_TEXT)
         with (
             TemporaryDirectory() as directory,
@@ -528,7 +639,7 @@ class TestPageviewJob(TestCase):
                 pageviews,
                 "build_report",
                 side_effect=pageviews.PageviewsUnavailableError("missing"),
-            ),
+            ) as build,
             self.assertLogs(job.logger, level="WARNING"),
         ):
             job.run(context=context)
@@ -537,11 +648,18 @@ class TestPageviewJob(TestCase):
         assert context.tasks[0].status == "deferred"
         assert page.text == _TEXT
         page.save.assert_not_called()
+        build.assert_called_once_with(
+            context.site,
+            _STOP,
+            settings=job.REPORT_SETTINGS,
+            history_days=800,
+            missing_percent=95,
+        )
 
     @staticmethod
     def test_gateway_outage_defers_without_publishing_or_raising() -> None:
         """Defer transient requests while other routines continue."""
-        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry_run=True)
+        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry=True)
         page = MagicMock(text=_TEXT)
         with (
             TemporaryDirectory() as directory,
@@ -563,7 +681,7 @@ class TestPageviewJob(TestCase):
     @staticmethod
     def test_custom_destination_controls_read_and_proposal() -> None:
         """Keep the job's destination choice outside report services."""
-        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry_run=True)
+        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry=True)
         target = "User:Example/Pageviews sandbox"
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
@@ -581,3 +699,158 @@ class TestPageviewJob(TestCase):
             job.run(context=context, title=target)
         read.assert_called_once_with(context.site, [target])
         assert context.edits[0].title == target
+
+
+class TestPageviewReadiness(TestCase):
+    """Verify actual UTC time bounds requested report dates."""
+
+    @staticmethod
+    def _check_run(
+        today: dt.date,
+        started_at: dt.datetime,
+        expected_stop: dt.date | None,
+        *,
+        text: str = _TEXT,
+    ) -> None:
+        """Check publication eligibility without requests or writes.
+
+        Args:
+            today: Requested UTC report anchor.
+            started_at: Actual invocation timestamp with its timezone.
+            expected_stop: Exclusive report end, or none for no update.
+            text: Existing checkpoint and optional publication settings.
+        """
+        context = MagicMock(today=today, started_at=started_at)
+        with (
+            patch.object(job, "job_run", return_value=nullcontext(context)),
+            patch.object(
+                job,
+                "read_pages",
+                return_value=[MagicMock(text=text)],
+            ),
+            patch.object(
+                pageviews,
+                "build_report",
+                return_value=_report(expected_stop or _STOP),
+            ) as build,
+        ):
+            job.run(context=context)
+        if expected_stop is None:
+            build.assert_not_called()
+            context.publish.assert_not_called()
+        else:
+            build.assert_called_once_with(
+                context.site,
+                expected_stop,
+                settings=job.REPORT_SETTINGS,
+                history_days=800,
+                missing_percent=95,
+            )
+            context.publish.assert_called_once()
+
+    def test_yesterday_becomes_eligible_at_exact_utc_boundary(self) -> None:
+        """Make yesterday eligible at exactly UTC 18:00."""
+        for timestamp, expected in (
+            (dt.datetime(2026, 1, 11, 17, 59, 59, tzinfo=dt.UTC), None),
+            (dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC), _STOP),
+        ):
+            with self.subTest(started_at=timestamp):
+                self._check_run(dt.date(2026, 1, 11), timestamp, expected)
+
+    def test_timestamp_timezone_is_normalized_to_utc(self) -> None:
+        """Use UTC readiness across a local midnight date boundary."""
+        local_zone = dt.timezone(dt.timedelta(hours=8))
+        for timestamp, expected in (
+            (
+                dt.datetime(2026, 1, 12, 1, 59, 59, tzinfo=local_zone),
+                None,
+            ),
+            (dt.datetime(2026, 1, 12, 2, tzinfo=local_zone), _STOP),
+        ):
+            with self.subTest(started_at=timestamp):
+                self._check_run(dt.date(2026, 1, 11), timestamp, expected)
+
+    def test_older_backlog_advances_one_day_before_cutoff(self) -> None:
+        """Fill one older date while yesterday remains ineligible."""
+        self._check_run(
+            dt.date(2026, 1, 11),
+            dt.datetime(2026, 1, 11, 17, tzinfo=dt.UTC),
+            _DAY,
+            text=_TEXT.replace("2026-01-09", "2026-01-08"),
+        )
+
+    def test_historical_anchor_is_eligible_before_actual_cutoff(self) -> None:
+        """Allow available historical data before today's cutoff."""
+        self._check_run(
+            dt.date(2026, 1, 11),
+            dt.datetime(2026, 1, 20, 1, tzinfo=dt.UTC),
+            _STOP,
+        )
+
+    def test_future_anchor_cannot_bypass_actual_readiness(self) -> None:
+        """Cap future anchors using actual UTC data readiness."""
+        self._check_run(
+            dt.date(2026, 1, 20),
+            dt.datetime(2026, 1, 11, 17, tzinfo=dt.UTC),
+            None,
+        )
+
+    def test_legacy_lag_attribute_does_not_change_utc_readiness(self) -> None:
+        """Ignore old lag settings on both sides of UTC 18:00."""
+        text = _TEXT.replace(
+            'update start="page_views"',
+            'aranami begin="page_views" lag-days="3"',
+        ).replace('update end="page_views"', 'aranami end="page_views"')
+        for timestamp, expected in (
+            (dt.datetime(2026, 1, 11, 17, 59, 59, tzinfo=dt.UTC), None),
+            (dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC), _STOP),
+        ):
+            with self.subTest(started_at=timestamp):
+                self._check_run(
+                    dt.date(2026, 1, 11),
+                    timestamp,
+                    expected,
+                    text=text,
+                )
+
+
+class TestPageviewSummaries(TestCase):
+    """Verify leader details and whole-link summary shortening."""
+
+    @staticmethod
+    def test_leader_gains_omit_unchanged_and_unknown_annotations() -> None:
+        """Show places gained and omit unavailable or zero movement."""
+        report = replace(
+            _report(_STOP),
+            daily_top="遊戲甲",
+            weekly_top="遊戲乙",
+            monthly_top="遊戲丙",
+            daily_top_gain=3,
+            weekly_top_gain=0,
+            monthly_top_gain=None,
+        )
+        assert job._edit_summary(report) == (
+            "Updated records for 10 January 2026. "
+            "Daily leader «[[遊戲甲]]» (▲3). "
+            "Weekly leader «[[遊戲乙]]». Monthly leader «[[遊戲丙]]»."
+        )
+
+    @staticmethod
+    def test_missing_periods_do_not_claim_a_leader() -> None:
+        """Include only configured rankings with an observed leader."""
+        report = replace(_report(_STOP), daily_top=None, monthly_top=None)
+        assert job._edit_summary(report) == (
+            "Updated records for 10 January 2026. Weekly leader «[[B]]»."
+        )
+
+    @staticmethod
+    def test_multibyte_titles_are_omitted_as_complete_links() -> None:
+        """Keep the essential date within 255 UTF-8 bytes."""
+        long_title = "遊" * 100
+        report = replace(_report(_STOP), daily_top=long_title)
+        summary = job._edit_summary(report)
+        assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        assert summary.startswith("Updated records for 10 January 2026.")
+        assert long_title not in summary
+        assert "Daily leader" not in summary
+        assert summary.count("[[") == summary.count("]]")

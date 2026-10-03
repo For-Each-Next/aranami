@@ -1,6 +1,6 @@
 """Share output and execution context between independent report jobs.
 
-Each job exposes ``run(dry_run=...)``. The package runner supplies one
+Each job exposes ``run(dry=...)``. The package runner supplies one
 context so all jobs contribute to one dry-run report and daily log, with
 plain wikitext files for the proposed edits.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING
@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import pywikibot
 
+from aranami.support.edit_summary import EditSummary
 from aranami.support.logs import open_run_log
 
 if TYPE_CHECKING:
@@ -28,6 +29,15 @@ if TYPE_CHECKING:
     from aranami.jobs._edits import ProposedEdit
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _monotonic_time() -> float:
+    """Read the current monotonic clock when a record is created.
+
+    Returns:
+        Current timestamp for measuring execution durations.
+    """
+    return perf_counter()
 
 
 @dataclass(slots=True)
@@ -42,6 +52,7 @@ class _TaskResult:
         elapsed_seconds: Duration measured with the monotonic clock.
         edit_indices: Positions of proposals in the parent edit list.
         notes: Routine-specific delegated actions or diagnostic notes.
+        started_monotonic: Clock start shared with publication timing.
     """
 
     name: str
@@ -51,6 +62,11 @@ class _TaskResult:
     elapsed_seconds: float = 0
     edit_indices: list[int] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    started_monotonic: float = field(
+        default_factory=_monotonic_time,
+        init=False,
+        repr=False,
+    )
 
 
 def _markdown_value(value: str) -> str:
@@ -87,7 +103,7 @@ class JobContext:
     Attributes:
         site: Existing authenticated Chinese Wikipedia site.
         today: UTC date captured at the start of the run.
-        dry_run: Whether edits are recorded locally instead of saved.
+        dry: Whether edits are recorded locally instead of saved.
         edits: Ordered proposed edits, including unchanged proposals.
         notes: Delegated actions, failures, and other execution notes.
         started_at: UTC timestamp captured before routine execution.
@@ -97,7 +113,7 @@ class JobContext:
 
     site: BaseSite
     today: dt.date
-    dry_run: bool
+    dry: bool
     edits: list[ProposedEdit] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     started_at: dt.datetime = field(
@@ -111,6 +127,11 @@ class JobContext:
         repr=False,
     )
     _task_notes_from: int = field(default=0, init=False, repr=False)
+    _started_monotonic: float = field(
+        default_factory=_monotonic_time,
+        init=False,
+        repr=False,
+    )
 
     def start_task(self, name: str) -> _TaskResult:
         """Start one independently executed routine in this run.
@@ -168,16 +189,33 @@ class JobContext:
     def publish(self, edit: ProposedEdit) -> None:
         """Record a proposal and save changed text during live runs.
 
+        Append elapsed time from the routine's start until this proposal
+        is ready, before checking or saving its target. Publications
+        outside a routine use the context's creation time. Live edits
+        and dry-run proposals carry the same final summary.
+
         Args:
             edit: Proposal to record or intentionally publish.
 
         Raises:
             RuntimeError: The target changed after report construction.
         """
+        started = (
+            self._active_task.started_monotonic
+            if self._active_task is not None
+            else self._started_monotonic
+        )
+        edit = replace(
+            edit,
+            summary=EditSummary.with_execution_time(
+                edit.summary,
+                perf_counter() - started,
+            ),
+        )
         self.edits.append(edit)
         if self._active_task is not None:
             self._active_task.edit_indices.append(len(self.edits) - 1)
-        if self.dry_run:
+        if self.dry:
             _LOGGER.info("Proposed edit: %s (%s).", edit.title, edit.tags)
             return
         if edit.original_text == edit.text:
@@ -256,7 +294,7 @@ class JobContext:
         Returns:
             Artifact path, or ``None`` for a live run.
         """
-        if not self.dry_run:
+        if not self.dry:
             return None
         self.finished_at = self.finished_at or dt.datetime.now(dt.UTC)
         directory = Path.cwd() / "dry-run"
@@ -300,15 +338,18 @@ class JobContext:
 def job_run(
     name: str,
     *,
-    dry_run: bool = False,
+    dry: bool = False,
     context: JobContext | None = None,
 ) -> Iterator[JobContext]:
     """Log one job and share its context or own a standalone run.
 
+    Dry runs print the routine's entry point before execution so callers
+    can follow progress in a terminal or notebook.
+
     Args:
         name: Routine name included in the shared daily log.
-        dry_run: Output mode for a standalone invocation.
-        context: Parent run context, whose mode overrides ``dry_run``.
+        dry: Output mode for a standalone invocation.
+        context: Parent run context, whose mode overrides ``dry``.
 
     Yields:
         Context through which the job publishes proposed edits.
@@ -317,13 +358,18 @@ def job_run(
         active = context or JobContext(
             pywikibot.Site("zh", "wikipedia"),
             dt.datetime.now(dt.UTC).date(),
-            dry_run,
+            dry,
         )
         logger = logging.getLogger(f"aranami.jobs.{name}")
-        started = perf_counter()
         task = active.start_task(name)
-        logger.info("Routine started (dry_run=%s).", active.dry_run)
+        started = task.started_monotonic
+        logger.info("Routine started (dry=%s).", active.dry)
         try:
+            if active.dry:
+                print(  # ruff: ignore[print]
+                    f"Dry run: executing aranami.jobs.{name}.run()",
+                    flush=True,
+                )
             yield active
         except Exception as error:
             task.status = "failed"

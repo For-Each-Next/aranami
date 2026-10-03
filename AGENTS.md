@@ -17,6 +17,15 @@ The root instructions remain in force throughout the repository.
 [Aranami package instructions][1] add runtime, storage, architecture, and
 layer-specific rules for `src/aranami/`.
 
+## Documentation focus
+
+- Lead documentation with what the component does, when to use it, and the
+  results the caller can expect.
+- Keep technology and implementation details brief. Include them only when
+  they help the reader use the component correctly or maintain its contract.
+- Keep the README focused on capabilities and practical usage. Put detailed
+  engineering conventions in `CONTRIBUTING.md` and scoped instructions.
+
 ## Python documentation
 
 - Start every Python module, including each `__init__.py`, with a file-level

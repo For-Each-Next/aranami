@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal
 import polars as pl
 import pywikibot
 from pywikibot.site import Namespace
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select, tuple_
 
 from aranami.sources.quarry import Replica, tables
 
@@ -28,16 +28,9 @@ _PAGE_SCHEMA = {
     "page_id": pl.Int64,
     "page_namespace": pl.Int64,
     "page_title": pl.String,
-    "page_len": pl.Int64,
-    "page_is_redirect": pl.Int64,
-    "page_latest": pl.Int64,
-    "latest_timestamp": pl.String,
-    "defaultsort": pl.String,
     "talk_page_id": pl.Int64,
-    "talk_page_latest": pl.Int64,
     "pa_class": pl.String,
     "pa_importance": pl.String,
-    "wikibase_item": pl.String,
 }
 _MEMBER_SCHEMA = {
     "page_id": pl.Int64,
@@ -65,63 +58,37 @@ def query_pages_by_wikiproject(
     site: BaseSite,
     project_name: str,
 ) -> pl.DataFrame:
-    """Read assessed pages with revision, talk-page, and Wikidata data.
+    """Read project assessments and page identities.
 
     Args:
         site: Site whose replica holds the project assessments.
         project_name: Exact PageAssessments project title.
 
     Returns:
-        Typed metadata including full titles, quality, importance,
-        revision identifiers, and nullable integer ``wikibase_qid``.
+        Page and nullable talk-page IDs, namespace and database titles,
+        full titles, quality, and importance.
     """
     page = tables.Page.__table__
     talk = page.alias("talk")
-    props = tables.PageProps.__table__
-    defaultsort = props.alias("defaultsort")
-    wikidata = props.alias("wikidata")
     assessment = tables.PageAssessments
     project = tables.PageAssessmentsProjects
-    revision = tables.Revision
     statement = (
         select(
             page.c.page_id,
             page.c.page_namespace,
             page.c.page_title,
-            page.c.page_len,
-            page.c.page_is_redirect,
-            page.c.page_latest,
-            revision.rev_timestamp.label("latest_timestamp"),
-            defaultsort.c.pp_value.label("defaultsort"),
             talk.c.page_id.label("talk_page_id"),
-            talk.c.page_latest.label("talk_page_latest"),
             assessment.pa_class,
             assessment.pa_importance,
-            wikidata.c.pp_value.label("wikibase_item"),
         )
         .select_from(project)
         .join(assessment, project.pap_project_id == assessment.pa_project_id)
         .join(page, assessment.pa_page_id == page.c.page_id)
-        .join(revision, page.c.page_latest == revision.rev_id)
         .outerjoin(
             talk,
             and_(
                 talk.c.page_namespace == page.c.page_namespace + 1,
                 talk.c.page_title == page.c.page_title,
-            ),
-        )
-        .outerjoin(
-            defaultsort,
-            and_(
-                defaultsort.c.pp_page == page.c.page_id,
-                defaultsort.c.pp_propname == "defaultsort",
-            ),
-        )
-        .outerjoin(
-            wikidata,
-            and_(
-                wikidata.c.pp_page == page.c.page_id,
-                wikidata.c.pp_propname == "wikibase_item",
             ),
         )
         .where(project.pap_project_title == project_name)
@@ -146,14 +113,7 @@ def query_pages_by_wikiproject(
         ),
         dtype=pl.String,
     )
-    return frame.with_columns(
-        titles,
-        pl
-        .col("wikibase_item")
-        .str.strip_prefix("Q")
-        .cast(pl.Int64, strict=False)
-        .alias("wikibase_qid"),
-    ).drop("wikibase_item")
+    return frame.with_columns(titles)
 
 
 def category_members(
@@ -169,7 +129,8 @@ def category_members(
         namespace: Optional member namespace restriction.
 
     Returns:
-        Page identifiers, namespace identifiers, and database titles.
+        Page IDs, namespace IDs, and database titles. Talk queries also
+        include the nullable main-page ID as ``article_page_id``.
     """
     category = pywikibot.Page(site, category_title, Namespace.CATEGORY)
     title = category.title(with_ns=False, underscore=True)
@@ -187,11 +148,24 @@ def category_members(
     )
     if namespace is not None:
         statement = statement.where(page.page_namespace == namespace)
+    schema = dict(_MEMBER_SCHEMA)
+    if namespace == Namespace.TALK:
+        article = tables.Page.__table__.alias("article")
+        statement = statement.add_columns(
+            article.c.page_id.label("article_page_id"),
+        ).outerjoin(
+            article,
+            and_(
+                article.c.page_namespace == Namespace.MAIN,
+                article.c.page_title == page.page_title,
+            ),
+        )
+        schema["article_page_id"] = pl.Int64
     return (
         _replica(site.dbName())
         .query(
             statement,
-            schema_overrides=_MEMBER_SCHEMA,
+            schema_overrides=schema,
         )
         .collect()
     )
@@ -223,6 +197,88 @@ def latest_revisions(site: BaseSite, page_ids: Iterable[int]) -> pl.DataFrame:
     return pl.concat(frames) if frames else pl.DataFrame(schema=schema)
 
 
+def page_creation_metadata(
+    site: BaseSite,
+    titles: Iterable[str],
+) -> pl.DataFrame:
+    """Read page identities and their earliest recorded revision times.
+
+    Args:
+        site: Site whose pages are requested.
+        titles: Page titles, including recognized namespace aliases.
+
+    Returns:
+        Canonical ``full_title``, ``page_id``, and UTC ``created_at``
+        columns for existing pages. Creation times are null when no
+        revision is available. Redirects keep their identities. Missing
+        pages are omitted.
+    """
+    keys = {}
+    for title in titles:
+        requested = pywikibot.Page(site, title)
+        key = (
+            int(requested.namespace()),
+            requested.title(
+                with_ns=False,
+                with_section=False,
+                underscore=True,
+            ),
+        )
+        keys[key] = None
+    schema = {
+        "page_id": pl.Int64,
+        "page_namespace": pl.Int64,
+        "page_title": pl.String,
+        "created_at": pl.String,
+    }
+    page, revision = tables.Page.__table__, tables.Revision.__table__
+    created_at = (
+        select(func.min(revision.c.rev_timestamp))
+        .where(revision.c.rev_page == page.c.page_id)
+        .correlate(page)
+        .scalar_subquery()
+        .label("created_at")
+    )
+    statement = select(
+        page.c.page_id,
+        page.c.page_namespace,
+        page.c.page_title,
+        created_at,
+    ).order_by(page.c.page_id)
+    frames = [
+        _replica(site.dbName())
+        .query(
+            statement.where(
+                tuple_(page.c.page_namespace, page.c.page_title).in_(batch),
+            ),
+            schema_overrides=schema,
+        )
+        .collect()
+        for batch in batched(keys, _BATCH_SIZE)
+    ]
+    frame = pl.concat(frames) if frames else pl.DataFrame(schema=schema)
+    full_titles = pl.Series(
+        "full_title",
+        (
+            pywikibot.Page(site, title, namespace).title()
+            for namespace, title in frame.select(
+                "page_namespace",
+                "page_title",
+            ).iter_rows()
+        ),
+        dtype=pl.String,
+    )
+    return frame.select(
+        full_titles,
+        "page_id",
+        pl.col("created_at").str.to_datetime(
+            "%Y%m%d%H%M%S",
+            time_unit="us",
+            time_zone="UTC",
+        ),
+    )
+
+
 def new_page_ids(
     site: BaseSite,
     start: dt.date,
@@ -247,6 +303,53 @@ def new_page_ids(
             revision.rev_timestamp >= start.strftime("%Y%m%d000000"),
             revision.rev_timestamp < stop.strftime("%Y%m%d000000"),
             revision.rev_parent_id == 0,
+            page.page_is_redirect == 0,
+            page.page_namespace % 2 == 0,
+            page.page_namespace != Namespace.USER,
+        )
+        .distinct()
+        .order_by(page.page_id)
+    )
+    return (
+        _replica(site.dbName())
+        .query(
+            statement,
+            schema_overrides={"page_id": pl.Int64},
+        )
+        .collect()["page_id"]
+        .to_list()
+    )
+
+
+def redirect_converted_page_ids(
+    site: BaseSite,
+    start: dt.date,
+    stop: dt.date,
+) -> list[int]:
+    """Select content pages rewritten from redirects in a UTC interval.
+
+    Args:
+        site: Site whose replica should be queried.
+        start: Inclusive redirect-removal date.
+        stop: Exclusive redirect-removal date.
+
+    Returns:
+        Distinct page IDs in ascending order whose revisions carry the
+        ``mw-removed-redirect`` tag, excluding current redirects, talk
+        pages, and user pages.
+    """
+    page, revision = tables.Page, tables.Revision
+    tag, definition = tables.ChangeTag, tables.ChangeTagDef
+    statement = (
+        select(page.page_id)
+        .select_from(revision)
+        .join(tag, tag.ct_rev_id == revision.rev_id)
+        .join(definition, tag.ct_tag_id == definition.ctd_id)
+        .join(page, revision.rev_page == page.page_id)
+        .where(
+            revision.rev_timestamp >= start.strftime("%Y%m%d000000"),
+            revision.rev_timestamp < stop.strftime("%Y%m%d000000"),
+            definition.ctd_name == "mw-removed-redirect",
             page.page_is_redirect == 0,
             page.page_namespace % 2 == 0,
             page.page_namespace != Namespace.USER,

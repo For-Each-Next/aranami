@@ -41,6 +41,7 @@ LABEL_LANG_PRIORITY = (
 )
 _BATCH_SIZE = 500
 _EN_SCHEMA = {
+    "page_id": pl.Int64,
     "en_title": pl.String,
     "qid": pl.String,
     "en_defaultsort": pl.String,
@@ -118,7 +119,8 @@ def fetch_en_key_pages() -> pl.DataFrame:
     """Read important or quality English video-game articles.
 
     Returns:
-        Article titles, item IDs, display/sort values, and assessments.
+        Stable page IDs, titles, item IDs, display/sort values,
+        and assessments.
     """
     replica = Replica("enwiki")
     title = _project_title(replica, ("Video games",), "Video")
@@ -156,6 +158,7 @@ def fetch_en_key_pages() -> pl.DataFrame:
     )
     statement = (
         select(
+            page.c.page_id,
             page.c.page_title.label("en_title"),
             item.c.pp_value.label("qid"),
             sort.c.pp_value.label("en_defaultsort"),
@@ -177,23 +180,15 @@ def fetch_en_key_pages() -> pl.DataFrame:
     return replica.query(statement, schema_overrides=_EN_SCHEMA).collect()
 
 
-def fetch_wikidata_sitelinks(
-    item_ids: Sequence[int],
-    *,
-    sites: Sequence[str] = ("zhwiki",),
-) -> pl.DataFrame:
-    """Read preferred sitelinks for unique item IDs in bounded batches.
+def fetch_wikidata_sitelinks(item_ids: Sequence[int]) -> pl.DataFrame:
+    """Read Chinese Wikipedia sitelinks for item IDs in bounded batches.
 
     Args:
         item_ids: Numeric IDs, including removed report items.
-        sites: Wikidata site identifiers in preferred order.
 
     Returns:
-        Unique item IDs and display titles in the ``zh_title`` column.
-        The historical column name also applies to non-Chinese sites.
+        Unique item IDs and Chinese display titles in ``zh_title``.
     """
-    if not sites:
-        return pl.DataFrame(schema=_SITELINK_SCHEMA)
     replica = Replica("wikidatawiki")
     items = sorted(set(item_ids))
     link = tables.WbItemsPerSite.__table__.c
@@ -204,19 +199,10 @@ def fetch_wikidata_sitelinks(
                 link.ips_site_page.label("zh_title"),
             )
             .where(
-                link.ips_site_id.in_(sites),
+                link.ips_site_id == "zhwiki",
                 link.ips_item_id.in_(items[offset : offset + _BATCH_SIZE]),
             )
-            .order_by(
-                case(
-                    *(
-                        (link.ips_site_id == site, rank)
-                        for rank, site in enumerate(sites)
-                    ),
-                    else_=len(sites),
-                ),
-                link.ips_item_id,
-            ),
+            .order_by(link.ips_item_id),
             schema_overrides=_SITELINK_SCHEMA,
         ).collect()
         for offset in range(0, len(items), _BATCH_SIZE)
@@ -233,19 +219,14 @@ def fetch_wikidata_sitelinks(
     )
 
 
-def fetch_wikidata_labels(
-    item_ids: Sequence[int],
-    *,
-    languages: Sequence[str] = LABEL_LANG_PRIORITY,
-) -> pl.DataFrame:
+def fetch_wikidata_labels(item_ids: Sequence[int]) -> pl.DataFrame:
     """Read the first available preferred-language label for each item.
 
     Args:
         item_ids: Numeric Wikidata item identifiers.
-        languages: Language codes in priority order.
 
     Returns:
-        Item IDs and labels selected using the requested priority.
+        Item IDs and labels selected using ``LABEL_LANG_PRIORITY``.
     """
     replica = Replica.wikidata_terms()
     items = sorted(set(item_ids))
@@ -270,7 +251,7 @@ def fetch_wikidata_labels(
             .select_from(relation)
             .where(
                 _TERM_TYPE.c.wby_name == "label",
-                language.c.wbxl_language.in_(languages),
+                language.c.wbxl_language.in_(LABEL_LANG_PRIORITY),
                 item.c.wbit_item_id.in_(items[offset : offset + _BATCH_SIZE]),
             ),
             schema_overrides=_LABEL_SCHEMA,
@@ -286,8 +267,11 @@ def fetch_wikidata_labels(
             pl
             .col("lang")
             .replace_strict(
-                {language: rank for rank, language in enumerate(languages)},
-                default=len(languages),
+                {
+                    language: rank
+                    for rank, language in enumerate(LABEL_LANG_PRIORITY)
+                },
+                default=len(LABEL_LANG_PRIORITY),
                 return_dtype=pl.Int64,
             )
             .alias("rank"),

@@ -2,6 +2,8 @@
 
 # Keep the repository's unittest runner and exception assertions.
 # ruff: file-ignore[pytest-unittest-raises-assertion]
+# Prime glyphs are required in elapsed edit summaries.
+# ruff: file-ignore[ambiguous-unicode-character-string]
 
 import datetime as dt
 from pathlib import Path
@@ -36,7 +38,7 @@ class TestRoutineOutput(TestCase):
         context = JobContext(
             site,
             dt.date(2026, 10, 3),
-            dry_run=True,
+            dry=True,
             started_at=dt.datetime(2026, 10, 3, 1, 2, 3, tzinfo=dt.UTC),
             finished_at=dt.datetime(2026, 10, 3, 1, 3, 4, tzinfo=dt.UTC),
         )
@@ -93,7 +95,7 @@ class TestRoutineOutput(TestCase):
         """Keep unsafe titles and empty text in uniquely named files."""
         site = Mock()
         site.dbName.return_value = "zhwiki"
-        context = JobContext(site, dt.date(2026, 10, 3), dry_run=True)
+        context = JobContext(site, dt.date(2026, 10, 3), dry=True)
         context.publish(
             ProposedEdit(site, "../../outside/页面", "", "summary"),
         )
@@ -115,7 +117,7 @@ class TestRoutineOutput(TestCase):
         """Preserve earlier proposals across repeated output calls."""
         site = Mock()
         site.dbName.return_value = "zhwiki"
-        context = JobContext(site, dt.date(2026, 10, 3), dry_run=True)
+        context = JobContext(site, dt.date(2026, 10, 3), dry=True)
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
@@ -146,7 +148,7 @@ class TestRoutineOutput(TestCase):
     @staticmethod
     def test_live_report_writes_no_local_artifacts() -> None:
         """Avoid creating dry-run output during live execution."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry_run=False)
+        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=False)
         context.edits.append(
             ProposedEdit(context.site, "Target", "text", "summary"),
         )
@@ -159,7 +161,7 @@ class TestRoutineOutput(TestCase):
 
     def test_live_publish_checks_concurrent_changes(self) -> None:
         """Refuse to overwrite a concurrently modified page."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry_run=False)
+        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=False)
         page = Mock(text="someone else's update")
         with (
             patch("aranami.jobs._execution.pywikibot.Page", return_value=page),
@@ -179,12 +181,15 @@ class TestRoutineOutput(TestCase):
     @staticmethod
     def test_live_publish_and_unchanged_skip() -> None:
         """Save changed text and avoid redundant writes."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry_run=False)
         page = Mock(text="old")
-        with patch(
-            "aranami.jobs._execution.pywikibot.Page",
-            return_value=page,
+        with (
+            patch("aranami.jobs._execution.perf_counter", return_value=100),
+            patch(
+                "aranami.jobs._execution.pywikibot.Page",
+                return_value=page,
+            ),
         ):
+            context = JobContext(Mock(), dt.date(2026, 10, 3), dry=False)
             context.publish(
                 ProposedEdit(
                     context.site,
@@ -203,8 +208,117 @@ class TestRoutineOutput(TestCase):
                     original_text="new",
                 ),
             )
-        page.save.assert_called_once_with(summary="summary")
+        page.save.assert_called_once_with(
+            summary="summary Executed in 0.00″.",
+        )
         assert page.text == "new"
+
+    @staticmethod
+    def test_publish_records_timed_summary_in_live_and_dry_runs() -> None:
+        """Keep recorded and published summaries identical."""
+        for dry in (False, True):
+            page = Mock(text="old")
+            with (
+                patch(
+                    "aranami.jobs._execution.perf_counter",
+                    return_value=100,
+                ) as clock,
+                patch(
+                    "aranami.jobs._execution.pywikibot.Page",
+                    return_value=page,
+                ) as page_factory,
+            ):
+                context = JobContext(
+                    Mock(),
+                    dt.date(2026, 10, 3),
+                    dry=dry,
+                )
+                context.site.dbName.return_value = "zhwiki"
+                proposal = ProposedEdit(
+                    context.site,
+                    "Target",
+                    "new",
+                    "Updated records for 5 May 2025.",
+                    original_text="old",
+                )
+                clock.return_value = 1413.95
+                context.publish(proposal)
+                expected = (
+                    "Updated records for 5 May 2025. Executed in 21′53.95″."
+                )
+                assert context.edits[0].summary == expected
+                assert proposal.summary == "Updated records for 5 May 2025."
+                if dry:
+                    page_factory.assert_not_called()
+                    with (
+                        TemporaryDirectory() as directory,
+                        patch(
+                            "pathlib.Path.cwd",
+                            return_value=Path(directory),
+                        ),
+                    ):
+                        report = context.write_report()
+                        assert report is not None
+                        assert expected in report.read_text(encoding="utf-8")
+                else:
+                    page.save.assert_called_once_with(summary=expected)
+
+    @staticmethod
+    def test_publish_times_each_proposal_from_its_own_routine() -> None:
+        """Reset timing between routines and measure each proposal."""
+        with (
+            TemporaryDirectory() as directory,
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+            patch(
+                "aranami.jobs._execution.perf_counter",
+                return_value=100,
+            ) as clock,
+        ):
+            context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
+            clock.return_value = 200
+            with job_run("first", context=context):
+                clock.return_value = 260.5
+                context.publish(
+                    ProposedEdit(context.site, "First", "one", "summary"),
+                )
+                clock.return_value = 270
+                context.publish(
+                    ProposedEdit(context.site, "Second", "two", "summary"),
+                )
+            clock.return_value = 500
+            with job_run("second", context=context):
+                clock.return_value = 511.25
+                context.publish(
+                    ProposedEdit(context.site, "Third", "three", "summary"),
+                )
+            clock.return_value = 600
+            context.publish(
+                ProposedEdit(context.site, "Direct", "four", "summary"),
+            )
+        assert [edit.summary for edit in context.edits] == [
+            "summary Executed in 1′00.50″.",
+            "summary Executed in 1′10.00″.",
+            "summary Executed in 11.25″.",
+            "summary Executed in 8′20.00″.",
+        ]
+        assert [task.elapsed_seconds for task in context.tasks] == [70, 11.25]
+
+    @staticmethod
+    def test_publish_replaces_existing_execution_suffix() -> None:
+        """Retain one suffix when a proposal is published again."""
+        with patch(
+            "aranami.jobs._execution.perf_counter",
+            return_value=100,
+        ) as clock:
+            context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
+            clock.return_value = 101
+            context.publish(
+                ProposedEdit(context.site, "Target", "text", "summary"),
+            )
+            clock.return_value = 102
+            context.publish(context.edits[0])
+        assert context.edits[0].summary == "summary Executed in 1.00″."
+        assert context.edits[1].summary == "summary Executed in 2.00″."
 
     @staticmethod
     def test_clear_cache_leaves_logs_and_reports() -> None:
@@ -226,7 +340,7 @@ class TestRoutineOutput(TestCase):
     @staticmethod
     def test_delegated_refresh_is_never_called_in_dry_run() -> None:
         """Group PexBot targets into one task without write requests."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry_run=True)
+        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
         context.site.dbName.return_value = "zhwiki"
         with (
             TemporaryDirectory() as directory,
@@ -255,7 +369,7 @@ class TestRoutineOutput(TestCase):
         None
     ):
         """Retain outputs and error details after a routine failure."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry_run=True)
+        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
         context.site.dbName.return_value = "zhwiki"
         with (
             TemporaryDirectory() as directory,
@@ -304,7 +418,7 @@ class TestRoutineOutput(TestCase):
     @staticmethod
     def test_all_failed_tasks_report_failed() -> None:
         """Compute the overall outcome from failed routine results."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry_run=True)
+        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
@@ -326,7 +440,7 @@ class TestRoutineOutput(TestCase):
     @staticmethod
     def test_deferred_task_reports_partial_success_without_exception() -> None:
         """Keep a postponed routine distinct from completed work."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry_run=True)
+        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
@@ -345,26 +459,84 @@ class TestRoutineOutput(TestCase):
 
     def test_deferred_result_requires_a_routine(self) -> None:
         """Require a routine before recording its deferred result."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry_run=True)
+        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
         with self.assertRaises(RuntimeError):
             context.defer("Source unavailable.")
 
-    @staticmethod
-    def test_standalone_routine_writes_its_one_completed_task() -> None:
-        """Finalize one standalone routine's timing and output."""
-        with (
-            TemporaryDirectory() as directory,
-            patch("pathlib.Path.cwd", return_value=Path(directory)),
-            patch("aranami.jobs._execution.pywikibot.Site") as site,
-        ):
-            site.return_value.dbName.return_value = "zhwiki"
-            with job_run("dyks", dry_run=True) as context:
-                context.publish(
-                    ProposedEdit(context.site, "Target", "text", "summary"),
-                )
-            report = next((Path(directory) / "dry-run").glob("*.md"))
-            content = report.read_text(encoding="utf-8")
-            assert "- status: success" in content
-            assert content.count("  - task ") == 1
-            assert "  - task 1: dyks — success" in content
-            assert context.finished_at is not None
+    def test_standalone_routine_finalizes_live_and_dry_output(self) -> None:
+        """Finalize standalone output in the chosen mode."""
+        for dry in (False, True):
+            page = Mock(text="old")
+            with (
+                self.subTest(dry=dry),
+                TemporaryDirectory() as directory,
+                patch("pathlib.Path.cwd", return_value=Path(directory)),
+                patch("aranami.jobs._execution.pywikibot.Site") as site,
+                patch(
+                    "aranami.jobs._execution.pywikibot.Page",
+                    return_value=page,
+                ) as page_factory,
+            ):
+                site.return_value.dbName.return_value = "zhwiki"
+                with job_run("dyks", dry=dry) as context:
+                    context.publish(
+                        ProposedEdit(
+                            context.site,
+                            "Target",
+                            "text",
+                            "summary",
+                        ),
+                    )
+                assert context.tasks[0].status == "success"
+                if dry:
+                    report = next(
+                        (Path(directory) / "dry-run").glob("*.md"),
+                    )
+                    content = report.read_text(encoding="utf-8")
+                    assert "- status: success" in content
+                    assert content.count("  - task ") == 1
+                    assert "  - task 1: dyks — success" in content
+                    assert context.finished_at is not None
+                    page_factory.assert_not_called()
+                else:
+                    page.save.assert_called_once_with(
+                        summary=context.edits[0].summary,
+                    )
+                    assert not (Path(directory) / "dry-run").exists()
+
+    def test_shared_context_overrides_conflicting_dry_keyword(self) -> None:
+        """Honor shared mode and retain its pending report."""
+        for dry in (False, True):
+            page = Mock(text="old")
+            context = JobContext(Mock(), dt.date(2026, 10, 3), dry=dry)
+            with (
+                self.subTest(dry=dry),
+                TemporaryDirectory() as directory,
+                patch("pathlib.Path.cwd", return_value=Path(directory)),
+                patch("aranami.jobs._execution.pywikibot.Site") as site,
+                patch(
+                    "aranami.jobs._execution.pywikibot.Page",
+                    return_value=page,
+                ) as page_factory,
+            ):
+                with job_run("dyks", dry=not dry, context=context) as active:
+                    assert active is context
+                    active.publish(
+                        ProposedEdit(
+                            active.site,
+                            "Target",
+                            "text",
+                            "summary",
+                        ),
+                    )
+                site.assert_not_called()
+                assert context.dry is dry
+                assert context.tasks[0].status == "success"
+                assert context.finished_at is None
+                assert not (Path(directory) / "dry-run").exists()
+                if dry:
+                    page_factory.assert_not_called()
+                else:
+                    page.save.assert_called_once_with(
+                        summary=context.edits[0].summary,
+                    )

@@ -15,12 +15,14 @@ import mwparserfromhell
 import polars as pl
 
 from aranami.sources.quarry import enwp
+from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
 from aranami.support.templates import template_page
 from aranami.support.wikitext import replace_by_tag
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
+    from mwparserfromhell.wikicode import Wikicode
     from pywikibot.site import BaseSite
 
 
@@ -31,9 +33,6 @@ REPORT_ITEM_TEMPLATE = "PJ:VG/DBR/EN/item"
 
 
 REPORT_FOOTER = "{{PJ:VG/DBR/EN/footer}}"
-
-
-MAX_EDIT_SUMMARY_BYTES = 500
 
 
 @dataclass(frozen=True)
@@ -60,10 +59,64 @@ class OldArticle:
     Attributes:
         english_title: English Wikipedia article title.
         item_id: Numeric Wikidata item identifier, when available.
+        page_id: Stable English Wikipedia page ID, when known locally.
     """
 
     english_title: str
     item_id: int | None
+    page_id: int | None = None
+
+
+class _ArticleMembership:
+    """Match stable page IDs and legacy report identities."""
+
+    def __init__(self, articles: Mapping[str, OldArticle]) -> None:
+        """Index stable IDs and fallback identities for legacy rows.
+
+        Args:
+            articles: Report articles keyed by their English title.
+        """
+        self.articles = articles
+        self.page_ids = {
+            article.page_id
+            for article in articles.values()
+            if article.page_id is not None
+        }
+        self.item_ids = {
+            article.item_id
+            for article in articles.values()
+            if article.item_id is not None
+        }
+        self.legacy_item_ids = {
+            article.item_id
+            for article in articles.values()
+            if article.page_id is None and article.item_id is not None
+        }
+
+    def contains(self, article: OldArticle) -> bool:
+        """Check membership by stable identity across title changes.
+
+        Args:
+            article: Candidate article to compare with this report.
+
+        Returns:
+            Whether the same article occurs in the indexed report.
+        """
+        previous = self.articles.get(article.english_title)
+        if (
+            previous is not None
+            and previous.page_id is None
+            and previous.item_id is None
+        ):
+            return True
+        if article.page_id is not None:
+            return (
+                article.page_id in self.page_ids
+                or article.item_id in self.legacy_item_ids
+            )
+        if article.item_id is not None:
+            return article.item_id in self.item_ids
+        return previous is not None
 
 
 @dataclass(frozen=True)
@@ -230,6 +283,7 @@ def build_enriched_rows(
             ).alias("display_title"),
         )
         .select(
+            "page_id",
             "en_title",
             "en_display_title",
             "qid",
@@ -460,7 +514,7 @@ def parse_old_articles(
     articles: dict[str, OldArticle] = {}
     wikicode = mwparserfromhell.parse(page_text)
 
-    for template in wikicode.filter_templates(recursive=True):
+    for template, page_id in _templates_with_page_ids(wikicode):
         if template_page(template.name, site) != expected_name:
             continue
         if not template.has("en"):
@@ -482,9 +536,40 @@ def parse_old_articles(
         articles[english_title] = OldArticle(
             english_title=english_title,
             item_id=item_id,
+            page_id=page_id,
         )
 
     return articles
+
+
+def _templates_with_page_ids(
+    code: Wikicode,
+) -> Iterator[tuple[mwparserfromhell.nodes.Template, int | None]]:
+    """Yield templates with page IDs from their following HTML comments.
+
+    Args:
+        code: Root or nested wikitext containing report items.
+
+    Yields:
+        Each template and its adjacent stable page ID, when available.
+    """
+    for index, node in enumerate(code.nodes):
+        if isinstance(node, mwparserfromhell.nodes.Template):
+            page_id = None
+            following = code.nodes[index + 1 : index + 2]
+            if following and isinstance(
+                following[0],
+                mwparserfromhell.nodes.Comment,
+            ):
+                marker = str(following[0].contents).strip()
+                prefix = 'aranami-enwp page-id="'
+                if marker.startswith(prefix) and marker.endswith('"'):
+                    value = marker[len(prefix) : -1]
+                    if value.isdigit() and int(value) > 0:
+                        page_id = int(value)
+            yield node, page_id
+        for child in node.__children__():
+            yield from _templates_with_page_ids(child)
 
 
 def build_item_to_zh_title(
@@ -512,19 +597,20 @@ def format_summary_article(
     english_title: str,
     chinese_title: str | None,
 ) -> str:
-    """Format one article link for an edit summary.
+    """Quote each linked article title in one complete summary mention.
 
     Args:
         english_title: English Wikipedia article title.
         chinese_title: Chinese Wikipedia title, when one exists.
 
     Returns:
-        English interwiki link with an optional Chinese link.
+        Quoted English interwiki link with an optional quoted Chinese
+        link in parentheses.
     """
-    english_link = f"[[:en:{english_title}|{english_title}]]"
+    english_link = f"«[[:en:{english_title}]]»"
     if chinese_title is None:
         return english_link
-    return f"{english_link} ([[{chinese_title}|{chinese_title}]])"
+    return f"{english_link} («[[{chinese_title}]]»)"
 
 
 def encode_length(value: str) -> int:
@@ -552,32 +638,11 @@ def truncate_summary_parts(
     Returns:
         Joined clauses, with an omission count when truncated.
     """
-    if max_bytes <= 0:
-        return ""
-
-    complete = "; ".join(parts)
-    if encode_length(complete) <= max_bytes:
-        return complete
-
-    included: list[str] = []
-    for index, part in enumerate(parts):
-        remaining = len(parts) - index - 1
-        candidate_parts = [*included, part]
-        suffix = f"; and {remaining} more" if remaining else ""
-        candidate = "; ".join(candidate_parts) + suffix
-        if encode_length(candidate) > max_bytes:
-            break
-        included.append(part)
-
-    omitted = len(parts) - len(included)
-    if not included:
-        fallback = f"update report; {len(parts)} article changes"
-        return fallback[:max_bytes]
-
-    summary = "; ".join(included)
-    if omitted:
-        summary += f"; and {omitted} more"
-    return summary
+    return (
+        EditSummary("", max_bytes=max_bytes)
+        .add_group("", parts, separator="; ", group_separator="")
+        .render()
+    )
 
 
 def build_edit_summary(
@@ -586,40 +651,54 @@ def build_edit_summary(
     item_to_zh_title: Mapping[int, str],
     max_bytes: int = MAX_EDIT_SUMMARY_BYTES,
 ) -> str:
-    """Build an add/remove summary by comparing report membership.
+    """Build a count and membership-change summary for one report.
 
     Args:
         old_articles: Existing report articles by English title.
         new_rows: Newly generated report rows.
         item_to_zh_title: Wikidata item IDs mapped to zhwiki titles.
-        max_bytes: Maximum UTF-8 summary size.
+        max_bytes: Requested UTF-8 summary budget, capped at 255 bytes.
 
     Returns:
-        Edit summary using ``add`` and ``remove`` clauses. Chinese links
-        are included only when a Chinese Wikipedia sitelink exists.
+        Total count followed by added and removed article links. Renames
+        retaining their page ID and assessment-only changes keep only
+        the count. Legacy entries use their Wikidata item or title.
+        Chinese links require a Chinese Wikipedia sitelink.
     """
-    new_by_title = {str(row["en_title"]): row for row in new_rows.to_dicts()}
-    old_titles = set(old_articles)
-    new_titles = set(new_by_title)
-
-    parts: list[str] = []
+    new_articles = {
+        str(row["en_title"]): OldArticle(
+            english_title=str(row["en_title"]),
+            item_id=int(row["item_id"]),
+            page_id=(
+                int(row["page_id"]) if row.get("page_id") is not None else None
+            ),
+        )
+        for row in new_rows.to_dicts()
+    }
+    old_membership = _ArticleMembership(old_articles)
+    new_membership = _ArticleMembership(new_articles)
+    added: list[str] = []
     for english_title in sorted(
-        new_titles - old_titles,
+        new_articles,
         key=english_sort_key,
     ):
-        row = new_by_title[english_title]
-        item_id = int(row["item_id"])
+        new_article = new_articles[english_title]
+        if old_membership.contains(new_article):
+            continue
         article = format_summary_article(
             english_title,
-            item_to_zh_title.get(item_id),
+            item_to_zh_title.get(new_article.item_id),
         )
-        parts.append(f"add {article}")
+        added.append(article)
 
+    removed: list[str] = []
     for english_title in sorted(
-        old_titles - new_titles,
+        old_articles,
         key=english_sort_key,
     ):
         old_article = old_articles[english_title]
+        if new_membership.contains(old_article):
+            continue
         chinese_title = None
         if old_article.item_id is not None:
             chinese_title = item_to_zh_title.get(
@@ -629,11 +708,18 @@ def build_edit_summary(
             english_title,
             chinese_title,
         )
-        parts.append(f"remove {article}")
+        removed.append(article)
 
-    if not parts:
-        return "update article data"
-    return truncate_summary_parts(parts, max_bytes)
+    count = len(new_articles)
+    noun = "item" if count == 1 else "items"
+    summary = EditSummary(f"{count:,} {noun} total.", max_bytes=max_bytes)
+    summary.add_group("Added ", added, group_separator=" ")
+    summary.add_group(
+        "removed " if added else "Removed ",
+        removed,
+        group_separator="; " if added else " ",
+    )
+    return summary.render()
 
 
 def replace_marker_value(
@@ -688,6 +774,10 @@ def normalize_en_pages(frame: pl.DataFrame) -> pl.DataFrame:
     Returns:
         Unique article rows with numeric item IDs and normalized titles.
     """
+    if "page_id" not in frame.columns:
+        frame = frame.with_columns(
+            pl.lit(None, dtype=pl.Int64).alias("page_id"),
+        )
     return (
         frame
         .with_columns(
@@ -719,6 +809,7 @@ def normalize_en_pages(frame: pl.DataFrame) -> pl.DataFrame:
         )
         .unique("en_title", keep="last", maintain_order=True)
         .select(
+            "page_id",
             "en_title",
             "en_display_title",
             "qid",

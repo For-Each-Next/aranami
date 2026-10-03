@@ -1,18 +1,64 @@
-"""Verify routine jobs own publication targets."""
+"""Verify configured and overridden routine publication targets."""
 
 from contextlib import nullcontext
+from dataclasses import replace
 from datetime import date
+from importlib import reload
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
 import polars as pl
 
 from aranami.jobs import assessment_lists, dyks, enwp_key_articles, new_pages
+from aranami.monitor import TASK_DEFINITIONS
 from aranami.services.zhwiki import enwp_key_articles as english_reports
+from aranami.support.report_membership import MembershipReport
 
 
 class TestJobDestinations(TestCase):
     """Check destination overrides preserve service scope."""
+
+    @staticmethod
+    def test_configured_destination_becomes_the_job_default() -> None:
+        """Load a job with its centrally configured destination."""
+        context = Mock(today=date(2026, 10, 3))
+        target = "User:Example/Configured new pages"
+        definition = replace(
+            TASK_DEFINITIONS["new_pages"],
+            pages={"report": target},
+        )
+        original_run = new_pages.run
+        try:
+            with patch.dict(TASK_DEFINITIONS, {"new_pages": definition}):
+                reload(new_pages)
+                with (
+                    patch.object(
+                        new_pages,
+                        "job_run",
+                        return_value=nullcontext(context),
+                    ),
+                    patch.object(
+                        new_pages,
+                        "read_pages",
+                        return_value=[Mock(text="Existing report")],
+                    ) as read,
+                    patch.object(
+                        new_pages,
+                        "update_text",
+                        return_value="Updated report",
+                    ),
+                    patch.object(
+                        new_pages,
+                        "record_dates",
+                        side_effect=[{context.today}, set()],
+                    ),
+                ):
+                    new_pages.run(context=context)
+                read.assert_called_once_with(context.site, [target])
+                assert context.publish.call_args.args[0].title == target
+        finally:
+            reload(new_pages)
+            new_pages.run = original_run
 
     @staticmethod
     def test_new_pages_custom_destination_preserves_keyword_scope() -> None:
@@ -58,7 +104,7 @@ class TestJobDestinations(TestCase):
     @staticmethod
     def test_dyk_destination_is_used_in_statistics_source() -> None:
         """Pass selected destinations into statistics generation."""
-        context = Mock(today=date(2026, 10, 3))
+        context = Mock(today=date(2026, 10, 3), dry=False)
         target = "User:Example/DYK report"
         statistics = "c:Data:Example/DYK.tab"
         original = "Existing DYK content"
@@ -71,9 +117,11 @@ class TestJobDestinations(TestCase):
             ) as read,
             patch.object(
                 dyks,
-                "update_text",
-                return_value="Updated DYK content",
-            ) as update,
+                "prepare_report",
+                return_value=MembershipReport("Updated DYK content", {}),
+            ) as prepare,
+            patch.object(dyks, "load_membership", return_value={}),
+            patch.object(dyks, "save_membership") as save,
         ):
             dyks.run(
                 title=target,
@@ -81,7 +129,7 @@ class TestJobDestinations(TestCase):
                 context=context,
             )
         read.assert_called_once_with(context.site, [target])
-        update.assert_called_once_with(
+        prepare.assert_called_once_with(
             original,
             context.site,
             context.today,
@@ -90,11 +138,17 @@ class TestJobDestinations(TestCase):
             statistics_title=statistics,
         )
         assert context.publish.call_args.args[0].title == target
+        save.assert_called_once_with(
+            context.site,
+            target,
+            "Updated DYK content",
+            {},
+        )
 
     @staticmethod
     def test_assessment_custom_destination_preserves_category() -> None:
         """Keep assessment configuration separate from its target."""
-        context = Mock()
+        context = Mock(dry=False)
         target = "User:Example/Assessment report"
         config = assessment_lists.ASSESSMENT_LISTS[0][1]
         original = "<section begin=list />\n<section end=list />"
@@ -111,14 +165,17 @@ class TestJobDestinations(TestCase):
             ) as read,
             patch.object(
                 assessment_lists,
-                "prepare_text",
-                return_value=original,
+                "prepare_report",
+                return_value=MembershipReport(original, {}),
             ) as prepare,
+            patch.object(assessment_lists, "load_membership", return_value={}),
+            patch.object(assessment_lists, "save_membership") as save,
         ):
             assessment_lists.run(lists=[(target, config)], context=context)
         read.assert_called_once_with(context.site, [target])
         prepare.assert_called_once_with(context.site, config, original)
         assert context.publish.call_args.args[0].title == target
+        save.assert_called_once_with(context.site, target, original, {})
 
     @staticmethod
     def test_english_destinations_preserve_report_specs() -> None:

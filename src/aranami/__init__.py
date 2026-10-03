@@ -1,11 +1,12 @@
-"""Expose Aranami's routine entry point and Wikimedia data sources.
+"""Expose recurring monitoring, immediate reports, and data sources.
 
-Call :func:`run` after installing the wheel on PAWS to perform one full
-WikiProject Video games routine. Pass ``dry_run=True`` to write proposed
-edits locally. Authentication and scheduling remain with the caller.
+Call :func:`run` on PAWS to start its scheduled WikiProject Video games
+monitor. Call :func:`run_once` to execute selected reports immediately,
+with an optional date anchor. Both default to live publication; pass
+``dry=True`` to write previews instead of wiki edits.
 """
 
-__all__ = ("run", "sources")
+__all__ = ("run", "run_once", "sources")
 
 from aranami import sources
-from aranami.runner import run
+from aranami.runner import run, run_once

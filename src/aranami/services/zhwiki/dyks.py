@@ -26,6 +26,11 @@ from aranami.sources.quarry.projects import (
 )
 from aranami.sources.wiki import template_aliases
 from aranami.support import dyk_cache
+from aranami.support.regions import region_content
+from aranami.support.report_membership import (
+    MembershipReport,
+    member_identifier,
+)
 from aranami.support.wikitext import replace_by_tag
 
 if TYPE_CHECKING:
@@ -249,6 +254,42 @@ def _item(title: str, assessment: str) -> Template:
     return template
 
 
+def article_members(text: str) -> dict[str, int | None]:
+    """Read unique members from both managed DYK ranges.
+
+    Args:
+        text: Original or updated report page content.
+
+    Returns:
+        Article titles and optional legacy page IDs, excluding unmanaged
+        templates and the hidden statistics payload.
+
+    Raises:
+        ValueError: If a present report range is ambiguous or invalid.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    members: dict[str, int | None] = {}
+    for name in ("dyk", "dykn"):
+        content = region_content(text, name)
+        if content is None:
+            continue
+        for line in content.splitlines():
+            if not line.lstrip().startswith("#"):
+                continue
+            row = mwparserfromhell.parse(line)
+            for template in row.filter_templates(recursive=False):
+                if not template.name.matches("PJ:VG/DYK/item"):
+                    continue
+                if not template.has("1"):
+                    continue
+                title = str(template.get("1").value)
+                normalized = title.replace("_", " ").lstrip(":").strip()
+                if normalized:
+                    identifier = member_identifier(row)
+                    if identifier is not None or normalized not in members:
+                        members[normalized] = identifier
+    return members
+
+
 def render_reports(
     completed: pl.DataFrame,
     nominations: pl.DataFrame,
@@ -314,7 +355,7 @@ def render_reports(
     )
 
 
-def update_text(  # ruff: ignore[too-many-arguments]
+def prepare_report(  # ruff: ignore[too-many-arguments]
     original_text: str,
     site: BaseSite,
     today: date,
@@ -322,7 +363,7 @@ def update_text(  # ruff: ignore[too-many-arguments]
     project: str,
     report_title: str,
     statistics_title: str,
-) -> str:
+) -> MembershipReport:
     """Update supplied DYK page text from current replica and wiki data.
 
     Args:
@@ -334,7 +375,7 @@ def update_text(  # ruff: ignore[too-many-arguments]
         statistics_title: Interwiki title for the copyable Commons data.
 
     Returns:
-        Complete page text with both DYK report ranges replaced.
+        Clean page text and unique member IDs across both DYK ranges.
     """
     members = (
         query_pages_by_wikiproject(site, project)
@@ -380,4 +421,49 @@ def update_text(  # ruff: ignore[too-many-arguments]
         statistics_title=statistics_title,
     )
     text = replace_by_tag("dyk", dyk_report, original_text)
-    return replace_by_tag("dykn", nomination_report, text)
+    member_ids = {
+        str(title).replace("_", " ").lstrip(":").strip(): identifier
+        for title, identifier in pl
+        .concat([
+            completed.select("title", "page_id"),
+            nominations.select("title", "page_id"),
+        ])
+        .unique(subset="title")
+        .iter_rows()
+    }
+    return MembershipReport(
+        text=replace_by_tag("dykn", nomination_report, text),
+        members=member_ids,
+    )
+
+
+def update_text(  # ruff: ignore[too-many-arguments]
+    original_text: str,
+    site: BaseSite,
+    today: date,
+    *,
+    project: str,
+    report_title: str,
+    statistics_title: str,
+) -> str:
+    """Return supplied DYK page text updated from current source data.
+
+    Args:
+        original_text: Existing report text with managed DYK ranges.
+        site: PAWS-authenticated Chinese Wikipedia site.
+        today: UTC date used to finish the statistics timeline.
+        project: WikiProject name used to select report members.
+        report_title: Chinese Wikipedia title cited as the data source.
+        statistics_title: Interwiki title for the copyable Commons data.
+
+    Returns:
+        Complete page text with both DYK report ranges replaced.
+    """
+    return prepare_report(
+        original_text,
+        site,
+        today,
+        project=project,
+        report_title=report_title,
+        statistics_title=statistics_title,
+    ).text

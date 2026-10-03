@@ -5,62 +5,65 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from mwparserfromhell.nodes import Wikilink
-
 from aranami.jobs import ProposedEdit, job_run
+from aranami.monitor import TASK_DEFINITIONS
 from aranami.services.zhwiki.assessment_lists import (
     AssessmentList,
-    article_titles,
-    prepare_text,
+    article_members,
+    prepare_report,
 )
 from aranami.sources.wiki import read_pages
+from aranami.support.edit_summary import EditSummary
+from aranami.support.report_membership import (
+    load_membership,
+    membership_changes,
+    save_membership,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from aranami.jobs import JobContext
 
 logger = logging.getLogger(__name__)
-_MAX_SUMMARY_BYTES = 500
-_BASE_TITLE = "WikiProject:电子游戏/认证条目"
 ASSESSMENT_LISTS = (
     (
-        f"{_BASE_TITLE}/Bplus",
+        TASK_DEFINITIONS["assessment_lists"].pages["Bplus"],
         AssessmentList(
             "Category:乙上级电子游戏条目",
             icon_template="Bplus",
         ),
     ),
     (
-        f"{_BASE_TITLE}/BPAN",
+        TASK_DEFINITIONS["assessment_lists"].pages["BPAN"],
         AssessmentList(
             "Category:请求乙上级评审的电子游戏条目",
             review_grade="bpan",
         ),
     ),
     (
-        f"{_BASE_TITLE}/A",
+        TASK_DEFINITIONS["assessment_lists"].pages["A"],
         AssessmentList(
             "Category:甲级电子游戏条目",
             icon_template="A",
         ),
     ),
     (
-        f"{_BASE_TITLE}/AL",
+        TASK_DEFINITIONS["assessment_lists"].pages["AL"],
         AssessmentList(
             "Category:甲级列表级电子游戏条目",
             icon_template="AL",
         ),
     ),
     (
-        f"{_BASE_TITLE}/ACC",
+        TASK_DEFINITIONS["assessment_lists"].pages["ACC"],
         AssessmentList(
             "Category:请求甲级评审的电子游戏条目",
             review_grade="acc",
         ),
     ),
     (
-        f"{_BASE_TITLE}/PPR",
+        TASK_DEFINITIONS["assessment_lists"].pages["PPR"],
         AssessmentList(
             "Category:请求专题评审的电子游戏条目",
             review_grade="ppr",
@@ -74,7 +77,7 @@ def _edit_summary(
     removed: Sequence[str],
     count: int,
 ) -> str:
-    """Describe changed articles within MediaWiki's summary byte limit.
+    """Describe changed articles within the shared summary byte limit.
 
     Args:
         added: New article titles.
@@ -84,58 +87,90 @@ def _edit_summary(
     Returns:
         A summary with counts and as many changed links as fit.
     """
-    count_part = f"current {count} {'article' if count == 1 else 'articles'}"
-    changes = [
-        (verb, titles)
-        for verb, titles in (("added", added), ("removed", removed))
-        if titles
-    ]
-    if not changes:
-        return f"updated list; {count_part}"
-    for limit in (None, 5, 3, 2, 1, 0):
-        groups: list[str] = []
-        for verb, titles in changes:
-            selected = titles if limit is None else titles[:limit]
-            links = ", ".join(str(Wikilink(title)) for title in selected)
-            omitted = len(titles) - len(selected)
-            if omitted:
-                links += f"{', ' if links else ''}+{omitted} more"
-            groups.append(f"{verb} {links}")
-        summary = "; ".join([*groups, count_part])
-        if len(summary.encode("utf-8")) <= _MAX_SUMMARY_BYTES:
-            return summary
-    return count_part
+    return EditSummary.membership(added, removed, count).render()
 
 
-def _content_summary(original_text: str, text: str) -> str:
+def _content_summary(
+    original_text: str,
+    text: str,
+    *,
+    previous_members: Mapping[str, int | None] | None = None,
+    current_members: Mapping[str, int | None] | None = None,
+) -> str:
     """Describe article changes from the supplied list contents.
 
     Args:
         original_text: Page content before transformation.
         text: Page content returned by the assessment service.
+        previous_members: Original members with validated local IDs, or
+            omit to parse legacy page text.
+        current_members: Source members returned with updated text, or
+            omit to parse page text.
 
     Returns:
         Summary derived without fetching source data again.
     """
-    previous = article_titles(original_text)
-    current = article_titles(text)
-    return _edit_summary(
-        sorted(
-            current - previous,
-            key=lambda title: (title.casefold(), title),
-        ),
-        sorted(
-            previous - current,
-            key=lambda title: (title.casefold(), title),
-        ),
-        len(current),
+    previous = (
+        article_members(original_text)
+        if previous_members is None
+        else previous_members
     )
+    current = (
+        article_members(text) if current_members is None else current_members
+    )
+    added, removed = membership_changes(previous, current)
+    return _edit_summary(added, removed, len(current))
+
+
+def _publish_list(
+    active: JobContext,
+    title: str,
+    config: AssessmentList,
+    original_text: str,
+) -> None:
+    """Publish a prepared list and cache its matching local identities.
+
+    Args:
+        active: Shared context selecting live publication or preview.
+        title: Destination report title and local snapshot identity.
+        config: Category and list-rendering configuration.
+        original_text: Destination text to compare and replace.
+    """
+    report = prepare_report(active.site, config, original_text)
+    cached = load_membership(active.site, title, original_text)
+    previous = {
+        member: cached.get(member) or identifier
+        for member, identifier in article_members(original_text).items()
+    }
+    active.publish(
+        ProposedEdit(
+            site=active.site,
+            title=title,
+            text=report.text,
+            summary=_content_summary(
+                original_text,
+                report.text,
+                previous_members=previous,
+                current_members=report.members,
+            ),
+            tags=("assessment-lists",),
+            original_text=original_text,
+        ),
+    )
+    if active.dry:
+        original_members = {
+            member: identifier or report.members.get(member)
+            for member, identifier in previous.items()
+        }
+        save_membership(active.site, title, original_text, original_members)
+    else:
+        save_membership(active.site, title, report.text, report.members)
 
 
 def run(
     *,
     lists: Sequence[tuple[str, AssessmentList]] | None = None,
-    dry_run: bool = False,
+    dry: bool = False,
     context: JobContext | None = None,
 ) -> None:
     """Construct and publish each assessment list independently.
@@ -143,7 +178,7 @@ def run(
     Args:
         lists: Destination titles and content configurations.
             Omit to use the routine defaults.
-        dry_run: Write proposed edits locally instead of editing pages.
+        dry: Write proposed edits locally instead of editing pages.
         context: Shared routine context, or omit to run independently.
 
     Raises:
@@ -151,7 +186,7 @@ def run(
     """
     with job_run(
         "assessment_lists",
-        dry_run=dry_run,
+        dry=dry,
         context=context,
     ) as active:
         selected_lists = ASSESSMENT_LISTS if lists is None else lists
@@ -163,17 +198,7 @@ def run(
         for (title, config), page in zip(selected_lists, pages, strict=True):
             logger.info("Starting assessment list %s", title)
             try:
-                original_text = page.text
-                text = prepare_text(active.site, config, original_text)
-                edit = ProposedEdit(
-                    site=active.site,
-                    title=title,
-                    text=text,
-                    summary=_content_summary(original_text, text),
-                    tags=("assessment-lists",),
-                    original_text=original_text,
-                )
-                active.publish(edit)
+                _publish_list(active, title, config, page.text)
             except Exception as error:  # Continue independent list updates.
                 logger.exception(
                     "Assessment list failed: %s",

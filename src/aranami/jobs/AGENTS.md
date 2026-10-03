@@ -8,7 +8,8 @@ package and repository-wide instructions.
 - Keep one independently runnable report task per module.
 - Coordinate source adapters and services rather than placing reusable
   report workflows in a job.
-- Do not import another job module.
+- Do not import another report job module. Read shared destination defaults
+  from `aranami.monitor`.
 - If a genuinely report-specific tabular transformation remains in a job,
   prefer Polars expressions over handwritten row loops.
 - If a job must manipulate non-trivial wikitext directly, use
@@ -18,7 +19,8 @@ package and repository-wide instructions.
 
 - Own the actual target site and page, preload current destination text,
   and pass it to content services. Select concrete report settings here,
-  including ranking periods, task-force lists, and report destinations.
+  including ranking periods and task-force lists. Use the default report
+  destinations from `monitor.py` unless the caller overrides them.
 - Construct structured proposed edits from service-returned text, with
   the target site/page, edit summary, status tags, and original text, before
   selecting publication or dry-run output.
@@ -26,7 +28,7 @@ package and repository-wide instructions.
   `Page.save()` and include an informative edit summary.
 - Do not access Wiki Replica connections or SQLAlchemy statements directly.
   Consume typed source or service results.
-- When `dry_run=True`, never call `Page.save()` or another write method.
+- When `dry=True`, never call `Page.save()` or another write method.
   Write one UTF-8 Markdown report for the complete run under `dry-run/`.
 - Begin the report with `# Aranami dry run — YYYY-MM-DD UTC`, followed by
   start, end, and overall status bullets. List each routine once beneath

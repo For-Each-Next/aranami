@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "aranami"
-version = "0.2.0.post7"
+version = "0.2.1a1"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [
@@ -32,6 +32,7 @@ classifiers = [
     "Private :: Do Not Upload",
 ]
 dependencies = [
+    "apscheduler>=3.11,<4",
     "dateparser",
     "great-tables",
     "jieba",
@@ -43,6 +44,7 @@ dependencies = [
     "python-dateutil",
     "sqlalchemy",
     "tqdm",
+    "ipykernel>=7.4.0",
 ]
 
 [dependency-groups]
