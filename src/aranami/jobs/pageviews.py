@@ -56,7 +56,7 @@ TASK_FORCES = (
         "se",
     ),
     pageviews.TaskForce("世嘉工作组", "世嘉工作组", "sega"),
-    pageviews.TaskForce("任天堂", "任天堂工作组", "nintendo"),
+    pageviews.TaskForce("任天堂工作组", "任天堂工作组", "nintendo"),
     pageviews.TaskForce("米哈游工作组", "米哈游工作组", "mihoyo"),
 )
 TASK_FORCE_PERIOD = pageviews.ReportPeriod(

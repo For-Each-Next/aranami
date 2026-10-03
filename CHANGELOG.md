@@ -5,6 +5,13 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.4
 
+### 0.3.1 (2026-10-03 07:25 UTC)
+
+Overview: Corrected Nintendo task-force membership in Pageviews rankings.
+
+- Corrected Nintendo Pageviews selection to use the Nintendo task-force
+  membership instead of the broader Nintendo project.
+
 ### 0.3.0 (2026-10-03 06:54 UTC)
 
 Overview: Added scheduled PAWS reports, resilient Pageviews updates, improved
