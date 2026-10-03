@@ -1,21 +1,22 @@
-"""Install an Aranami wheel and run its routines in dry-run mode.
+"""Install an Aranami wheel and monitor its live routine schedules.
 
 Run ``python scripts/run_aranami.py [path/to/aranami-<version>.whl]``.
 Without a path, use the newest Aranami wheel by its modification time in
 the current directory or its ``dist/`` subdirectory. After installation
 succeeds, delete older Aranami wheels from those two directories.
 Pip installs dependencies using this Python interpreter, then a fresh
-process runs the newly installed package without wiki writes.
+process monitors the newly installed package's schedules with live wiki
+edits and PexBot refresh requests until interrupted.
 Existing Pywikibot configuration and Wiki Replica access are needed.
-Results are saved in ``dry-run/`` beside this script, with one Markdown
-summary and one plain UTF-8 ``.wikitext`` file per proposed edit.
+Runtime logs and caches are saved beside this script.
 The complete script can also be pasted into a PAWS notebook cell, where
-results are saved under the notebook's current directory.
+runtime files are saved under the notebook's current directory.
 """
 
 from __future__ import annotations
 
 import argparse
+import signal
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 from pathlib import Path
@@ -23,6 +24,18 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+_MONITOR_CODE = """\
+from threading import Event
+
+import aranami
+
+scheduler = aranami.run(dry=False)
+try:
+    Event().wait()
+except KeyboardInterrupt:
+    scheduler.shutdown(wait=True)
+"""
 
 
 def _local_wheels() -> list[Path]:
@@ -115,20 +128,34 @@ def install_wheel(argv: Sequence[str] | None = None) -> None:
 
 
 def run() -> None:
-    """Run routines once in a fresh process without wiki writes.
+    """Monitor live schedules in a fresh process until interrupted.
 
-    Save dry-run results beside the script, or in the current directory
+    Save runtime files beside the script, or in the current directory
     for a pasted notebook cell. Preserve the caller's working directory.
-    Routine failures propagate after completed proposals are saved.
+    An interrupt stops the scheduler after its active jobs finish. The
+    fresh process uses the newly installed package independently of
+    imports already loaded in a notebook.
+
+    Raises:
+        subprocess.CalledProcessError: The monitor process exits with a
+            failure status.
     """
     script_file = globals().get("__file__")
     root = Path(script_file).resolve().parent if script_file else Path.cwd()
-    print(f"Saving dry-run results to {root / 'dry-run'}", flush=True)  # ruff: ignore[print]
-    subprocess.run(
-        (sys.executable, "-c", "import aranami; aranami.run_once(dry=True)"),
-        check=True,
+    print(f"Monitoring live schedules; runtime files in {root}", flush=True)  # ruff: ignore[print]
+    command = (sys.executable, "-c", _MONITOR_CODE)
+    with subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true]
+        command,
         cwd=root,
-    )
+        start_new_session=True,
+    ) as process:
+        try:
+            returncode = process.wait()
+        except KeyboardInterrupt:
+            process.send_signal(signal.SIGINT)
+            returncode = process.wait()
+        if returncode:
+            raise subprocess.CalledProcessError(returncode, command)
 
 
 if __name__ == "__main__":

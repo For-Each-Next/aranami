@@ -22,7 +22,7 @@ _DAY = dt.date(2026, 1, 10)
 _STOP = dt.date(2026, 1, 11)
 _TEXT = (
     'Before<!-- update start="page_views" -->'
-    "<!-- wpvg-page-view-data-date: 2026-01-09 -->"
+    "<!-- report date 2026-01-09 -->"
     '<!-- update end="page_views" -->After'
 )
 
@@ -38,7 +38,7 @@ def _report(stop: dt.date) -> pageviews.PageviewReport:
     """
     day = stop - dt.timedelta(days=1)
     return pageviews.PageviewReport(
-        f"<!-- wpvg-page-view-data-date: {day} -->",
+        f"<!-- report date {day} -->",
         day,
         "A",
         "B",
@@ -141,7 +141,13 @@ class TestPeriodAggregation(TestCase):
         ]
         assert str(items[0].get("old_rank").value) == "2"
         assert all(not item.has("old_views") for item in items)
-        assert "# {{PJ:VG/HOT/item" not in text
+        item_lines = [
+            line for line in text.splitlines() if "{{PJ:VG/HOT/item|" in line
+        ]
+        assert len(item_lines) == len(items)
+        assert all(
+            line.startswith("# {{PJ:VG/HOT/item|") for line in item_lines
+        )
 
 
 class TestReportState(TestCase):
@@ -201,19 +207,39 @@ class TestReportState(TestCase):
             job.TASK_FORCES,
         )
         assert len(headers) == expected_count
+        item_lines = [
+            line
+            for line in report.text.splitlines()
+            if "{{PJ:VG/HOT/item|" in line
+        ]
+        assert len(item_lines) == (
+            2 * len(job.PROJECT_PERIODS) + len(job.TASK_FORCES)
+        )
+        assert all(
+            line.startswith("# {{PJ:VG/HOT/item|") for line in item_lines
+        )
         assert [
             str(template.get("page_count").value) for template in headers
         ] == (["2"] * len(job.PROJECT_PERIODS) + ["1"] * len(job.TASK_FORCES))
         assert (
-            report.daily_top == report.weekly_top == report.monthly_top == "A"
+            report.daily_top
+            == report.weekly_top
+            == report.monthly_top
+            == report.quarterly_top
+            == report.yearly_top
+            == "A"
         )
         assert (
             report.daily_top_gain
             == report.weekly_top_gain
             == report.monthly_top_gain
+            == report.quarterly_top_gain
+            == report.yearly_top_gain
             == 0
         )
         assert report.data_date == _DAY
+        assert report.text.startswith("<!-- report date 2026-01-10 -->\n")
+        assert pageviews.current_data_date(report.text) == _DAY
         assert query.call_count == len(responses)
         assert [call.args[1] for call in query.call_args_list] == [
             job.PROJECT,
@@ -296,16 +322,28 @@ class TestReportState(TestCase):
             report.monthly_top_gain,
         ) == (3, 0, None)
         assert job._edit_summary(report) == (
-            "Updated records for 10 January 2026. Daily leader «[[A]]» (▲3). "
-            "Weekly leader «[[B]]». Monthly leader «[[C]]»."
+            "Updated for 10 Jan 2026. Hottest: «[[A]]» for daily (▲3); "
+            "«[[B]]» for weekly; «[[C]]» for monthly."
         )
 
-    @staticmethod
-    def test_marker_and_legacy_header_dates() -> None:
-        """Prefer the explicit marker and accept old header dates."""
-        assert pageviews.current_data_date(_TEXT, _STOP) == dt.date(2026, 1, 9)
-        text = "{{PJ:VG/HOT/header|end=2026-01-10}}"
-        assert pageviews.current_data_date(text, _STOP) == _DAY
+    def test_only_report_date_comments_supply_the_checkpoint(self) -> None:
+        """Ignore obsolete markers and template dates."""
+        assert pageviews.current_data_date(_TEXT) == dt.date(2026, 1, 9)
+        for text in (
+            "<!-- wpvg-page-view-data-date: 2026-01-10 -->",
+            "{{PJ:VG/HOT/header|end=2026-01-10}}",
+            "<!-- report date: 2026-01-10 -->",
+            "<!-- Report date 2026-01-10 -->",
+            "<!-- report date 2026-1-10 -->",
+            "report date 2026-01-10",
+        ):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                pageviews.current_data_date(text)
+            assert pageviews.current_data_date(_TEXT + text) == dt.date(
+                2026,
+                1,
+                9,
+            )
 
     @staticmethod
     def test_report_uses_supplied_periods_and_task_force_selection() -> None:
@@ -385,6 +423,10 @@ class TestReportState(TestCase):
         assert "工作組月瀏覽量" not in report.text
         assert report.weekly_top is None
         assert report.monthly_top is None
+        assert report.quarterly_top is None
+        assert report.yearly_top is None
+        assert report.quarterly_top_gain is None
+        assert report.yearly_top_gain is None
 
     @staticmethod
     def test_daily_health_is_checked_without_displaying_daily_rankings() -> (
@@ -448,10 +490,17 @@ class TestReportState(TestCase):
     def test_missing_and_conflicting_dates_fail_safely(self) -> None:
         """Reject ambiguous checkpoints."""
         with self.assertRaises(ValueError):
-            pageviews.current_data_date("No date", _STOP)
-        conflicting = _TEXT + "<!-- wpvg-page-view-data-date: 2026-01-10 -->"
+            pageviews.current_data_date("No date")
+        conflicting = _TEXT + "<!-- report date 2026-01-10 -->"
         with self.assertRaises(ValueError):
-            pageviews.current_data_date(conflicting, _STOP)
+            pageviews.current_data_date(conflicting)
+        with self.assertRaises(ValueError):
+            pageviews.current_data_date("<!-- report date 2026-02-30 -->")
+        assert pageviews.current_data_date(_TEXT + _TEXT) == dt.date(
+            2026,
+            1,
+            9,
+        )
 
     @staticmethod
     def test_text_update_retains_unmanaged_content() -> None:
@@ -532,9 +581,9 @@ class TestPageviewJob(TestCase):
         assert context.edits[0].original_text == _TEXT
         assert context.edits[0].title == job.REPORT_TITLE
         assert context.edits[0].summary == (
-            "Updated records for 10 January 2026. Daily leader «[[A]]». "
-            "Weekly leader «[[B]]». Monthly leader «[[C]]». "
-            "Executed in 0.00\u2033."
+            "Updated for 10 Jan 2026. Hottest: «[[A]]» for daily; "
+            "«[[B]]» for weekly; «[[C]]» for monthly. "
+            "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
         )
         assert "2026-01-10" in context.edits[0].text
         page.save.assert_not_called()
@@ -668,12 +717,12 @@ class TestPageviewJob(TestCase):
             patch.object(
                 pageviews,
                 "build_report",
-                side_effect=pageviews.PageviewsDeferredError("HTTP 504"),
+                side_effect=pageviews.PageviewsDeferredError("HTTP 503"),
             ),
         ):
             job.run(context=context)
         assert context.tasks[0].status == "deferred"
-        assert context.notes == ["HTTP 504"]
+        assert context.notes == ["HTTP 503"]
         assert not context.edits
         assert page.text == _TEXT
         page.save.assert_not_called()
@@ -830,9 +879,60 @@ class TestPageviewSummaries(TestCase):
             monthly_top_gain=None,
         )
         assert job._edit_summary(report) == (
-            "Updated records for 10 January 2026. "
-            "Daily leader «[[遊戲甲]]» (▲3). "
-            "Weekly leader «[[遊戲乙]]». Monthly leader «[[遊戲丙]]»."
+            "Updated for 10 Jan 2026. Hottest: «[[遊戲甲]]» for daily (▲3); "
+            "«[[遊戲乙]]» for weekly; «[[遊戲丙]]» for monthly."
+        )
+
+    def test_repeated_leaders_link_each_distinct_title_once(self) -> None:
+        """Group repeated titles and keep each period's rank gain."""
+        for titles, expected in (
+            (
+                ("惡靈古堡\uff1a爆發夜",) * 3,
+                (
+                    "«[[惡靈古堡\uff1a爆發夜]]» for "
+                    "daily, weekly, and monthly (▲42)"
+                ),
+            ),
+            (
+                ("A", "B", "A"),
+                "«[[A]]» for daily and monthly (▲42); «[[B]]» for weekly",
+            ),
+            (
+                (None, "B", "B"),
+                "«[[B]]» for weekly and monthly (▲42)",
+            ),
+        ):
+            with self.subTest(titles=titles):
+                report = replace(
+                    _report(_STOP),
+                    daily_top=titles[0],
+                    weekly_top=titles[1],
+                    monthly_top=titles[2],
+                    monthly_top_gain=42,
+                )
+                summary = job._edit_summary(report)
+                assert summary == (
+                    f"Updated for 10 Jan 2026. Hottest: {expected}."
+                )
+                assert len(
+                    mwparserfromhell.parse(summary).filter_wikilinks(),
+                ) == (len(set(titles) - {None}))
+
+    @staticmethod
+    def test_grouped_leader_retains_separate_period_gains() -> None:
+        """Keep each positive rank increase beside its own period."""
+        report = replace(
+            _report(_STOP),
+            daily_top="A",
+            weekly_top="A",
+            monthly_top="A",
+            daily_top_gain=3,
+            weekly_top_gain=2,
+            monthly_top_gain=42,
+        )
+        assert job._edit_summary(report) == (
+            "Updated for 10 Jan 2026. Hottest: «[[A]]» for "
+            "daily (▲3), weekly (▲2), and monthly (▲42)."
         )
 
     @staticmethod
@@ -840,8 +940,19 @@ class TestPageviewSummaries(TestCase):
         """Include only configured rankings with an observed leader."""
         report = replace(_report(_STOP), daily_top=None, monthly_top=None)
         assert job._edit_summary(report) == (
-            "Updated records for 10 January 2026. Weekly leader «[[B]]»."
+            "Updated for 10 Jan 2026. Hottest: «[[B]]» for weekly."
         )
+
+    @staticmethod
+    def test_no_observed_leaders_omits_hottest_pages_sentence() -> None:
+        """Keep only the report date when no period has a leader."""
+        report = replace(
+            _report(_STOP),
+            daily_top=None,
+            weekly_top=None,
+            monthly_top=None,
+        )
+        assert job._edit_summary(report) == "Updated for 10 Jan 2026."
 
     @staticmethod
     def test_multibyte_titles_are_omitted_as_complete_links() -> None:
@@ -850,7 +961,91 @@ class TestPageviewSummaries(TestCase):
         report = replace(_report(_STOP), daily_top=long_title)
         summary = job._edit_summary(report)
         assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
-        assert summary.startswith("Updated records for 10 January 2026.")
+        assert summary.startswith("Updated for 10 Jan 2026.")
         assert long_title not in summary
-        assert "Daily leader" not in summary
+        assert "for daily" not in summary
         assert summary.count("[[") == summary.count("]]")
+        timed = job.EditSummary.with_execution_time(summary, 1313.95)
+        assert len(timed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        assert timed.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 21\u203253.95\u2033.")
+        assert long_title not in timed
+        assert "more" not in timed
+        assert timed.count("[[") == timed.count("]]")
+        assert timed.count("«") == timed.count("»")
+
+    @staticmethod
+    def test_seasonal_and_yearly_leaders_group_in_title_order() -> None:
+        """Group seasonal repeats and retain yearly rank gains."""
+        report = replace(
+            _report(_STOP),
+            quarterly_top="B",
+            yearly_top="D",
+            quarterly_top_gain=4,
+            yearly_top_gain=7,
+        )
+        summary = job._edit_summary(report)
+        assert summary == (
+            "Updated for 10 Jan 2026. Hottest: «[[A]]» for daily; "
+            "«[[B]]» for weekly and seasonal (▲4); «[[C]]» for monthly; "
+            "«[[D]]» for yearly (▲7)."
+        )
+        timed = job.EditSummary.with_execution_time(summary, 1313.95)
+        assert len(timed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        assert "weekly and seasonal (▲4)" in timed
+        assert "«[[D]]» for yearly (▲7)." in timed
+        assert timed.count("[[B]]") == 1
+        assert timed.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 21\u203253.95\u2033.")
+
+    @staticmethod
+    def test_grouped_periods_fit_with_timing_without_duplicate_links() -> None:
+        """Fit all shared periods and timing with one title mention."""
+        title = "遊戲甲乙丙"
+        report = replace(
+            _report(_STOP),
+            daily_top=title,
+            weekly_top=title,
+            monthly_top=title,
+            quarterly_top=title,
+            yearly_top=title,
+        )
+        summary = job._edit_summary(report)
+        assert summary == (
+            f"Updated for 10 Jan 2026. Hottest: «[[{title}]]» for "
+            "daily, weekly, monthly, seasonal, and yearly."
+        )
+        timed = job.EditSummary.with_execution_time(summary, 1313.95)
+        assert timed.startswith(summary)
+        assert len(timed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        assert timed.count(f"[[{title}]]") == 1
+        assert timed.count("[[") == timed.count("]]")
+        assert timed.count("«") == timed.count("»")
+        assert timed.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 21\u203253.95\u2033.")
+
+    def test_timing_omits_yearly_then_seasonal_without_omission_counts(
+        self,
+    ) -> None:
+        """Keep shorter periods and timing when space is limited."""
+        for title_length, expected_periods in (
+            (37, "daily, weekly, monthly, and seasonal"),
+            (40, "daily, weekly, and monthly"),
+        ):
+            with self.subTest(title_length=title_length):
+                title = "遊" * title_length
+                report = replace(
+                    _report(_STOP),
+                    daily_top=title,
+                    weekly_top=title,
+                    monthly_top=title,
+                    quarterly_top=title,
+                    yearly_top=title,
+                )
+                summary = job._edit_summary(report)
+                assert "seasonal, and yearly" in summary
+                timed = job.EditSummary.with_execution_time(summary, 37.78)
+                assert timed == (
+                    f"Updated for 10 Jan 2026. Hottest: «[[{title}]]» for "
+                    f"{expected_periods}. "
+                    "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 37.78\u2033."
+                )
+                assert len(timed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+                assert "more" not in timed

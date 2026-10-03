@@ -2,14 +2,14 @@
 
 [English](README.md) · [繁體中文](README.zh-Hant.md) · [简体中文](README.zh-Hans.md)
 
-Aranami（荒波，意为“汹涌的波浪”）维护维基百科报告，主要服务于中文维基百科的电子游戏专题。
+Aranami（<span lang="ja">荒波</span>，意为“狂瀾”）维护维基百科报告，主要服务于中文维基百科的电子游戏专题。
 在 [Wikimedia PAWS][1] 上运行它，可以发布报告、预览修改，或收集数据进行一次性分析。
 
 ## 选择接口
 
 | 想要完成的工作 | 接口 | 修改内容或返回结果 |
 |---|---|---|
-| 启动例行监视器 | `aranami.run()` | 返回正在运行的调度器，按各项工作设定的 UTC 时间更新报告。 |
+| 启动例行监视器 | `aranami.run()` | 返回正在运行的调度器；首次启动时立即检查全部报告，随后按各项工作设定的 UTC 时间更新。 |
 | 按同一计划持续预览 | `aranami.run(dry=True)` | 返回正在运行的调度器，每次触发时将提案写入 `dry-run/`；不会编辑维基页面或请求刷新 PexBot 报告。 |
 | 立即运行报告 | `aranami.run_once(...)` | 无论计划时间为何，都立即运行全部工作一轮并返回 `None`；使用 `dry=True` 预览。 |
 | 立即运行选定报告 | `aranami.run_once(tasks=["new_pages", "pageviews"], ...)` | 仅运行选定工作一轮；`tasks="new_pages"` 选择单项工作。 |
@@ -18,7 +18,7 @@ Aranami（荒波，意为“汹涌的波浪”）维护维基百科报告，主�
 | 获取优质条目及其入选日期 | `analyze_quality_contents(site)` | 返回条目数据表；不会编辑维基页面或自动导出结果。 |
 | 获取数据或处理提供的文本 | 下方的数据源和辅助接口 | 返回数据、显示预览或转换文本；会写入文件的接口在下方注明。 |
 
-## 在 PAWS 上安装并预览
+## 在 PAWS 上安装并持续监视
 
 将 wheel 和 [scripts/run_aranami.py](scripts/run_aranami.py) 上传到 PAWS。
 在包含 Aranami wheel 的目录中运行：
@@ -28,8 +28,10 @@ python scripts/run_aranami.py
 ```
 
 启动脚本选择修改时间最新的 `aranami-*.whl`，查找范围为当前目录或 `dist/`。
-它安装该 wheel 及其依赖，并调用新版本的 `aranami.run_once(dry=True)`，
-立即预览全部例行工作一轮。安装成功后，
+它安装该 wheel 及其依赖，并调用新版本的 `aranami.run(dry=False)`。
+新监视器立即检查全部例行工作，随后按 UTC 计划持续运行，
+发布有变化的维基页面并请求 PexBot 刷新。启动脚本会持续运行，
+直到按 Ctrl+C 或笔记本的停止按钮中断；停止时等待正在运行的工作完成。安装成功后，
 脚本会删除修改时间相同或更早的其他本地 Aranami wheel。
 如果安装失败，脚本会保留所有 wheel，并且不会启动例行工作。
 要自行选择 wheel：
@@ -44,13 +46,13 @@ python scripts/run_aranami.py "path/to/aranami-<version>.whl"
 %run scripts/run_aranami.py
 ```
 
-也可以将完整脚本粘贴到一个单元格中。直接执行文件时，`logs/`、`cache/` 和 `dry-run/`
+也可以将完整脚本粘贴到一个单元格中。直接执行文件时，`logs/` 和 `cache/`
 位于脚本所在目录；粘贴到单元格中执行时，则使用笔记本的当前目录。
 即使笔记本之前导入了旧版本，启动脚本也会使用新安装的版本。
 PAWS 环境是临时的，因此服务器重启后需要再次运行脚本。参见 [PAWS 使用指引][3]。
 
 脚本的公开 Python 接口包括 `install_wheel(argv=None)` 和 `run()`：
-前者安装选中的 wheel 并删除较旧的本地上传文件；后者预览已安装的包。
+前者安装选中的 wheel 并删除较旧的本地上传文件；后者持续监视已安装的包并正式发布。
 以导入方式使用脚本时，应明确传入安装参数：
 
 ```python
@@ -65,7 +67,7 @@ run()
 
 `aranami.run(*, dry=False, clear_cache=False)` 启动包内的监视器，
 返回 APScheduler 的 `BackgroundScheduler`。各项工作按下表设定的 UTC 时间运行。
-调用会立即返回，首轮工作在下一次计划时间触发。
+调用会立即返回。新启动的正式监视器立即检查并更新全部报告，随后按计划运行。
 
 ```python
 import aranami
@@ -82,7 +84,7 @@ APScheduler 随 wheel 安装，无需额外的笔记本安装单元格。
 
 只要 Python 进程或 PAWS 内核仍在运行，监视器就会继续工作。
 重启内核会清除其调度计划；重新导入包后，再次调用 `aranami.run()`。
-以相同 `dry` 值重复调用会复用正在运行的调度器。
+以相同 `dry` 值重复调用会复用正在运行的调度器，不会再次触发初始检查。
 要切换该值或清除缓存，请先调用 `scheduler.shutdown(wait=True)`。
 监视器运行期间切换模式或传入 `clear_cache=True` 会抛出 `ValueError`。
 已暂停的监视器需要调用 `scheduler.resume()` 才会恢复。
@@ -138,40 +140,49 @@ new_pages.run(dry=True)
 
 ## 例行工作与 UTC 运行计划
 
-各项工作的默认目标页面和 UTC 运行计划共同定义于
-[src/aranami/monitor.py](src/aranami/monitor.py) 的 `TASK_DEFINITIONS`。
-修改此文件后构建替换 wheel，即可更改包内的默认目标或触发时间。
-各工作模块使用这些默认值实现报告；此模块从同一组定义生成 `SCHEDULES`，并管理监视器。
-`aranami.run()` 使用 UTC 注册这些 cron 工作，不受笔记本本地时区影响。
-“运行安排”列表示触发时间，不代表工作执行所需的时长。
-`aranami.run_once()` 立即执行，不使用这些触发时间。
-每项工作最多同时执行一个实例，错过的多个触发时间合并为一次执行尝试。
-热门条目允许延迟最多 3,500 秒开始执行。
+下列六项独立工作维护中文维基百科的电子游戏专题报告。
+新启动的正式监视器立即检查全部工作，随后按各项 UTC 计划运行。
+正式运行保存有变化的页面；`dry=True` 写入本地修改提案。
+下方每个固定目标单独占一行，均位于 `WikiProject:电子游戏/` 下。
 
-下方页面链接均指向中文维基百科 `WikiProject:电子游戏/` 下的页面，
-每个固定目标单独占一行。正式运行保存有变化的页面文本；
-`dry=True` 则写入本地修改提案。
+默认目标和 UTC cron 计划定义于
+[src/aranami/monitor.py](src/aranami/monitor.py) 的 `TASK_DEFINITIONS`。
+修改此文件后构建替换 wheel，即可更改这些默认值；工作模块使用同一组定义，
+监视器据此生成 `SCHEDULES`。“运行安排”列表示触发时间，不代表执行时长，
+也不受笔记本本地时区影响。`aranami.run_once()` 不受这些时间限制，立即执行。
+每项工作最多同时执行一个实例，错过的多个触发时间合并为一次执行尝试。
 
 | 例行脚本 | 更新页面 | [运行安排](src/aranami/monitor.py) | 说明 |
 |---|---|---|---|
-| [dyks.py](src/aranami/jobs/dyks.py) | [新条目推荐](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新条目推荐) | 每小时 `HH:00` | 刷新已入选条目、候选条目、评级和隐藏的年度统计。 |
-| [new_pages.py](src/aranami/jobs/new_pages.py) | [新进条目/关键词筛选](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新进条目/关键词筛选) | 每日 `00:07` | 列出截至 UTC 昨天符合关键词的新建页面及由重定向改写的页面；默认保留 100 个日期，并刷新全部保留记录中的评级图标。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/Bplus](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/Bplus) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/BPAN](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/BPAN) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/A](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/A) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/AL](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/AL) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/ACC](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/ACC) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/PPR](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/PPR) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [pageviews.py](src/aranami/jobs/pageviews.py) | [热门条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/热门条目) | 每小时 `HH:59` | UTC 18:00之后，尝试更新昨日访问量资料。每次最多补一个缺失日期，避免集中发出大量请求。 |
-| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科重要条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科重要条目) | 每日 `23:24` | 刷新英文极高／高重要度条目、中文对应条目、评级和数量。 |
-| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科优质条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科优质条目) | 每日 `23:24` | 刷新英文 FA／FL／GA 条目、中文对应条目、评级和数量。 |
-| [pexbot.py](src/aranami/jobs/pexbot.py) | [数据库报告](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告) 下的订阅页面 | 每日 `00:00` | 请求 PexBot 刷新列出的报告页面。 |
+| [dyks.py](src/aranami/jobs/dyks.py) | [新条目推荐](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新条目推荐) | 每小时 `HH:00` | 刷新已入选条目、候选条目、评级和隐藏的年度统计。[（详细说明）](#dyk) |
+| [new_pages.py](src/aranami/jobs/new_pages.py) | [新进条目/关键词筛选](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新进条目/关键词筛选) | 每日 `00:07` | 列出截至 UTC 昨天符合关键词的新建页面及由重定向改写的页面；默认保留 100 个日期，并刷新全部保留记录中的评级图标。[（详细说明）](#新页面) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/Bplus](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/Bplus) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（详细说明）](#评级列表) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/BPAN](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/BPAN) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（详细说明）](#评级列表) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/A](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/A) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（详细说明）](#评级列表) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/AL](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/AL) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（详细说明）](#评级列表) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/ACC](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/ACC) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（详细说明）](#评级列表) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/PPR](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/PPR) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（详细说明）](#评级列表) |
+| [pageviews.py](src/aranami/jobs/pageviews.py) | [热门条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/热门条目) | 每小时 `HH:59` | UTC 18:00之后，尝试更新昨日访问量资料。每次最多补一个缺失日期，避免集中发出大量请求。[（详细说明）](#热门条目) |
+| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科重要条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科重要条目) | 每日 `23:24` | 刷新英文极高／高重要度条目、中文对应条目、评级和数量。[（详细说明）](#英文条目对照) |
+| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科优质条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科优质条目) | 每日 `23:24` | 刷新英文 FA／FL／GA 条目、中文对应条目、评级和数量。[（详细说明）](#英文条目对照) |
+| [pexbot.py](src/aranami/jobs/pexbot.py) | [数据库报告](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告) 下的订阅页面 | 每日 `00:00` | 请求 PexBot 刷新列出的报告页面。[（详细说明）](#pexbot) |
 
-遗漏每日更新时，热门条目每次调用只推进一个报告日期；若当天数据不可用，
-留待后续调用重试。新页面目前在一次调用中补齐保留范围内的全部缺失日期，
-并复用已有记录。每次调用都会刷新全部保留页面条目的评级图标，包括较早日期的条目。
-其他生成的列表也会在重建时刷新评级或设定的评审图标。
-热门条目的评级随新每日报告生成而刷新；PexBot 的生成内容由其自身控制。
+链接中的例行工作均在 `aranami.jobs` 下提供 `run(...)`。
+下面分别说明各项工作的结果和目标设置。
+
+### DYK
+
+DYK 刷新已入选条目、候选条目、评级和隐藏的年度统计。
+使用 `title` 可选择其他报告目标。`statistics_title` 默认为
+`c:Data:Zhwiki_WikiProject_Video_Games_DYK_Annual_Statistics.tab`。
+它为可复制的隐藏统计内容标注名称；例行工作不会保存该 Commons 页面。
+
+### 新页面
+
+新页面列表默认保留截至 UTC 昨天的 100 个日期。
+一次调用会补齐保留范围内全部缺失日期，并复用已有每日记录。
+每次调用都会刷新全部保留页面条目的评级图标，包括较早日期的条目。
+使用 `title` 可选择其他目标。
 
 每个新页面日期还会搜索该 UTC 日带有 `mw-removed-redirect` 标签的编辑。
 符合关键词且目前为普通页面的结果会加入同一列表，在讨论链接后标注
@@ -185,16 +196,30 @@ new_pages.run(dry=True)
 已有记录会在元数据可用时补齐缺少的注释；已保存的注释会在后续更新中保留。
 无法取得创建时间时标记为 `未知`。
 
-链接中的例行工作均在 `aranami.jobs` 下提供 `run(...)`。
-DYK、新页面和热门条目接受 `title` 以选择其他目标；热门条目还接受
-`settings=REPORT_SETTINGS`。使用 `lists=[(title, AssessmentList(...)), ...]`
-选择评级列表，使用包含 `important` 和 `quality` 的 `targets` 选择英文报告目标。
-PexBot 接受 `prefixes` 以覆盖允许的页面根标题，或用 `prefixes=[]` 关闭刷新；
-仅支持中文维基百科。
+### 评级列表
 
-DYK 的 `statistics_title` 默认为
-`c:Data:Zhwiki_WikiProject_Video_Games_DYK_Annual_Statistics.tab`。
-它为可复制的隐藏统计内容标注名称；例行工作不会保存该 Commons 页面。
+评级列表在重建时刷新条目、评级和设定的评审图标。
+使用 `lists=[(title, AssessmentList(...)), ...]` 选择列表和目标页面。
+
+### 热门条目
+
+热门条目每次调用只推进一个缺失报告日期；若当天数据不可用，留待后续调用重试。
+昨日观测数据在 UTC 18:00 后可尝试处理，每小时 `HH:59` 的定时计划首次在
+UTC 18:59 尝试更新；此前仍可补齐较早的缺失日期。
+计划工作允许延迟最多 3,500 秒开始执行。评级随新每日报告生成而刷新。
+使用 `title` 选择其他目标，用 `settings=REPORT_SETTINGS` 选择专题成员和排名周期。
+
+### 英文条目对照
+
+两项英文报告刷新极高／高重要度条目或 FA／FL／GA 条目，
+以及中文对应条目、评级和数量。评级在列表重建时刷新。
+使用包含 `important` 和 `quality` 的 `targets` 选择报告目标。
+
+### PexBot
+
+PexBot 刷新订阅的报告页面，其生成内容由自身控制。
+使用 `prefixes` 覆盖允许的页面根标题，或用 `prefixes=[]` 关闭刷新。
+仅支持中文维基百科。
 
 ### 使用指定日期
 
@@ -242,7 +267,8 @@ finally:
 对于热门条目排名，报告日期必须早于基准日期（`date` 或 `context.today`），
 并符合实际调用开始时的 UTC 就绪限制：
 昨日数据到 UTC 18:00 才能尝试处理，此前仍可补较早的缺失日期。
-指定基准日期不会绕过这一限制。工作根据目标页面记录的进度处理下一个缺失日期，
+指定基准日期不会绕过这一限制。进度日期只识别目标页面的
+`<!-- report date YYYY-MM-DD -->` 注释。工作据此处理下一个缺失日期，
 不会直接跳到指定日期。要生成某一天的准确排名而不修改页面，可以使用一次性报告生成工具：
 
 ```python

@@ -31,17 +31,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-REPORT_DATA_DATE_MARKER = "wpvg-page-view-data-date"
+REPORT_DATA_DATE_MARKER = "report date"
 _MISSING_PERCENT_LIMIT = 95
 _REQUEST_ATTEMPTS = 3
 _TRANSIENT_HTTP_STATUSES = {
     HTTPStatus.BAD_GATEWAY,
     HTTPStatus.SERVICE_UNAVAILABLE,
-    HTTPStatus.GATEWAY_TIMEOUT,
 }
 _MARKER_PATTERN = re.compile(
-    rf"\s*{REPORT_DATA_DATE_MARKER}\s*:\s*(\d{{4}}-\d{{2}}-\d{{2}})\s*",
-    re.IGNORECASE,
+    rf"\s*{REPORT_DATA_DATE_MARKER} ([0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}})\s*",
 )
 _VIEWS_SCHEMA = {
     "title": pl.String,
@@ -86,6 +84,12 @@ class PageviewReport:
             unchanged, or None without a previous rank.
         monthly_top_gain: Places gained by the monthly leader; zero if
             unchanged, or None without a previous rank.
+        quarterly_top: First observed article in the seasonal ranking.
+        yearly_top: First observed article in the yearly ranking.
+        quarterly_top_gain: Places gained by the seasonal leader;
+            zero if unchanged, or None without a previous rank.
+        yearly_top_gain: Places gained by the yearly leader; zero if
+            unchanged, or None without a previous rank.
     """
 
     text: str
@@ -96,6 +100,10 @@ class PageviewReport:
     daily_top_gain: int | None = None
     weekly_top_gain: int | None = None
     monthly_top_gain: int | None = None
+    quarterly_top: str | None = None
+    yearly_top: str | None = None
+    quarterly_top_gain: int | None = None
+    yearly_top_gain: int | None = None
 
 
 class PageviewsUnavailableError(RuntimeError):
@@ -129,18 +137,22 @@ class ReportSettings:
     project_tag: str
 
 
-def current_data_date(text: str, target_date: dt.date) -> dt.date:
-    """Read the authoritative data date or a legacy report end date.
+def current_data_date(text: str) -> dt.date:
+    """Read the checkpoint from a canonical report-date comment.
+
+    Recognize only ``<!-- report date YYYY-MM-DD -->`` comments, with
+    surrounding whitespace allowed in their contents. Ignore legacy
+    markers and ranking-template dates.
 
     Args:
-        text: Current report page containing a date marker or headers.
-        target_date: Latest complete day, used to bound legacy dates.
+        text: Current report page containing a report-date comment.
 
     Returns:
         Previously published report date.
 
     Raises:
-        ValueError: If no date is available or markers conflict.
+        ValueError: If the marker is missing, a date is invalid, or
+            recognized markers contain conflicting dates.
     """
     code = mwparserfromhell.parse(text)
     dates = {
@@ -151,20 +163,11 @@ def current_data_date(text: str, target_date: dt.date) -> dt.date:
     if len(dates) == 1:
         return dates.pop()
     if dates:
-        message = "Pageview report contains conflicting data-date markers."
+        message = "Pageview report contains conflicting report-date markers."
         raise ValueError(message)
-    legacy_dates = {
-        dt.date.fromisoformat(str(template.get("end").value).strip())
-        for template in code.filter_templates()
-        if str(template.name).strip().casefold() == "pj:vg/hot/header"
-        and template.has("end")
-    }
-    eligible = [value for value in legacy_dates if value <= target_date]
-    if eligible:
-        return max(eligible)
     message = (
-        "Unable to find the pageview data date; add a marker such as "
-        f"<!-- {REPORT_DATA_DATE_MARKER}: 2026-01-09 -->."
+        "Unable to find the pageview report date; add a marker such as "
+        f"<!-- {REPORT_DATA_DATE_MARKER} 2026-01-09 -->."
     )
     raise ValueError(message)
 
@@ -237,6 +240,8 @@ def aggregate_views(
     Missing observations produce a null total; an observed zero remains
     zero. Cache changes are staged in memory for the caller to validate
     before saving; an omitted cache performs ordinary transient queries.
+    HTTP 504 skips the affected article without retrying or changing its
+    cached coverage. Skipped articles contribute no period rows.
 
     Args:
         site: Authenticated site identifying the Wikimedia project.
@@ -268,6 +273,8 @@ def aggregate_views(
             cache=cache,
             history_days=history_days,
         )
+        if observations is None:
+            continue
         totals = (
             period_frame
             .join_where(
@@ -291,7 +298,7 @@ def aggregate_views(
         )
         if index % 100 == 0 or index == len(unique_titles):
             logger.info("Aggregated %d/%d articles", index, len(unique_titles))
-    return pl.concat(frames)
+    return pl.concat(frames) if frames else pl.DataFrame(schema=_VIEWS_SCHEMA)
 
 
 def _article_observations(
@@ -301,7 +308,7 @@ def _article_observations(
     *,
     cache: PageviewsCache | None,
     history_days: int,
-) -> pl.DataFrame:
+) -> pl.DataFrame | None:
     """Reuse sufficient history or request one missing contiguous range.
 
     Args:
@@ -313,6 +320,7 @@ def _article_observations(
 
     Returns:
         Known dates and observed counts, with missing dates omitted.
+        None after HTTP 504, leaving cached history and coverage intact.
     """
     start, stop = period
     previous = pl.DataFrame(schema={"date": pl.Date, "pageview": pl.Int64})
@@ -335,17 +343,11 @@ def _article_observations(
                 if cached_stop >= stop:
                     return previous
                 request_start, coverage_start = cached_stop, cached_start
-    fresh = (
-        _fetch_article_data(
-            site,
-            title,
-            request_start,
-            stop,
-        )
-        .select("date", "pageview")
-        .filter(
-            pl.col("date").is_between(request_start, stop, closed="left"),
-        )
+    fetched = _fetch_article_data(site, title, request_start, stop)
+    if fetched is None:
+        return None
+    fresh = fetched.select("date", "pageview").filter(
+        pl.col("date").is_between(request_start, stop, closed="left"),
     )
     combined = pl.concat([previous, fresh]).unique(subset="date", keep="last")
     if cache is not None:
@@ -358,8 +360,8 @@ def _fetch_article_data(
     title: str,
     start: dt.date,
     stop: dt.date,
-) -> pl.DataFrame:
-    """Retry transient gateway failures without inventing data.
+) -> pl.DataFrame | None:
+    """Skip HTTP 504 pages and retry HTTP 502/503 failures.
 
     Args:
         site: Site identifying the Pageviews project.
@@ -369,6 +371,7 @@ def _fetch_article_data(
 
     Returns:
         Observations from a successful request, including zeroes.
+        None when HTTP 504 skips this article for the current report.
 
     Raises:
         PageviewsDeferredError: Three transient attempts failed.
@@ -380,6 +383,13 @@ def _fetch_article_data(
         try:
             return pageviews.fetch_data_dataframe(site, title, start, stop)
         except urllib.error.HTTPError as error:
+            if error.code == HTTPStatus.GATEWAY_TIMEOUT:
+                error.close()
+                logger.info(
+                    "Skipping Pageviews article %s after HTTP 504",
+                    title,
+                )
+                return None
             if error.code not in _TRANSIENT_HTTP_STATUSES:
                 raise
             error.close()
@@ -502,7 +512,7 @@ def _section(
                 "" if value is None else str(value),
                 preserve_spacing=False,
             )
-        items.append(str(item))
+        items.append(f"# {item}")
     available = data.filter(pl.col("views").is_not_null())
     top = str(available.item(0, "title")) if available.height else None
     old_rank = available.item(0, "old_rank") if available.height else None
@@ -546,6 +556,9 @@ def build_report(
     missing_percent: int = _MISSING_PERCENT_LIMIT,
 ) -> PageviewReport:
     """Build project rankings and cache only healthy report inputs.
+
+    Articles returning HTTP 504 are omitted from rankings and the daily
+    availability check. Their cached coverage is retained.
 
     Args:
         site: Chinese Wikipedia site and its replica identity.
@@ -598,8 +611,9 @@ def build_report(
         cache.discard_pending()
         raise
     cache.save(titles, history_days=history_days)
+    articles = articles.join(views.select("title"), on="title", how="semi")
     sections = [
-        f"<!-- {REPORT_DATA_DATE_MARKER}: {data_date.isoformat()} -->\n",
+        f"<!-- {REPORT_DATA_DATE_MARKER} {data_date.isoformat()} -->\n",
         f"== {settings.project_heading} ==",
     ]
     leaders: dict[str, tuple[str | None, int | None]] = {}
@@ -627,14 +641,18 @@ def build_report(
         text, _, _ = _section(members, views, stop, config, task_force.tag)
         sections.append(text)
     return PageviewReport(
-        "".join(sections),
-        data_date,
-        leaders.get("daily", (None, None))[0],
-        leaders.get("weekly", (None, None))[0],
-        leaders.get("monthly", (None, None))[0],
-        leaders.get("daily", (None, None))[1],
-        leaders.get("weekly", (None, None))[1],
-        leaders.get("monthly", (None, None))[1],
+        text="".join(sections),
+        data_date=data_date,
+        daily_top=leaders.get("daily", (None, None))[0],
+        weekly_top=leaders.get("weekly", (None, None))[0],
+        monthly_top=leaders.get("monthly", (None, None))[0],
+        daily_top_gain=leaders.get("daily", (None, None))[1],
+        weekly_top_gain=leaders.get("weekly", (None, None))[1],
+        monthly_top_gain=leaders.get("monthly", (None, None))[1],
+        quarterly_top=leaders.get("quarterly", (None, None))[0],
+        yearly_top=leaders.get("yearly", (None, None))[0],
+        quarterly_top_gain=leaders.get("quarterly", (None, None))[1],
+        yearly_top_gain=leaders.get("yearly", (None, None))[1],
     )
 
 

@@ -2,15 +2,16 @@
 
 [English](README.md) · [繁體中文](README.zh-Hant.md) · [简体中文](README.zh-Hans.md)
 
-Aranami (荒波, "rough waves") maintains Wikipedia reports, primarily for
-WikiProject Video games on Chinese Wikipedia. Run it on [Wikimedia PAWS][1]
+Aranami (<span lang="ja">荒波</span>, "rough waves") maintains Wikipedia
+reports, primarily for WikiProject Video games on Chinese Wikipedia.
+Run it on [Wikimedia PAWS][1]
 to publish reports, preview changes, or collect data for one-time analysis.
 
 ## Choose an interface
 
 | What you want to do | Interface | What changes or comes back |
 |---|---|---|
-| Start the routine monitor | `aranami.run()` | Returns a running scheduler that updates each report at its scheduled UTC time. |
+| Start the routine monitor | `aranami.run()` | Returns a running scheduler that checks each report immediately on a fresh start, then updates it at its scheduled UTC time. |
 | Keep previewing on the same schedule | `aranami.run(dry=True)` | Returns a running scheduler that writes proposals under `dry-run/` at each scheduled time, without wiki edits or PexBot refresh requests. |
 | Run reports immediately | `aranami.run_once(...)` | Runs all routines once, regardless of their schedule, and returns `None`. Use `dry=True` for a preview. |
 | Run selected reports immediately | `aranami.run_once(tasks=["new_pages", "pageviews"], ...)` | Runs only the selected routines once; `tasks="new_pages"` selects one routine. |
@@ -19,7 +20,7 @@ to publish reports, preview changes, or collect data for one-time analysis.
 | Get quality articles and listing dates | `analyze_quality_contents(site)` | Returns an article table; no wiki edits or automatic result export. |
 | Fetch data or process supplied text | The source and support interfaces below | Returns data, displays a preview, or transforms text; file-writing exceptions are identified below. |
 
-## Install and preview on PAWS
+## Install and monitor on PAWS
 
 Upload the wheel and [scripts/run_aranami.py](scripts/run_aranami.py) to PAWS.
 Run this from a directory containing Aranami wheels:
@@ -30,8 +31,11 @@ python scripts/run_aranami.py
 
 The launcher installs the most recently modified `aranami-*.whl` from the
 current directory or `dist/`, installs its dependencies, and calls
-`aranami.run_once(dry=True)` with the installed version for one immediate
-preview. After successful installation, it
+`aranami.run(dry=False)` with the installed version. A fresh monitor checks
+every routine immediately, then keeps running on its UTC schedule. It
+publishes changed wiki pages and requests PexBot refreshes. The launcher
+stays active until you interrupt it with Ctrl+C or the notebook's stop
+button; shutdown waits for active jobs to finish. After installation, it
 removes other local Aranami wheels with equal or earlier modification times.
 It retains all wheels if installation fails and does not start the routines.
 To choose a wheel yourself:
@@ -47,15 +51,15 @@ If the script is beside the notebook, omit `scripts/`. In a notebook cell:
 ```
 
 You can also paste the complete script into one cell. File execution places
-`logs/`, `cache/`, and `dry-run/` beside the script; a pasted cell uses the
+`logs/` and `cache/` beside the script; a pasted cell uses the
 notebook's current directory. The launcher uses the newly installed version
 even if the notebook previously imported an older one. PAWS environments are
 temporary, so run it again after a server restart. See [PAWS guidance][3].
 
 The script's public Python interfaces are `install_wheel(argv=None)`, which
 installs the selected wheel and removes older local uploads, and `run()`,
-which previews the installed package. When importing the script, pass
-installation arguments explicitly:
+which monitors the installed package with live publication. When importing
+the script, pass installation arguments explicitly:
 
 ```python
 from scripts.run_aranami import install_wheel, run
@@ -69,8 +73,9 @@ run()
 
 `aranami.run(*, dry=False, clear_cache=False)` starts the packaged monitor
 and returns an APScheduler `BackgroundScheduler`. Each routine runs at its
-own UTC time in the table below. The call returns immediately, and the first
-jobs run at their next scheduled times.
+own UTC time in the table below. The call returns immediately. On a fresh
+live start, all routines check and update their reports immediately before
+continuing on those schedules.
 
 ```python
 import aranami
@@ -89,7 +94,8 @@ The monitor reuses PAWS authentication and Wiki Replica access.
 The monitor remains active while its Python process or PAWS kernel stays
 alive. Restarting the kernel removes its schedule; call `aranami.run()`
 again after importing the package. Repeated calls with the same `dry` value
-reuse the running scheduler. To change that value or clear the cache, first
+reuse the running scheduler without another initial pass. To change that
+value or clear the cache, first
 call `scheduler.shutdown(wait=True)`. Changing modes or passing
 `clear_cache=True` while the monitor is running raises `ValueError`.
 A paused monitor stays paused until you call `scheduler.resume()`.
@@ -150,47 +156,55 @@ takes precedence and the caller writes the combined preview with
 
 ## Routine jobs and UTC schedule
 
-Each routine's default target pages and UTC schedule are defined together
-in `TASK_DEFINITIONS` in
-[src/aranami/monitor.py](src/aranami/monitor.py).
-Edit this file and build a replacement wheel to change the packaged
-destinations or trigger times. The job modules implement
-the reports using these defaults; this module derives `SCHEDULES` from the
-same definitions and manages the monitor.
-`aranami.run()` installs these cron jobs using UTC, regardless of the
-notebook's local timezone.
-The schedule column gives trigger times, rather than execution duration.
-`aranami.run_once()` runs immediately and does not use these trigger times.
-Each routine allows one active instance and combines missed trigger times
-into one attempted run. Pageviews permits up to 3,500 seconds of lateness.
+These six independent routines maintain Chinese Wikipedia's video-game
+project reports. A fresh live monitor checks all six immediately, then
+follows their individual UTC schedules. Live calls save changed pages;
+`dry=True` writes local proposals. Each fixed destination below has its
+own row under `WikiProject:电子游戏/`.
 
-All page links below are on Chinese Wikipedia under
-`WikiProject:电子游戏/`. Each fixed destination has its own row.
-Live calls save changed page text; `dry=True` writes local proposals.
+Default pages and UTC cron schedules are defined in `TASK_DEFINITIONS` in
+[src/aranami/monitor.py](src/aranami/monitor.py). Edit it and build a
+replacement wheel to change those defaults. The job modules use the same
+definitions from which the monitor derives `SCHEDULES`.
+The schedule column gives trigger times, rather than execution duration;
+the notebook's local timezone has no effect. `aranami.run_once()` runs
+immediately regardless of these times. Each routine permits one active
+instance and combines missed triggers into one attempted run.
 
 | Routine | Updated page | [Schedule](src/aranami/monitor.py) | Notes |
 |---|---|---|---|
-| [dyks.py](src/aranami/jobs/dyks.py) | [新条目推荐](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新条目推荐) | Hourly at `HH:00` | Refreshes completed DYK entries, candidates, assessment grades, and hidden annual statistics. |
-| [new_pages.py](src/aranami/jobs/new_pages.py) | [新进条目/关键词筛选](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新进条目/关键词筛选) | Daily at `00:07` | Lists keyword-matched page creations and redirect conversions through yesterday UTC; retains 100 dates by default and refreshes assessment icons across all retained entries. |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/Bplus](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/Bplus) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/BPAN](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/BPAN) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/A](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/A) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/AL](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/AL) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/ACC](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/ACC) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/PPR](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/PPR) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. |
-| [pageviews.py](src/aranami/jobs/pageviews.py) | [热门条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/热门条目) | Hourly at `HH:59` | After 18:00 UTC, attempts to update yesterday's pageview data. Catches up at most one missing day per call to avoid a burst of requests. |
-| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科重要条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科重要条目) | Daily at `23:24` | Refreshes English Top/High-importance articles, Chinese counterparts, assessment grades, and counts. |
-| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科优质条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科优质条目) | Daily at `23:24` | Refreshes English FA/FL/GA articles, Chinese counterparts, assessment grades, and counts. |
-| [pexbot.py](src/aranami/jobs/pexbot.py) | Subscribed pages under [数据库报告](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告) | Daily at `00:00` | Requests PexBot to refresh the listed report pages. |
+| [dyks.py](src/aranami/jobs/dyks.py) | [新条目推荐](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新条目推荐) | Hourly at `HH:00` | Refreshes completed DYK entries, candidates, assessment grades, and hidden annual statistics. [(Details)](#dyk) |
+| [new_pages.py](src/aranami/jobs/new_pages.py) | [新进条目/关键词筛选](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新进条目/关键词筛选) | Daily at `00:07` | Lists keyword-matched page creations and redirect conversions through yesterday UTC; retains 100 dates by default and refreshes assessment icons across all retained entries. [(Details)](#new-pages) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/Bplus](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/Bplus) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. [(Details)](#assessment-lists) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/BPAN](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/BPAN) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. [(Details)](#assessment-lists) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/A](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/A) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. [(Details)](#assessment-lists) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/AL](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/AL) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. [(Details)](#assessment-lists) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/ACC](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/ACC) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. [(Details)](#assessment-lists) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/PPR](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/PPR) | Daily at `01:31`, `07:31`, `13:31`, `19:31` | Updates the list. [(Details)](#assessment-lists) |
+| [pageviews.py](src/aranami/jobs/pageviews.py) | [热门条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/热门条目) | Hourly at `HH:59` | After 18:00 UTC, attempts to update yesterday's pageview data. Catches up at most one missing day per call to avoid a burst of requests. [(Details)](#pageviews) |
+| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科重要条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科重要条目) | Daily at `23:24` | Refreshes English Top/High-importance articles, Chinese counterparts, assessment grades, and counts. [(Details)](#english-comparisons) |
+| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科优质条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科优质条目) | Daily at `23:24` | Refreshes English FA/FL/GA articles, Chinese counterparts, assessment grades, and counts. [(Details)](#english-comparisons) |
+| [pexbot.py](src/aranami/jobs/pexbot.py) | Subscribed pages under [数据库报告](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告) | Daily at `00:00` | Requests PexBot to refresh the listed report pages. [(Details)](#pexbot) |
 
-For missed daily updates, Pageviews advances by one report date per call
-and retries later if the day's data is unavailable. New pages currently
-fills all missing dates within its retained window in one call, reusing
-existing records. Its assessment icons refresh for every retained listed
-page on each call, including entries from earlier dates. Other generated
-lists also refresh their grades or configured review icons when rebuilt.
-Popularity-report grades refresh when a new daily report is built;
-PexBot controls its own generated content.
+All linked routines expose `run(...)` under `aranami.jobs`. The following
+sections describe their results and destination settings.
+
+### DYK
+
+DYK refreshes completed entries, candidates, assessment grades, and hidden
+annual statistics. Pass `title` to choose another report destination.
+Its `statistics_title` defaults to
+`c:Data:Zhwiki_WikiProject_Video_Games_DYK_Annual_Statistics.tab`. It labels
+the copyable hidden statistics payload; the routine does not save that
+Commons page.
+
+### New pages
+
+The new-page list retains 100 UTC dates by default, through yesterday. One
+call fills all missing dates in that window while reusing existing daily
+records. Assessment icons refresh for every retained listed page on each
+call, including entries from earlier dates. Pass `title` to choose another
+destination.
 
 Each new-page date also searches edits tagged `mw-removed-redirect` on
 that UTC day. Keyword-matched pages that are currently normal pages enter
@@ -207,18 +221,35 @@ redirect conversions. Retained rows receive missing comments when their
 metadata is available, and saved comments persist across later updates.
 An unavailable creation time is labeled `未知`.
 
-All linked routines expose `run(...)` under `aranami.jobs`. DYK, new pages,
-and Pageviews accept `title` to choose another destination; Pageviews also
-accepts `settings=REPORT_SETTINGS`. Select assessment lists with
-`lists=[(title, AssessmentList(...)), ...]` and English report destinations
-with `targets` containing both `important` and `quality`. PexBot accepts
-`prefixes` to override allowed roots, or `prefixes=[]` to disable refreshes;
-only Chinese Wikipedia is supported.
+### Assessment lists
 
-DYK's `statistics_title` defaults to
-`c:Data:Zhwiki_WikiProject_Video_Games_DYK_Annual_Statistics.tab`. It labels
-the copyable hidden statistics payload; the routine does not save that
-Commons page.
+Assessment lists refresh their entries, grades, and configured review
+icons when rebuilt. Select lists and destinations with
+`lists=[(title, AssessmentList(...)), ...]`.
+
+### Pageviews
+
+Pageviews advances by one missing report date per call and retries later
+if the day's data is unavailable. Yesterday's observations become
+eligible at 18:00 UTC; the regular hourly `HH:59` schedule first attempts
+them at 18:59 UTC. Earlier missing dates remain eligible before that
+cutoff. A scheduled attempt may start up to 3,500 seconds late.
+Assessment grades refresh when a new daily popularity report is built.
+Pass `title` to choose another destination and `settings=REPORT_SETTINGS`
+to choose project membership and ranking periods.
+
+### English comparisons
+
+The two English reports refresh Top/High-importance or FA/FL/GA articles,
+their Chinese counterparts, assessment grades, and counts. Grades refresh
+when the lists are rebuilt. Choose destinations with `targets` containing
+both `important` and `quality`.
+
+### PexBot
+
+PexBot refreshes subscribed report pages and controls its own generated
+content. Pass `prefixes` to override allowed page roots, or `prefixes=[]`
+to disable refreshes. Only Chinese Wikipedia is supported.
 
 ### Use a chosen date
 
@@ -272,7 +303,8 @@ For popularity rankings, report dates must be before the anchor (`date` or
 Yesterday becomes eligible at 18:00 UTC; older missing dates can still be
 processed before then. A chosen anchor does not bypass that limit.
 The routine takes the next missing date from the
-destination page's checkpoint; it does not jump to the chosen date. To build
+destination page's `<!-- report date YYYY-MM-DD -->` checkpoint; it does not
+jump to the chosen date. Only this date comment is recognized. To build
 an exact day's rankings without changing a page, use the one-time report
 builder:
 

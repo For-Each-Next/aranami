@@ -7,11 +7,13 @@ import datetime as dt
 from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_PAUSED
+from apscheduler.triggers.cron import CronTrigger
 
 from aranami import monitor
 from aranami.jobs import (
@@ -24,6 +26,7 @@ from aranami.jobs import (
 )
 
 _PAGEVIEWS_GRACE_SECONDS = 3_500
+_FUTURE_SCHEDULE_YEAR = 2099
 
 
 class _PausedScheduler(BackgroundScheduler):
@@ -98,7 +101,7 @@ class TestMonitor(TestCase):
             assert job.max_instances == 1
             assert job.coalesce is True
             assert job.trigger.timezone == dt.UTC
-            assert job.next_run_time.second == 0
+        assert len({job.next_run_time for job in jobs.values()}) == 1
         assert jobs["pageviews"].misfire_grace_time == _PAGEVIEWS_GRACE_SECONDS
         assert jobs["dyks"].misfire_grace_time == 1
 
@@ -186,6 +189,83 @@ class TestMonitor(TestCase):
         assert len(self.schedulers) == 1
         assert len(first.get_jobs()) == len(monitor.SCHEDULES)
         assert first.state == STATE_PAUSED
+
+    @staticmethod
+    def test_fresh_live_monitor_checks_all_jobs_immediately() -> None:
+        """Queue one startup check while retaining each cron trigger."""
+        before = dt.datetime.now(dt.UTC)
+        scheduler = monitor.start(dry=False)
+        after = dt.datetime.now(dt.UTC)
+        initial_times = {
+            job.id: job.next_run_time for job in scheduler.get_jobs()
+        }
+        assert set(initial_times) == set(monitor.TASK_DEFINITIONS)
+        assert all(before <= time <= after for time in initial_times.values())
+        assert monitor.start(dry=False) is scheduler
+        assert {
+            job.id: job.next_run_time for job in scheduler.get_jobs()
+        } == initial_times
+        for schedule in monitor.SCHEDULES:
+            job = scheduler.get_job(schedule.name)
+            assert job is not None
+            assert (
+                job.trigger.get_next_fire_time(
+                    job.next_run_time,
+                    job.next_run_time,
+                )
+                > job.next_run_time
+            )
+
+    @staticmethod
+    def test_fresh_preview_monitor_waits_for_cron_times() -> None:
+        """Keep preview output scheduled without an immediate pass."""
+        before = dt.datetime.now(dt.UTC)
+        scheduler = monitor.start(dry=True)
+        for job in scheduler.get_jobs():
+            assert job.next_run_time >= before
+            assert job.next_run_time.second == 0
+            assert job.next_run_time.microsecond == 0
+
+    @staticmethod
+    def test_live_startup_dispatches_each_job_once() -> None:
+        """Execute startup mocks once before their future cron times."""
+        completed = {schedule.name: Event() for schedule in monitor.SCHEDULES}
+        callbacks = {
+            name: Mock(
+                side_effect=lambda *, dry, finished=finished: (
+                    finished.set() if not dry else None
+                ),
+            )
+            for name, finished in completed.items()
+        }
+        trigger = CronTrigger(year=_FUTURE_SCHEDULE_YEAR, timezone=dt.UTC)
+        with ExitStack() as patches:
+            for name, callback in callbacks.items():
+                patches.enter_context(
+                    patch(f"aranami.jobs.{name}.run", callback),
+                )
+            patches.enter_context(
+                patch.object(
+                    monitor.RoutineSchedule,
+                    "trigger",
+                    return_value=trigger,
+                ),
+            )
+            scheduler = monitor.start(dry=False)
+            assert monitor.start(dry=False) is scheduler
+            scheduler.resume()
+            assert all(
+                finished.wait(timeout=5) for finished in completed.values()
+            )
+            scheduler.pause()
+            assert all(
+                job.next_run_time.year == _FUTURE_SCHEDULE_YEAR
+                for job in scheduler.get_jobs()
+            )
+            assert monitor.start(dry=False) is scheduler
+            scheduler.shutdown(wait=True)
+        for callback in callbacks.values():
+            callback.assert_called_once_with(dry=False)
 
     def test_active_monitor_rejects_output_mode_change(self) -> None:
         """Require shutdown before switching dry or live mode."""

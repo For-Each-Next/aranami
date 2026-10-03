@@ -15,7 +15,6 @@ from unittest.mock import patch
 from scripts import run_aranami
 
 _ARGUMENT_ERROR = 2
-_PROCESS_COUNT = 2
 _SOURCE = Path(run_aranami.__file__).read_text(encoding="utf-8")
 _KERNEL_ARGS = ["ipykernel_launcher.py", "-f", "kernel-connection.json"]
 _OLDER_MTIME = 1_700_000_000_000_000_000
@@ -46,13 +45,16 @@ class TestInstallScript(TestCase):
             with (
                 patch.object(sys, "argv", _KERNEL_ARGS),
                 patch.object(run_aranami.subprocess, "run") as process,
+                patch.object(run_aranami.subprocess, "Popen") as monitor,
             ):
+                child = monitor.return_value.__enter__.return_value
+                child.wait.return_value = 0
                 exec(  # ruff: ignore[exec-builtin]
                     compile(_SOURCE, "<notebook-cell>", "exec"),
                     {"__name__": "__main__"},
                 )
-                assert process.call_count == _PROCESS_COUNT
-                assert list(process.call_args_list[0].args[0]) == [
+                process.assert_called_once()
+                assert list(process.call_args.args[0]) == [
                     sys.executable,
                     "-m",
                     "pip",
@@ -60,7 +62,15 @@ class TestInstallScript(TestCase):
                     "--upgrade",
                     str(wheel),
                 ]
-                assert process.call_args_list[0].kwargs == {"check": True}
+                assert process.call_args.kwargs == {"check": True}
+                monitor.assert_called_once()
+                command = monitor.call_args.args[0]
+                assert command[:2] == (sys.executable, "-c")
+                assert "scheduler = aranami.run(dry=False)" in command[2]
+                assert monitor.call_args.kwargs == {
+                    "cwd": Path.cwd(),
+                    "start_new_session": True,
+                }
                 assert sys.argv == _KERNEL_ARGS
 
     @staticmethod
@@ -79,13 +89,24 @@ class TestInstallScript(TestCase):
             with (
                 patch.object(sys, "argv", ["run_aranami.py", str(wheel)]),
                 patch.object(run_aranami.subprocess, "run") as process,
+                patch.object(run_aranami.subprocess, "Popen") as monitor,
             ):
+                child = monitor.return_value.__enter__.return_value
+                child.wait.return_value = 0
                 exec(  # ruff: ignore[exec-builtin]
                     compile(_SOURCE, "run_aranami.py", "exec"),
                     {"__name__": "__main__", "__file__": "run_aranami.py"},
                 )
-                assert process.call_count == _PROCESS_COUNT
-                assert process.call_args_list[0].args[0][-1] == str(wheel)
+                process.assert_called_once()
+                assert process.call_args.args[0][-1] == str(wheel)
+                monitor.assert_called_once()
+                command = monitor.call_args.args[0]
+                assert command[:2] == (sys.executable, "-c")
+                assert "scheduler = aranami.run(dry=False)" in command[2]
+                assert monitor.call_args.kwargs == {
+                    "cwd": Path.cwd(),
+                    "start_new_session": True,
+                }
             assert not older.exists()
             assert wheel.exists()
             assert not equal.exists()

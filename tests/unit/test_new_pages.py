@@ -206,7 +206,7 @@ class TestNewPageRecords(TestCase):
             day,
             {day},
         ) == (
-            "Updated records for 2 October 2026. "
+            "Updated for 2 Oct 2026. "
             "Found 3 article pages and 1 non-article page."
         )
         assert repeated == updated
@@ -502,16 +502,18 @@ class TestNewPageRecords(TestCase):
             assert edit.original_text == original
             assert edit.text == updated
             assert edit.summary == (
-                "Updated records for 2 October 2026. "
+                "Updated for 2 Oct 2026. "
                 "Found 0 article pages and 0 non-article pages. "
-                "Executed in 0.00\u2033."
+                "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
             )
             assert edit.tags == ("new-pages", "filled-1-dates")
             page.text = updated
             new_pages_job.run(context=context)
         assert context.edits[-1].original_text == updated
         assert context.edits[-1].text == updated
-        assert context.edits[-1].summary == edit.summary
+        assert context.edits[-1].summary == (
+            "Updated class icons. Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
+        )
         assert context.edits[-1].tags == ("new-pages", "filled-0-dates")
         page.save.assert_not_called()
 
@@ -572,12 +574,74 @@ class TestNewPageRecords(TestCase):
             new_pages_job.run(context=context)
         [edit] = context.edits
         assert edit.summary == (
-            "Updated records for 5 May 2025. "
+            "Updated for 5 May 2025. "
             "Found 1 article page and 1 non-article page. "
             "Backfilled 11 older daily records. "
-            "Executed in 0.00\u2033."
+            "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
         )
         assert len(edit.summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        assert (
+            new_pages_job._edit_summary(  # ruff: ignore[private-member-access]
+                updated,
+                context.site,
+                day,
+                older,
+            )
+            == "Updated class icons. Backfilled 11 older daily records."
+        )
+
+    @staticmethod
+    @patch("aranami.jobs._execution.perf_counter", new=lambda: 0.0)
+    def test_existing_date_icon_refresh_uses_short_summary() -> None:
+        """Describe icon refreshes for existing daily records."""
+        today = dt.date(2026, 10, 3)
+        day = today - dt.timedelta(days=1)
+        original = managed_region(
+            "new-pages",
+            _section(day) + "* {{class/icon|初}} [[:Game]]"
+            " <!-- 页面ID 1 · 创建时间 2026-10-02 00:00:00 -->\n"
+            "* [[:Other game]]"
+            " <!-- 页面ID 2 · 创建时间 2026-10-02 01:00:00 -->\n"
+            "* [[:Category:Games]]"
+            " <!-- 页面ID 3 · 创建时间 2026-10-02 02:00:00 -->\n",
+            {"days": "1"},
+        )
+        site = _TitleSite("zh", "wikipedia")
+        context = JobContext(site, today, dry=True)
+        page = Mock(text=original)
+        grades = pl.DataFrame({
+            "full_title": ["Game"],
+            "pa_class": ["优良"],
+        })
+        with (
+            patch.object(
+                new_pages_job,
+                "job_run",
+                return_value=nullcontext(context),
+            ),
+            patch.object(new_pages_job, "read_pages", return_value=[page]),
+            patch.object(new_pages, "_build_section") as build,
+            patch.object(new_pages, "page_creation_metadata") as metadata,
+            patch.object(
+                new_pages,
+                "query_pages_by_wikiproject",
+                return_value=grades,
+            ),
+            patch.object(new_pages_job, "record_counts") as counts,
+        ):
+            new_pages_job.run(context=context)
+        [edit] = context.edits
+        assert "{{class/icon|优良}} [[:Game]]" in edit.text
+        assert new_pages.record_dates(edit.text) == {day}
+        assert new_pages.record_counts(edit.text, site, {day}) == (2, 1)
+        assert edit.summary == (
+            "Updated class icons. Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
+        )
+        assert edit.tags == ("new-pages", "filled-0-dates")
+        build.assert_not_called()
+        metadata.assert_not_called()
+        counts.assert_not_called()
+        page.save.assert_not_called()
 
     @staticmethod
     def test_icons_are_repeatable_and_preserve_links() -> None:

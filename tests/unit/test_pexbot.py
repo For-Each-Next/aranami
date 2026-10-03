@@ -216,6 +216,26 @@ class TestPexbotEvents(TestCase):
                 job._refresh(_site(), "Wikipedia:Report")
             assert response.closed
 
+    def test_refresh_logs_only_present_event_arguments(self) -> None:
+        """Omit empty brackets and preserve progress details."""
+        response = BytesIO(
+            b'data: {"code":"shutoff-checked"}\n'
+            b'data: {"code":"started","args":[]}\n'
+            b'data: {"code":"step","args":["queries",2]}\n'
+            b'data: {"code":"end"}\n',
+        )
+        with (
+            patch.object(job.urllib.request, "urlopen", return_value=response),
+            self.assertLogs(job._LOGGER, level="INFO") as logs,
+        ):
+            job._refresh(_site(), "Wikipedia:Report")
+        assert [record.getMessage() for record in logs.records] == [
+            "PexBot Wikipedia:Report: shutoff-checked.",
+            "PexBot Wikipedia:Report: started.",
+            "PexBot Wikipedia:Report: step ('queries', 2).",
+            "PexBot Wikipedia:Report: end.",
+        ]
+
     def test_refresh_rejects_other_wiki_without_request(self) -> None:
         """Validate the site at the publication transport boundary."""
         with (

@@ -410,7 +410,9 @@ class TestDykEdit(TestCase):
         assert edit.title == title
         assert edit.original_text == original
         assert edit.text == updated
-        assert edit.summary == "1 item total. Executed in 0.00\u2033."
+        assert (
+            edit.summary == "1 item total. Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
+        )
         assert "aranami-member" not in edit.text
         save.assert_called_once_with(site, title, original, {"Old": 1})
         page.save.assert_not_called()

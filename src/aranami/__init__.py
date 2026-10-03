@@ -1,7 +1,8 @@
 """Expose recurring monitoring, immediate reports, and data sources.
 
 Call :func:`run` on PAWS to start its scheduled WikiProject Video games
-monitor. Call :func:`run_once` to execute selected reports immediately,
+monitor, with an immediate check of all reports on a fresh live start.
+Call :func:`run_once` to execute selected reports immediately,
 with an optional date anchor. Both default to live publication; pass
 ``dry=True`` to write previews instead of wiki edits.
 """

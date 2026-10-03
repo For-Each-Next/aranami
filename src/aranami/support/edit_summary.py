@@ -25,27 +25,27 @@ MAX_EDIT_SUMMARY_BYTES = 255
 _SECONDS_PER_MINUTE = 60
 _HUNDREDTHS_PER_SECOND = 100
 _EXECUTION_SUFFIX = re.compile(
-    r"\s*[Ee]xecuted in (?:\d+′)?\d{1,2}\.\d{2}″\.$",
+    r"\s*[Ee]xecuted(?: by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒)? in (?:\d+′)?\d{1,2}\.\d{2}″\.$",
 )
 _MONTHS = (
-    "January",
-    "February",
-    "March",
-    "April",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
     "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
 )
 
 
 @dataclass(slots=True)
 class _SummaryPart:
-    """Hold an optional clause or a group of complete mentions."""
+    """Hold complete clause alternatives or a group of mentions."""
 
     prefix: str
     items: tuple[str, ...]
@@ -53,18 +53,20 @@ class _SummaryPart:
     joiner: str
     suffix: str
     grouped: bool
+    alternatives: tuple[str, ...] = ()
 
     def text(self, included: int) -> str:
-        """Render retained items and the number of omitted mentions.
+        """Render a clause alternative or a retained group of mentions.
 
         Args:
-            included: Number of leading items retained in this group.
+            included: Number of alternatives remaining to try, or the
+                number of leading items retained in a mention group.
 
         Returns:
-            Complete clause, including an omission count when needed.
+            Complete clause, including an omission count for groups.
         """
         if not self.grouped:
-            return self.prefix
+            return self.alternatives[len(self.alternatives) - included]
         pieces = list(self.items[:included])
         omitted = len(self.items) - included
         if omitted:
@@ -127,19 +129,39 @@ class EditSummary:
         self.max_bytes = max(0, min(max_bytes, MAX_EDIT_SUMMARY_BYTES))
         self._parts: list[_SummaryPart] = []
 
-    def append(self, clause: str, *, separator: str = " ") -> Self:
-        """Append an optional clause that must fit in its entirety.
+    def append(
+        self,
+        clause: str,
+        *,
+        separator: str = " ",
+        alternatives: Sequence[str] = (),
+    ) -> Self:
+        """Append a complete clause with optional shorter alternatives.
+
+        Try each alternative in order as the byte budget shrinks, also
+        when publication timing is added. Drop the clause only after its
+        last alternative cannot fit; never slice an alternative.
 
         Args:
             clause: Complete optional text, including any wiki links.
             separator: Text separating this clause from earlier text.
+            alternatives: Progressively shorter complete replacements
+                for the primary clause, with the shortest last.
 
         Returns:
             This builder for additional clauses.
         """
         if clause:
             self._parts.append(
-                _SummaryPart(clause, (), "", separator, "", grouped=False),
+                _SummaryPart(
+                    clause,
+                    (),
+                    "",
+                    separator,
+                    "",
+                    grouped=False,
+                    alternatives=(clause, *alternatives),
+                ),
             )
         return self
 
@@ -179,7 +201,10 @@ class EditSummary:
 
     @classmethod
     def daily(cls, day: dt.date) -> Self:
-        """Start a dated report summary using an English calendar date.
+        """Start a dated summary with a compact, English calendar date.
+
+        Use an unpadded day and a three-letter month regardless of the
+        process locale, for example ``Updated for 15 Sep 2026.``.
 
         Args:
             day: Date of the report records being updated.
@@ -188,8 +213,7 @@ class EditSummary:
             A builder with the report date as its essential clause.
         """
         return cls(
-            f"Updated records for {day.day} {_MONTHS[day.month - 1]} "
-            f"{day.year}.",
+            f"Updated for {day.day} {_MONTHS[day.month - 1]} {day.year}.",
         )
 
     @classmethod
@@ -231,7 +255,8 @@ class EditSummary:
         """Join active clauses with their requested punctuation.
 
         Args:
-            counts: Retained item counts, or none for omitted clauses.
+            counts: Remaining clause alternatives or retained group-item
+                counts, or none for omitted clauses.
 
         Returns:
             Candidate summary ending in a full stop.
@@ -254,7 +279,10 @@ class EditSummary:
             Summary preserving essential text and details that fit.
             Very small custom budgets retain a UTF-8-safe plain prefix.
         """
-        counts: list[int | None] = [len(part.items) for part in self._parts]
+        counts: list[int | None] = [
+            len(part.alternatives) if part.alternatives else len(part.items)
+            for part in self._parts
+        ]
         while len((text := self._compose(counts)).encode("utf-8")) > (
             self.max_bytes
         ):
@@ -263,7 +291,11 @@ class EditSummary:
                 for index, (part, count) in enumerate(
                     zip(self._parts, counts, strict=True),
                 )
-                if count is not None and part.grouped and count > 0
+                if count is not None
+                and (
+                    (part.grouped and count > 0)
+                    or (part.alternatives and count > 1)
+                )
             ]
             if adjustable:
                 largest = max(
@@ -321,8 +353,9 @@ class EditSummary:
             elapsed_seconds: Duration until publication starts.
 
         Returns:
-            Summary ending with ``Executed in 21′53.95″.`` using the
-            measured duration, or ``7.12″`` for times below one minute.
+            Summary ending with ``Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in <duration>.``
+            using the measured duration, such as ``21′53.95″`` or
+            ``7.12″`` for times below one minute.
             Complete clauses are rebudgeted when
             available; caller-supplied text is shortened at safe bounds.
         """
@@ -333,7 +366,7 @@ class EditSummary:
         )
         seconds, fraction = divmod(remainder, _HUNDREDTHS_PER_SECOND)
         duration = f"{minutes}′{seconds:02d}" if minutes else str(seconds)
-        suffix = f"Executed in {duration}.{fraction:02d}″."
+        suffix = f"Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in {duration}.{fraction:02d}″."
         budget = MAX_EDIT_SUMMARY_BYTES - len(suffix.encode("utf-8")) - 1
         if isinstance(summary, _RenderedSummary):
             rebuilt = cls(summary.base, max_bytes=budget)

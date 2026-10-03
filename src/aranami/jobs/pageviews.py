@@ -21,6 +21,8 @@ from aranami.support.edit_summary import EditSummary
 from aranami.support.wikitext import integer_option, region_options
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from aranami.jobs import JobContext
 
 logger = logging.getLogger(__name__)
@@ -75,26 +77,58 @@ REPORT_SETTINGS = pageviews.ReportSettings(
 
 
 def _edit_summary(report: pageviews.PageviewReport) -> str:
-    """Describe report leaders within MediaWiki's summary byte limit.
+    """Group each hottest page's periods and link its title once.
 
     Args:
         report: Processed ranking text and its leading articles.
 
     Returns:
-        English report date and complete leader clauses that fit.
+        English report date and complete period mentions that fit within
+        MediaWiki's summary byte limit, with period-specific rank gains.
+        Longer periods are omitted first when space is limited.
     """
     summary = EditSummary.daily(report.data_date)
+    rankings: list[tuple[str, str, int | None]] = []
     for period, title, gain in (
-        ("Daily", report.daily_top, report.daily_top_gain),
-        ("Weekly", report.weekly_top, report.weekly_top_gain),
-        ("Monthly", report.monthly_top, report.monthly_top_gain),
+        ("daily", report.daily_top, report.daily_top_gain),
+        ("weekly", report.weekly_top, report.weekly_top_gain),
+        ("monthly", report.monthly_top, report.monthly_top_gain),
+        ("seasonal", report.quarterly_top, report.quarterly_top_gain),
+        ("yearly", report.yearly_top, report.yearly_top_gain),
     ):
         if title is None:
             continue
-        leader = f"«{Wikilink(title)}»"
-        movement = f" (▲{gain})" if gain is not None and gain > 0 else ""
-        summary.append(f"{period} leader {leader}{movement}.")
+        rankings.append((period, title, gain))
+    clauses = [
+        _hottest_clause(rankings[:retained])
+        for retained in range(len(rankings), 0, -1)
+    ]
+    if clauses:
+        summary.append(clauses[0], alternatives=clauses[1:])
     return summary.render()
+
+
+def _hottest_clause(rankings: Sequence[tuple[str, str, int | None]]) -> str:
+    """Group retained periods by leader with separate rank gains.
+
+    Args:
+        rankings: Observed leaders in increasing period order.
+
+    Returns:
+        Complete hottest-pages sentence linking each title once.
+    """
+    title_periods: dict[str, list[str]] = {}
+    for period, title, gain in rankings:
+        movement = f" (▲{gain})" if gain is not None and gain > 0 else ""
+        title_periods.setdefault(title, []).append(f"{period}{movement}")
+    leaders = []
+    for title, periods in title_periods.items():
+        if len(periods) > 2:  # ruff: ignore[magic-value-comparison]
+            period_text = f"{', '.join(periods[:-1])}, and {periods[-1]}"
+        else:
+            period_text = " and ".join(periods)
+        leaders.append(f"«{Wikilink(title)}» for {period_text}")
+    return f"Hottest: {'; '.join(leaders)}."
 
 
 def _report_cutoff(
@@ -168,7 +202,7 @@ def run(
             active.today,
             active.started_at,
         )
-        current = pageviews.current_data_date(text, target)
+        current = pageviews.current_data_date(text)
         logger.info("Pageview report is at %s; target is %s", current, target)
         if current >= target:
             return

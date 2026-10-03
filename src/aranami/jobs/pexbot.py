@@ -56,12 +56,13 @@ def _refresh(site: BaseSite, title: str) -> None:
             event = parse_event(raw_line.decode("utf-8").strip())
             if event is None:
                 continue
-            _LOGGER.info("PexBot %s: %s %s.", title, event.code, event.args)
+            details = f" {event.args}" if event.args else ""
+            _LOGGER.info("PexBot %s: %s%s.", title, event.code, details)
             if (
                 "error" in event.code.casefold()
                 or "fail" in event.code.casefold()
             ):
-                msg = f"PexBot failed for {title}: {event.code} {event.args}."
+                msg = f"PexBot failed for {title}: {event.code}{details}."
                 raise RuntimeError(msg)
             if event.code == "end":
                 return

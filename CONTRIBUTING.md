@@ -20,7 +20,9 @@ scheduler. Define default target pages, per-routine UTC cron triggers, and
 PexBot subscription roots together in
 `src/aranami/monitor.py` through `TASK_DEFINITIONS`. Jobs read their defaults
 from those definitions. The monitor uses independent
-job contexts. Repeated starts reuse the active monitor; stop it with
+job contexts. A fresh live monitor queues every routine immediately to
+check and update reports before their recurring UTC schedule. Repeated
+starts reuse the active monitor without another initial pass; stop it with
 `scheduler.shutdown(wait=True)` before changing its
 output mode or clearing caches. `aranami.run(dry=True)` also monitors
 continuously, writing previews at each scheduled time. The caller keeps
@@ -164,6 +166,10 @@ and later runs. Missing creation timestamps are `未知`; unresolved page
 identities leave the row unchanged with a diagnostic.
 
 Pageviews processes at most one missing report date per call.
+Read its published checkpoint only from `<!-- report date YYYY-MM-DD -->`
+and emit the same marker in generated reports. Ignore obsolete date comments
+and ranking-template dates; fail before building without a valid checkpoint
+or when recognized dates conflict.
 Keep `DATA_READY_HOUR=18` in
 `src/aranami/jobs/pageviews.py` as the routine's data-readiness rule.
 Yesterday becomes eligible
@@ -183,9 +189,11 @@ cover the required report intervals. New articles receive their own history
 fetch. Coverage metadata distinguishes an observed empty interval from an
 interval that was never queried.
 
-Treat gateway timeouts as failed requests, never as missing observations or
-zeroes. Keep the source adapter's one-attempt contract; the routine may retry
-502/503/504 responses up to three times. Exhausted retries defer publication
+Keep the source adapter's one-attempt contract. The Pageviews routine skips
+an article immediately after HTTP 504, excluding it from the current rankings
+and availability check without changing its cached history or coverage.
+Skipped articles remain eligible for requests in later invocations. Retry
+502/503 responses up to three times; exhausted retries defer publication
 until a later invocation. Preserve completed requests in a separate pending
 Parquet checkpoint for the target date, leaving the healthy snapshot intact.
 Resume pending work on the next attempt, commit it only after the global
@@ -262,18 +270,27 @@ Mark every article-title link with `«...»`, including optional Chinese
 sitelinks in English-report summaries and Pageviews leaders. Preserve
 complete delimiter pairs when shortening a summary.
 At publication, end every live edit and dry-run proposal summary with
-`Executed in 21′53.95″.` using the measured minutes, seconds, and hundredths.
+`Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 21′53.95″.` using measured minutes, seconds,
+and hundredths.
 For durations below one minute, omit zero minutes and the leading seconds
-zero, for example `Executed in 7.12″.`.
+zero, for example `Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 7.12″.`.
 Measure from the current routine's start until each proposal is ready,
 before checking or saving its target. Direct publications use context
 creation time. Reserve space for the complete suffix within the same
 255-byte limit and replace an earlier suffix if the proposal is reused.
-Dated summaries name the report date. Pageviews adds daily, weekly, and
-monthly leaders with places gained, omitting movement when the leader
-remains first or has no previous rank. New-page summaries count matched
-article and non-article pages for the latest daily list and mention older
-daily records filled during the run.
+Dated summaries use compact English dates such as `15 Sep 2026` and begin
+with `Updated for <date>.`. Pageviews groups daily, weekly, monthly,
+seasonal (quarterly), and yearly periods under each leading title in a
+`Hottest:` sentence, linking each title once. Join grouped periods with
+`and`, including a serial comma for three or more periods, and separate
+titles with semicolons. Keep places gained beside the corresponding period,
+omitting movement when the leader remains first or has no previous rank.
+If the complete summary and timing suffix exceed 255 bytes, omit yearly
+first, then seasonal, and then the remaining longest periods as needed.
+Do not add omission counts to this sentence. New-page summaries use a date
+and matched article/non-article counts only when the latest daily list was
+filled during the run. Reused latest records use `Updated class icons.`
+instead. Mention older daily records filled during either kind of update.
 
 Real-time summaries state the current item total, grouped additions and
 removals, and elapsed time. Keep summaries factual, without instructions
@@ -311,13 +328,18 @@ uv build --wheel --clear
 
 The standalone `scripts/run_aranami.py` launcher installs the newest local
 Aranami wheel by modification time from the current directory and `dist/`,
-then runs the routine once in dry-run mode. Keep its main block to the two
+then starts live monitoring through `aranami.run(dry=False)` in a fresh
+process. A fresh monitor checks every routine immediately, then follows
+the recurring UTC schedules. Keep the child process alive until an
+interrupt, then call `scheduler.shutdown(wait=True)` so active jobs finish.
+Forward interrupts from the launcher to the child's separate process
+session and wait for its shutdown. Keep its main block to the two
 calls `install_wheel()` and `run()`, with wheel discovery and cleanup in
 private helpers. Match `aranami-*.whl` without
 parsing or comparing filename versions. After successful installation,
 keep the selected wheel and remove other local wheels with equal or earlier
 modification times. Explicit selections preserve more recent uploads.
-Use the active interpreter for both pip and a fresh routine process so
+Use the active interpreter for both pip and a fresh monitor process so
 notebook imports cannot keep an older package loaded. Anchor runtime output beside
 the script, or in the notebook's current directory for pasted cells.
 
@@ -325,6 +347,15 @@ Before every explicit wheel build, advance to an unused `.devN` or `.postN`
 version and regenerate `uv.lock`. Only the user chooses major/minor versions.
 Update the evolving `CHANGELOG.md` section with a UTC timestamp before
 handoff. Keep commits cohesive and use Conventional Commits.
+
+GitHub Actions uses `ci.yml` for pull requests and pushes to `trunk`,
+`release.yml` for `v<version>` tags, and reusable `validate.yml` for both.
+Validation checks the lockfile, lint, formatting, and offline unit and
+integration tests, then builds and retains a wheel. Test builds use distinct
+suffixes derived from the workflow run and attempt; their version and lock
+changes stay in the runner. Release tags must match the formal version in
+`pyproject.toml`. Tagged releases keep that version and publish the verified
+wheel as a GitHub Release asset with notes from its changelog section.
 
 [1]: https://docs.pola.rs/api/python/stable/reference/index.html
 [2]: https://docs.pola.rs/user-guide/migration/pandas/

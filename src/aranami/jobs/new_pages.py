@@ -28,7 +28,7 @@ def _edit_summary(
     day: dt.date,
     filled_dates: set[dt.date],
 ) -> str:
-    """Describe the latest list and recovered older daily records.
+    """Describe newly filled records or refreshed assessment icons.
 
     Args:
         text: Generated report containing the matched page lists.
@@ -37,14 +37,19 @@ def _edit_summary(
         filled_dates: Previously absent dates filled during this update.
 
     Returns:
-        Dated English summary with latest page counts and any backfill.
+        Latest page counts only when that date was filled, otherwise
+        a short icon-refresh summary, with any older backfill.
     """
-    articles, non_articles = record_counts(text, site, {day})
-    summary = EditSummary.daily(day).append(
-        f"Found {articles:,} article {'page' if articles == 1 else 'pages'} "
-        f"and {non_articles:,} non-article "
-        f"{'page' if non_articles == 1 else 'pages'}.",
-    )
+    if day in filled_dates:
+        articles, non_articles = record_counts(text, site, {day})
+        summary = EditSummary.daily(day).append(
+            f"Found {articles:,} article "
+            f"{'page' if articles == 1 else 'pages'} "
+            f"and {non_articles:,} non-article "
+            f"{'page' if non_articles == 1 else 'pages'}.",
+        )
+    else:
+        summary = EditSummary("Updated class icons.")
     older = len(filled_dates - {day})
     if older:
         summary.append(

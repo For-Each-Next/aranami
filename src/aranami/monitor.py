@@ -2,7 +2,8 @@
 
 Edit ``TASK_DEFINITIONS`` before building to change report pages, PexBot
 subscription roots, or cron times. Starting the monitor runs
-reports independently in the background without immediate wiki work.
+reports independently in the background. A fresh live monitor checks
+every report immediately before continuing its cron schedules.
 Keep the calling Python process alive. Call ``shutdown(wait=True)`` on
 the returned scheduler before exiting or clearing shared caches.
 """
@@ -190,7 +191,8 @@ def start(
 ) -> BackgroundScheduler:
     """Start routine monitoring or return this process's monitor.
 
-    Jobs first run at their next UTC cron time. Reports may overlap;
+    A fresh live monitor first checks every report immediately. Preview
+    jobs first run at their next UTC cron time. Reports may overlap;
     each report has at most one active execution. Missed runs coalesce
     into one invocation. A stopped monitor is replaced on the next call.
     A paused monitor is returned without resuming it.
@@ -231,20 +233,27 @@ def start(
                 clear_runtime_cache()
                 _LOGGER.info("Cleared disposable runtime cache.")
             scheduler = BackgroundScheduler(timezone=dt.UTC)
-            for schedule in SCHEDULES:
+            callbacks = tuple(
+                (schedule, schedule.run) for schedule in SCHEDULES
+            )
+            startup_options = (
+                {"next_run_time": dt.datetime.now(dt.UTC)} if not dry else {}
+            )
+            for schedule, callback in callbacks:
                 options = (
                     {"misfire_grace_time": schedule.misfire_grace_time}
                     if schedule.misfire_grace_time is not None
                     else {}
                 )
                 scheduler.add_job(
-                    schedule.run,
+                    callback,
                     trigger=schedule.trigger(),
                     id=schedule.name,
                     kwargs={"dry": dry},
                     max_instances=1,
                     coalesce=True,
                     **options,
+                    **startup_options,
                 )
             scheduler.start()
             _scheduler = scheduler

@@ -209,7 +209,7 @@ class TestRoutineOutput(TestCase):
                 ),
             )
         page.save.assert_called_once_with(
-            summary="summary Executed in 0.00″.",
+            summary="summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00″.",
         )
         assert page.text == "new"
 
@@ -238,16 +238,16 @@ class TestRoutineOutput(TestCase):
                     context.site,
                     "Target",
                     "new",
-                    "Updated records for 5 May 2025.",
+                    "Updated for 5 May 2025.",
                     original_text="old",
                 )
                 clock.return_value = 1413.95
                 context.publish(proposal)
                 expected = (
-                    "Updated records for 5 May 2025. Executed in 21′53.95″."
+                    "Updated for 5 May 2025. Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 21′53.95″."
                 )
                 assert context.edits[0].summary == expected
-                assert proposal.summary == "Updated records for 5 May 2025."
+                assert proposal.summary == "Updated for 5 May 2025."
                 if dry:
                     page_factory.assert_not_called()
                     with (
@@ -296,10 +296,10 @@ class TestRoutineOutput(TestCase):
                 ProposedEdit(context.site, "Direct", "four", "summary"),
             )
         assert [edit.summary for edit in context.edits] == [
-            "summary Executed in 1′00.50″.",
-            "summary Executed in 1′10.00″.",
-            "summary Executed in 11.25″.",
-            "summary Executed in 8′20.00″.",
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 1′00.50″.",
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 1′10.00″.",
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 11.25″.",
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 8′20.00″.",
         ]
         assert [task.elapsed_seconds for task in context.tasks] == [70, 11.25]
 
@@ -317,8 +317,12 @@ class TestRoutineOutput(TestCase):
             )
             clock.return_value = 102
             context.publish(context.edits[0])
-        assert context.edits[0].summary == "summary Executed in 1.00″."
-        assert context.edits[1].summary == "summary Executed in 2.00″."
+        assert (
+            context.edits[0].summary == "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 1.00″."
+        )
+        assert (
+            context.edits[1].summary == "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 2.00″."
+        )
 
     @staticmethod
     def test_clear_cache_leaves_logs_and_reports() -> None:

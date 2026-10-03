@@ -2,6 +2,7 @@
 
 # Preserve the user's minute and second prime symbols.
 # ruff: file-ignore[ambiguous-unicode-character-string]
+import datetime as dt
 import pickle  # ruff: ignore[suspicious-pickle-import]
 from copy import copy, deepcopy
 from dataclasses import asdict
@@ -13,11 +14,38 @@ from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
 
 _CHINESE_CHARACTER_BYTES = 3
 _EXAMPLE_DURATION = 1313.95
-_EXAMPLE_SUFFIX = "Executed in 21′53.95″."
+_EXAMPLE_SUFFIX = "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 21′53.95″."
 
 
 class TestEditSummary(TestCase):
     """Check Unicode byte limits and useful truncated descriptions."""
+
+    @staticmethod
+    def test_daily_date_uses_compact_english_months() -> None:
+        """Keep report dates brief with unpadded days in every month."""
+        for month, name in enumerate(
+            (
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ),
+            start=1,
+        ):
+            assert EditSummary.daily(dt.date(2026, month, 1)).render() == (
+                f"Updated for 1 {name} 2026."
+            )
+        assert EditSummary.daily(dt.date(2026, 9, 15)).render() == (
+            "Updated for 15 Sep 2026."
+        )
 
     @staticmethod
     def test_membership_counts_and_both_change_groups() -> None:
@@ -64,14 +92,13 @@ class TestEditSummary(TestCase):
     def test_later_short_clause_survives_oversized_earlier_clause() -> None:
         """Drop a long leader link and preserve a shorter leader."""
         summary = (
-            EditSummary("Updated records for 2026-10-02.")
+            EditSummary
+            .daily(dt.date(2026, 10, 2))
             .append(f"Daily leader «[[{'遊戲' * 100}]]».")
             .append("Weekly leader «[[Game]]».")
             .render()
         )
-        assert summary == (
-            "Updated records for 2026-10-02. Weekly leader «[[Game]]»."
-        )
+        assert summary == ("Updated for 2 Oct 2026. Weekly leader «[[Game]]».")
 
     @staticmethod
     def test_custom_small_budget_is_utf8_safe() -> None:
@@ -90,19 +117,19 @@ class TestEditSummary(TestCase):
             == f"1 item total. {_EXAMPLE_SUFFIX}"
         )
         assert EditSummary.with_execution_time("summary", 0) == (
-            "summary Executed in 0.00″."
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00″."
         )
         assert EditSummary.with_execution_time("summary", 5.2) == (
-            "summary Executed in 5.20″."
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 5.20″."
         )
         assert EditSummary.with_execution_time("summary", 7.12) == (
-            "summary Executed in 7.12″."
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 7.12″."
         )
         assert EditSummary.with_execution_time("summary", 59.999) == (
-            "summary Executed in 1′00.00″."
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 1′00.00″."
         )
         assert EditSummary.with_execution_time("summary", 3600) == (
-            "summary Executed in 60′00.00″."
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 60′00.00″."
         )
 
     @staticmethod
@@ -131,7 +158,8 @@ class TestEditSummary(TestCase):
     def test_timing_omits_whole_oversized_leader_clause() -> None:
         """Keep the date and duration when a leader no longer fits."""
         original = (
-            EditSummary("Updated records for 5 May 2025.")
+            EditSummary
+            .daily(dt.date(2025, 5, 5))
             .append(f"Daily leader «[[{'遊' * 61}]]».")
             .render()
         )
@@ -140,9 +168,52 @@ class TestEditSummary(TestCase):
             original,
             _EXAMPLE_DURATION,
         )
-        assert summary == (
-            f"Updated records for 5 May 2025. {_EXAMPLE_SUFFIX}"
+        assert summary == (f"Updated for 5 May 2025. {_EXAMPLE_SUFFIX}")
+
+    @staticmethod
+    def test_timing_tries_ordered_complete_clause_alternatives() -> None:
+        """Drop yearly then seasonal details when timing needs space."""
+        daily = "Hottest: «[[Game]]» daily, weekly, and monthly"
+        seasonal = f"«[[{'遊' * 35}]]» seasonal"
+        yearly = "«[[Year]]» yearly"
+        original = (
+            EditSummary
+            .daily(dt.date(2026, 10, 1))
+            .append(
+                f"{daily}; {seasonal}; {yearly}.",
+                alternatives=(f"{daily}; {seasonal}.", f"{daily}."),
+            )
+            .render()
         )
+        assert "yearly" in original
+        summary = EditSummary.with_execution_time(original, _EXAMPLE_DURATION)
+        assert summary == (
+            f"Updated for 1 Oct 2026. {daily}. {_EXAMPLE_SUFFIX}"
+        )
+        assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        assert "more" not in summary
+        assert summary.count("[[") == summary.count("]]")
+        assert summary.count("«") == summary.count("»")
+        assert "yearly" in original
+
+    @staticmethod
+    def test_last_alternative_fits_before_clause_is_omitted() -> None:
+        """Keep the shortest complete clause at its byte boundary."""
+        retained = "Total. Short «[[Game]]»."
+        size = len(retained.encode("utf-8"))
+        for budget, expected in (
+            (size, retained),
+            (size - 1, "Total."),
+        ):
+            summary = (
+                EditSummary("Total.", max_bytes=budget)
+                .append(
+                    f"Long «[[{'遊' * 100}]]».",
+                    alternatives=("Short «[[Game]]».",),
+                )
+                .render()
+            )
+            assert summary == expected
 
     @staticmethod
     def test_plain_input_preserves_links_and_replaces_old_suffix() -> None:
@@ -154,15 +225,19 @@ class TestEditSummary(TestCase):
         )
         for previous in (
             first,
-            first.replace("Executed in", "executed in"),
+            first.replace("Executed", "executed"),
+            first.replace(_EXAMPLE_SUFFIX, "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0′05.20″."),
+            first.replace(_EXAMPLE_SUFFIX, "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 5.20″."),
             first.replace(_EXAMPLE_SUFFIX, "Executed in 0′05.20″."),
             first.replace(_EXAMPLE_SUFFIX, "Executed in 5.20″."),
+            first.replace(_EXAMPLE_SUFFIX, "executed in 5.20″."),
         ):
             second = EditSummary.with_execution_time(previous, 5.2)
             assert second == (
-                "2 items total. Added «[[Short]]». Executed in 5.20″."
+                "2 items total. Added «[[Short]]». "
+                "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 5.20″."
             )
-            assert second.count("Executed in") == 1
+            assert second.count("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in") == 1
             assert len(second.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
 
     @staticmethod

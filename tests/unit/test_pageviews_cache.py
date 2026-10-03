@@ -5,13 +5,16 @@
 
 import datetime as dt
 from contextlib import chdir
+from dataclasses import replace
 from http import HTTPStatus
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
+import mwparserfromhell
 import polars as pl
 
 from aranami.jobs import pageviews as job
@@ -38,11 +41,16 @@ def _observations(*rows: tuple[dt.date, int]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=_OBSERVATIONS, orient="row")
 
 
-def _http_error(status: HTTPStatus = HTTPStatus.GATEWAY_TIMEOUT) -> HTTPError:
+def _http_error(
+    status: HTTPStatus = HTTPStatus.SERVICE_UNAVAILABLE,
+    *,
+    response_body: BytesIO | None = None,
+) -> HTTPError:
     """Create a response failure without making an HTTP request.
 
     Args:
         status: Response failure to simulate.
+        response_body: Optional stream whose closure is checked.
 
     Returns:
         Unopened HTTP exception for service retry tests.
@@ -52,7 +60,7 @@ def _http_error(status: HTTPStatus = HTTPStatus.GATEWAY_TIMEOUT) -> HTTPError:
         status,
         status.phrase,
         {},
-        None,
+        response_body,
     )
 
 
@@ -80,7 +88,6 @@ class TestTransientPageviews(TestCase):
         for status in (
             HTTPStatus.BAD_GATEWAY,
             HTTPStatus.SERVICE_UNAVAILABLE,
-            HTTPStatus.GATEWAY_TIMEOUT,
         ):
             with (
                 self.subTest(status=status),
@@ -121,6 +128,207 @@ class TestTransientPageviews(TestCase):
         assert fetch.call_count == 3
         assert cache.get("A") is None
         assert cache.get("B") is None
+
+    @staticmethod
+    def test_gateway_timeout_skips_title_and_continues() -> None:
+        """Close HTTP 504 and continue with the next article."""
+        cache = PageviewsCache(Path("unused.parquet"))
+        response_body = BytesIO(b"gateway timeout")
+        site = MagicMock()
+        with patch.object(
+            pageviews.pageviews,
+            "fetch_data_dataframe",
+            side_effect=[
+                _http_error(
+                    HTTPStatus.GATEWAY_TIMEOUT,
+                    response_body=response_body,
+                ),
+                _observations((_DAY, 0)),
+            ],
+        ) as fetch:
+            views = pageviews.aggregate_views(
+                site,
+                ["Created today", "Healthy"],
+                _PERIODS,
+                cache=cache,
+            )
+        assert [call.args[1] for call in fetch.call_args_list] == [
+            "Created today",
+            "Healthy",
+        ]
+        assert response_body.closed
+        assert views.get_column("title").to_list() == ["Healthy", "Healthy"]
+        assert views.get_column("views").to_list() == [0, 0]
+        assert cache.get("Created today") is None
+        assert cache.get("Healthy") is not None
+
+    @staticmethod
+    def test_gateway_timeout_preserves_history_without_checkpointing() -> None:
+        """Preserve cached history and coverage after HTTP 504."""
+        with TemporaryDirectory() as directory, chdir(directory):
+            primary = PageviewsCache.load("zh.wikipedia.org")
+            primary.replace(
+                "A",
+                _OLDEST,
+                _DAY,
+                _observations((_REQUIRED, 7)),
+            )
+            primary.save(["A"])
+            before = primary.path.read_bytes()
+            cache = PageviewsCache.load("zh.wikipedia.org", data_date=_DAY)
+            previous = cache.get("A")
+            assert previous is not None
+            with patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+                side_effect=_http_error(HTTPStatus.GATEWAY_TIMEOUT),
+            ) as fetch:
+                views = pageviews.aggregate_views(
+                    MagicMock(),
+                    ["A"],
+                    _PERIODS,
+                    cache=cache,
+                )
+            fetch.assert_called_once()
+            assert views.is_empty()
+            assert views.schema == {
+                "title": pl.String,
+                "start": pl.Date,
+                "stop": pl.Date,
+                "views": pl.Int64,
+            }
+            current = cache.get("A")
+            assert current is not None
+            assert current.equals(previous)
+            cache.save_pending()
+            assert cache.pending_path is not None
+            assert not cache.pending_path.exists()
+            assert primary.path.read_bytes() == before
+
+    def test_all_gateway_timeouts_reject_empty_report(self) -> None:
+        """Reject reports where every article returns HTTP 504."""
+        with TemporaryDirectory() as directory, chdir(directory):
+            site = MagicMock()
+            site.hostname.return_value = "zh.wikipedia.org"
+            with (
+                patch.object(
+                    pageviews,
+                    "_project_articles",
+                    return_value=_articles("A", "B"),
+                ),
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_data_dataframe",
+                    side_effect=[
+                        _http_error(HTTPStatus.GATEWAY_TIMEOUT),
+                        _http_error(HTTPStatus.GATEWAY_TIMEOUT),
+                    ],
+                ) as fetch,
+                self.assertRaises(pageviews.PageviewsUnavailableError),
+            ):
+                pageviews.build_report(
+                    site,
+                    _STOP,
+                    settings=job.REPORT_SETTINGS,
+                )
+            assert [call.args[1] for call in fetch.call_args_list] == [
+                "A",
+                "B",
+            ]
+            cache = PageviewsCache.load("zh.wikipedia.org", data_date=_DAY)
+            assert not cache.path.exists()
+            assert cache.pending_path is not None
+            assert not cache.pending_path.exists()
+
+    def test_report_omits_skipped_article_and_keeps_valid_zero(self) -> None:
+        """Omit skipped members and preserve zeroes and old history."""
+        settings = replace(
+            job.REPORT_SETTINGS,
+            periods=(job.PROJECT_PERIODS[0],),
+            task_forces=(job.TASK_FORCES[0],),
+        )
+        for has_history in (False, True):
+            with (
+                self.subTest(has_history=has_history),
+                TemporaryDirectory() as directory,
+                chdir(directory),
+            ):
+                primary = PageviewsCache.load("zh.wikipedia.org")
+                if has_history:
+                    primary.replace(
+                        "Skipped",
+                        _OLDEST,
+                        _DAY,
+                        _observations((_REQUIRED, 7)),
+                    )
+                    primary.save(["Skipped"])
+                previous = primary.get("Skipped")
+                site = MagicMock()
+                site.hostname.return_value = "zh.wikipedia.org"
+                with (
+                    patch.object(
+                        pageviews,
+                        "_project_articles",
+                        return_value=_articles("Healthy", "Skipped"),
+                    ),
+                    patch.object(
+                        pageviews.pageviews,
+                        "fetch_data_dataframe",
+                        side_effect=[
+                            _observations((_DAY, 0)),
+                            _http_error(HTTPStatus.GATEWAY_TIMEOUT),
+                        ],
+                    ) as fetch,
+                ):
+                    report = pageviews.build_report(
+                        site,
+                        _STOP,
+                        settings=settings,
+                        missing_percent=1,
+                    )
+                assert [call.args[1] for call in fetch.call_args_list] == [
+                    "Healthy",
+                    "Skipped",
+                ]
+                assert report.data_date == _DAY
+                assert report.daily_top == "Healthy"
+                assert "Skipped" not in report.text
+                templates = mwparserfromhell.parse(
+                    report.text,
+                ).filter_templates()
+                items = [
+                    template
+                    for template in templates
+                    if str(template.name) == "PJ:VG/HOT/item"
+                ]
+                headers = [
+                    template
+                    for template in templates
+                    if str(template.name) == "PJ:VG/HOT/header"
+                ]
+                assert [str(item.get("1").value) for item in items] == [
+                    "Healthy",
+                    "Healthy",
+                ]
+                assert [str(item.get("views").value) for item in items] == [
+                    "0",
+                    "0",
+                ]
+                assert [
+                    str(header.get("page_count").value) for header in headers
+                ] == ["1", "1"]
+                restored = PageviewsCache.load("zh.wikipedia.org")
+                healthy = restored.get("Healthy")
+                assert healthy is not None
+                assert healthy.get_column(
+                    "pageview",
+                ).drop_nulls().to_list() == [0]
+                skipped = restored.get("Skipped")
+                if previous is None:
+                    assert skipped is None
+                else:
+                    assert skipped is not None
+                    assert skipped.equals(previous)
 
     def test_client_http_errors_propagate_without_retry(self) -> None:
         """Keep permanent HTTP failures as failures of the routine."""

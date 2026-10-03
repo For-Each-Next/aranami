@@ -42,7 +42,8 @@ def run(
     """Start recurring routine schedules using PAWS authentication.
 
     Return immediately while the monitor keeps dispatching each routine
-    at its configured UTC time. Both live and preview modes recur until
+    at its configured UTC time. A fresh live monitor also checks every
+    routine immediately. Both live and preview modes recur until
     the returned scheduler is stopped. Repeated calls reuse an active
     monitor with the same output mode.
 

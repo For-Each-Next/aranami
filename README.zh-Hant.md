@@ -2,7 +2,7 @@
 
 [English](README.md) · [繁體中文](README.zh-Hant.md) · [简体中文](README.zh-Hans.md)
 
-Aranami（荒波，意為「洶湧的波浪」）維護維基百科報告，主要服務於
+Aranami（<span lang="ja">荒波</span>，意為「狂瀾」）維護維基百科報告，主要服務於
 中文維基百科的電子遊戲專題。在 [Wikimedia PAWS][1] 上執行，
 即可發布報告、預覽變更，或收集資料進行一次性分析。
 
@@ -10,7 +10,7 @@ Aranami（荒波，意為「洶湧的波浪」）維護維基百科報告，主�
 
 | 想做的事 | 介面 | 變更或回傳的結果 |
 |---|---|---|
-| 啟動例行監視器 | `aranami.run()` | 回傳正在執行的排程器，按各項工作設定的 UTC 時間更新報告。 |
+| 啟動例行監視器 | `aranami.run()` | 回傳正在執行的排程器；首次啟動時立即檢查所有報告，隨後按各項工作設定的 UTC 時間更新。 |
 | 按同一排程持續預覽 | `aranami.run(dry=True)` | 回傳正在執行的排程器，每次觸發時將提案寫入 `dry-run/`；不編輯維基頁面，也不請求 PexBot 刷新。 |
 | 立即執行報告 | `aranami.run_once(...)` | 不論排程時間為何，都立即執行所有工作一輪並回傳 `None`；使用 `dry=True` 預覽。 |
 | 立即執行選定報告 | `aranami.run_once(tasks=["new_pages", "pageviews"], ...)` | 只執行選定工作一輪；`tasks="new_pages"` 選擇單一工作。 |
@@ -19,7 +19,7 @@ Aranami（荒波，意為「洶湧的波浪」）維護維基百科報告，主�
 | 取得優質條目及入選日期 | `analyze_quality_contents(site)` | 回傳條目表格；不編輯維基頁面，也不自動匯出結果。 |
 | 取得資料或處理傳入的文字 | 下列來源及支援介面 | 回傳資料、顯示預覽或轉換文字；會寫入檔案的例外另有說明。 |
 
-## 在 PAWS 安裝與預覽
+## 在 PAWS 安裝並持續監視
 
 將 wheel 與 [scripts/run_aranami.py](scripts/run_aranami.py) 上傳到 PAWS。
 在含有 Aranami wheel 的目錄中執行：
@@ -29,8 +29,10 @@ python scripts/run_aranami.py
 ```
 
 啟動腳本會從目前目錄或 `dist/` 中選擇最後修改時間最新的 `aranami-*.whl`，
-安裝它及相依套件，並呼叫新版本的 `aranami.run_once(dry=True)`，
-立即預覽所有例行工作一輪。
+安裝它及相依套件，並呼叫新版本的 `aranami.run(dry=False)`。
+新監視器立即檢查所有例行工作，隨後按 UTC 排程持續執行，
+發布有變更的維基頁面並請求 PexBot 刷新。啟動腳本持續執行，
+直到按 Ctrl+C 或筆記本的停止按鈕中斷；停止時會等待正在執行的工作完成。
 安裝成功後，會刪除其他最後修改時間相同或較早的本機 Aranami wheel。
 安裝失敗時保留所有 wheel，並且不啟動例行工作。
 若要自行選擇 wheel：
@@ -45,14 +47,14 @@ python scripts/run_aranami.py "path/to/aranami-<version>.whl"
 %run scripts/run_aranami.py
 ```
 
-也可以將完整腳本貼到一個儲存格中。執行腳本檔案時，`logs/`、`cache/` 和
-`dry-run/` 位於腳本旁；貼入儲存格時，則使用筆記本的目前目錄。
+也可以將完整腳本貼到一個儲存格中。執行腳本檔案時，`logs/` 和 `cache/`
+位於腳本旁；貼入儲存格時，則使用筆記本的目前目錄。
 即使筆記本先前已匯入舊版本，啟動腳本仍會使用新安裝的版本。
 PAWS 環境是暫時的，因此伺服器重新啟動後需要再次執行。
 請參閱 [PAWS 使用說明][3]。
 
 腳本的公開 Python 介面包括 `install_wheel(argv=None)` 和 `run()`。
-前者安裝選定的 wheel 並刪除較舊的本機上傳檔案，後者預覽已安裝的套件。
+前者安裝選定的 wheel 並刪除較舊的本機上傳檔案，後者持續監視已安裝的套件並正式發布。
 匯入腳本時，請明確傳入安裝引數：
 
 ```python
@@ -67,7 +69,7 @@ run()
 
 `aranami.run(*, dry=False, clear_cache=False)` 啟動套件內的監視器，
 回傳 APScheduler 的 `BackgroundScheduler`。各項工作按下表設定的 UTC 時間執行。
-呼叫會立即回傳，首輪工作在下一次排程時間觸發。
+呼叫會立即回傳。新啟動的正式監視器立即檢查並更新所有報告，隨後按排程執行。
 
 ```python
 import aranami
@@ -84,7 +86,7 @@ APScheduler 隨 wheel 安裝，無需額外的筆記本安裝儲存格。
 
 只要 Python 程序或 PAWS 核心仍在執行，監視器就會繼續工作。
 重新啟動核心會清除排程；重新匯入套件後，再次呼叫 `aranami.run()`。
-以相同 `dry` 值重複呼叫會重用正在執行的排程器。
+以相同 `dry` 值重複呼叫會重用正在執行的排程器，不會再次觸發初始檢查。
 要切換該值或清除快取，請先呼叫 `scheduler.shutdown(wait=True)`。
 監視器執行期間切換模式或傳入 `clear_cache=True` 會拋出 `ValueError`。
 已暫停的監視器需要呼叫 `scheduler.resume()` 才會恢復。
@@ -140,40 +142,49 @@ new_pages.run(dry=True)
 
 ## 例行工作與 UTC 排程
 
-各項工作的預設目標頁面和 UTC 排程共同定義於
-[src/aranami/monitor.py](src/aranami/monitor.py) 的 `TASK_DEFINITIONS`。
-修改此檔案後建立替換 wheel，即可更改套件內的預設目標或觸發時間。
-各工作模組使用這些預設值實作報告；此模組從同一組定義產生 `SCHEDULES`，並管理監視器。
-`aranami.run()` 使用 UTC 註冊這些 cron 工作，不受筆記本本地時區影響。
-「執行安排」欄表示觸發時間，不代表工作執行所需的時間。
-`aranami.run_once()` 立即執行，不使用這些觸發時間。
-每項工作最多同時執行一個執行個體，錯過的多個觸發時間合併為一次執行嘗試。
-熱門條目允許延遲最多 3,500 秒開始執行。
+下列六項獨立工作維護中文維基百科的電子遊戲專題報告。
+新啟動的正式監視器立即檢查所有工作，隨後按各項 UTC 排程執行。
+正式執行儲存有變更的頁面；`dry=True` 寫入本機提案。
+下方每個固定目標各占一列，皆位於 `WikiProject:电子游戏/` 下。
 
-下方頁面連結均指向中文維基百科 `WikiProject:电子游戏/` 下的頁面，
-每個固定目標各占一列。正式執行儲存有變更的頁面文字；
-`dry=True` 則寫入本機提案。
+預設目標和 UTC cron 排程定義於
+[src/aranami/monitor.py](src/aranami/monitor.py) 的 `TASK_DEFINITIONS`。
+修改此檔案後建立替換 wheel，即可更改這些預設值；工作模組使用同一組定義，
+監視器據此產生 `SCHEDULES`。「執行安排」欄表示觸發時間，不代表執行時長，
+也不受筆記本本地時區影響。`aranami.run_once()` 不受這些時間限制，立即執行。
+每項工作最多同時執行一個執行個體，錯過的多個觸發時間合併為一次執行嘗試。
 
 | 例行腳本 | 更新頁面 | [執行安排](src/aranami/monitor.py) | 說明 |
 |---|---|---|---|
-| [dyks.py](src/aranami/jobs/dyks.py) | [新条目推荐](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新条目推荐) | 每小時 `HH:00` | 刷新已入選條目、候選條目、評級和隱藏的年度統計。 |
-| [new_pages.py](src/aranami/jobs/new_pages.py) | [新进条目/关键词筛选](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新进条目/关键词筛选) | 每日 `00:07` | 列出截至 UTC 昨天符合關鍵字的新建頁面及由重定向改寫的頁面；預設保留 100 個日期，並刷新全部保留記錄中的評級圖示。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/Bplus](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/Bplus) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/BPAN](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/BPAN) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/A](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/A) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/AL](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/AL) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/ACC](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/ACC) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/PPR](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/PPR) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。 |
-| [pageviews.py](src/aranami/jobs/pageviews.py) | [热门条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/热门条目) | 每小時 `HH:59` | UTC 18:00之後，嘗試更新昨日訪問量資料。每次最多補一個缺少的日期，避免集中發出大量請求。 |
-| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科重要条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科重要条目) | 每日 `23:24` | 刷新英文極高／高重要度條目、中文對應條目、評級和數量。 |
-| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科优质条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科优质条目) | 每日 `23:24` | 刷新英文 FA／FL／GA 條目、中文對應條目、評級和數量。 |
-| [pexbot.py](src/aranami/jobs/pexbot.py) | [数据库报告](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告) 下的訂閱頁面 | 每日 `00:00` | 請求 PexBot 刷新列出的報告頁面。 |
+| [dyks.py](src/aranami/jobs/dyks.py) | [新条目推荐](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新条目推荐) | 每小時 `HH:00` | 刷新已入選條目、候選條目、評級和隱藏的年度統計。[（詳細說明）](#dyk) |
+| [new_pages.py](src/aranami/jobs/new_pages.py) | [新进条目/关键词筛选](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新进条目/关键词筛选) | 每日 `00:07` | 列出截至 UTC 昨天符合關鍵字的新建頁面及由重定向改寫的頁面；預設保留 100 個日期，並刷新全部保留記錄中的評級圖示。[（詳細說明）](#新進條目) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/Bplus](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/Bplus) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（詳細說明）](#評級列表) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/BPAN](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/BPAN) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（詳細說明）](#評級列表) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/A](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/A) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（詳細說明）](#評級列表) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/AL](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/AL) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（詳細說明）](#評級列表) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/ACC](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/ACC) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（詳細說明）](#評級列表) |
+| [assessment_lists.py](src/aranami/jobs/assessment_lists.py) | [认证条目/PPR](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/PPR) | 每日 `01:31`、`07:31`、`13:31`、`19:31` | 更新列表。[（詳細說明）](#評級列表) |
+| [pageviews.py](src/aranami/jobs/pageviews.py) | [热门条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/热门条目) | 每小時 `HH:59` | UTC 18:00之後，嘗試更新昨日訪問量資料。每次最多補一個缺少的日期，避免集中發出大量請求。[（詳細說明）](#熱門條目) |
+| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科重要条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科重要条目) | 每日 `23:24` | 刷新英文極高／高重要度條目、中文對應條目、評級和數量。[（詳細說明）](#英文條目對照) |
+| [enwp_key_articles.py](src/aranami/jobs/enwp_key_articles.py) | [数据库报告/英文维基百科优质条目](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科优质条目) | 每日 `23:24` | 刷新英文 FA／FL／GA 條目、中文對應條目、評級和數量。[（詳細說明）](#英文條目對照) |
+| [pexbot.py](src/aranami/jobs/pexbot.py) | [数据库报告](https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告) 下的訂閱頁面 | 每日 `00:00` | 請求 PexBot 刷新列出的報告頁面。[（詳細說明）](#pexbot) |
 
-錯過每日更新時，熱門條目每次呼叫只推進一個報告日期；若當天資料無法取得，
-留待後續呼叫重試。新進條目目前在一次呼叫中補齊保留範圍內全部缺少的日期，
-並重用已有記錄。每次呼叫都會刷新全部保留頁面條目的評級圖示，包括較早日期的條目。
-其他產生的列表也會在重建時刷新評級或設定的評審圖示。
-熱門條目的評級隨新每日報告產生而刷新；PexBot 的產生內容由其自身控制。
+連結中的例行工作均在 `aranami.jobs` 下提供 `run(...)`。
+以下分別說明各項工作的結果和目標設定。
+
+### DYK
+
+新條目推薦刷新已入選條目、候選條目、評級和隱藏的年度統計。
+使用 `title` 可選擇其他報告目標。`statistics_title` 預設為
+`c:Data:Zhwiki_WikiProject_Video_Games_DYK_Annual_Statistics.tab`。
+它用於標示可複製的隱藏統計內容；例行工作不儲存該 Commons 頁面。
+
+### 新進條目
+
+新進條目列表預設保留截至 UTC 昨天的 100 個日期。
+一次呼叫會補齊保留範圍內所有缺少日期，並重用已有每日記錄。
+每次呼叫都會刷新所有保留頁面條目的評級圖示，包括較早日期的條目。
+使用 `title` 可選擇其他目標。
 
 每個新進條目日期還會搜尋該 UTC 日帶有 `mw-removed-redirect` 標籤的編輯。
 符合關鍵字且目前為普通頁面的結果會加入同一列表，在討論連結後標註
@@ -187,16 +198,30 @@ new_pages.run(dry=True)
 已有記錄會在中繼資料可用時補齊缺少的註解；已儲存的註解會在後續更新中保留。
 無法取得建立時間時標記為 `未知`。
 
-連結中的例行工作均在 `aranami.jobs` 下提供 `run(...)`。
-新條目推薦、新進條目和熱門條目接受 `title` 以選擇其他目標；熱門條目另接受
-`settings=REPORT_SETTINGS`。使用 `lists=[(title, AssessmentList(...)), ...]`
-選擇評級列表，使用包含 `important` 和 `quality` 的 `targets` 選擇英文報告目標。
-PexBot 接受 `prefixes` 以覆寫允許的頁面根路徑，或用 `prefixes=[]` 停用刷新；
-只支援中文維基百科。
+### 評級列表
 
-新條目推薦的 `statistics_title` 預設為
-`c:Data:Zhwiki_WikiProject_Video_Games_DYK_Annual_Statistics.tab`。
-它用於標示可複製的隱藏統計內容；例行工作不儲存該 Commons 頁面。
+評級列表在重建時刷新條目、評級和設定的評審圖示。
+使用 `lists=[(title, AssessmentList(...)), ...]` 選擇列表和目標頁面。
+
+### 熱門條目
+
+熱門條目每次呼叫只推進一個缺少的報告日期；若當天資料無法取得，留待後續呼叫重試。
+昨日觀測資料在 UTC 18:00 後可嘗試處理，每小時 `HH:59` 的排程首次在
+UTC 18:59 嘗試更新；此前仍可補齊較早缺少的日期。
+排程工作允許延遲最多 3,500 秒開始執行。評級隨新每日報告產生而刷新。
+使用 `title` 選擇其他目標，用 `settings=REPORT_SETTINGS` 選擇專題成員和排名週期。
+
+### 英文條目對照
+
+兩項英文報告刷新極高／高重要度條目或 FA／FL／GA 條目，
+以及中文對應條目、評級和數量。評級在列表重建時刷新。
+使用包含 `important` 和 `quality` 的 `targets` 選擇報告目標。
+
+### PexBot
+
+PexBot 刷新訂閱的報告頁面，產生內容由其自身控制。
+使用 `prefixes` 覆寫允許的頁面根路徑，或用 `prefixes=[]` 停用刷新。
+只支援中文維基百科。
 
 ### 使用指定日期
 
@@ -245,7 +270,8 @@ finally:
 對熱門條目排名而言，報告日期必須早於基準日期（`date` 或 `context.today`），
 並符合實際呼叫開始時的 UTC 就緒限制：
 昨日資料到 UTC 18:00 才能嘗試處理，此前仍可補較早的缺少日期。
-指定基準日期不會繞過這一限制。工作根據目標頁面的進度記錄處理下一個缺少的日期，
+指定基準日期不會繞過這一限制。進度日期只認目標頁面的
+`<!-- report date YYYY-MM-DD -->` 註解。工作據此處理下一個缺少的日期，
 不會直接跳到指定日期。若要建立某個確切日期的排名而不變更頁面，請使用一次性報告產生器：
 
 ```python
