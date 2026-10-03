@@ -3,6 +3,17 @@
 These instructions apply to `src/aranami/services/` in addition to the
 parent package and repository-wide instructions.
 
+## Responsibility boundaries
+
+- Keep report coordination and wiki-specific interpretation in services.
+- Keep domain scope such as keyword matching rules in services. Accept
+  destination content from jobs rather than selecting or loading update
+  pages here.
+- Put reusable date parsing, template-value access, prose extraction, and
+  language word counting in narrowly named support modules.
+- Pass wiki-specific profiles to generic support functions. Support must
+  not import services or select quality classes, actions, or results.
+
 ## Data processing
 
 - Process tabular data from the Quarry and Pageviews source adapters with
@@ -14,19 +25,22 @@ parent package and repository-wide instructions.
 - Refer to the [Polars Python API reference][1] for supported data types,
   expressions, and operations.
 
-## Wikitext and proposed edits
+## Wikitext and job inputs
 
 - Build or modify non-trivial Wikipedia wikitext with
   `mwparserfromhell` instead of assembling markup through repeated string
   concatenation.
 - Parse existing wikitext and manipulate its nodes and templates whenever
   possible; simple fixed text does not require a parser.
-- Represent a proposed edit as structured data containing the target site
-  and page, wikitext, edit summary, and status tags.
-- Services may construct proposed edits but must not save wiki pages.
-  Intentional publication belongs to jobs.
+- Accept existing page text, process it, and return updated text. Services
+  may also return destination-free report data for jobs to consume.
+- Keep actual update page titles and reads, publication proposals, and
+  saves in jobs. Services must not select or load destination pages.
+- Receive concrete report choices from jobs, including project names,
+  ranking periods, task-force lists, and assessment/report definitions.
+  Keep reusable configuration types and site-specific content rules here.
 - Refer to the [mwparserfromhell documentation][2] for
   wikitext construction.
 
-[1]: https://docs.pola.rs/py-polars/html/reference/
+[1]: https://docs.pola.rs/api/python/stable/reference/index.html
 [2]: https://mwparserfromhell.readthedocs.io/en/latest/

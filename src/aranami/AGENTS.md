@@ -12,11 +12,18 @@ repository-wide instructions.
   or depend on a notebook environment.
 - Keep Aranami buildable as a pure-Python wheel with
   `uv build --wheel --clear`.
-- The `aranami.run(dry_run=False)` call performs one complete run and
-  returns. Do not implement a scheduler, daemon, sleep loop, or notebook
-  callback.
-- `aranami.run(dry_run=True)` performs the same report construction but
-  writes proposed edits locally and must not modify Wikipedia.
+- `aranami.run(dry=False)` starts the background monitor defined in
+  `monitor.py` and returns its scheduler. Use independent per-routine UTC
+  cron triggers, coalesce missed executions, and limit each job to one
+  active instance. Repeated starts reuse an active monitor in the same mode.
+- `aranami.run(dry=True)` also runs the schedules continuously, writing
+  previews at each trigger without wiki edits or PexBot refresh requests.
+- `aranami.run_once(date=None, dry=False, tasks=None)` executes selected
+  tasks immediately without starting or changing schedules. The optional
+  date sets the UTC report anchor. Both public entry points default to live
+  publication. Job-level APIs use the same `dry` keyword and accept an
+  optional `context`.
+- Keep sleep loops and notebook-specific callbacks out of runtime code.
 - On PAWS, runtime data belongs under the caller's current directory:
   `logs/` for UTC daily logs, `cache/` for disposable cached data, and
   `dry-run/` for proposed-edit artifacts.
@@ -35,14 +42,20 @@ repository-wide instructions.
 
 Keep dependencies flowing down through these layers:
 
-- `aranami.__init__` is the small public API and exports `run`.
-- `runner.py` orchestrates one run by invoking jobs. It contains no report
-  implementation or scheduling loop.
+- `aranami.__init__` is the small public API and exports `run` and `run_once`.
+- `runner.py` starts monitoring or coordinates an immediate selected pass.
+  It contains no report implementation or scheduling loop.
+- `monitor.py` defines every routine's default target pages and UTC cron
+  times together, including PexBot's allowed report roots. It owns the
+  background scheduler lifecycle and resolves job callbacks lazily so
+  jobs can read its definitions. Scheduled jobs do not share a `JobContext`.
 - `jobs/` contains one independently runnable report task per module.
-  Jobs coordinate services and select intentional on-wiki publication or
-  local dry-run output.
+  Jobs select report destinations and settings, read current target text,
+  and wrap processed content for intentional on-wiki publication or local
+  dry-run output.
 - `services/` contains reusable, higher-level report workflows shared by
-  jobs.
+  jobs. Services accept caller-supplied text and report settings and return
+  processed content without selecting destination pages.
 - `sources/` contains low-level, read-only external data access. Use a
   Quarry source adapter for Wiki Replica queries and a Pageviews source
   adapter for the Wikimedia Pageviews API. Either adapter may be a module
@@ -62,7 +75,7 @@ directories add rules for their own layer:
 - [Source adapter instructions][1] cover Wiki Replica queries, read-only
   Pywikibot fallbacks, and page preloading.
 - [Service instructions][2] cover Polars data processing, wikitext
-  construction, and proposed-edit values.
+  construction, and destination-free report values.
 - [Job instructions][3] cover report coordination, intentional
   publication, and dry-run artifacts.
 

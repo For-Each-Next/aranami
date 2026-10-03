@@ -1,175 +1,164 @@
-"""Write rotating Aranami logs under the caller's ``logs`` directory.
+"""Append all routine records to one file per UTC calendar date.
 
-The active ``aranami.log`` file rolls over at UTC midnight. The latest
-90 dated archives are retained alongside the active file. One managed
-handler on the stable ``aranami`` logger hierarchy captures records from
-all package modules during a run.
-
-Examples:
-    >>> from pathlib import Path
-    >>> from tempfile import TemporaryDirectory
-    >>> with TemporaryDirectory() as directory:
-    ...     log_directory = Path(directory) / "logs"
-    ...     with open_run_log(log_directory) as logger:
-    ...         logger.info("Example run")
-    ...     len(list(log_directory.glob("aranami.log*")))
-    1
-
+Every run shares ``logs/aranami.YYYY-MM-DD.log`` beneath the caller's
+current directory. Keep the current day and the latest 90 completed
+UTC-dated files. Importing the package does not configure logging.
 """
 
 from __future__ import annotations
 
 __all__ = ("open_run_log",)
 
+import datetime as dt
 import logging
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
-from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from threading import RLock
 from time import gmtime
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-_LOG_DIRECTORY_NAME: Final = "logs"
-_LOG_FILENAME: Final = "aranami.log"
-_LOGGER_NAME: Final = "aranami"
-_ARCHIVE_COUNT: Final = 90
+_ARCHIVE_COUNT = 90
+_FILENAME = re.compile(r"aranami\.(\d{4}-\d{2}-\d{2})\.log")
+
+
+class _DailyLogHandler(logging.FileHandler):
+    """Route each record to its UTC date across midnight boundaries."""
+
+    def __init__(self, directory: Path) -> None:
+        """Initialize a delayed append-only handler."""
+        self.directory = directory
+        self.active_date: dt.date | None = None
+        today = dt.datetime.now(dt.UTC).date()
+        super().__init__(
+            directory / f"aranami.{today}.log",
+            encoding="utf-8",
+            delay=True,
+        )
+        self.setLevel(logging.INFO)
+        formatter = logging.Formatter(
+            "%(asctime)sZ %(levelname)s [%(name)s.%(funcName)s]: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        formatter.converter = gmtime
+        self.setFormatter(formatter)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Append a record to its date's file and prune old archives.
+
+        Args:
+            record: Event whose creation time determines its UTC file.
+        """
+        day = dt.datetime.fromtimestamp(record.created, dt.UTC).date()
+        if day != self.active_date:
+            if self.stream is not None:
+                self.stream.close()
+                self.stream = None
+            self.baseFilename = str(self.directory / f"aranami.{day}.log")
+            self.active_date = day
+            self._prune(day)
+        super().emit(record)
+
+    def _prune(self, today: dt.date) -> None:
+        """Retain the latest completed dates and unrelated files."""
+        archives: list[tuple[dt.date, Path]] = []
+        for path in self.directory.glob("aranami.*.log"):
+            match = _FILENAME.fullmatch(path.name)
+            if match is None or not path.is_file():
+                continue
+            try:
+                day = dt.date.fromisoformat(match[1])
+            except ValueError:
+                continue
+            if day < today:
+                archives.append((day, path))
+        for _, path in sorted(archives, reverse=True)[_ARCHIVE_COUNT:]:
+            path.unlink()
 
 
 @dataclass(slots=True)
 class _RunLogState:
-    """Track the handler shared by overlapping run-log contexts."""
+    """Track the one handler shared by overlapping run contexts."""
 
-    path: Path
-    handler: TimedRotatingFileHandler
+    directory: Path
+    handler: _DailyLogHandler
     original_level: int
     references: int = 1
 
 
 class _RunLogManager:
-    """Manage one process-wide Aranami run-log destination."""
+    """Manage one destination without configuring the root logger."""
 
     def __init__(self) -> None:
-        """Initialize the inactive manager."""
+        """Initialize an inactive, lock-protected log manager."""
         self._active: _RunLogState | None = None
         self._lock = RLock()
 
-    def acquire(
-        self,
-        path: Path,
-    ) -> tuple[logging.Logger, Path | None]:
-        """Attach or reuse the managed handler for a log path.
+    def acquire(self, directory: Path) -> logging.Logger:
+        """Attach or reuse the shared daily-file handler.
 
         Args:
-            path: Absolute active-log path for this context.
+            directory: Resolved directory for this run's daily files.
 
         Returns:
-            The package logger and any conflicting active path.
+            The stable Aranami logger.
 
+        Raises:
+            RuntimeError: A context is using another destination.
         """
-        logger = logging.getLogger(_LOGGER_NAME)
+        logger = logging.getLogger("aranami")
         with self._lock:
             if self._active is not None:
-                if self._active.path != path:
-                    return logger, self._active.path
+                if self._active.directory != directory:
+                    msg = "An Aranami run log is already active elsewhere."
+                    raise RuntimeError(msg)
                 self._active.references += 1
-                return logger, None
-
-            path.parent.mkdir(parents=True, exist_ok=True)
-            handler = _create_handler(path)
+                return logger
+            directory.mkdir(parents=True, exist_ok=True)
+            handler = _DailyLogHandler(directory)
             original_level = logger.level
             if logger.getEffectiveLevel() > logging.INFO:
                 logger.setLevel(logging.INFO)
             logger.addHandler(handler)
-            self._active = _RunLogState(
-                path=path,
-                handler=handler,
-                original_level=original_level,
-            )
-        return logger, None
+            self._active = _RunLogState(directory, handler, original_level)
+        return logger
 
     def release(self) -> None:
-        """Release one context and close the handler after the last."""
-        logger = logging.getLogger(_LOGGER_NAME)
+        """Close the handler and restore the caller's logging level."""
+        logger = logging.getLogger("aranami")
         with self._lock:
             if self._active is None:
                 return
             self._active.references -= 1
             if self._active.references:
                 return
-
             logger.removeHandler(self._active.handler)
             logger.setLevel(self._active.original_level)
             self._active.handler.close()
             self._active = None
 
 
-_RUN_LOG_MANAGER: Final = _RunLogManager()
+_RUN_LOG_MANAGER = _RunLogManager()
 
 
 @contextmanager
-def open_run_log(
-    directory: Path | None = None,
-) -> Iterator[logging.Logger]:
-    """Capture Aranami package records in the rotating run log.
-
-    Overlapping contexts reuse one handler when they target the same
-    path. Only one active destination is supported per process.
+def open_run_log(directory: Path | None = None) -> Iterator[logging.Logger]:
+    """Capture all package routines in one file for each UTC day.
 
     Args:
-        directory: Log directory. Defaults to ``logs`` under the
-            caller's current working directory.
+        directory: Defaults to visible ``logs/`` beneath the caller's
+            current working directory.
 
     Yields:
-        The top-level package logger with the run handler attached.
-
-    Raises:
-        RuntimeError: Another context is using a different log path.
-
+        The stable package logger with its shared file handler attached.
     """
-    log_directory = (
-        Path.cwd() / _LOG_DIRECTORY_NAME if directory is None else directory
-    )
-    log_path = (log_directory / _LOG_FILENAME).resolve()
-    logger, conflicting_path = _RUN_LOG_MANAGER.acquire(log_path)
-    if conflicting_path is not None:
-        msg = (
-            f"An Aranami run log is already active at {conflicting_path}; "
-            f"cannot also use {log_path}."
-        )
-        raise RuntimeError(msg)
+    destination = Path.cwd() / "logs" if directory is None else directory
+    logger = _RUN_LOG_MANAGER.acquire(destination.resolve())
     try:
         yield logger
     finally:
         _RUN_LOG_MANAGER.release()
-
-
-def _create_handler(path: Path) -> TimedRotatingFileHandler:
-    """Create the UTC rotating handler for one active log path.
-
-    Args:
-        path: Absolute active-log path.
-
-    Returns:
-        A delayed handler configured for Aranami run records.
-
-    """
-    handler = TimedRotatingFileHandler(
-        path,
-        when="midnight",
-        backupCount=_ARCHIVE_COUNT,
-        encoding="utf-8",
-        delay=True,
-        utc=True,
-    )
-    handler.setLevel(logging.INFO)
-    formatter = logging.Formatter(
-        "%(asctime)sZ %(levelname)s [%(name)s.%(funcName)s]: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    formatter.converter = gmtime
-    handler.setFormatter(formatter)
-    return handler

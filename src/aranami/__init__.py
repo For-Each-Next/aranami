@@ -1,11 +1,13 @@
-"""Expose Aranami's PAWS run bootstrap and Wikimedia data sources.
+"""Expose recurring monitoring, immediate reports, and data sources.
 
-Call :func:`run` to initialize per-run logging; no report jobs are wired
-yet. Use :mod:`aranami.sources` for read-only Wiki Replica and Pageviews
-access while developing reports.
+Call :func:`run` on PAWS to start its scheduled WikiProject Video games
+monitor, with an immediate check of all reports on a fresh live start.
+Call :func:`run_once` to execute selected reports immediately,
+with an optional date anchor. Both default to live publication; pass
+``dry=True`` to write previews instead of wiki edits.
 """
 
-__all__ = ("run", "sources")
+__all__ = ("run", "run_once", "sources")
 
 from aranami import sources
-from aranami.runner import run
+from aranami.runner import run, run_once

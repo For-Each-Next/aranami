@@ -28,6 +28,8 @@ user-fixes.py
 *.lwp
 throttle.ctrl
 logs/
+cache/
+dry-run/
 
 # Tests, coverage, and tool caches
 apicache/

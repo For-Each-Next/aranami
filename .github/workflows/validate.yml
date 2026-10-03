@@ -1,0 +1,117 @@
+name: Validate
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  PYWIKIBOT_NO_USER_CONFIG: "2"
+
+jobs:
+  validate:
+    name: Check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up uv and Python 3.12
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.22"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Check lockfile
+        run: uv lock --check
+
+      - name: Install locked dependencies
+        run: uv sync --locked --dev
+
+      - name: Lint
+        run: uv run --locked ruff check --no-fix .
+
+      - name: Check formatting
+        run: uv run --locked ruff format --check .
+
+      - name: Run offline unit tests
+        run: uv run --locked python -m unittest discover -s tests/unit -v
+
+      - name: Run offline integration tests
+        run: uv run --locked python -m unittest discover -s tests/integration -v
+
+      - name: Select build version
+        run: |
+          uv run --locked python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          project = Path("pyproject.toml")
+          source = project.read_text(encoding="utf-8")
+          version = tomllib.loads(source)["project"]["version"]
+          match = re.fullmatch(
+              r"(\d+\.\d+\.\d+)(?:\.(dev|post)(\d+))?", version,
+          )
+          if match is None:
+              raise SystemExit(f"Unsupported package version: {version}")
+          if os.environ["GITHUB_REF_TYPE"] == "tag":
+              if match[2] or os.environ["GITHUB_REF_NAME"] != f"v{version}":
+                  raise SystemExit("Release tag must match the formal package version.")
+          else:
+              # CI runs and retries get distinct disposable wheel versions.
+              number = int(os.environ["GITHUB_RUN_ID"]) * 1_000_000
+              number += int(os.environ["GITHUB_RUN_ATTEMPT"])
+              suffix = "dev" if match[2] == "dev" else "post"
+              version = f"{match[1]}.{suffix}{number}"
+              source, replacements = re.subn(
+                  r'^version = "[^"]+"$', f'version = "{version}"',
+                  source, count=1, flags=re.MULTILINE,
+              )
+              if replacements != 1:
+                  raise SystemExit("Could not update the package version.")
+              project.write_text(source, encoding="utf-8")
+          print(f"Building Aranami {version}")
+          PY
+
+      - name: Regenerate build lockfile
+        run: uv lock
+
+      - name: Build wheel
+        run: uv build --wheel --clear
+
+      - name: Extract release notes
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          uv run --locked python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["GITHUB_REF_NAME"][1:]
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          section = re.search(
+              rf"(?ms)^### {re.escape(version)} \([^\n]+\)\n"
+              rf"(.*?)(?=^## |^### |\Z)", changelog,
+          )
+          if section is None or not section[1].strip():
+              raise SystemExit(f"Missing changelog entry for {version}.")
+          Path("dist/release-notes.md").write_text(
+              section[1].strip() + "\n", encoding="utf-8",
+          )
+          PY
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-files
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
