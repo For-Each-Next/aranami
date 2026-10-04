@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mwparserfromhell.nodes import Wikilink
+
 from aranami.jobs import ProposedEdit, job_run
 from aranami.monitor import TASK_DEFINITIONS
-from aranami.services.zhwiki.dyks import article_members, prepare_report
+from aranami.services.zhwiki.dyks import (
+    article_members,
+    nomination_changes,
+    prepare_report,
+)
 from aranami.sources.wiki import read_pages
 from aranami.support.edit_summary import EditSummary
 from aranami.support.report_membership import (
     load_membership,
-    membership_changes,
     save_membership,
 )
 
@@ -33,7 +38,7 @@ def _content_summary(
     previous_members: Mapping[str, int | None] | None = None,
     current_members: Mapping[str, int | None] | None = None,
 ) -> str:
-    """Describe membership changes across both generated DYK ranges.
+    """Describe nomination outcomes across both generated DYK ranges.
 
     Args:
         original_text: Page content before transformation.
@@ -44,7 +49,7 @@ def _content_summary(
             omit to parse page text.
 
     Returns:
-        Count-first summary with actual added and removed articles.
+        Count-first summary with new, passed, and failed nominees.
     """
     previous = (
         article_members(original_text)
@@ -54,8 +59,28 @@ def _content_summary(
     current = (
         article_members(text) if current_members is None else current_members
     )
-    added, removed = membership_changes(previous, current)
-    return EditSummary.membership(added, removed, len(current)).render()
+    new, passed, failed, removed = nomination_changes(
+        original_text,
+        text,
+        previous_members=previous,
+        current_members=current,
+    )
+    summary = EditSummary.membership([], [], len(current))
+    has_group = False
+    for label, titles in (
+        ("New nominee ", new),
+        ("Passed nominee ", passed),
+        ("Failed nominee ", failed),
+        ("Removed ", removed),
+    ):
+        if titles:
+            summary.add_group(
+                label.lower() if has_group else label,
+                [f"«{Wikilink(title)}»" for title in titles],
+                group_separator="; " if has_group else " ",
+            )
+            has_group = True
+    return summary.render()
 
 
 def run(

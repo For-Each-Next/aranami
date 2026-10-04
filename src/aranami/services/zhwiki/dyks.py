@@ -30,11 +30,13 @@ from aranami.support.regions import region_content
 from aranami.support.report_membership import (
     MembershipReport,
     member_identifier,
+    membership_changes,
 )
 from aranami.support.wikitext import replace_by_tag
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
+    from typing import Literal
 
     from pywikibot.site import BaseSite
 
@@ -254,11 +256,48 @@ def _item(title: str, assessment: str) -> Template:
     return template
 
 
-def article_members(text: str) -> dict[str, int | None]:
-    """Read unique members from both managed DYK ranges.
+def _article_items(
+    text: str,
+    range_name: Literal["dyk", "dykn"],
+) -> Iterator[tuple[str, int | None, Template]]:
+    """Read normalized article identities and templates from one range.
 
     Args:
         text: Original or updated report page content.
+        range_name: Completed-DYK or nomination range to inspect.
+
+    Yields:
+        Article titles, optional legacy IDs, and listing templates.
+    """
+    content = region_content(text, range_name)
+    if content is None:
+        return
+    for line in content.splitlines():
+        if not line.lstrip().startswith("#"):
+            continue
+        row = mwparserfromhell.parse(line)
+        for template in row.filter_templates(recursive=False):
+            if not template.name.matches("PJ:VG/DYK/item"):
+                continue
+            if not template.has("1"):
+                continue
+            title = str(template.get("1").value)
+            normalized = title.replace("_", " ").lstrip(":").strip()
+            if normalized:
+                yield normalized, member_identifier(row), template
+
+
+def article_members(
+    text: str,
+    *,
+    range_name: Literal["dyk", "dykn"] | None = None,
+) -> dict[str, int | None]:
+    """Read unique members from managed DYK ranges.
+
+    Args:
+        text: Original or updated report page content.
+        range_name: Select completed DYKs or nominations, or omit to
+            read both ranges.
 
     Returns:
         Article titles and optional legacy page IDs, excluding unmanaged
@@ -268,26 +307,160 @@ def article_members(text: str) -> dict[str, int | None]:
         ValueError: If a present report range is ambiguous or invalid.
     """  # ruff: ignore[docstring-extraneous-exception]
     members: dict[str, int | None] = {}
-    for name in ("dyk", "dykn"):
-        content = region_content(text, name)
-        if content is None:
-            continue
-        for line in content.splitlines():
-            if not line.lstrip().startswith("#"):
-                continue
-            row = mwparserfromhell.parse(line)
-            for template in row.filter_templates(recursive=False):
-                if not template.name.matches("PJ:VG/DYK/item"):
-                    continue
-                if not template.has("1"):
-                    continue
-                title = str(template.get("1").value)
-                normalized = title.replace("_", " ").lstrip(":").strip()
-                if normalized:
-                    identifier = member_identifier(row)
-                    if identifier is not None or normalized not in members:
-                        members[normalized] = identifier
+    for name in ("dyk", "dykn") if range_name is None else (range_name,):
+        for title, identifier, _template in _article_items(text, name):
+            if identifier is not None or title not in members:
+                members[title] = identifier
     return members
+
+
+def _range_members(
+    text: str,
+    range_name: Literal["dyk", "dykn"],
+    identities: Mapping[str, int | None],
+) -> dict[str, int | None]:
+    """Enrich one range with validated cached or source identities.
+
+    Args:
+        text: Report content defining membership in the range.
+        range_name: Completed-DYK or nomination range to inspect.
+        identities: IDs belonging to this exact report content.
+
+    Returns:
+        Range members with supplied IDs or legacy comment IDs.
+    """
+    return {
+        title: identities.get(title) or identifier
+        for title, identifier in article_members(
+            text,
+            range_name=range_name,
+        ).items()
+    }
+
+
+def _completed_dates(text: str) -> dict[str, set[date]]:
+    """Read distinct known completion dates regardless of their order.
+
+    Args:
+        text: Report content containing the completed-DYK range.
+
+    Returns:
+        Normalized article titles and distinct generated ISO dates.
+        Unknown and invalid date labels are excluded.
+    """
+    dates: dict[str, set[date]] = {}
+    for title, _identifier, template in _article_items(text, "dyk"):
+        labels = (
+            str(template.get("date").value).split("、")
+            if template.has("date")
+            else []
+        )
+        article_dates = dates.setdefault(title, set())
+        for label in labels:
+            try:
+                completed = date.fromisoformat(label.strip())
+            except ValueError:
+                continue
+            article_dates.add(completed)
+    return dates
+
+
+def _updated_completions(
+    original_text: str,
+    text: str,
+    previous: Mapping[str, int | None],
+    current: Mapping[str, int | None],
+) -> dict[str, int | None]:
+    """Find existing completed articles that gained a completion date.
+
+    Args:
+        original_text: Original report with completed dates.
+        text: Updated report with completed dates.
+        previous: Original completed articles and their identities.
+        current: Updated completed articles and their identities.
+
+    Returns:
+        Articles with added known dates, recognizing stable-ID renames.
+    """
+    previous_dates = _completed_dates(original_text)
+    current_dates = _completed_dates(text)
+    previous_titles = {
+        identifier: title
+        for title, identifier in previous.items()
+        if identifier is not None
+    }
+    updated: dict[str, int | None] = {}
+    for title, identifier in current.items():
+        previous_title = previous_titles.get(identifier)
+        if (
+            previous_title is None
+            and title in previous
+            and (identifier is None or previous[title] is None)
+        ):
+            previous_title = title
+        if previous_title is not None and (
+            current_dates.get(title, set())
+            - previous_dates.get(previous_title, set())
+        ):
+            updated[title] = identifier
+    return updated
+
+
+def nomination_changes(
+    original_text: str,
+    text: str,
+    *,
+    previous_members: Mapping[str, int | None],
+    current_members: Mapping[str, int | None],
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """Distinguish new, passed, and failed DYK nominations.
+
+    A candidate passes when it gains completed membership or a new
+    completion date for a repeat nomination. A departing candidate
+    absent from the completed list fails. An unchanged historical
+    completion cannot distinguish repeat failure from delayed candidate
+    cleanup, so it does not imply either outcome. Stable IDs recognize
+    renames, with normalized titles as the legacy fallback.
+
+    Args:
+        original_text: Report content before transformation.
+        text: Updated completed-DYK and nomination ranges.
+        previous_members: Original members with known validated IDs.
+        current_members: Updated members with source IDs, when known.
+
+    Returns:
+        Sorted new, passed, and failed nominees, followed by removed
+        historical entries whose nomination result is unknown.
+    """
+    previous_completed = _range_members(original_text, "dyk", previous_members)
+    current_completed = _range_members(text, "dyk", current_members)
+    previous_nominated = _range_members(
+        original_text,
+        "dykn",
+        previous_members,
+    )
+    new, departed = membership_changes(
+        previous_nominated,
+        _range_members(text, "dykn", current_members),
+    )
+    passed, removed = membership_changes(previous_completed, current_completed)
+    departed_members = {title: previous_nominated[title] for title in departed}
+    updated_completions = _updated_completions(
+        original_text,
+        text,
+        previous_completed,
+        current_completed,
+    )
+    _, unrelated = membership_changes(updated_completions, previous_nominated)
+    passed = sorted(
+        set(passed) | (updated_completions.keys() - set(unrelated)),
+        key=lambda title: (title.casefold(), title),
+    )
+    _, failed = membership_changes(
+        departed_members,
+        current_completed,
+    )
+    return new, passed, failed, removed
 
 
 def render_reports(

@@ -193,6 +193,8 @@ sections describe their results and destination settings.
 
 DYK refreshes completed entries, candidates, assessment grades, and hidden
 annual statistics. Pass `title` to choose another report destination.
+Edit summaries label nomination changes as `New nominee`, `Passed nominee`,
+or `Failed nominee`, followed by the linked article titles.
 Its `statistics_title` defaults to
 `c:Data:Zhwiki_WikiProject_Video_Games_DYK_Annual_Statistics.tab`. It labels
 the copyable hidden statistics payload; the routine does not save that
@@ -476,7 +478,7 @@ exporting files.
 | [`aranami.services.quality_profile`](src/aranami/services/quality_profile.py) | `MilestoneExtractor`, `QualityAnalysisProfile` | Describes a wiki's quality-analysis choices and date-extraction interface. |
 | [`aranami.services.enwiki.quality_dates`](src/aranami/services/enwiki/quality_dates.py), [`aranami.services.zhwiki.quality_dates`](src/aranami/services/zhwiki/quality_dates.py) | `extract_milestone(text, status, *, site, most_recent=True, aliases=None)` | Returns a wiki-specific `QualityMilestone` or `None`. |
 | [`aranami.services.zhwiki.dyk_dates`](src/aranami/services/zhwiki/dyk_dates.py) | `extract_dates` | Returns DYK dates from supplied talk-page text, including unknown values. |
-| [`aranami.services.zhwiki.dyks`](src/aranami/services/zhwiki/dyks.py) | `prepare_report`, `update_text`, `render_reports`, `build_statistics`, `article_members` | Returns report text with article identities, updated DYK page text, rendered sections, dated counts, or membership. Source reads can update the disposable DYK cache. |
+| [`aranami.services.zhwiki.dyks`](src/aranami/services/zhwiki/dyks.py) | `prepare_report`, `update_text`, `render_reports`, `build_statistics`, `article_members`, `nomination_changes` | Returns report text with article identities, updated DYK page text, rendered sections, dated counts, membership, or nomination outcomes. Source reads can update the disposable DYK cache. |
 | [`aranami.services.zhwiki.new_pages`](src/aranami/services/zhwiki/new_pages.py) | `update_text`, `matches_keywords`, `update_icons`, `record_dates`, `record_counts` | Returns updated daily-list text, keyword matches, refreshed icons, recorded dates, or article/non-article counts. |
 | [`aranami.services.zhwiki.assessment_lists`](src/aranami/services/zhwiki/assessment_lists.py) | `ReviewInfo`, `AssessmentList`; `prepare_report`, `prepare_text`, `update_text`, `review_heading`, `article_members`, `article_titles` | Configures lists and returns report text with article identities, prepared list text, review anchors, or membership. |
 | [`aranami.services.zhwiki.pageviews`](src/aranami/services/zhwiki/pageviews.py) | `ReportPeriod`, `TaskForce`, `ReportSettings`, `PageviewReport`; `current_data_date`, `report_periods`, `require_daily_observations`, `aggregate_views`, `build_report`, `update_text`; `PageviewsUnavailableError`, `PageviewsDeferredError` | Configures rankings and returns dates, intervals, traffic totals, or report text. `build_report` writes disposable healthy/pending files under `cache/`; `aggregate_views` stages data only when supplied a cache. Errors identify unavailable observations or deferred requests. |
