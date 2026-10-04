@@ -5,6 +5,15 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.4
 
+### 0.3.2 (2026-10-04 03:22 UTC)
+
+Overview: Clarified DYK edit summaries with explicit nomination outcomes.
+
+- Labeled new, passed, and failed DYK nominees in edit summaries while
+  distinguishing removals of historical completed entries.
+- Recognized renamed nominees and repeat completions without mislabeling
+  delayed candidate cleanup as a failed nomination.
+
 ### 0.3.1 (2026-10-03 07:25 UTC)
 
 Overview: Corrected Nintendo task-force membership in Pageviews rankings.

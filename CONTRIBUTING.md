@@ -299,6 +299,12 @@ membership snapshots under `cache/`, never in generated report wikitext.
 Use IDs to recognize renames, grade changes, and movement between DYK
 candidate and completed lists. Validate each snapshot against the exact
 destination text and advance it only after successful live publication.
+DYK summaries distinguish `New nominee`, `Passed nominee`, and
+`Failed nominee`. A repeat nominee passes when it gains a completion
+date. A departing candidate absent from the completed list fails.
+Unchanged historical completion dates cannot distinguish failed repeats
+from delayed candidate cleanup, so they do not imply either outcome.
+Keep removed historical completed entries separate from failed nominees.
 Dry runs may seed the original membership but must not advance it to the
 proposed report. Missing or stale snapshots fall back to title matching,
 or existing Wikidata IDs for English reports, without changing the report

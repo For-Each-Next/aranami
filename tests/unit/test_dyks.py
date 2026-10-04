@@ -20,6 +20,7 @@ from aranami.services.zhwiki.dyk_dates import extract_dates
 from aranami.sources.dyk import TalkPage
 from aranami.support import dyk_cache, report_membership
 from aranami.support.dates import parse_date
+from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
 from aranami.support.regions import region_content
 from aranami.support.report_membership import MembershipReport
 
@@ -437,13 +438,20 @@ class TestDykEdit(TestCase):
             '# {{PJ:VG/DYK/item|Added|优良}}<!-- aranami-member id="4" -->',
         )
         assert dyk_job._content_summary(original, updated) == (
-            "3 items total. Added «[[Added]]»; removed «[[Removed]]»."
+            "3 items total. Passed nominee «[[Added]]»; removed «[[Removed]]»."
         )
         assert "Unmanaged" not in dyks.article_members(updated)
+        assert dyks.article_members(updated, range_name="dykn") == {
+            "Candidate": 3,
+        }
+        assert dyks.article_members(updated, range_name="dyk") == {
+            "Renamed": 1,
+            "Added": 4,
+        }
 
     @staticmethod
-    def test_candidate_promotion_only_reports_total() -> None:
-        """Count an article once when it moves between report ranges."""
+    def test_candidate_promotion_reports_passed_nominee() -> None:
+        """Count each passed nominee once."""
         ranges = (
             '<!-- aranami begin="dyk" -->{completed}'
             '<!-- aranami end="dyk" -->\n'
@@ -455,7 +463,269 @@ class TestDykEdit(TestCase):
         )
         original = ranges.format(completed="\n", nominated=item)
         updated = ranges.format(completed=item, nominated="\n")
+        assert dyk_job._content_summary(original, updated) == (
+            "1 item total. Passed nominee «[[Game]]»."
+        )
+
+    @staticmethod
+    def test_summary_distinguishes_new_passed_and_failed_nominees() -> None:
+        """Label simultaneous new, passed, and failed nominations."""
+        ranges = (
+            '<!-- aranami begin="dyk" -->{completed}'
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->{nominated}'
+            '<!-- aranami end="dykn" -->'
+        )
+        historical = "\n# {{PJ:VG/DYK/item|Historical|初级|date=2023-01-01}}\n"
+        original = ranges.format(
+            completed=historical,
+            nominated=(
+                "\n# {{PJ:VG/DYK/item|Passed|初级}}\n"
+                "# {{PJ:VG/DYK/item|花园多惠|初级}}\n"
+            ),
+        )
+        updated = ranges.format(
+            completed=(
+                historical
+                + "# {{PJ:VG/DYK/item|Passed|优良|date=2024-05-01}}\n"
+            ),
+            nominated="\n# {{PJ:VG/DYK/item|New|初级}}\n",
+        )
+        assert dyk_job._content_summary(original, updated) == (
+            "3 items total. New nominee «[[New]]»; "
+            "passed nominee «[[Passed]]»; failed nominee «[[花园多惠]]»."
+        )
+
+    @staticmethod
+    def test_candidate_promotion_matches_normalized_title_without_ids() -> (
+        None
+    ):
+        """Recognize promotions without a membership snapshot."""
+        original = (
+            '<!-- update start="dyk" -->\n<!-- update end="dyk" -->\n'
+            '<!-- update start="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Video_Game|初级}}\n"
+            '<!-- update end="dykn" -->'
+        )
+        updated = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Video Game|优良|date=2024-05-01}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            '<!-- aranami end="dykn" -->'
+        )
+        assert dyk_job._content_summary(original, updated) == (
+            "1 item total. Passed nominee «[[Video Game]]»."
+        )
+
+    @staticmethod
+    def test_cached_identity_recognizes_rename_during_promotion() -> None:
+        """Recognize success when the candidate is also renamed."""
+        original = (
+            '<!-- aranami begin="dyk" -->\n<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Old name|初级}}\n"
+            '<!-- aranami end="dykn" -->'
+        )
+        updated = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|New name|优良|date=2024-05-01}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            '<!-- aranami end="dykn" -->'
+        )
+        assert (
+            dyk_job._content_summary(
+                original,
+                updated,
+                previous_members={"Old name": 1},
+                current_members={"New name": 1},
+            )
+            == "1 item total. Passed nominee «[[New name]]»."
+        )
+
+    @staticmethod
+    def test_repeat_nomination_passes_when_completed_date_is_added() -> None:
+        """Recognize repeat success from its new date."""
+        original = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级|date=2023-01-01}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级}}\n"
+            '<!-- aranami end="dykn" -->'
+        )
+        updated = original.replace(
+            "date=2023-01-01",
+            "date=2023-01-01、2024-05-01",
+        ).replace("# {{PJ:VG/DYK/item|Game|初级}}\n", "")
+        assert dyk_job._content_summary(original, updated) == (
+            "1 item total. Passed nominee «[[Game]]»."
+        )
+
+    @staticmethod
+    def test_unchanged_historical_completion_leaves_outcome_unknown() -> None:
+        """Keep ambiguous historical outcomes unlabeled."""
+        original = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级|date=2023-01-01、2023-04-01}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级}}\n"
+            '<!-- aranami end="dykn" -->'
+        )
+        updated = (
+            original
+            .replace("# {{PJ:VG/DYK/item|Game|初级}}\n", "")
+            .replace("2023-01-01、2023-04-01", "2023-04-01、2023-01-01")
+            .replace("初级", "优良")
+        )
         assert dyk_job._content_summary(original, updated) == "1 item total."
+
+    @staticmethod
+    def test_delayed_candidate_cleanup_does_not_reverse_a_pass() -> None:
+        """Preserve success after delayed candidate cleanup."""
+        ranges = (
+            '<!-- aranami begin="dyk" -->{completed}'
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->{nominated}'
+            '<!-- aranami end="dykn" -->'
+        )
+        candidate = "\n# {{PJ:VG/DYK/item|Game|初级}}\n"
+        completed = "\n# {{PJ:VG/DYK/item|Game|初级|date=2024-05-01}}\n"
+        original = ranges.format(completed="\n", nominated=candidate)
+        passed = ranges.format(completed=completed, nominated=candidate)
+        cleaned = ranges.format(completed=completed, nominated="\n")
+        assert dyk_job._content_summary(original, passed) == (
+            "1 item total. Passed nominee «[[Game]]»."
+        )
+        assert dyk_job._content_summary(passed, cleaned) == "1 item total."
+
+    @staticmethod
+    def test_repeat_pass_survives_delayed_candidate_cleanup() -> None:
+        """Report repeat success before candidate cleanup."""
+        original = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级|date=2023-01-01}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级}}\n"
+            '<!-- aranami end="dykn" -->'
+        )
+        passed = original.replace(
+            "date=2023-01-01",
+            "date=2023-01-01、2024-05-01",
+        )
+        cleaned = passed.replace("# {{PJ:VG/DYK/item|Game|初级}}\n", "")
+        assert dyk_job._content_summary(original, passed) == (
+            "1 item total. Passed nominee «[[Game]]»."
+        )
+        assert dyk_job._content_summary(passed, cleaned) == "1 item total."
+
+    @staticmethod
+    def test_unknown_completion_date_does_not_imply_repeat_success() -> None:
+        """Require a valid new date before reporting repeat success."""
+        original = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级|date=2023-01-01}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级}}\n"
+            '<!-- aranami end="dykn" -->'
+        )
+        updated = original.replace(
+            "date=2023-01-01",
+            "date=2023-01-01、日期不詳",
+        )
+        assert dyk_job._content_summary(original, updated) == "1 item total."
+
+    @staticmethod
+    def test_same_title_with_another_id_does_not_pass_previous_candidate() -> (
+        None
+    ):
+        """Distinguish a replacement article from the prior nominee."""
+        original = (
+            '<!-- aranami begin="dyk" -->\n<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Game|初级}}\n"
+            '<!-- aranami end="dykn" -->'
+        )
+        updated = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Game|优良|date=2024-05-01}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            '<!-- aranami end="dykn" -->'
+        )
+        assert dyk_job._content_summary(
+            original,
+            updated,
+            previous_members={"Game": 1},
+            current_members={"Game": 2},
+        ) == (
+            "1 item total. Passed nominee «[[Game]]»; "
+            "failed nominee «[[Game]]»."
+        )
+
+    @staticmethod
+    def test_removed_completed_article_is_not_a_failed_nominee() -> None:
+        """Keep historical removals separate from failed nominations."""
+        original = (
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Historical|初级|date=2023-01-01}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            '<!-- aranami end="dykn" -->'
+        )
+        updated = original.replace(
+            "# {{PJ:VG/DYK/item|Historical|初级|date=2023-01-01}}\n",
+            "",
+        )
+        assert dyk_job._content_summary(original, updated) == (
+            "0 items total. Removed «[[Historical]]»."
+        )
+
+    @staticmethod
+    def test_long_nominee_summary_keeps_complete_links_with_timing() -> None:
+        """Fit multibyte outcomes and timing within the byte limit."""
+        ranges = (
+            '<!-- aranami begin="dyk" -->{completed}'
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->{nominated}'
+            '<!-- aranami end="dykn" -->'
+        )
+        short_title = "新遊戲" * 8
+        new_title = "花园多惠" * 30
+        passed_title = "成功" * 60
+        failed_title = "失敗" * 60
+        original = ranges.format(
+            completed="\n",
+            nominated=f"\n# {{{{PJ:VG/DYK/item|{failed_title}|初级}}}}\n",
+        )
+        updated = ranges.format(
+            completed=(
+                f"\n# {{{{PJ:VG/DYK/item|{passed_title}|初级"
+                "|date=2024-05-01}}\n"
+            ),
+            nominated=(
+                f"\n# {{{{PJ:VG/DYK/item|{short_title}|初级}}}}\n"
+                f"# {{{{PJ:VG/DYK/item|{new_title}|初级}}}}\n"
+            ),
+        )
+        summary = EditSummary.with_execution_time(
+            dyk_job._content_summary(original, updated),
+            7.12,
+        )
+        assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        assert summary.startswith("3 items total.")
+        assert summary.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 7.12\u2033.")
+        assert f"«[[{short_title}]]»" in summary
+        assert summary.count("«") == summary.count("»")
+        assert summary.count("[[") == summary.count("]]")
+        assert {
+            str(link.title)
+            for link in mwparserfromhell.parse(summary).filter_wikilinks()
+        } <= {short_title, new_title, passed_title, failed_title}
 
     @staticmethod
     def test_legacy_title_membership_and_grade_only_changes() -> None:
@@ -523,7 +793,8 @@ class TestDykEdit(TestCase):
         [call] = context.publish.call_args_list
         edit = call.args[0]
         assert edit.summary == (
-            "2 items total. Added «[[Added]]»; removed «[[Removed]]»."
+            "2 items total. Passed nominee «[[Added]]», «[[Renamed]]»; "
+            "removed «[[Removed]]»."
         )
         assert "aranami-member" not in edit.text
         save.assert_called_once_with(
@@ -585,7 +856,7 @@ class TestDykEdit(TestCase):
         summaries = [
             call.args[0].summary for call in context.publish.call_args_list
         ]
-        assert summaries == ["2 items total. Added «[[Added]]»."] * 2
+        assert summaries == ["2 items total. Passed nominee «[[Added]]»."] * 2
 
     def test_failed_publication_does_not_save_membership(self) -> None:
         """Preserve cached identities when publication fails."""
