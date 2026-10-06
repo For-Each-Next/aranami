@@ -100,6 +100,8 @@ pexbot.run(prefixes=["WikiProject:电子游戏/数据库报告"], dry=True)
 Other sites are rejected before category queries or refresh requests.
 Dry runs record selected actions without contacting the refresh endpoint;
 live refreshes require an explicit successful `end` stream event.
+Live refreshes wait 15 seconds after each request finishes before starting
+the next report, including after failed attempts.
 
 ## Polars and Parquet
 
@@ -299,9 +301,12 @@ membership snapshots under `cache/`, never in generated report wikitext.
 Use IDs to recognize renames, grade changes, and movement between DYK
 candidate and completed lists. Validate each snapshot against the exact
 destination text and advance it only after successful live publication.
-DYK summaries distinguish `New nominee`, `Passed nominee`, and
-`Failed nominee`. A repeat nominee passes when it gains a completion
-date. A departing candidate absent from the completed list fails.
+DYK summaries begin with separate counts for completed articles and active
+nominees, such as `24 articles, 3 nominees.`. A repeat nominee appears in
+both counts while listed in both ranges. Summaries distinguish
+`New nominee`, `Passed nominee`, and `Failed nominee`. A repeat nominee
+passes when it gains a completion date. A departing candidate absent from
+the completed list fails.
 Unchanged historical completion dates cannot distinguish failed repeats
 from delayed candidate cleanup, so they do not imply either outcome.
 Keep removed historical completed entries separate from failed nominees.

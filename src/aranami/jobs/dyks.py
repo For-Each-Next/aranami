@@ -38,7 +38,7 @@ def _content_summary(
     previous_members: Mapping[str, int | None] | None = None,
     current_members: Mapping[str, int | None] | None = None,
 ) -> str:
-    """Describe nomination outcomes across both generated DYK ranges.
+    """Describe article and nominee totals with nomination outcomes.
 
     Args:
         original_text: Page content before transformation.
@@ -49,7 +49,8 @@ def _content_summary(
             omit to parse page text.
 
     Returns:
-        Count-first summary with new, passed, and failed nominees.
+        Separate article and nominee totals followed by new, passed,
+        and failed nominees.
     """
     previous = (
         article_members(original_text)
@@ -65,7 +66,12 @@ def _content_summary(
         previous_members=previous,
         current_members=current,
     )
-    summary = EditSummary.membership([], [], len(current))
+    articles = len(article_members(text, range_name="dyk"))
+    nominees = len(article_members(text, range_name="dykn"))
+    summary = EditSummary(
+        f"{articles:,} {'article' if articles == 1 else 'articles'}, "
+        f"{nominees:,} {'nominee' if nominees == 1 else 'nominees'}.",
+    )
     has_group = False
     for label, titles in (
         ("New nominee ", new),

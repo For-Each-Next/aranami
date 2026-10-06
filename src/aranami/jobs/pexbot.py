@@ -7,6 +7,7 @@ Dry runs list the delegated actions and never contact these endpoints.
 from __future__ import annotations
 
 import logging
+import time
 import urllib.parse
 import urllib.request
 from importlib.metadata import version
@@ -29,6 +30,7 @@ PEXBOT_PREFIXES: tuple[str, ...] = TASK_DEFINITIONS["pexbot"].prefixes
 
 _LOGGER = logging.getLogger(__name__)
 _ENDPOINT = "https://pexbot.toolforge.org/database-report/stream"
+_COOLDOWN_SECONDS = 15
 
 
 def _refresh(site: BaseSite, title: str) -> None:
@@ -78,6 +80,9 @@ def run(
 ) -> None:
     """Refresh subscribed reports or describe delegated dry-run actions.
 
+    Live requests pause for 15 seconds after each completed attempt
+    before starting the next report. Dry runs do not pause.
+
     Args:
         dry: Suppress external requests for a standalone run.
         context: Parent context whose output mode takes precedence.
@@ -93,7 +98,7 @@ def run(
         titles = subscribed_titles(active.site, allowed)
         _LOGGER.info("Selected %d subscribed PexBot reports.", len(titles))
         failures: list[Exception] = []
-        for title in titles:
+        for index, title in enumerate(titles):
             if active.dry:
                 active.notes.append(
                     f"PexBot refresh proposed: {title}. External generation "
@@ -104,6 +109,8 @@ def run(
                     title,
                 )
                 continue
+            if index:
+                time.sleep(_COOLDOWN_SECONDS)
             try:
                 _refresh(active.site, title)
             except Exception as error:
