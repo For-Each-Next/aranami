@@ -260,14 +260,17 @@ class TestPexbotJob(TestCase):
             patch.object(
                 job,
                 "subscribed_titles",
-                return_value=["Target"],
+                return_value=["Target", "Another target"],
             ) as select,
             patch.object(job, "_refresh") as refresh,
+            patch.object(job.time, "sleep") as pause,
         ):
             job.run(context=context)
         select.assert_called_once_with(context.site, configured)
         refresh.assert_not_called()
+        pause.assert_not_called()
         assert "Target" in context.notes[0]
+        assert "Another target" in context.notes[1]
 
     @staticmethod
     def test_explicit_prefix_override_including_disable() -> None:
@@ -276,15 +279,65 @@ class TestPexbotJob(TestCase):
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(job, "_refresh") as refresh,
+            patch.object(job.time, "sleep") as pause,
             patch.object(service, "category_members") as query,
         ):
             job.run(context=context, prefixes=[])
         refresh.assert_not_called()
+        pause.assert_not_called()
         query.assert_not_called()
+
+    @staticmethod
+    def test_live_refreshes_pause_between_completed_requests() -> None:
+        """Pause after completion before each next request only."""
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
+        sequence = Mock()
+        with (
+            patch.object(job, "job_run", return_value=nullcontext(context)),
+            patch.object(
+                job,
+                "subscribed_titles",
+                return_value=["A", "B", "C"],
+            ),
+            patch.object(job, "_refresh") as refresh,
+            patch.object(job.time, "sleep") as pause,
+        ):
+            sequence.attach_mock(refresh, "refresh")
+            sequence.attach_mock(pause, "pause")
+            job.run(context=context, prefixes=["Wikipedia:Custom"])
+        assert sequence.mock_calls == [
+            call.refresh(context.site, "A"),
+            call.pause(15),
+            call.refresh(context.site, "B"),
+            call.pause(15),
+            call.refresh(context.site, "C"),
+        ]
+
+    def test_empty_and_single_report_batches_never_pause(self) -> None:
+        """Avoid a cooldown when no subsequent refresh is selected."""
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
+        for titles in ([], ["A"]):
+            with (
+                self.subTest(titles=titles),
+                patch.object(
+                    job,
+                    "job_run",
+                    return_value=nullcontext(context),
+                ),
+                patch.object(job, "subscribed_titles", return_value=titles),
+                patch.object(job, "_refresh") as refresh,
+                patch.object(job.time, "sleep") as pause,
+            ):
+                job.run(context=context, prefixes=["Wikipedia:Custom"])
+            pause.assert_not_called()
+            assert refresh.call_args_list == [
+                call(context.site, title) for title in titles
+            ]
 
     def test_failed_report_does_not_skip_remaining_reports(self) -> None:
         """Continue other refreshes and report aggregate failure."""
         context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
+        sequence = Mock()
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(job, "subscribed_titles", return_value=["A", "B"]),
@@ -293,11 +346,15 @@ class TestPexbotJob(TestCase):
                 "_refresh",
                 side_effect=[RuntimeError("failed"), None],
             ) as refresh,
+            patch.object(job.time, "sleep") as pause,
             self.assertLogs(job._LOGGER, level="ERROR"),
             self.assertRaises(ExceptionGroup),
         ):
+            sequence.attach_mock(refresh, "refresh")
+            sequence.attach_mock(pause, "pause")
             job.run(context=context, prefixes=["Wikipedia:Custom"])
-        assert refresh.call_args_list == [
-            call(context.site, "A"),
-            call(context.site, "B"),
+        assert sequence.mock_calls == [
+            call.refresh(context.site, "A"),
+            call.pause(15),
+            call.refresh(context.site, "B"),
         ]

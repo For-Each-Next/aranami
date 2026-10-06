@@ -412,11 +412,47 @@ class TestDykEdit(TestCase):
         assert edit.original_text == original
         assert edit.text == updated
         assert (
-            edit.summary == "1 item total. Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
+            edit.summary
+            == "1 article, 0 nominees. Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
         )
         assert "aranami-member" not in edit.text
         save.assert_called_once_with(site, title, original, {"Old": 1})
         page.save.assert_not_called()
+
+    @staticmethod
+    def test_summary_counts_articles_and_nominees_separately() -> None:
+        """Count each managed list, including active repeat nominees."""
+        ranges = (
+            '<!-- aranami begin="dyk" -->{completed}'
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->{nominated}'
+            '<!-- aranami end="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Unmanaged|初级}}"
+        )
+        cases = (
+            ((), (), "0 articles, 0 nominees."),
+            ((), ("Candidate",), "0 articles, 1 nominee."),
+            (("Completed",), (), "1 article, 0 nominees."),
+            (
+                ("Repeat", "Other"),
+                ("Repeat", "Other"),
+                "2 articles, 2 nominees.",
+            ),
+        )
+        for completed, nominated, expected in cases:
+            text = ranges.format(
+                completed="\n".join(
+                    f"# {{{{PJ:VG/DYK/item|{title}|初级"
+                    "|date=2023-01-01、2024-05-01}}"
+                    for title in completed
+                ),
+                nominated="\n".join(
+                    f"# {{{{PJ:VG/DYK/item|{title}|初级}}}}"
+                    for title in nominated
+                )
+                or "# {{icon|DYKC}}\uff08無\uff09",
+            )
+            assert dyk_job._content_summary(text, text) == expected
 
     @staticmethod
     def test_membership_changes_cover_completed_and_nominated_items() -> None:
@@ -438,7 +474,8 @@ class TestDykEdit(TestCase):
             '# {{PJ:VG/DYK/item|Added|优良}}<!-- aranami-member id="4" -->',
         )
         assert dyk_job._content_summary(original, updated) == (
-            "3 items total. Passed nominee «[[Added]]»; removed «[[Removed]]»."
+            "2 articles, 1 nominee. Passed nominee «[[Added]]»; "
+            "removed «[[Removed]]»."
         )
         assert "Unmanaged" not in dyks.article_members(updated)
         assert dyks.article_members(updated, range_name="dykn") == {
@@ -464,7 +501,7 @@ class TestDykEdit(TestCase):
         original = ranges.format(completed="\n", nominated=item)
         updated = ranges.format(completed=item, nominated="\n")
         assert dyk_job._content_summary(original, updated) == (
-            "1 item total. Passed nominee «[[Game]]»."
+            "1 article, 0 nominees. Passed nominee «[[Game]]»."
         )
 
     @staticmethod
@@ -492,7 +529,7 @@ class TestDykEdit(TestCase):
             nominated="\n# {{PJ:VG/DYK/item|New|初级}}\n",
         )
         assert dyk_job._content_summary(original, updated) == (
-            "3 items total. New nominee «[[New]]»; "
+            "2 articles, 1 nominee. New nominee «[[New]]»; "
             "passed nominee «[[Passed]]»; failed nominee «[[花园多惠]]»."
         )
 
@@ -515,7 +552,7 @@ class TestDykEdit(TestCase):
             '<!-- aranami end="dykn" -->'
         )
         assert dyk_job._content_summary(original, updated) == (
-            "1 item total. Passed nominee «[[Video Game]]»."
+            "1 article, 0 nominees. Passed nominee «[[Video Game]]»."
         )
 
     @staticmethod
@@ -541,7 +578,7 @@ class TestDykEdit(TestCase):
                 previous_members={"Old name": 1},
                 current_members={"New name": 1},
             )
-            == "1 item total. Passed nominee «[[New name]]»."
+            == "1 article, 0 nominees. Passed nominee «[[New name]]»."
         )
 
     @staticmethod
@@ -560,7 +597,7 @@ class TestDykEdit(TestCase):
             "date=2023-01-01、2024-05-01",
         ).replace("# {{PJ:VG/DYK/item|Game|初级}}\n", "")
         assert dyk_job._content_summary(original, updated) == (
-            "1 item total. Passed nominee «[[Game]]»."
+            "1 article, 0 nominees. Passed nominee «[[Game]]»."
         )
 
     @staticmethod
@@ -580,7 +617,10 @@ class TestDykEdit(TestCase):
             .replace("2023-01-01、2023-04-01", "2023-04-01、2023-01-01")
             .replace("初级", "优良")
         )
-        assert dyk_job._content_summary(original, updated) == "1 item total."
+        assert (
+            dyk_job._content_summary(original, updated)
+            == "1 article, 0 nominees."
+        )
 
     @staticmethod
     def test_delayed_candidate_cleanup_does_not_reverse_a_pass() -> None:
@@ -597,9 +637,12 @@ class TestDykEdit(TestCase):
         passed = ranges.format(completed=completed, nominated=candidate)
         cleaned = ranges.format(completed=completed, nominated="\n")
         assert dyk_job._content_summary(original, passed) == (
-            "1 item total. Passed nominee «[[Game]]»."
+            "1 article, 1 nominee. Passed nominee «[[Game]]»."
         )
-        assert dyk_job._content_summary(passed, cleaned) == "1 item total."
+        assert (
+            dyk_job._content_summary(passed, cleaned)
+            == "1 article, 0 nominees."
+        )
 
     @staticmethod
     def test_repeat_pass_survives_delayed_candidate_cleanup() -> None:
@@ -618,9 +661,12 @@ class TestDykEdit(TestCase):
         )
         cleaned = passed.replace("# {{PJ:VG/DYK/item|Game|初级}}\n", "")
         assert dyk_job._content_summary(original, passed) == (
-            "1 item total. Passed nominee «[[Game]]»."
+            "1 article, 1 nominee. Passed nominee «[[Game]]»."
         )
-        assert dyk_job._content_summary(passed, cleaned) == "1 item total."
+        assert (
+            dyk_job._content_summary(passed, cleaned)
+            == "1 article, 0 nominees."
+        )
 
     @staticmethod
     def test_unknown_completion_date_does_not_imply_repeat_success() -> None:
@@ -637,7 +683,10 @@ class TestDykEdit(TestCase):
             "date=2023-01-01",
             "date=2023-01-01、日期不詳",
         )
-        assert dyk_job._content_summary(original, updated) == "1 item total."
+        assert (
+            dyk_job._content_summary(original, updated)
+            == "1 article, 1 nominee."
+        )
 
     @staticmethod
     def test_same_title_with_another_id_does_not_pass_previous_candidate() -> (
@@ -663,7 +712,7 @@ class TestDykEdit(TestCase):
             previous_members={"Game": 1},
             current_members={"Game": 2},
         ) == (
-            "1 item total. Passed nominee «[[Game]]»; "
+            "1 article, 0 nominees. Passed nominee «[[Game]]»; "
             "failed nominee «[[Game]]»."
         )
 
@@ -682,7 +731,7 @@ class TestDykEdit(TestCase):
             "",
         )
         assert dyk_job._content_summary(original, updated) == (
-            "0 items total. Removed «[[Historical]]»."
+            "0 articles, 0 nominees. Removed «[[Historical]]»."
         )
 
     @staticmethod
@@ -717,7 +766,7 @@ class TestDykEdit(TestCase):
             7.12,
         )
         assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
-        assert summary.startswith("3 items total.")
+        assert summary.startswith("1 article, 2 nominees.")
         assert summary.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 7.12\u2033.")
         assert f"«[[{short_title}]]»" in summary
         assert summary.count("«") == summary.count("»")
@@ -739,7 +788,10 @@ class TestDykEdit(TestCase):
             "初级",
             "优良",
         )
-        assert dyk_job._content_summary(original, updated) == "1 item total."
+        assert (
+            dyk_job._content_summary(original, updated)
+            == "1 article, 0 nominees."
+        )
 
     @staticmethod
     def test_clean_candidate_promotion_and_rename_use_cached_ids() -> None:
@@ -793,7 +845,8 @@ class TestDykEdit(TestCase):
         [call] = context.publish.call_args_list
         edit = call.args[0]
         assert edit.summary == (
-            "2 items total. Passed nominee «[[Added]]», «[[Renamed]]»; "
+            "2 articles, 0 nominees. Passed nominee «[[Added]]», "
+            "«[[Renamed]]»; "
             "removed «[[Removed]]»."
         )
         assert "aranami-member" not in edit.text
@@ -856,7 +909,13 @@ class TestDykEdit(TestCase):
         summaries = [
             call.args[0].summary for call in context.publish.call_args_list
         ]
-        assert summaries == ["2 items total. Passed nominee «[[Added]]»."] * 2
+        assert (
+            summaries
+            == [
+                "2 articles, 0 nominees. Passed nominee «[[Added]]».",
+            ]
+            * 2
+        )
 
     def test_failed_publication_does_not_save_membership(self) -> None:
         """Preserve cached identities when publication fails."""

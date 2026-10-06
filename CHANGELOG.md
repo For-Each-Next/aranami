@@ -5,6 +5,15 @@ been committed to Git. Entries are grouped by package release line.
 
 ## Until 0.4
 
+### 0.3.3 (2026-10-06 06:59 UTC)
+
+Overview: Clarified DYK report totals and paced consecutive PexBot refreshes.
+
+- Separated completed article and active nominee counts in DYK edit
+  summaries while retaining nomination outcomes and execution timing.
+- Added a 15-second cooldown after each live PexBot request finishes before
+  starting the next report, including after failed attempts.
+
 ### 0.3.2 (2026-10-04 03:22 UTC)
 
 Overview: Clarified DYK edit summaries with explicit nomination outcomes.
