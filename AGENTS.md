@@ -2,9 +2,10 @@
 
 These instructions apply to the entire repository.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the shared engineering conventions,
-including per-wiki extractors, verified template contracts, configurable HTML
-comment ranges, Polars/Parquet processing, daily logs, and disposable caches.
+See [the development guide](docs/development.md) for the shared engineering
+conventions, including per-wiki extractors, verified template contracts,
+configurable HTML comment ranges, Polars/Parquet processing, daily logs,
+and disposable caches.
 
 ## Repository boundary
 
@@ -23,8 +24,11 @@ layer-specific rules for `src/aranami/`.
   results the caller can expect.
 - Keep technology and implementation details brief. Include them only when
   they help the reader use the component correctly or maintain its contract.
-- Keep the README focused on capabilities and practical usage. Put detailed
-  engineering conventions in `CONTRIBUTING.md` and scoped instructions.
+- Keep the README focused on what the tool does and its results, including
+  the scheduled tasks and their UTC trigger times. Put usage
+  instructions in `docs/usage.md`, and design and engineering conventions in
+  `docs/development.md` and scoped instructions. Maintain files in `docs/`
+  in English only.
 
 ## Python documentation
 
@@ -111,7 +115,8 @@ layer-specific rules for `src/aranami/`.
 - Put one concise `Overview:` paragraph immediately below each package version
   heading that describes the release as a whole.
 - Follow the overview with concise, past-tense bullets covering only material
-  completed outcomes.
+  completed outcomes. Keep each bullet to no more than two lines and omit
+  minor implementation details.
 - When more work, `.devN` builds, or `.postN` builds belong to an existing
   version, revise its overview and bullet list.
 - Before finalizing the base version, consolidate overlapping bullets and

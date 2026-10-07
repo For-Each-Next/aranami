@@ -2,8 +2,10 @@
 
 Edit ``TASK_DEFINITIONS`` before building to change report pages, PexBot
 subscription roots, or cron times. Starting the monitor runs
-reports independently in the background. A fresh live monitor checks
-every report immediately before continuing its cron schedules.
+reports independently in the background. By default, a fresh monitor
+checks every report immediately before continuing its cron schedules.
+Pass ``run_immediately=False`` to start at the next scheduled times
+instead.
 Keep the calling Python process alive. Call ``shutdown(wait=True)`` on
 the returned scheduler before exiting or clearing shared caches.
 """
@@ -188,14 +190,17 @@ def start(
     *,
     dry: bool = False,
     clear_cache: bool = False,
+    run_immediately: bool = True,
 ) -> BackgroundScheduler:
     """Start routine monitoring or return this process's monitor.
 
-    A fresh live monitor first checks every report immediately. Preview
-    jobs first run at their next UTC cron time. Reports may overlap;
-    each report has at most one active execution. Missed runs coalesce
-    into one invocation. A stopped monitor is replaced on the next call.
-    A paused monitor is returned without resuming it.
+    By default, a fresh monitor checks every report immediately in live
+    and preview modes. Set ``run_immediately=False`` to wait for the
+    UTC schedule. Reports may overlap; each report has at most one
+    active execution. Missed runs coalesce into one invocation. Stopped
+    monitors are replaced on the next call. Paused monitors are returned
+    without resuming them. Reusing an active monitor leaves its jobs
+    unchanged regardless of ``run_immediately``.
 
     Args:
         dry: Write local proposals at each scheduled time instead of
@@ -203,6 +208,10 @@ def start(
         clear_cache: Delete disposable ``cache/`` data before starting a
             fresh monitor. Stop an existing monitor with
             ``shutdown(wait=True)`` before requesting cache clearing.
+        run_immediately: Check every routine immediately on a fresh
+            start, then follow its UTC schedule. False waits for the
+            next cron times. This option has no effect on an active
+            monitor.
 
     Returns:
         Running background scheduler, which the caller can inspect,
@@ -237,7 +246,9 @@ def start(
                 (schedule, schedule.run) for schedule in SCHEDULES
             )
             startup_options = (
-                {"next_run_time": dt.datetime.now(dt.UTC)} if not dry else {}
+                {"next_run_time": dt.datetime.now(dt.UTC)}
+                if run_immediately
+                else {}
             )
             for schedule, callback in callbacks:
                 options = (
@@ -260,8 +271,9 @@ def start(
             _dry = dry
             _LOGGER.info(
                 "Aranami monitor started with %d UTC routine schedules "
-                "(dry=%s).",
+                "(dry=%s, run_immediately=%s).",
                 len(SCHEDULES),
                 dry,
+                run_immediately,
             )
         return scheduler

@@ -2,6 +2,8 @@
 
 # Keep calls to internal routines available to focused offline tests.
 # ruff: file-ignore[private-member-access]
+# Verify the exact mathematical monospace version glyphs.
+# ruff: file-ignore[ambiguous-unicode-character-string]
 
 from contextlib import nullcontext
 from datetime import date
@@ -376,6 +378,10 @@ class TestDykEdit(TestCase):
         page = Mock(text=original)
         title = "WikiProject:电子游戏/新条目推荐"
         with (
+            patch(
+                "aranami.support.edit_summary.version",
+                return_value="0.3.5",
+            ),
             patch.object(
                 dyk_job,
                 "job_run",
@@ -412,8 +418,8 @@ class TestDykEdit(TestCase):
         assert edit.original_text == original
         assert edit.text == updated
         assert (
-            edit.summary
-            == "1 article, 0 nominees. Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
+            edit.summary == "1 article, 0 nominees. "
+            "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 0.00\u2033."
         )
         assert "aranami-member" not in edit.text
         save.assert_called_once_with(site, title, original, {"Old": 1})
@@ -743,7 +749,7 @@ class TestDykEdit(TestCase):
             '<!-- aranami begin="dykn" -->{nominated}'
             '<!-- aranami end="dykn" -->'
         )
-        short_title = "新遊戲" * 8
+        short_title = "新遊戲" * 6
         new_title = "花园多惠" * 30
         passed_title = "成功" * 60
         failed_title = "失敗" * 60
@@ -761,13 +767,17 @@ class TestDykEdit(TestCase):
                 f"# {{{{PJ:VG/DYK/item|{new_title}|初级}}}}\n"
             ),
         )
-        summary = EditSummary.with_execution_time(
-            dyk_job._content_summary(original, updated),
-            7.12,
-        )
+        with patch(
+            "aranami.support.edit_summary.version",
+            return_value="0.3.5",
+        ):
+            summary = EditSummary.with_execution_time(
+                dyk_job._content_summary(original, updated),
+                7.12,
+            )
         assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
         assert summary.startswith("1 article, 2 nominees.")
-        assert summary.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 7.12\u2033.")
+        assert summary.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 7.12\u2033.")
         assert f"«[[{short_title}]]»" in summary
         assert summary.count("«") == summary.count("»")
         assert summary.count("[[") == summary.count("]]")

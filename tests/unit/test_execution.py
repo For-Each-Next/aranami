@@ -183,6 +183,10 @@ class TestRoutineOutput(TestCase):
         """Save changed text and avoid redundant writes."""
         page = Mock(text="old")
         with (
+            patch(
+                "aranami.support.edit_summary.version",
+                return_value="0.3.5",
+            ),
             patch("aranami.jobs._execution.perf_counter", return_value=100),
             patch(
                 "aranami.jobs._execution.pywikibot.Page",
@@ -209,7 +213,7 @@ class TestRoutineOutput(TestCase):
                 ),
             )
         page.save.assert_called_once_with(
-            summary="summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00″.",
+            summary="summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 0.00″.",
         )
         assert page.text == "new"
 
@@ -219,6 +223,10 @@ class TestRoutineOutput(TestCase):
         for dry in (False, True):
             page = Mock(text="old")
             with (
+                patch(
+                    "aranami.support.edit_summary.version",
+                    return_value="0.3.5",
+                ),
                 patch(
                     "aranami.jobs._execution.perf_counter",
                     return_value=100,
@@ -244,7 +252,8 @@ class TestRoutineOutput(TestCase):
                 clock.return_value = 1413.95
                 context.publish(proposal)
                 expected = (
-                    "Updated for 5 May 2025. Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 21′53.95″."
+                    "Updated for 5 May 2025. "
+                    "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 21′53.95″."
                 )
                 assert context.edits[0].summary == expected
                 assert proposal.summary == "Updated for 5 May 2025."
@@ -269,6 +278,10 @@ class TestRoutineOutput(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
+            patch(
+                "aranami.support.edit_summary.version",
+                return_value="0.3.5",
+            ),
             patch(
                 "aranami.jobs._execution.perf_counter",
                 return_value=100,
@@ -296,20 +309,26 @@ class TestRoutineOutput(TestCase):
                 ProposedEdit(context.site, "Direct", "four", "summary"),
             )
         assert [edit.summary for edit in context.edits] == [
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 1′00.50″.",
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 1′10.00″.",
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 11.25″.",
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 8′20.00″.",
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 1′00.50″.",
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 1′10.00″.",
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 11.25″.",
+            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 8′20.00″.",
         ]
         assert [task.elapsed_seconds for task in context.tasks] == [70, 11.25]
 
     @staticmethod
     def test_publish_replaces_existing_execution_suffix() -> None:
         """Retain one suffix when a proposal is published again."""
-        with patch(
-            "aranami.jobs._execution.perf_counter",
-            return_value=100,
-        ) as clock:
+        with (
+            patch(
+                "aranami.support.edit_summary.version",
+                return_value="0.3.5",
+            ),
+            patch(
+                "aranami.jobs._execution.perf_counter",
+                return_value=100,
+            ) as clock,
+        ):
             context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
             clock.return_value = 101
             context.publish(
@@ -318,10 +337,12 @@ class TestRoutineOutput(TestCase):
             clock.return_value = 102
             context.publish(context.edits[0])
         assert (
-            context.edits[0].summary == "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 1.00″."
+            context.edits[0].summary
+            == "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 1.00″."
         )
         assert (
-            context.edits[1].summary == "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 2.00″."
+            context.edits[1].summary
+            == "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 2.00″."
         )
 
     @staticmethod

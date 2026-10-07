@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import mwparserfromhell
 import polars as pl
+from mwparserfromhell.nodes import Wikilink
 
 from aranami.sources.quarry import enwp
 from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
@@ -597,20 +598,22 @@ def format_summary_article(
     english_title: str,
     chinese_title: str | None,
 ) -> str:
-    """Quote each linked article title in one complete summary mention.
+    """Link an English title and bracket its Chinese counterpart.
 
     Args:
         english_title: English Wikipedia article title.
-        chinese_title: Chinese Wikipedia title, when one exists.
+        chinese_title: Chinese Wikipedia title, when one exists. An
+            empty title omits the Chinese link.
 
     Returns:
-        Quoted English interwiki link with an optional quoted Chinese
-        link in parentheses.
+        Quoted English interwiki link followed by an optional Chinese
+        link in square brackets. The brackets use character references
+        so the Chinese link remains valid wikitext.
     """
-    english_link = f"«[[:en:{english_title}]]»"
-    if chinese_title is None:
+    english_link = f"«{Wikilink(':en:' + english_title)}»"
+    if not chinese_title:
         return english_link
-    return f"{english_link} («[[{chinese_title}]]»)"
+    return f"{english_link} &#91;{Wikilink(chinese_title)}&#93;"
 
 
 def encode_length(value: str) -> int:

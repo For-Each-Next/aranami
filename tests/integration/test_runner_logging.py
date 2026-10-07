@@ -87,9 +87,31 @@ class TestRunnerLoggingIntegration(TestCase):
                     start.assert_called_once_with(
                         dry=dry,
                         clear_cache=False,
+                        run_immediately=True,
                     )
                     for call in calls.values():
                         call.assert_not_called()
+
+    def test_public_run_forwards_explicit_startup_policy_in_both_modes(
+        self,
+    ) -> None:
+        """Forward both startup policies in live and preview modes."""
+        for dry in (False, True):
+            for run_immediately in (False, True):
+                with (
+                    self.subTest(dry=dry, run_immediately=run_immediately),
+                    patch.object(runner.monitor, "start") as start,
+                ):
+                    result = aranami.run(
+                        dry=dry,
+                        run_immediately=run_immediately,
+                    )
+                    assert result is start.return_value
+                    start.assert_called_once_with(
+                        dry=dry,
+                        clear_cache=False,
+                        run_immediately=run_immediately,
+                    )
 
     @staticmethod
     def test_public_run_once_appends_every_routine_to_one_daily_file() -> None:

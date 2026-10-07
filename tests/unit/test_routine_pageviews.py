@@ -322,7 +322,7 @@ class TestReportState(TestCase):
             report.monthly_top_gain,
         ) == (3, 0, None)
         assert job._edit_summary(report) == (
-            "Updated for 10 Jan 2026. Hottest: «[[A]]» for daily (▲3); "
+            "Updated for 10 Jan 2026. Top: «[[A]]» for daily (▲3); "
             "«[[B]]» for weekly; «[[C]]» for monthly."
         )
 
@@ -581,9 +581,9 @@ class TestPageviewJob(TestCase):
         assert context.edits[0].original_text == _TEXT
         assert context.edits[0].title == job.REPORT_TITLE
         assert context.edits[0].summary == (
-            "Updated for 10 Jan 2026. Hottest: «[[A]]» for daily; "
+            "Updated for 10 Jan 2026. Top: «[[A]]» for daily; "
             "«[[B]]» for weekly; «[[C]]» for monthly. "
-            "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
+            f"{job.EditSummary.with_execution_time('', 0)}"
         )
         assert "2026-01-10" in context.edits[0].text
         page.save.assert_not_called()
@@ -879,7 +879,7 @@ class TestPageviewSummaries(TestCase):
             monthly_top_gain=None,
         )
         assert job._edit_summary(report) == (
-            "Updated for 10 Jan 2026. Hottest: «[[遊戲甲]]» for daily (▲3); "
+            "Updated for 10 Jan 2026. Top: «[[遊戲甲]]» for daily (▲3); "
             "«[[遊戲乙]]» for weekly; «[[遊戲丙]]» for monthly."
         )
 
@@ -912,7 +912,7 @@ class TestPageviewSummaries(TestCase):
                 )
                 summary = job._edit_summary(report)
                 assert summary == (
-                    f"Updated for 10 Jan 2026. Hottest: {expected}."
+                    f"Updated for 10 Jan 2026. Top: {expected}."
                 )
                 assert len(
                     mwparserfromhell.parse(summary).filter_wikilinks(),
@@ -931,7 +931,7 @@ class TestPageviewSummaries(TestCase):
             monthly_top_gain=42,
         )
         assert job._edit_summary(report) == (
-            "Updated for 10 Jan 2026. Hottest: «[[A]]» for "
+            "Updated for 10 Jan 2026. Top: «[[A]]» for "
             "daily (▲3), weekly (▲2), and monthly (▲42)."
         )
 
@@ -940,11 +940,11 @@ class TestPageviewSummaries(TestCase):
         """Include only configured rankings with an observed leader."""
         report = replace(_report(_STOP), daily_top=None, monthly_top=None)
         assert job._edit_summary(report) == (
-            "Updated for 10 Jan 2026. Hottest: «[[B]]» for weekly."
+            "Updated for 10 Jan 2026. Top: «[[B]]» for weekly."
         )
 
     @staticmethod
-    def test_no_observed_leaders_omits_hottest_pages_sentence() -> None:
+    def test_no_observed_leaders_omits_top_pages_sentence() -> None:
         """Keep only the report date when no period has a leader."""
         report = replace(
             _report(_STOP),
@@ -967,7 +967,7 @@ class TestPageviewSummaries(TestCase):
         assert summary.count("[[") == summary.count("]]")
         timed = job.EditSummary.with_execution_time(summary, 1313.95)
         assert len(timed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
-        assert timed.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 21\u203253.95\u2033.")
+        assert timed.endswith(job.EditSummary.with_execution_time("", 1313.95))
         assert long_title not in timed
         assert "more" not in timed
         assert timed.count("[[") == timed.count("]]")
@@ -985,7 +985,7 @@ class TestPageviewSummaries(TestCase):
         )
         summary = job._edit_summary(report)
         assert summary == (
-            "Updated for 10 Jan 2026. Hottest: «[[A]]» for daily; "
+            "Updated for 10 Jan 2026. Top: «[[A]]» for daily; "
             "«[[B]]» for weekly and seasonal (▲4); «[[C]]» for monthly; "
             "«[[D]]» for yearly (▲7)."
         )
@@ -994,7 +994,7 @@ class TestPageviewSummaries(TestCase):
         assert "weekly and seasonal (▲4)" in timed
         assert "«[[D]]» for yearly (▲7)." in timed
         assert timed.count("[[B]]") == 1
-        assert timed.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 21\u203253.95\u2033.")
+        assert timed.endswith(job.EditSummary.with_execution_time("", 1313.95))
 
     @staticmethod
     def test_grouped_periods_fit_with_timing_without_duplicate_links() -> None:
@@ -1010,7 +1010,7 @@ class TestPageviewSummaries(TestCase):
         )
         summary = job._edit_summary(report)
         assert summary == (
-            f"Updated for 10 Jan 2026. Hottest: «[[{title}]]» for "
+            f"Updated for 10 Jan 2026. Top: «[[{title}]]» for "
             "daily, weekly, monthly, seasonal, and yearly."
         )
         timed = job.EditSummary.with_execution_time(summary, 1313.95)
@@ -1019,17 +1019,25 @@ class TestPageviewSummaries(TestCase):
         assert timed.count(f"[[{title}]]") == 1
         assert timed.count("[[") == timed.count("]]")
         assert timed.count("«") == timed.count("»")
-        assert timed.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 21\u203253.95\u2033.")
+        assert timed.endswith(job.EditSummary.with_execution_time("", 1313.95))
 
     def test_timing_omits_yearly_then_seasonal_without_omission_counts(
         self,
     ) -> None:
         """Keep shorter periods and timing when space is limited."""
-        for title_length, expected_periods in (
-            (37, "daily, weekly, monthly, and seasonal"),
-            (40, "daily, weekly, and monthly"),
+        suffix = job.EditSummary.with_execution_time("", 37.78)
+        body_budget = MAX_EDIT_SUMMARY_BYTES - len(suffix.encode("utf-8")) - 1
+        for expected_periods in (
+            "daily, weekly, monthly, and seasonal",
+            "daily, weekly, and monthly",
         ):
-            with self.subTest(title_length=title_length):
+            fixed_body = (
+                f"Updated for 10 Jan 2026. Top: «[[]]» for {expected_periods}."
+            )
+            title_length = (
+                body_budget - len(fixed_body.encode("utf-8"))
+            ) // len("遊".encode())
+            with self.subTest(expected_periods=expected_periods):
                 title = "遊" * title_length
                 report = replace(
                     _report(_STOP),
@@ -1043,9 +1051,8 @@ class TestPageviewSummaries(TestCase):
                 assert "seasonal, and yearly" in summary
                 timed = job.EditSummary.with_execution_time(summary, 37.78)
                 assert timed == (
-                    f"Updated for 10 Jan 2026. Hottest: «[[{title}]]» for "
-                    f"{expected_periods}. "
-                    "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 37.78\u2033."
+                    f"Updated for 10 Jan 2026. Top: «[[{title}]]» for "
+                    f"{expected_periods}. {suffix}"
                 )
                 assert len(timed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
                 assert "more" not in timed

@@ -1,5 +1,8 @@
 """Test ENWP rendering, article changes, and replica selections."""
 
+# Preserve punctuation in the user's Chinese article title.
+# ruff: file-ignore[ambiguous-unicode-character-string]
+
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
@@ -11,6 +14,7 @@ from unittest.mock import Mock, patch
 
 import mwparserfromhell
 import polars as pl
+from mwparserfromhell.nodes import HTMLEntity
 from sqlalchemy.dialects import mysql
 from sqlalchemy.sql.selectable import Select
 from wiki_fixtures import OfflineSite
@@ -250,8 +254,8 @@ class TestEnglishReportService(TestCase):
         new = pl.DataFrame({"en_title": ["New"], "item_id": [9]})
         summary = reports.build_edit_summary(old, new, {8: "舊", 9: "新"})
         assert summary == (
-            "1 item total. Added «[[:en:New]]» («[[新]]»); "
-            "removed «[[:en:Old]]» («[[舊]]»)."
+            "1 item total. Added «[[:en:New]]» &#91;[[新]]&#93;; "
+            "removed «[[:en:Old]]» &#91;[[舊]]&#93;."
         )
         long_rows = pl.DataFrame({
             "en_title": ["中文" * 200],
@@ -261,6 +265,41 @@ class TestEnglishReportService(TestCase):
         summary_budget = 50
         assert len(short.encode()) <= summary_budget
         assert short == "1 item total. Added 1 more."
+
+    @staticmethod
+    def test_summary_links_parenthesized_chinese_counterpart() -> None:
+        """Keep both titles linked with distinct delimiters."""
+        english = "Blade (Honkai)"
+        chinese = "刃 (崩壞：星穹鐵道)"
+        mention = reports.format_summary_article(english, chinese)
+        assert mention == (
+            "«[[:en:Blade (Honkai)]]» &#91;[[刃 (崩壞：星穹鐵道)]]&#93;"
+        )
+        parsed = mwparserfromhell.parse(mention)
+        assert str(parsed) == mention
+        assert [str(link.title) for link in parsed.filter_wikilinks()] == [
+            f":en:{english}",
+            chinese,
+        ]
+        assert [
+            node.normalize()
+            for node in parsed.nodes
+            if isinstance(node, HTMLEntity)
+        ] == ["[", "]"]
+
+    @staticmethod
+    def test_summary_omits_missing_or_empty_chinese_counterpart() -> None:
+        """Keep only the English link without a Chinese title."""
+        for chinese in (None, ""):
+            mention = reports.format_summary_article(
+                "Blade (Honkai)",
+                chinese,
+            )
+            assert mention == "«[[:en:Blade (Honkai)]]»"
+            assert [
+                str(link.title)
+                for link in mwparserfromhell.parse(mention).filter_wikilinks()
+            ] == [":en:Blade (Honkai)"]
 
     @staticmethod
     def test_summary_ignores_renames_and_assessment_changes() -> None:
@@ -320,17 +359,19 @@ class TestEnglishReportService(TestCase):
             "en_title": [f"New {index} 中文中文中文" for index in range(10)],
             "item_id": list(range(1, 11)),
         })
+        chinese = {index: f"中文標題 {index}" for index in range(1, 11)}
         for requested, budget in [(90, 90), (500, 255)]:
             summary = reports.build_edit_summary(
                 old,
                 new,
-                {},
+                chinese,
                 max_bytes=requested,
             )
             assert len(summary.encode("utf-8")) <= budget
             assert summary.startswith("10 items total.")
             assert summary.count("[[") == summary.count("]]")
             assert summary.count("«") == summary.count("»")
+            assert summary.count("&#91;") == summary.count("&#93;")
             assert "more" in summary
         assert not reports.build_edit_summary(old, new, {}, max_bytes=0)
 
@@ -395,7 +436,7 @@ class TestEnglishReportService(TestCase):
             for text in texts.values()
         )
         assert all(
-            "removed «[[:en:Old]]» («[[舊]]»)" in summary
+            "removed «[[:en:Old]]» &#91;[[舊]]&#93;" in summary
             for summary in summaries.values()
         )
         custom = reports.ReportSpec(

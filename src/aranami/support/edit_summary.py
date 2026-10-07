@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from importlib.metadata import version
 from typing import TYPE_CHECKING, Self
 
 import mwparserfromhell
-from mwparserfromhell.nodes import Text, Wikilink
+from mwparserfromhell.nodes import HTMLEntity, Text, Wikilink
 
 if TYPE_CHECKING:
     import datetime as dt
@@ -25,7 +26,12 @@ MAX_EDIT_SUMMARY_BYTES = 255
 _SECONDS_PER_MINUTE = 60
 _HUNDREDTHS_PER_SECOND = 100
 _EXECUTION_SUFFIX = re.compile(
-    r"\s*[Ee]xecuted(?: by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒)? in (?:\d+′)?\d{1,2}\.\d{2}″\.$",
+    r"\s*[Ee]xecuted(?: by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒(?: [𝟶-𝟿𝚊-𝚣0-9a-z.!+-]+)?)?"
+    r" in (?:\d+′)?\d{1,2}\.\d{2}″\.$",
+)
+_VERSION_GLYPHS = str.maketrans(
+    "0123456789abcdefghijklmnopqrstuvwxyz",
+    "𝟶𝟷𝟸𝟹𝟺𝟻𝟼𝟽𝟾𝟿𝚊𝚋𝚌𝚍𝚎𝚏𝚐𝚑𝚒𝚓𝚔𝚕𝚖𝚗𝚘𝚙𝚚𝚛𝚜𝚝𝚞𝚟𝚠𝚡𝚢𝚣",
 )
 _MONTHS = (
     "Jan",
@@ -346,15 +352,17 @@ class EditSummary:
 
     @classmethod
     def with_execution_time(cls, summary: str, elapsed_seconds: float) -> str:
-        """End a summary with elapsed execution time within 255 bytes.
+        """End a summary with package version and time within 255 bytes.
 
         Args:
             summary: Rendered report summary or caller-supplied text.
             elapsed_seconds: Duration until publication starts.
 
         Returns:
-            Summary ending with ``Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in <duration>.``
-            using the measured duration, such as ``21′53.95″`` or
+            Summary ending with
+            ``Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 <version> in <duration>.``
+            using the installed version in mathematical monospace and
+            the measured duration, such as ``21′53.95″`` or
             ``7.12″`` for times below one minute.
             Complete clauses are rebudgeted when
             available; caller-supplied text is shortened at safe bounds.
@@ -366,7 +374,11 @@ class EditSummary:
         )
         seconds, fraction = divmod(remainder, _HUNDREDTHS_PER_SECOND)
         duration = f"{minutes}′{seconds:02d}" if minutes else str(seconds)
-        suffix = f"Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in {duration}.{fraction:02d}″."
+        package_version = version("aranami").translate(_VERSION_GLYPHS)
+        suffix = (
+            f"Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 {package_version} "
+            f"in {duration}.{fraction:02d}″."
+        )
         budget = MAX_EDIT_SUMMARY_BYTES - len(suffix.encode("utf-8")) - 1
         if isinstance(summary, _RenderedSummary):
             rebuilt = cls(summary.base, max_bytes=budget)
@@ -388,7 +400,7 @@ def _fit_existing_summary(text: str, budget: int) -> str:
         budget: Bytes available before the mandatory timing suffix.
 
     Returns:
-        A complete prefix with balanced links, quotes, and parentheses.
+        A complete prefix with balanced links, quotes, and brackets.
     """
     if len(text.encode("utf-8")) <= budget:
         return text
@@ -396,22 +408,40 @@ def _fit_existing_summary(text: str, budget: int) -> str:
     safe = ""
     quote_end: str | None = None
     parentheses = 0
+    brackets = 0
+    trailing_punctuation = 0
     for node in mwparserfromhell.parse(text).nodes:
         pieces = str(node) if isinstance(node, Text) else (str(node),)
         for piece in pieces:
             prefix += piece
-            if isinstance(node, Text):
+            trailing_punctuation = (
+                trailing_punctuation + 1
+                if isinstance(node, Text) and piece in " ,;."
+                else 0
+            )
+            if isinstance(node, (Text, HTMLEntity)):
+                character = (
+                    node.normalize() if isinstance(node, HTMLEntity) else piece
+                )
                 if quote_end is not None:
-                    quote_end = None if piece == quote_end else quote_end
-                elif piece in {"«", "“"}:
-                    quote_end = {"«": "»", "“": "”"}[piece]
+                    quote_end = None if character == quote_end else quote_end
+                elif character in {"«", "“"}:
+                    quote_end = {"«": "»", "“": "”"}[character]
                 else:
                     parentheses = max(
                         0,
-                        parentheses + {"(": 1, ")": -1}.get(piece, 0),
+                        parentheses + {"(": 1, ")": -1}.get(character, 0),
                     )
-            if quote_end is None and not parentheses:
-                candidate = prefix.rstrip(" ,;.") + "."
+                    brackets = max(
+                        0,
+                        brackets + {"[": 1, "]": -1}.get(character, 0),
+                    )
+            if quote_end is None and not parentheses and not brackets:
+                candidate = (
+                    prefix[:-trailing_punctuation]
+                    if trailing_punctuation
+                    else prefix
+                ) + "."
                 if len(candidate.encode("utf-8")) <= budget:
                     safe = candidate
             if len(prefix.encode("utf-8")) > budget:

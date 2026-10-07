@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from aranami.jobs import JobContext, ProposedEdit, job_run
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from pywikibot.site import BaseSite
 
 _TARGET = TASK_DEFINITIONS["new_pages"].pages["report"]
+_LOGGER = logging.getLogger(__name__)
 
 
 def _edit_summary(
@@ -65,7 +67,7 @@ def run(
     dry: bool = False,
     context: JobContext | None = None,
 ) -> None:
-    """Update the keyword report once for the preceding UTC day.
+    """Fill missing keyword records or skip a complete date window.
 
     Args:
         title: Destination page whose existing records are updated.
@@ -83,6 +85,11 @@ def run(
         )
         dates = record_dates(text)
         filled_dates = dates - record_dates(original_text)
+        if not filled_dates:
+            reason = "No missing retained new-page dates; skipped update."
+            active.notes.append(reason)
+            _LOGGER.info(reason)
+            return
         filled = len(filled_dates)
         active.publish(
             ProposedEdit(
