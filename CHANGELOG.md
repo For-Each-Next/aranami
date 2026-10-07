@@ -2,6 +2,25 @@
 
 This file records major completed changes, grouped by package release line.
 
+## Until 0.5
+
+### 0.4.0 (2026-10-07 08:29 UTC)
+
+Overview: Simplified report maintenance around current marker and identity
+contracts, removing obsolete compatibility code and redundant documentation.
+
+- Required paired `aranami` comments for managed ranges; removed migration
+  from `update` comments, section-only ranges, and unmarked new-page reports.
+- Removed old row-ID comment readers while retaining cached identities and
+  title/Wikidata matching when caches are absent.
+- Removed unused summary helpers and managed-range reexports; range helpers
+  now live only in `aranami.support.regions`.
+- Removed the `bpcn` review alias, ignored assessment `member_ids` argument,
+  and `PEXBOT_PREFIXES` alias in favor of central task definitions.
+- Removed the notebook kernel dependency from the runtime package.
+- Consolidated current usage guidance and removed redundant interface catalogs.
+- Preserved daily gap filling, Pageviews catch-up, and pending-request recovery.
+
 ## Until 0.4
 
 ### 0.3.5 (2026-10-07 08:04 UTC)

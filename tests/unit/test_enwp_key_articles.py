@@ -40,12 +40,12 @@ def _old_text(spec: reports.ReportSpec, body: str = "old body") -> str:
     """
     markers = ["count_all", *(name for _, name in spec.count_markers)]
     counts = " ".join(
-        f'<!-- update begin="{name}" -->99<!-- update begin="{name}" -->'
+        f'<!-- aranami begin="{name}" -->99<!-- aranami end="{name}" -->'
         for name in markers
     )
     return (
         f"Before {counts}\n"
-        f'<!-- update begin="body" -->{body}<!-- update end="body" -->'
+        f'<!-- aranami begin="body" -->{body}<!-- aranami end="body" -->'
         "\nAfter"
     )
 
@@ -164,14 +164,8 @@ class TestEnglishReportService(TestCase):
     """Exercise report membership, rendering, and summary behavior."""
 
     @staticmethod
-    def test_nested_counter_markers_preserve_surroundings() -> None:
-        """Replace markers inside a template without rewriting it."""
-        text = '{{Box|n=<!-- update begin="count_all" -->9'
-        text += '<!-- update begin="count_all" -->|other=keep}}'
-        result = reports.replace_marker_value(text, "count_all", "12")
-        assert "|other=keep}}" in result
-        assert '<!-- aranami begin="count_all" -->12' in result
-        assert '<!-- aranami end="count_all" -->' in result
+    def test_missing_body_markers_reject_update() -> None:
+        """Refuse to replace a report without canonical body markers."""
         failure = None
         try:
             reports.replace_body("No report markers", "replacement")
@@ -250,7 +244,7 @@ class TestEnglishReportService(TestCase):
         assert reports.parse_old_articles(
             legacy_item,
             OfflineSite("zh", "wikipedia"),
-        ) == {"A|B": reports.OldArticle("A|B", 9, 123, en_class="GA")}
+        ) == {"A|B": reports.OldArticle("A|B", 9, en_class="GA")}
         managed = _old_text(job.REPORT_SPECS[0], item)
         assert item in reports.replace_body(managed, item)
 
@@ -335,8 +329,8 @@ class TestEnglishReportService(TestCase):
         )
 
     @staticmethod
-    def test_summary_migrates_legacy_identity_and_formats_totals() -> None:
-        """Match legacy IDs and separate thousands in the total."""
+    def test_summary_matches_wikidata_and_formats_totals() -> None:
+        """Match Wikidata IDs and separate thousands in the total."""
         old = {"Old": reports.OldArticle("Old", 8)}
         new = pl.DataFrame({
             "page_id": [123],

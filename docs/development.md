@@ -92,10 +92,10 @@ Quality analysis remains explicitly callable outside the routine runner.
 PexBot refreshes are restricted to Chinese Wikipedia. Configure their
 allowed page roots in `src/aranami/monitor.py` through
 `TASK_DEFINITIONS["pexbot"].prefixes` before building a replacement wheel.
-The job's `PEXBOT_PREFIXES` alias uses that definition. The service receives
-these prefixes explicitly and contains no project-specific scope. A root
-matches its exact page and slash-delimited subpages; a trailing slash
-matches only descendants. Titles and namespace aliases are normalized by
+The service receives these prefixes explicitly and contains no
+project-specific scope. A root matches its exact page and slash-delimited
+subpages; a trailing slash matches only descendants. Titles and namespace
+aliases are normalized by
 Pywikibot. An empty tuple disables PexBot selection without querying its
 subscription category. A manual invocation may override the wheel defaults:
 
@@ -181,9 +181,8 @@ identities leave the row unchanged with a diagnostic.
 
 Pageviews processes at most one missing report date per call.
 Read its published checkpoint only from `<!-- report date YYYY-MM-DD -->`
-and emit the same marker in generated reports. Ignore obsolete date comments
-and ranking-template dates; fail before building without a valid checkpoint
-or when recognized dates conflict.
+and emit the same marker in generated reports. Fail before building without
+a valid checkpoint or when recognized dates conflict.
 Keep `DATA_READY_HOUR=18` in
 `src/aranami/jobs/pageviews.py` as the routine's data-readiness rule.
 Yesterday becomes eligible
@@ -192,10 +191,9 @@ schedule first attempts it at 18:59 UTC. Before 18:00, older missing dates
 remain eligible. Apply the same cutoff to live, dry, and manual job
 invocations, using `JobContext.started_at` rather than the chosen report
 anchor for readiness. Report dates must also be before the requested anchor;
-a supplied anchor cannot bypass the actual cutoff. Existing `lag-days`
-attributes no longer affect the selected report date. If at least 95% of
-queried articles have no
-observation for that date, skip the edit and leave both the wiki date marker
+a supplied anchor cannot bypass the actual cutoff. If at least 95% of
+queried articles have no observation for that date, skip the edit and leave
+both the wiki date marker
 and healthy cache unchanged so the next call retries. Explicit zeroes remain valid.
 Its Parquet cache keeps an 800-day history by default, reuses sufficient
 coverage, fetches only missing tails, and rebuilds histories that do not
@@ -215,7 +213,7 @@ availability guard passes, and discard it when the guard rejects that day.
 
 ## Managed ranges and on-wiki configuration
 
-Use HTML comments to mark generated ranges. The canonical form is:
+Use paired `aranami` HTML comments to mark generated ranges:
 
 ```wikitext
 <!-- aranami begin="new-pages" days="100" -->
@@ -236,11 +234,11 @@ requests or publication. Code supplies documented defaults. Current settings
 include new-page retention, Pageviews history and availability threshold,
 and assessment-list source categories.
 
-Migrate legacy update comments during a successful rewrite. Keep functional
+Only `aranami` comments delimit managed ranges. Keep functional
 `<section begin="..."/>` and `<section end="..."/>` tags used by labeled
-section transclusion, placing Aranami comments inside them. Refuse ambiguous,
-missing, reversed, or duplicate markers instead of replacing a broad span.
-Preserve all text outside the managed range.
+section transclusion outside the Aranami comments. Refuse ambiguous, missing,
+reversed, or duplicate markers instead of replacing a broad span. Preserve
+all text outside the managed range.
 
 ## Wikitext, templates, and site semantics
 
@@ -287,11 +285,11 @@ Use bracket character entities around its wikilink so both article links
 remain valid. Preserve complete delimiter pairs and entities when
 shortening a summary.
 At publication, end every live edit and dry-run proposal summary with
-`Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 21′53.95″.` using the installed package
+`Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟺.𝟶 in 21′53.95″.` using the installed package
 version in mathematical monospace and measured minutes, seconds,
 and hundredths.
 For durations below one minute, omit zero minutes and the leading seconds
-zero, for example `Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 7.12″.`.
+zero, for example `Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟺.𝟶 in 7.12″.`.
 Measure from the current routine's start until each proposal is ready,
 before checking or saving its target. Direct publications use context
 creation time. Reserve space for the complete suffix within the same
@@ -329,9 +327,8 @@ Keep removed historical completed entries separate from failed nominees.
 Dry runs may seed the original membership but must not advance it to the
 proposed report. Missing or stale snapshots fall back to title matching,
 or existing Wikidata IDs for English reports, without changing the report
-body. In real-time membership reports, read old ID comments only for
-migration and remove them when rewriting generated rows. The dated
-new-page list retains its requested ID and creation-time comments.
+body. The dated new-page list retains its requested ID and creation-time
+comments.
 Both English key-article reports list English
 additions and removals as `[[:en:Title]]` links and match English page IDs
 across title changes.

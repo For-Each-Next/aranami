@@ -21,9 +21,9 @@ from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
 _DAY = dt.date(2026, 1, 10)
 _STOP = dt.date(2026, 1, 11)
 _TEXT = (
-    'Before<!-- update start="page_views" -->'
+    'Before<!-- aranami begin="page_views" -->'
     "<!-- report date 2026-01-09 -->"
-    '<!-- update end="page_views" -->After'
+    '<!-- aranami end="page_views" -->After'
 )
 
 
@@ -642,10 +642,10 @@ class TestPageviewJob(TestCase):
     def test_page_marker_configures_history_and_missing_limit() -> None:
         """Read settings and retain their marker attributes."""
         text = _TEXT.replace(
-            'update start="page_views"',
+            'aranami begin="page_views"',
             'aranami begin="page_views" history-days="900" '
             'missing-percent="90"',
-        ).replace('update end="page_views"', 'aranami end="page_views"')
+        )
         context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry=True)
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
@@ -844,12 +844,12 @@ class TestPageviewReadiness(TestCase):
             None,
         )
 
-    def test_legacy_lag_attribute_does_not_change_utc_readiness(self) -> None:
-        """Ignore old lag settings on both sides of UTC 18:00."""
+    def test_unknown_attribute_does_not_change_utc_readiness(self) -> None:
+        """Ignore unrelated settings on both sides of UTC 18:00."""
         text = _TEXT.replace(
-            'update start="page_views"',
-            'aranami begin="page_views" lag-days="3"',
-        ).replace('update end="page_views"', 'aranami end="page_views"')
+            'aranami begin="page_views"',
+            'aranami begin="page_views" unrelated="3"',
+        )
         for timestamp, expected in (
             (dt.datetime(2026, 1, 11, 17, 59, 59, tzinfo=dt.UTC), None),
             (dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC), _STOP),

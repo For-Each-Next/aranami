@@ -6,6 +6,7 @@
 import datetime as dt
 import json
 from contextlib import nullcontext
+from dataclasses import replace
 from io import BytesIO
 from typing import override
 from unittest import TestCase
@@ -256,7 +257,13 @@ class TestPexbotJob(TestCase):
         configured = ("Wikipedia:Custom", "User:Another/")
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
-            patch.object(job, "PEXBOT_PREFIXES", configured),
+            patch.dict(
+                job.TASK_DEFINITIONS,
+                pexbot=replace(
+                    job.TASK_DEFINITIONS["pexbot"],
+                    prefixes=configured,
+                ),
+            ),
             patch.object(
                 job,
                 "subscribed_titles",

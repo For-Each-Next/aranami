@@ -1,5 +1,8 @@
 """Verify date retention, gap recovery, and repeatable report output."""
 
+# Keep the repository's unittest runner and exception assertions.
+# ruff: file-ignore[pytest-unittest-raises-assertion]
+
 import datetime as dt
 from contextlib import nullcontext
 from unittest import TestCase
@@ -12,7 +15,7 @@ from pywikibot.site import BaseSite, Namespace
 from aranami.jobs import JobContext, new_pages as new_pages_job
 from aranami.services.zhwiki import new_pages
 from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
-from aranami.support.wikitext import managed_region
+from aranami.support.regions import managed_region
 
 _DAY_HEADING_LEVEL = 3
 
@@ -346,7 +349,9 @@ class TestNewPageRecords(TestCase):
         assert result.startswith("=== 2026年10月2日 ===\n")
         assert "搜尋0個頁面，匹配到0個頁面" in result  # ruff: ignore[ambiguous-unicode-character-string]
         assert "自重定向页改写" not in result
-        assert new_pages.record_dates(result) == {day}
+        assert new_pages.record_dates(
+            managed_region("new-pages", result),
+        ) == {day}
         assert preload.call_args.args[1] == []
 
     @staticmethod
@@ -355,11 +360,12 @@ class TestNewPageRecords(TestCase):
         today = dt.date(2026, 10, 3)
         days = [today - dt.timedelta(days=value) for value in range(1, 101)]
         missing = {days[2], days[76]}
-        original = (
-            "Manual introduction.\n"
-            + "".join(_section(day) for day in days if day not in missing)
+        original = "Manual introduction.\n" + managed_region(
+            "new-pages",
+            "".join(_section(day) for day in days if day not in missing)
             + _section(days[0])
-            + _section(today - dt.timedelta(days=150))
+            + _section(today - dt.timedelta(days=150)),
+            {"days": "100"},
         )
         original += "== Manual notes ==\nKeep this note.\n"
         site = Mock()
@@ -414,6 +420,40 @@ class TestNewPageRecords(TestCase):
             query_members.assert_not_called()
             assert repeated == updated
         read_pages.assert_not_called()
+
+    def test_obsolete_or_unmarked_pages_reject_before_source_requests(
+        self,
+    ) -> None:
+        """Require canonical markers before rebuilding daily records."""
+        record = _section(dt.date(2026, 10, 2))
+        for original in (
+            record,
+            (
+                f'<!-- update start="new-pages" -->{record}'
+                '<!-- update end="new-pages" -->'
+            ),
+        ):
+            with (
+                self.subTest(original=original),
+                patch.object(new_pages, "_build_section") as build,
+                patch.object(
+                    new_pages,
+                    "query_pages_by_wikiproject",
+                ) as query,
+            ):
+                with self.assertRaises(ValueError):
+                    new_pages.update_text(
+                        original,
+                        Mock(),
+                        dt.date(2026, 10, 3),
+                        project="电子游戏",
+                    )
+                with self.assertRaises(ValueError):
+                    new_pages.record_dates(original)
+                with self.assertRaises(ValueError):
+                    new_pages.record_counts(original, Mock(), set())
+                build.assert_not_called()
+                query.assert_not_called()
 
     @staticmethod
     def test_comment_configuration_and_unmanaged_dates() -> None:

@@ -18,7 +18,7 @@ from aranami.monitor import TASK_DEFINITIONS
 from aranami.services.zhwiki import pageviews
 from aranami.sources.wiki import read_pages
 from aranami.support.edit_summary import EditSummary
-from aranami.support.wikitext import integer_option, region_options
+from aranami.support.regions import integer_option, region_options
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -168,7 +168,7 @@ def run(
     most one report, and current reports make no Pageviews API requests.
     Yesterday is eligible from UTC 18:00; earlier runs can still fill
     older gaps. The actual run time limits historical or future report
-    anchors. Legacy ``lag-days`` attributes no longer affect the cutoff.
+    anchors.
     A failed save leaves the last on-wiki marker authoritative. Dry runs
     construct the same single proposal without advancing the marker.
 

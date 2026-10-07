@@ -281,10 +281,10 @@ class TestDykEdit(TestCase):
         """Replace both lists using caller-supplied text and project."""
         site = Mock()
         original_text = (
-            'Introduction\n<!-- update start="dyk" -->old'
-            '<!-- update end="dyk" -->\nMiddle\n'
-            '<!-- update start="dykn" -->old candidates'
-            '<!-- update end="dykn" -->\nFooter'
+            'Introduction\n<!-- aranami begin="dyk" -->old'
+            '<!-- aranami end="dyk" -->\nMiddle\n'
+            '<!-- aranami begin="dykn" -->old candidates'
+            '<!-- aranami end="dykn" -->\nFooter'
         )
         members = pl.DataFrame(
             {
@@ -365,16 +365,11 @@ class TestDykEdit(TestCase):
         context = JobContext(site, date(2024, 5, 1), dry=True)
         original = (
             '<!-- aranami begin="dyk" -->\n'
-            '# {{PJ:VG/DYK/item|Old|初级}}<!-- aranami-member id="1" -->\n'
+            "# {{PJ:VG/DYK/item|Old|初级}}\n"
             '<!-- aranami end="dyk" -->\n'
             '<!-- aranami begin="dykn" -->\n<!-- aranami end="dykn" -->'
         )
-        updated = (
-            original
-            .replace("Old", "Renamed")
-            .replace("初级", "优良")
-            .replace('<!-- aranami-member id="1" -->', "")
-        )
+        updated = original.replace("Old", "Renamed").replace("初级", "优良")
         page = Mock(text=original)
         title = "WikiProject:电子游戏/新条目推荐"
         with (
@@ -397,7 +392,7 @@ class TestDykEdit(TestCase):
                 "prepare_report",
                 return_value=MembershipReport(updated, {"Renamed": 1}),
             ) as prepare_report,
-            patch.object(dyk_job, "load_membership", return_value={}),
+            patch.object(dyk_job, "load_membership", return_value={"Old": 1}),
             patch.object(dyk_job, "save_membership") as save,
         ):
             dyk_job.run(context=context)
@@ -464,33 +459,42 @@ class TestDykEdit(TestCase):
     def test_membership_changes_cover_completed_and_nominated_items() -> None:
         """Describe additions and removals while recognizing renames."""
         original = (
-            '<!-- update start="dyk" -->\n'
-            '# {{PJ:VG/DYK/item|Old|初级}}<!-- aranami-member id="1" -->\n'
-            '# {{PJ:VG/DYK/item|Removed|初级}}<!-- aranami-member id="2" -->\n'
-            '<!-- update end="dyk" -->\n'
-            '<!-- update start="dykn" -->\n'
-            "# {{PJ:VG/DYK/item|Candidate|初级}}"
-            '<!-- aranami-member id="3" -->\n'
-            '<!-- update end="dykn" -->\n'
+            '<!-- aranami begin="dyk" -->\n'
+            "# {{PJ:VG/DYK/item|Old|初级}}\n"
+            "# {{PJ:VG/DYK/item|Removed|初级}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Candidate|初级}}\n"
+            '<!-- aranami end="dykn" -->\n'
             "# {{PJ:VG/DYK/item|Unmanaged|初级}}"
         )
         updated = original.replace("Old", "Renamed").replace("初级", "优良")
         updated = updated.replace(
-            '# {{PJ:VG/DYK/item|Removed|优良}}<!-- aranami-member id="2" -->',
-            '# {{PJ:VG/DYK/item|Added|优良}}<!-- aranami-member id="4" -->',
+            "# {{PJ:VG/DYK/item|Removed|优良}}",
+            "# {{PJ:VG/DYK/item|Added|优良}}",
         )
-        assert dyk_job._content_summary(original, updated) == (
+        assert dyk_job._content_summary(
+            original,
+            updated,
+            previous_members={"Old": 1, "Removed": 2, "Candidate": 3},
+            current_members={"Renamed": 1, "Added": 4, "Candidate": 3},
+        ) == (
             "2 articles, 1 nominee. Passed nominee «[[Added]]»; "
             "removed «[[Removed]]»."
         )
         assert "Unmanaged" not in dyks.article_members(updated)
         assert dyks.article_members(updated, range_name="dykn") == {
-            "Candidate": 3,
+            "Candidate": None,
         }
         assert dyks.article_members(updated, range_name="dyk") == {
-            "Renamed": 1,
-            "Added": 4,
+            "Renamed": None,
+            "Added": None,
         }
+        annotated = updated.replace(
+            "{{PJ:VG/DYK/item|Renamed|优良}}",
+            '{{PJ:VG/DYK/item|Renamed|优良}}<!-- aranami-member id="1" -->',
+        )
+        assert dyks.article_members(annotated) == dyks.article_members(updated)
 
     @staticmethod
     def test_candidate_promotion_reports_passed_nominee() -> None:
@@ -501,9 +505,7 @@ class TestDykEdit(TestCase):
             '<!-- aranami begin="dykn" -->{nominated}'
             '<!-- aranami end="dykn" -->'
         )
-        item = (
-            '\n# {{PJ:VG/DYK/item|Game|初级}}<!-- aranami-member id="1" -->\n'
-        )
+        item = "\n# {{PJ:VG/DYK/item|Game|初级}}\n"
         original = ranges.format(completed="\n", nominated=item)
         updated = ranges.format(completed=item, nominated="\n")
         assert dyk_job._content_summary(original, updated) == (
@@ -545,10 +547,10 @@ class TestDykEdit(TestCase):
     ):
         """Recognize promotions without a membership snapshot."""
         original = (
-            '<!-- update start="dyk" -->\n<!-- update end="dyk" -->\n'
-            '<!-- update start="dykn" -->\n'
+            '<!-- aranami begin="dyk" -->\n<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
             "# {{PJ:VG/DYK/item|Video_Game|初级}}\n"
-            '<!-- update end="dykn" -->'
+            '<!-- aranami end="dykn" -->'
         )
         updated = (
             '<!-- aranami begin="dyk" -->\n'
@@ -787,12 +789,12 @@ class TestDykEdit(TestCase):
         } <= {short_title, new_title, passed_title, failed_title}
 
     @staticmethod
-    def test_legacy_title_membership_and_grade_only_changes() -> None:
+    def test_uncached_title_membership_and_grade_only_changes() -> None:
         """Ignore class changes in unmarked template items."""
         original = (
-            '<!-- update start="dyk" -->\n'
+            '<!-- aranami begin="dyk" -->\n'
             "# {{PJ:VG/DYK/item|Video_Game|初级}}\n"
-            '<!-- update end="dyk" -->'
+            '<!-- aranami end="dyk" -->'
         )
         updated = original.replace("Video_Game", "Video Game").replace(
             "初级",

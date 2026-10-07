@@ -26,13 +26,11 @@ from aranami.sources.quarry.projects import (
 )
 from aranami.sources.wiki import template_aliases
 from aranami.support import dyk_cache
-from aranami.support.regions import region_content
+from aranami.support.regions import region_content, replace_by_tag
 from aranami.support.report_membership import (
     MembershipReport,
-    member_identifier,
     membership_changes,
 )
-from aranami.support.wikitext import replace_by_tag
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -183,7 +181,7 @@ def _statistics_comment(
     report_title: str,
     statistics_title: str,
 ) -> str:
-    """Render the legacy copyable Commons payload without publishing it.
+    """Render the copyable Commons payload without publishing it.
 
     Args:
         frame: Completed DYK report rows.
@@ -259,7 +257,7 @@ def _item(title: str, assessment: str) -> Template:
 def _article_items(
     text: str,
     range_name: Literal["dyk", "dykn"],
-) -> Iterator[tuple[str, int | None, Template]]:
+) -> Iterator[tuple[str, Template]]:
     """Read normalized article identities and templates from one range.
 
     Args:
@@ -267,7 +265,7 @@ def _article_items(
         range_name: Completed-DYK or nomination range to inspect.
 
     Yields:
-        Article titles, optional legacy IDs, and listing templates.
+        Article titles and listing templates.
     """
     content = region_content(text, range_name)
     if content is None:
@@ -284,7 +282,7 @@ def _article_items(
             title = str(template.get("1").value)
             normalized = title.replace("_", " ").lstrip(":").strip()
             if normalized:
-                yield normalized, member_identifier(row), template
+                yield normalized, template
 
 
 def article_members(
@@ -300,7 +298,7 @@ def article_members(
             read both ranges.
 
     Returns:
-        Article titles and optional legacy page IDs, excluding unmanaged
+        Article titles with unknown page IDs, excluding unmanaged
         templates and the hidden statistics payload.
 
     Raises:
@@ -308,9 +306,9 @@ def article_members(
     """  # ruff: ignore[docstring-extraneous-exception]
     members: dict[str, int | None] = {}
     for name in ("dyk", "dykn") if range_name is None else (range_name,):
-        for title, identifier, _template in _article_items(text, name):
-            if identifier is not None or title not in members:
-                members[title] = identifier
+        members.update(
+            dict.fromkeys(title for title, _ in _article_items(text, name)),
+        )
     return members
 
 
@@ -327,14 +325,14 @@ def _range_members(
         identities: IDs belonging to this exact report content.
 
     Returns:
-        Range members with supplied IDs or legacy comment IDs.
+        Range members with supplied IDs when available.
     """
     return {
-        title: identities.get(title) or identifier
-        for title, identifier in article_members(
+        title: identities.get(title)
+        for title in article_members(
             text,
             range_name=range_name,
-        ).items()
+        )
     }
 
 
@@ -349,7 +347,7 @@ def _completed_dates(text: str) -> dict[str, set[date]]:
         Unknown and invalid date labels are excluded.
     """
     dates: dict[str, set[date]] = {}
-    for title, _identifier, template in _article_items(text, "dyk"):
+    for title, template in _article_items(text, "dyk"):
         labels = (
             str(template.get("date").value).split("、")
             if template.has("date")
@@ -420,7 +418,7 @@ def nomination_changes(
     absent from the completed list fails. An unchanged historical
     completion cannot distinguish repeat failure from delayed candidate
     cleanup, so it does not imply either outcome. Stable IDs recognize
-    renames, with normalized titles as the legacy fallback.
+    renames, with normalized titles as the fallback without cached IDs.
 
     Args:
         original_text: Report content before transformation.

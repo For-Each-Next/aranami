@@ -1,11 +1,11 @@
-"""Verify configurable HTML-comment regions and legacy migration."""
+"""Verify configurable canonical HTML-comment regions."""
 
 # Keep the repository's unittest runner and exception assertions.
 # ruff: file-ignore[pytest-unittest-raises-assertion]
 
 from unittest import TestCase
 
-from aranami.support.wikitext import (
+from aranami.support.regions import (
     integer_option,
     managed_region,
     region_content,
@@ -32,29 +32,55 @@ class TestManagedRegions(TestCase):
         assert updated.endswith("after")
 
     @staticmethod
-    def test_nested_legacy_counter_is_migrated() -> None:
-        """Migrate a legacy repeated-begin counter inside a template."""
+    def test_nested_counter_preserves_surroundings() -> None:
+        """Update canonical comments inside a template parameter."""
         source = (
-            '{{Box|count=<!-- update begin="total" -->1'
-            '<!-- update begin="total" -->|other=keep}}'
+            '{{Box|count=<!-- aranami begin="total" -->1'
+            '<!-- aranami end="total" -->|other=keep}}'
         )
         updated = replace_by_tag(
             "total",
             "2",
             source,
-            legacy_begin="begin",
-            allow_repeated_begin=True,
         )
         assert 'aranami begin="total"' in updated
         assert 'aranami end="total"' in updated
         assert "|other=keep" in updated
         assert region_content(updated, "total") == "2"
 
+    def test_obsolete_markers_are_not_managed(self) -> None:
+        """Ignore old update dialects and refuse to rewrite them."""
+        for opening, closing in (
+            ("start", "end"),
+            ("begin", "end"),
+            ("begin", "begin"),
+        ):
+            source = (
+                f'<!-- update {opening}="x" -->old'
+                f'<!-- update {closing}="x" -->'
+            )
+            with self.subTest(opening=opening, closing=closing):
+                assert region_content(source, "x") is None
+                assert region_options(source, "x") == {}
+                with self.assertRaises(ValueError):
+                    replace_by_tag("x", "replacement", source)
+
+    @staticmethod
+    def test_obsolete_comments_outside_canonical_range_are_preserved() -> None:
+        """Treat old comments as ordinary surrounding page content."""
+        outside = '<!-- update start="x" -->keep<!-- update end="x" -->'
+        source = outside + managed_region("x", "old")
+        assert replace_by_tag("x", "new", source) == (
+            outside + managed_region("x", "new")
+        )
+
     def test_missing_and_ambiguous_boundaries_are_rejected(self) -> None:
         """Avoid broad edits when comments are absent or duplicated."""
         for source in (
             "unmanaged",
             '<!-- aranami begin="x" -->',
+            '<!-- aranami begin="x" --><!-- aranami begin="x" -->',
+            '<!-- aranami begin="x" --><!-- update end="x" -->',
             managed_region("x", "a") + managed_region("x", "b"),
             '<!-- aranami end="x" --><!-- aranami begin="x" -->',
             (

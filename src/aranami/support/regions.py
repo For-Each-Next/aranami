@@ -2,7 +2,7 @@
 
 Canonical boundaries are ``<!-- aranami begin="name" -->`` and
 ``<!-- aranami end="name" -->``. Extra begin attributes configure the
-workflow. Legacy update comments are migrated on a successful rewrite.
+workflow.
 """
 
 from __future__ import annotations
@@ -30,7 +30,6 @@ class _Region:
     begin: int
     end: int
     options: dict[str, str]
-    canonical: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +38,6 @@ class _Boundary:
 
     position: int
     kind: str
-    canonical: bool
     options: dict[str, str]
 
 
@@ -105,15 +103,13 @@ def _boundary(
     comment: Comment,
     position: int,
     name: str,
-    legacy_begin: str,
 ) -> _Boundary | None:
-    """Interpret a canonical or legacy boundary for one region.
+    """Interpret a canonical boundary for one region.
 
     Args:
         comment: Candidate HTML comment.
         position: Comment's index within its containing parser subtree.
         name: Requested managed-region name.
-        legacy_begin: Historical opening keyword to recognize.
 
     Returns:
         Matching boundary details, or none for an unrelated comment.
@@ -128,12 +124,7 @@ def _boundary(
             for key, value in attributes.items()
             if key not in {"begin", "end"}
         }
-        return _Boundary(position, kind, canonical=True, options=options)
-    marker = str(comment.contents).strip()
-    if marker == f'update {legacy_begin}="{name}"':
-        return _Boundary(position, "begin", canonical=False, options={})
-    if marker == f'update end="{name}"':
-        return _Boundary(position, "end", canonical=False, options={})
+        return _Boundary(position, kind, options)
     return None
 
 
@@ -141,62 +132,43 @@ def _paired_region(
     code: Wikicode,
     name: str,
     boundaries: list[_Boundary],
-    *,
-    allow_repeated_begin: bool,
 ) -> _Region:
-    """Validate one ordered pair with a consistent marker dialect.
+    """Validate one ordered pair of canonical boundaries.
 
     Args:
         code: Parser subtree containing the candidate boundaries.
         name: Region name included in validation errors.
         boundaries: Matching comments in source order.
-        allow_repeated_begin: Accept historical double-begin counters.
 
     Returns:
         Validated region ready for replacement.
 
     Raises:
-        ValueError: Its boundaries are duplicated, mixed, or reversed.
+        ValueError: Boundaries are incomplete, duplicated, or reversed.
     """
     message = f"Expected one ordered marker pair for {name!r}."
     if len(boundaries) != _PAIR_SIZE:
         raise ValueError(message)
     first, last = boundaries
-    legacy_pair = (
-        allow_repeated_begin
-        and not first.canonical
-        and not last.canonical
-        and first.kind == last.kind == "begin"
-    )
-    if (
-        first.kind != "begin"
-        or not (last.kind == "end" or legacy_pair)
-        or first.canonical != last.canonical
-    ):
+    if first.kind != "begin" or last.kind != "end":
         raise ValueError(message)
     return _Region(
         code,
         first.position,
         last.position,
         first.options,
-        first.canonical,
     )
 
 
 def _locate(
     code: Wikicode,
     name: str,
-    *,
-    legacy_begin: str = "start",
-    allow_repeated_begin: bool = False,
 ) -> _Region | None:
     """Validate one uniquely paired region across the parser tree.
 
     Args:
         code: Complete parsed page source.
         name: Requested managed-region name.
-        legacy_begin: Historical opening keyword to recognize.
-        allow_repeated_begin: Accept historical double-begin counters.
 
     Returns:
         The region location, or ``None`` when no markers name it.
@@ -210,36 +182,15 @@ def _locate(
             boundary
             for index, node in enumerate(tree.nodes)
             if isinstance(node, Comment)
-            and (boundary := _boundary(node, index, name, legacy_begin))
-            is not None
+            and (boundary := _boundary(node, index, name)) is not None
         ]
         if not markers:
             continue
-        found.append(
-            _paired_region(
-                tree,
-                name,
-                markers,
-                allow_repeated_begin=allow_repeated_begin,
-            ),
-        )
+        found.append(_paired_region(tree, name, markers))
     if len(found) > 1:
         msg = f"Duplicate managed regions for {name!r}."
         raise ValueError(msg)
     return found[0] if found else None
-
-
-def has_region(text: str, name: str) -> bool:
-    """Check for a uniquely paired named region.
-
-    Args:
-        text: Existing page wikitext.
-        name: Name assigned to the managed range.
-
-    Returns:
-        Whether canonical or legacy start/end markers enclose it.
-    """
-    return _locate(mwparserfromhell.parse(text), name) is not None
 
 
 def region_options(text: str, name: str) -> dict[str, str]:
@@ -250,8 +201,8 @@ def region_options(text: str, name: str) -> dict[str, str]:
         name: Name assigned to the managed range.
 
     Returns:
-        String-valued attributes, or an empty mapping for legacy or
-        absent markers. Malformed markers raise instead of defaulting.
+        String attributes, or an empty mapping for absent markers.
+        Malformed markers raise instead of defaulting.
     """
     region = _locate(mwparserfromhell.parse(text), name)
     return {} if region is None else dict(region.options)
@@ -260,24 +211,17 @@ def region_options(text: str, name: str) -> dict[str, str]:
 def region_content(
     text: str,
     name: str,
-    *,
-    legacy_begin: str = "start",
 ) -> str | None:
     """Read the contents of one validated managed region.
 
     Args:
         text: Existing page source.
         name: Stable region name.
-        legacy_begin: Historical opening keyword to recognize.
 
     Returns:
         Enclosed wikitext, or ``None`` when the region is absent.
     """
-    region = _locate(
-        mwparserfromhell.parse(text),
-        name,
-        legacy_begin=legacy_begin,
-    )
+    region = _locate(mwparserfromhell.parse(text), name)
     if region is None:
         return None
     return "".join(
@@ -362,18 +306,13 @@ def replace_by_tag(
     tag: str,
     content: str,
     text: str,
-    *,
-    legacy_begin: str = "start",
-    allow_repeated_begin: bool = False,
 ) -> str:
-    """Replace one managed region and migrate its legacy boundaries.
+    """Replace the content enclosed by one canonical managed region.
 
     Args:
         tag: Stable managed-region name.
         content: Replacement wikitext.
         text: Complete existing page source.
-        legacy_begin: Legacy opening keyword, ``start`` or ``begin``.
-        allow_repeated_begin: Accept old counter pairs using two begins.
 
     Returns:
         Updated text preserving canonical begin options and other text.
@@ -382,18 +321,10 @@ def replace_by_tag(
         ValueError: Boundaries are absent, ambiguous, or malformed.
     """
     code = mwparserfromhell.parse(text)
-    region = _locate(
-        code,
-        tag,
-        legacy_begin=legacy_begin,
-        allow_repeated_begin=allow_repeated_begin,
-    )
+    region = _locate(code, tag)
     if region is None:
         msg = f"Missing managed-region markers for {tag!r}."
         raise ValueError(msg)
-    if not region.canonical:
-        region.code.nodes[region.begin] = Comment(f' aranami begin="{tag}" ')
-        region.code.nodes[region.end] = Comment(f' aranami end="{tag}" ')
     region.code.nodes[region.begin + 1 : region.end] = mwparserfromhell.parse(
         content,
     ).nodes

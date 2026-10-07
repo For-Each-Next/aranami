@@ -29,14 +29,13 @@ from aranami.sources.quarry.projects import (
     redirect_converted_page_ids,
 )
 from aranami.sources.wiki import read_page_ids
-from aranami.support.templates import template_page
-from aranami.support.wikitext import (
+from aranami.support.regions import (
     integer_option,
-    managed_region,
     region_content,
     region_options,
     replace_by_tag,
 )
+from aranami.support.templates import template_page
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -334,25 +333,30 @@ def _build_section(site: BaseSite, day: dt.date) -> str:
 
 def _extract_sections(
     text: str,
-) -> tuple[list[object], int, dict[dt.date, str]]:
-    """Separate dated records from unrelated text without discarding it.
+) -> dict[dt.date, str]:
+    """Read the first record for each date from the managed range.
+
+    Args:
+        text: Complete report containing canonical new-page markers.
 
     Returns:
-        Unrelated nodes, insertion position, and first dated sections.
+        Daily wikitext records keyed by their UTC report dates.
+
+    Raises:
+        ValueError: The managed range is absent or malformed.
     """
-    code = mwparserfromhell.parse(text)
-    remainder = []
+    content = region_content(text, "new-pages")
+    if content is None:
+        message = "Missing managed-region markers for 'new-pages'."
+        raise ValueError(message)
+    code = mwparserfromhell.parse(content)
     sections: dict[dt.date, str] = {}
-    insertion: int | None = None
     index = 0
     while index < len(code.nodes):
         day = _heading_date(code.nodes[index])
         if day is None:
-            remainder.append(code.nodes[index])
             index += 1
             continue
-        if insertion is None:
-            insertion = len(remainder)
         end = index + 1
         while end < len(code.nodes):
             node = code.nodes[end]
@@ -364,23 +368,22 @@ def _extract_sections(
             "".join(str(n) for n in code.nodes[index:end]),
         )
         index = end
-    return remainder, insertion or 0, sections
+    return sections
 
 
 def record_dates(text: str) -> set[dt.date]:
     """Collect distinct report dates from the supplied managed content.
 
     Args:
-        text: Existing or updated report text, including legacy pages.
+        text: Existing or updated report text with canonical markers.
 
     Returns:
-        Dates within the managed range, or across an unmarked page.
-    """
-    managed_text = region_content(text, "new-pages")
-    _, _, sections = _extract_sections(
-        text if managed_text is None else managed_text,
-    )
-    return set(sections)
+        Dates within the managed range.
+
+    Raises:
+        ValueError: The managed range is absent or malformed.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    return set(_extract_sections(text))
 
 
 def record_counts(
@@ -398,11 +401,11 @@ def record_counts(
     Returns:
         Article and non-article counts, excluding talk-template links,
         unrelated page content, and records outside the selected dates.
-    """
-    managed_text = region_content(text, "new-pages")
-    _, _, sections = _extract_sections(
-        text if managed_text is None else managed_text,
-    )
+
+    Raises:
+        ValueError: The managed range is absent or malformed.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    sections = _extract_sections(text)
     articles = non_articles = 0
     for day in days:
         for line in sections.get(day, "").splitlines():
@@ -443,7 +446,7 @@ def update_text(
     cannot lose a date.
 
     Args:
-        original_text: Existing page text with dated report records.
+        original_text: Page text with a canonical managed range.
         site: Authenticated Chinese Wikipedia site.
         stop: Exclusive end of the retained window, normally today.
         project: WikiProject name supplying current assessment grades.
@@ -452,14 +455,13 @@ def update_text(
         Original text when the retained window is complete. Otherwise,
         complete text with gaps filled, older dates pruned, and current
         assessment icons throughout the retained records.
-    """
+
+    Raises:
+        ValueError: The managed range is absent or malformed.
+    """  # ruff: ignore[docstring-extraneous-exception]
     options = region_options(original_text, "new-pages")
     retained_days = integer_option(options, "days", _RECORD_DAYS, maximum=3650)
-    previous_region = region_content(original_text, "new-pages")
-    managed_text = (
-        original_text if previous_region is None else previous_region
-    )
-    remainder, insertion, existing = _extract_sections(managed_text)
+    existing = _extract_sections(original_text)
     days = [
         stop - dt.timedelta(days=offset)
         for offset in range(1, retained_days + 1)
@@ -474,15 +476,4 @@ def update_text(
     metadata = query_pages_by_wikiproject(site, project)
     grades = dict(metadata.select("full_title", "pa_class").iter_rows())
     records = update_icons(records, grades, site)
-    if previous_region is None:
-        code = mwparserfromhell.wikicode.Wikicode(remainder)
-        code.insert(
-            insertion,
-            managed_region(
-                "new-pages",
-                "\n" + records,
-                options={"days": str(retained_days)},
-            ),
-        )
-        return str(code)
     return replace_by_tag("new-pages", "\n" + records, original_text)
