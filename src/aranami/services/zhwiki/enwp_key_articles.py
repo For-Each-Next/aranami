@@ -1,7 +1,8 @@
 """Construct English key-article reports without publishing wiki edits.
 
 Reports share replica lookups and preserve page surroundings,
-article membership summaries, Chinese labels, and alphabetical grouping.
+article membership summaries, Chinese labels, alphabetical importance
+groups, and dated quality groups.
 """
 
 from __future__ import annotations
@@ -13,12 +14,13 @@ from typing import TYPE_CHECKING
 
 import mwparserfromhell
 import polars as pl
-from mwparserfromhell.nodes import Wikilink
+from mwparserfromhell.nodes import Heading, Wikilink
 
+from aranami.services.enwiki import quality_listing_dates
 from aranami.sources.quarry import enwp
 from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
 from aranami.support.templates import template_page
-from aranami.support.wikitext import replace_by_tag
+from aranami.support.wikitext import region_content, replace_by_tag
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
@@ -61,11 +63,13 @@ class OldArticle:
         english_title: English Wikipedia article title.
         item_id: Numeric Wikidata item identifier, when available.
         page_id: Stable English Wikipedia page ID, when known locally.
+        en_class: Stored English quality class, when available.
     """
 
     english_title: str
     item_id: int | None
     page_id: int | None = None
+    en_class: str | None = None
 
 
 class _ArticleMembership:
@@ -78,18 +82,18 @@ class _ArticleMembership:
             articles: Report articles keyed by their English title.
         """
         self.articles = articles
-        self.page_ids = {
-            article.page_id
+        self.by_page_id = {
+            article.page_id: article
             for article in articles.values()
             if article.page_id is not None
         }
-        self.item_ids = {
-            article.item_id
+        self.by_item_id = {
+            article.item_id: article
             for article in articles.values()
             if article.item_id is not None
         }
-        self.legacy_item_ids = {
-            article.item_id
+        self.legacy_by_item_id = {
+            article.item_id: article
             for article in articles.values()
             if article.page_id is None and article.item_id is not None
         }
@@ -103,21 +107,36 @@ class _ArticleMembership:
         Returns:
             Whether the same article occurs in the indexed report.
         """
+        return self.find(article) is not None
+
+    def find(self, article: OldArticle) -> OldArticle | None:
+        """Return the article with the same stable or legacy identity.
+
+        Args:
+            article: Candidate article to compare with this report.
+
+        Returns:
+            Matching article, or None when no identity matches. Known
+            conflicting page IDs never fall back to a Wikidata ID.
+        """
         previous = self.articles.get(article.english_title)
+        if article.page_id is not None:
+            match = self.by_page_id.get(
+                article.page_id,
+            ) or self.legacy_by_item_id.get(article.item_id)
+        elif article.item_id is not None:
+            match = self.by_item_id.get(article.item_id)
+        else:
+            return previous
+        if match is not None:
+            return match
         if (
             previous is not None
             and previous.page_id is None
             and previous.item_id is None
         ):
-            return True
-        if article.page_id is not None:
-            return (
-                article.page_id in self.page_ids
-                or article.item_id in self.legacy_item_ids
-            )
-        if article.item_id is not None:
-            return article.item_id in self.item_ids
-        return previous is not None
+            return previous
+        return None
 
 
 @dataclass(frozen=True)
@@ -452,13 +471,77 @@ def render_body(rows_frame: pl.DataFrame) -> str:
     )
 
 
+def render_quality_body(rows_frame: pl.DataFrame) -> str:
+    """Render quality articles by their latest English listing date.
+
+    Args:
+        rows_frame: Enriched quality rows with nullable listing dates.
+
+    Returns:
+        Year sections in descending date order, with a date comment
+        after each dated item and unresolved dates in the final section.
+        Same-day and unresolved entries use English title sort keys.
+    """
+    if rows_frame.is_empty():
+        return ""
+    items = pl.DataFrame(
+        [
+            {
+                "quality_date": row.get("quality_date"),
+                "sort_key": english_sort_key(str(row["sort_value"])),
+                "title_key": english_sort_key(str(row["en_title"])),
+                "item": render_item(row),
+            }
+            for row in rows_frame.iter_rows(named=True)
+        ],
+        schema={
+            "quality_date": pl.Date,
+            "sort_key": pl.String,
+            "title_key": pl.String,
+            "item": pl.String,
+        },
+    ).with_columns(pl.col("quality_date").dt.year().alias("year"))
+    groups = (
+        items
+        .sort(
+            "quality_date",
+            "sort_key",
+            "title_key",
+            descending=[True, False, False],
+            nulls_last=True,
+        )
+        .with_columns(
+            pl.concat_str(
+                pl.col("item"),
+                pl
+                .when(pl.col("quality_date").is_not_null())
+                .then(
+                    pl.concat_str(
+                        pl.lit("<!-- "),
+                        pl.col("quality_date").dt.strftime("%Y-%m-%d"),
+                        pl.lit(" -->"),
+                    ),
+                )
+                .otherwise(pl.lit("")),
+            ).alias("item"),
+        )
+        .group_by("year", maintain_order=True)
+        .agg(pl.col("item").str.join("\n"))
+    )
+    return "\n\n".join(
+        f"{Heading(f' {year}年 ' if year else ' 年份未知 ', 2)}"
+        f"\n\n{REPORT_HEADER}\n{items}\n{REPORT_FOOTER}"
+        for year, items in groups.iter_rows()
+    )
+
+
 def update_page_text(
     old_text: str,
     body: str,
     counts: Mapping[str, int],
     spec: ReportSpec,
 ) -> str:
-    """Update report counters and body.
+    """Update the managed body and applicable importance counters.
 
     Args:
         old_text: Existing page wikitext.
@@ -467,8 +550,11 @@ def update_page_text(
         spec: Report configuration.
 
     Returns:
-        Updated page wikitext.
+        Updated page wikitext. Quality reports preserve all surrounding
+        text and require only body markers.
     """
+    if spec.name == "quality":
+        return replace_body(old_text, body)
     new_text = replace_marker_value(
         old_text,
         "count_all",
@@ -538,6 +624,15 @@ def parse_old_articles(
             english_title=english_title,
             item_id=item_id,
             page_id=page_id,
+            en_class=(
+                html
+                .unescape(str(template.get("en_cls").value))
+                .strip()
+                .upper()
+                or None
+                if template.has("en_cls")
+                else None
+            ),
         )
 
     return articles
@@ -653,6 +748,8 @@ def build_edit_summary(
     new_rows: pl.DataFrame,
     item_to_zh_title: Mapping[int, str],
     max_bytes: int = MAX_EDIT_SUMMARY_BYTES,
+    *,
+    quality: bool = False,
 ) -> str:
     """Build a count and membership-change summary for one report.
 
@@ -661,12 +758,16 @@ def build_edit_summary(
         new_rows: Newly generated report rows.
         item_to_zh_title: Wikidata item IDs mapped to zhwiki titles.
         max_bytes: Requested UTF-8 summary budget, capped at 255 bytes.
+        quality: Whether to describe English quality-class changes.
 
     Returns:
         Total count followed by added and removed article links. Renames
-        retaining their page ID and assessment-only changes keep only
-        the count. Legacy entries use their Wikidata item or title.
-        Chinese links require a Chinese Wikipedia sitelink.
+        retaining their page ID keep only the count. Quality reports
+        describe GA listings and delistings and FA/FL promotions and
+        removals, including earlier classes for known transitions.
+        Importance and Chinese assessment changes are ignored. Legacy
+        entries use their Wikidata item or title. Chinese links require
+        a Chinese Wikipedia sitelink.
     """
     new_articles = {
         str(row["en_title"]): OldArticle(
@@ -675,9 +776,20 @@ def build_edit_summary(
             page_id=(
                 int(row["page_id"]) if row.get("page_id") is not None else None
             ),
+            en_class=(str(row.get("en_class") or "").strip().upper() or None),
         )
         for row in new_rows.to_dicts()
     }
+    count = len(new_articles)
+    noun = "item" if count == 1 else "items"
+    summary = EditSummary(f"{count:,} {noun} total.", max_bytes=max_bytes)
+    if quality:
+        return _build_quality_summary(
+            summary,
+            old_articles,
+            new_articles,
+            item_to_zh_title,
+        )
     old_membership = _ArticleMembership(old_articles)
     new_membership = _ArticleMembership(new_articles)
     added: list[str] = []
@@ -713,15 +825,85 @@ def build_edit_summary(
         )
         removed.append(article)
 
-    count = len(new_articles)
-    noun = "item" if count == 1 else "items"
-    summary = EditSummary(f"{count:,} {noun} total.", max_bytes=max_bytes)
     summary.add_group("Added ", added, group_separator=" ")
     summary.add_group(
         "removed " if added else "Removed ",
         removed,
         group_separator="; " if added else " ",
     )
+    return summary.render()
+
+
+def _build_quality_summary(
+    summary: EditSummary,
+    old_articles: Mapping[str, OldArticle],
+    new_articles: Mapping[str, OldArticle],
+    item_to_zh_title: Mapping[int, str],
+) -> str:
+    """Describe quality membership and known class transitions.
+
+    Args:
+        summary: Builder containing the total and byte budget.
+        old_articles: Previous members and stored English classes.
+        new_articles: Current members and English classes.
+        item_to_zh_title: Chinese sitelinks for article mentions.
+
+    Returns:
+        Summary grouped by English class and quality action. Matched
+        legacy entries without a stored class do not imply a promotion.
+    """
+    actions = {
+        "GA": ("listed", "delisted"),
+        "FA": ("prompted", "removed"),
+        "FL": ("prompted", "removed"),
+    }
+    old_membership = _ArticleMembership(old_articles)
+    new_membership = _ArticleMembership(new_articles)
+    groups: dict[tuple[str | None, bool], list[str]] = {}
+    for english_title in sorted(new_articles, key=english_sort_key):
+        new_article = new_articles[english_title]
+        old_article = old_membership.find(new_article)
+        if old_article is not None and (
+            old_article.en_class is None
+            or old_article.en_class == new_article.en_class
+        ):
+            continue
+        article = format_summary_article(
+            english_title,
+            item_to_zh_title.get(new_article.item_id),
+        )
+        if old_article is not None and old_article.en_class in actions:
+            article += f" (from {old_article.en_class})"
+        en_class = (
+            new_article.en_class if new_article.en_class in actions else None
+        )
+        groups.setdefault((en_class, True), []).append(article)
+
+    for english_title in sorted(old_articles, key=english_sort_key):
+        old_article = old_articles[english_title]
+        if new_membership.contains(old_article):
+            continue
+        article = format_summary_article(
+            english_title,
+            item_to_zh_title.get(old_article.item_id),
+        )
+        en_class = (
+            old_article.en_class if old_article.en_class in actions else None
+        )
+        groups.setdefault((en_class, False), []).append(article)
+
+    for added in (True, False):
+        for en_class, verbs in actions.items():
+            summary.add_group(
+                f"{en_class} {verbs[0 if added else 1]} ",
+                groups.get((en_class, added), []),
+                group_separator="; ",
+            )
+        summary.add_group(
+            "Added " if added else "Removed ",
+            groups.get((None, added), []),
+            group_separator="; ",
+        )
     return summary.render()
 
 
@@ -838,11 +1020,22 @@ def prepare_reports(
 
     Returns:
         Shared rows and memberships for rendering and summaries.
+        Quality reports include cached English listing dates; source
+        reads refresh disposable date snapshots when needed.
+
+    Raises:
+        ValueError: If a quality report has no managed body region.
     """
-    old_articles = {
-        spec.name: parse_old_articles(existing[spec.name], site)
-        for spec in specs
-    }
+    old_articles = {}
+    for spec in specs:
+        text = existing[spec.name]
+        if spec.name == "quality":
+            body = region_content(text, "body", legacy_begin="begin")
+            if body is None:
+                message = "Quality reports require a managed body region."
+                raise ValueError(message)
+            text = body
+        old_articles[spec.name] = parse_old_articles(text, site)
     articles = normalize_en_pages(enwp.fetch_en_key_pages())
     new_ids = articles.get_column("item_id").to_list()
     old_ids = [
@@ -856,8 +1049,15 @@ def prepare_reports(
     states = enwp.fetch_zh_page_states(
         sitelinks.get_column("zh_title").to_list(),
     )
+    rows = build_enriched_rows(articles, sitelinks, labels, states)
+    if any(spec.name == "quality" for spec in specs):
+        rows = rows.join(
+            quality_listing_dates.listing_dates(articles),
+            on="page_id",
+            how="left",
+        )
     return ReportData(
-        rows=build_enriched_rows(articles, sitelinks, labels, states),
+        rows=rows,
         old_articles=old_articles,
         linked_titles=build_item_to_zh_title(sitelinks),
     )
@@ -883,7 +1083,9 @@ def build_reports(
         rows = filter_report_rows(data.rows, spec)
         texts[spec.name] = update_page_text(
             existing[spec.name],
-            render_body(rows),
+            render_quality_body(rows)
+            if spec.name == "quality"
+            else render_body(rows),
             count_report_rows(rows, spec),
             spec,
         )

@@ -124,6 +124,13 @@ def _report_change_sources(
             return_value=english,
         ) as source,
         patch.object(
+            reports.quality_listing_dates,
+            "listing_dates",
+            return_value=pl.DataFrame(
+                schema={"page_id": pl.Int64, "quality_date": pl.Date},
+            ),
+        ),
+        patch.object(
             enwp,
             "fetch_wikidata_sitelinks",
             return_value=pl.DataFrame(
@@ -231,19 +238,19 @@ class TestEnglishReportService(TestCase):
             str(template),
             OfflineSite("zh", "wikipedia"),
         ) == {
-            "A|B": reports.OldArticle("A|B", 9),
+            "A|B": reports.OldArticle("A|B", 9, en_class="GA"),
         }
         item = reports.render_item(row)
         assert "page-id" not in item
         assert reports.parse_old_articles(
             item,
             OfflineSite("zh", "wikipedia"),
-        ) == {"A|B": reports.OldArticle("A|B", 9)}
+        ) == {"A|B": reports.OldArticle("A|B", 9, en_class="GA")}
         legacy_item = item + '<!-- aranami-enwp page-id="123" -->'
         assert reports.parse_old_articles(
             legacy_item,
             OfflineSite("zh", "wikipedia"),
-        ) == {"A|B": reports.OldArticle("A|B", 9, 123)}
+        ) == {"A|B": reports.OldArticle("A|B", 9, 123, en_class="GA")}
         managed = _old_text(job.REPORT_SPECS[0], item)
         assert item in reports.replace_body(managed, item)
 
@@ -383,6 +390,10 @@ class TestEnglishReportService(TestCase):
         existing = {
             spec.name: _old_text(spec, old_item) for spec in job.REPORT_SPECS
         }
+        existing["quality"] = existing["quality"].replace(
+            "Before",
+            "Before {{PJ:VG/DBR/EN/item|en=Example|wd=99|en_cls=GA}}",
+        )
         sitelinks = pl.DataFrame({
             "item_id": [1, 8],
             "zh_title": ["阿爾法", "舊"],
@@ -401,6 +412,13 @@ class TestEnglishReportService(TestCase):
                 enwp,
                 "fetch_en_key_pages",
                 return_value=_english_rows(),
+            ),
+            patch.object(
+                reports.quality_listing_dates,
+                "listing_dates",
+                return_value=pl.DataFrame(
+                    schema={"page_id": pl.Int64, "quality_date": pl.Date},
+                ),
             ),
             patch.object(
                 enwp,
@@ -426,6 +444,8 @@ class TestEnglishReportService(TestCase):
         }
         links.assert_called_once_with([1, 2, 8])
         label.assert_called_once_with([1, 2])
+        assert "Example" not in data.old_articles["quality"]
+        assert "en=Example|wd=99|en_cls=GA" in texts["quality"]
         assert list(texts) == [spec.name for spec in job.REPORT_SPECS]
         assert "en=Alpha Game" in texts["important"]
         assert "en=Éclair" not in texts["important"]
@@ -616,7 +636,8 @@ class TestEnglishReportJob(TestCase):
             assert edit.text == texts[name]
             assert edit.original_text == existing[name]
             assert edit.tags == ("enwp-key-articles", name)
-            assert edit.summary.startswith("1 item total. Added «[[:en:")
+            verb = "GA listed" if name == "quality" else "Added"
+            assert edit.summary.startswith(f"1 item total. {verb} «[[:en:")
 
     @staticmethod
     def test_both_reports_cache_ids_and_summarize_english_membership() -> None:
@@ -644,9 +665,11 @@ class TestEnglishReportJob(TestCase):
             )
             for spec, edit in zip(job.REPORT_SPECS, edits, strict=True):
                 added_title = f"New {spec.name}"
+                verb = "GA listed" if spec.name == "quality" else "Added"
+                removed = "Removed" if spec.name == "quality" else "removed"
                 assert edit.summary == (
-                    f"2 items total. Added «[[:en:{added_title}]]»; "
-                    "removed «[[:en:Gone]]»."
+                    f"2 items total. {verb} «[[:en:{added_title}]]»; "
+                    f"{removed} «[[:en:Gone]]»."
                 )
                 assert "page-id" not in edit.text
                 assert "en=Renamed" in edit.text

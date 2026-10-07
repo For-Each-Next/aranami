@@ -257,17 +257,27 @@ def region_options(text: str, name: str) -> dict[str, str]:
     return {} if region is None else dict(region.options)
 
 
-def region_content(text: str, name: str) -> str | None:
+def region_content(
+    text: str,
+    name: str,
+    *,
+    legacy_begin: str = "start",
+) -> str | None:
     """Read the contents of one validated managed region.
 
     Args:
         text: Existing page source.
         name: Stable region name.
+        legacy_begin: Historical opening keyword to recognize.
 
     Returns:
         Enclosed wikitext, or ``None`` when the region is absent.
     """
-    region = _locate(mwparserfromhell.parse(text), name)
+    region = _locate(
+        mwparserfromhell.parse(text),
+        name,
+        legacy_begin=legacy_begin,
+    )
     if region is None:
         return None
     return "".join(

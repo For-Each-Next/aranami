@@ -4,6 +4,19 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.4
 
+### 0.3.5 (2026-10-07 08:04 UTC)
+
+Overview: Ordered English quality articles by their listing dates and
+described English quality-class changes in edit summaries.
+
+- Grouped FA, FL, and GA together by year and descending English listing
+  date, with dated comments and unresolved dates last.
+- Cached resolved and unresolved dates by discussion revision and class,
+  reducing repeated English Wikipedia content requests.
+- Added English listing, promotion, removal, and class-transition summaries.
+- Preserved manually maintained quality-page surroundings and the existing
+  importance report's ordering and counters.
+
 ### 0.3.4 (2026-10-07 04:44 UTC)
 
 Overview: Made scheduled starts configurable, streamlined wheel launching,

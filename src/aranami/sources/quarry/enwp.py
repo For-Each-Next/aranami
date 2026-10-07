@@ -49,6 +49,11 @@ _EN_SCHEMA = {
     "en_class": pl.String,
     "en_importance": pl.String,
 }
+_TALK_SCHEMA = {
+    "page_id": pl.Int64,
+    "talk_page_id": pl.Int64,
+    "oldid": pl.Int64,
+}
 _SITELINK_SCHEMA = {"item_id": pl.Int64, "zh_title": pl.String}
 _LABEL_SCHEMA = {"item_id": pl.Int64, "lang": pl.String, "label": pl.String}
 _ZH_SCHEMA = {
@@ -178,6 +183,52 @@ def fetch_en_key_pages() -> pl.DataFrame:
         )
     )
     return replica.query(statement, schema_overrides=_EN_SCHEMA).collect()
+
+
+def fetch_en_talk_revisions(page_ids: Sequence[int]) -> pl.DataFrame:
+    """Read corresponding English talk-page IDs and latest revisions.
+
+    Args:
+        page_ids: Stable English article identifiers in the report.
+
+    Returns:
+        Article IDs with nullable talk-page and revision identifiers.
+        Articles without talk pages remain present.
+    """
+    identifiers = sorted(set(page_ids))
+    if not identifiers:
+        return pl.DataFrame(schema=_TALK_SCHEMA)
+    replica = Replica("enwiki")
+    page = tables.Page.__table__
+    talk = page.alias("talk")
+    frames = [
+        replica.query(
+            select(
+                page.c.page_id,
+                talk.c.page_id.label("talk_page_id"),
+                talk.c.page_latest.label("oldid"),
+            )
+            .select_from(
+                page.outerjoin(
+                    talk,
+                    and_(
+                        talk.c.page_namespace == 1,
+                        talk.c.page_title == page.c.page_title,
+                    ),
+                ),
+            )
+            .where(
+                page.c.page_namespace == 0,
+                page.c.page_id.in_(
+                    identifiers[offset : offset + _BATCH_SIZE],
+                ),
+            )
+            .order_by(page.c.page_id),
+            schema_overrides=_TALK_SCHEMA,
+        ).collect()
+        for offset in range(0, len(identifiers), _BATCH_SIZE)
+    ]
+    return pl.concat(frames)
 
 
 def fetch_wikidata_sitelinks(item_ids: Sequence[int]) -> pl.DataFrame:
