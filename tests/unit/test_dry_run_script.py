@@ -13,6 +13,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+from aranami import __main__ as package_main
 from scripts import run_aranami
 
 _SOURCE = Path(run_aranami.__file__).read_text(encoding="utf-8")
@@ -48,13 +49,45 @@ class TestRunScript(TestCase):
             assert installer.call_args.args[0][-1] == str(wheel)
             monitor.assert_called_once()
             command = monitor.call_args.args[0]
-            assert command[:2] == (sys.executable, "-c")
-            assert "scheduler = aranami.run(dry=False)" in command[2]
+            assert command == (
+                sys.executable,
+                "-m",
+                "aranami",
+                "--no-dry",
+                "--run-immediately",
+            )
             assert monitor.call_args.kwargs == {
                 "cwd": root,
                 "start_new_session": True,
             }
             assert Path.cwd() == root
+
+    def test_launcher_forwards_both_configuration_flags(self) -> None:
+        """Honor preview and startup settings in each fresh child."""
+        for dry in (False, True):
+            for run_immediately in (False, True):
+                with (
+                    self.subTest(dry=dry, run_immediately=run_immediately),
+                    patch.object(run_aranami, "DRY_RUN", dry),
+                    patch.object(
+                        run_aranami,
+                        "RUN_IMMEDIATELY",
+                        run_immediately,
+                    ),
+                    patch.object(run_aranami.subprocess, "Popen") as monitor,
+                ):
+                    child = monitor.return_value.__enter__.return_value
+                    child.wait.return_value = 0
+                    run_aranami.run_schedule()
+                assert monitor.call_args.args[0] == (
+                    sys.executable,
+                    "-m",
+                    "aranami",
+                    "--dry" if dry else "--no-dry",
+                    "--run-immediately"
+                    if run_immediately
+                    else "--no-run-immediately",
+                )
 
     @staticmethod
     def test_fresh_process_uses_new_package_and_script_root() -> None:
@@ -83,7 +116,13 @@ class TestRunScript(TestCase):
                     str(wheel),
                 )
                 assert check is True
-                (root / "aranami.py").write_text(
+                package = root / "aranami"
+                package.mkdir()
+                (package / "__main__.py").write_text(
+                    Path(package_main.__file__).read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+                (package / "__init__.py").write_text(
                     '"""Provide a newly installed offline monitor."""\n'
                     "import os\n"
                     "import signal\n"
@@ -96,9 +135,11 @@ class TestRunScript(TestCase):
                     "        assert wait is True\n"
                     "        Path('logs/shutdown.txt').write_text("
                     "'complete', encoding='utf-8')\n"
-                    "def run(*, dry: bool) -> Scheduler:\n"
+                    "def run(*, dry: bool, "
+                    "run_immediately: bool) -> Scheduler:\n"
                     '    """Schedule a live call after returning."""\n'
                     "    assert dry is False\n"
+                    "    assert run_immediately is True\n"
                     "    Path('logs').mkdir()\n"
                     "    def report() -> None:\n"
                     '        """Record background work and interrupt."""\n'
@@ -124,7 +165,7 @@ class TestRunScript(TestCase):
             ):
                 run_aranami.install_wheel([])
                 installer.assert_called_once()
-                run_aranami.run()
+                run_aranami.run_schedule()
                 assert Path.cwd() == caller
             installer.assert_called_once()
             assert (root / "logs/live-call.txt").read_text(
@@ -162,7 +203,7 @@ class TestRunScript(TestCase):
                 with self.assertRaises(
                     run_aranami.subprocess.CalledProcessError,
                 ) as raised:
-                    run_aranami.run()
+                    run_aranami.run_schedule()
                 assert raised.exception.returncode == 1
                 assert raised.exception.cmd == monitor.call_args.args[0]
                 monitor.assert_called_once()
@@ -180,7 +221,7 @@ class TestRunScript(TestCase):
         with patch.object(run_aranami.subprocess, "Popen") as monitor:
             child = monitor.return_value.__enter__.return_value
             child.wait.side_effect = [KeyboardInterrupt, 0]
-            run_aranami.run()
+            run_aranami.run_schedule()
         child.send_signal.assert_called_once_with(signal.SIGINT)
         assert child.wait.call_count == _INTERRUPT_WAIT_COUNT
 

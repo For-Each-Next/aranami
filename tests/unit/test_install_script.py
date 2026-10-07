@@ -10,7 +10,7 @@ from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scripts import run_aranami
 
@@ -49,10 +49,17 @@ class TestInstallScript(TestCase):
             ):
                 child = monitor.return_value.__enter__.return_value
                 child.wait.return_value = 0
+                sequence = Mock()
+                sequence.attach_mock(process, "install")
+                sequence.attach_mock(monitor, "monitor")
                 exec(  # ruff: ignore[exec-builtin]
                     compile(_SOURCE, "<notebook-cell>", "exec"),
                     {"__name__": "__main__"},
                 )
+                assert [call[0] for call in sequence.mock_calls][:2] == [
+                    "install",
+                    "monitor",
+                ]
                 process.assert_called_once()
                 assert list(process.call_args.args[0]) == [
                     sys.executable,
@@ -65,8 +72,13 @@ class TestInstallScript(TestCase):
                 assert process.call_args.kwargs == {"check": True}
                 monitor.assert_called_once()
                 command = monitor.call_args.args[0]
-                assert command[:2] == (sys.executable, "-c")
-                assert "scheduler = aranami.run(dry=False)" in command[2]
+                assert command == (
+                    sys.executable,
+                    "-m",
+                    "aranami",
+                    "--no-dry",
+                    "--run-immediately",
+                )
                 assert monitor.call_args.kwargs == {
                     "cwd": Path.cwd(),
                     "start_new_session": True,
@@ -101,8 +113,13 @@ class TestInstallScript(TestCase):
                 assert process.call_args.args[0][-1] == str(wheel)
                 monitor.assert_called_once()
                 command = monitor.call_args.args[0]
-                assert command[:2] == (sys.executable, "-c")
-                assert "scheduler = aranami.run(dry=False)" in command[2]
+                assert command == (
+                    sys.executable,
+                    "-m",
+                    "aranami",
+                    "--no-dry",
+                    "--run-immediately",
+                )
                 assert monitor.call_args.kwargs == {
                     "cwd": Path.cwd(),
                     "start_new_session": True,
@@ -230,6 +247,7 @@ class TestInstallScript(TestCase):
                     "run",
                     side_effect=failure,
                 ) as process,
+                patch.object(run_aranami.subprocess, "Popen") as monitor,
                 self.assertRaises(
                     run_aranami.subprocess.CalledProcessError,
                 ) as raised,
@@ -240,6 +258,7 @@ class TestInstallScript(TestCase):
                 )
             assert raised.exception is failure
             process.assert_called_once()
+            monitor.assert_not_called()
             assert process.call_args.args[0][1:3] == ("-m", "pip")
             assert all(wheel.exists() for wheel in wheels)
 

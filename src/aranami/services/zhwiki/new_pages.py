@@ -1,7 +1,7 @@
 """Discover video-game pages created or converted from redirects.
 
 Match keywords in preloaded text for dated creations and conversions.
-Repeated runs fill gaps without duplicating existing dates.
+Skip complete date windows and fill gaps without duplicate records.
 """
 
 from __future__ import annotations
@@ -430,9 +430,12 @@ def update_text(
 ) -> str:
     """Keep the latest 100 complete UTC dates and fill missing records.
 
-    Existing dates are reused, including dates without matches. Missing
-    dates include creations and ``mw-removed-redirect`` edits from the
-    same UTC day. Converted pages receive a ``自重定向页改写`` note.
+    When all retained dates are present, return the original text.
+    This skips queries and maintenance changes. Otherwise, reuse
+    existing dates, including dates without matches, when filling gaps.
+    Missing dates include creations and ``mw-removed-redirect`` edits
+    from the same UTC day. Converted pages receive a
+    ``自重定向页改写`` note.
     Each resolved item ends with its page ID and first-revision UTC time
     in an HTML comment. Existing rows receive missing comments once.
     Each page appears once per day, even when also created that day.
@@ -446,8 +449,9 @@ def update_text(
         project: WikiProject name supplying current assessment grades.
 
     Returns:
-        Complete page text with gaps filled, older dates pruned, and
-        current assessment icons throughout the retained records.
+        Original text when the retained window is complete. Otherwise,
+        complete text with gaps filled, older dates pruned, and current
+        assessment icons throughout the retained records.
     """
     options = region_options(original_text, "new-pages")
     retained_days = integer_option(options, "days", _RECORD_DAYS, maximum=3650)
@@ -461,6 +465,8 @@ def update_text(
         for offset in range(1, retained_days + 1)
     ]
     missing = [day for day in days if day not in existing]
+    if not missing:
+        return original_text
     for day in reversed(missing):
         existing[day] = _build_section(site, day)
     records = "".join(existing[day].rstrip() + "\n\n" for day in days)

@@ -38,20 +38,27 @@ def run(
     *,
     dry: bool = False,
     clear_cache: bool = False,
+    run_immediately: bool = True,
 ) -> BackgroundScheduler:
     """Start recurring routine schedules using PAWS authentication.
 
     Return immediately while the monitor keeps dispatching each routine
-    at its configured UTC time. A fresh live monitor also checks every
-    routine immediately. Both live and preview modes recur until
-    the returned scheduler is stopped. Repeated calls reuse an active
-    monitor with the same output mode.
+    at its configured UTC time. By default, a fresh monitor also checks
+    every routine immediately in either live or preview mode. Set
+    ``run_immediately=False`` to wait for the first scheduled times.
+    Both modes recur until the returned scheduler is stopped. Repeated
+    calls reuse an active monitor with the same output mode without
+    another initial pass, regardless of ``run_immediately``.
 
     Args:
         dry: Write local previews at each scheduled time instead of
             editing wiki pages or requesting PexBot refreshes.
         clear_cache: Delete disposable caches before starting a fresh
             monitor. Stop an active monitor before clearing its caches.
+        run_immediately: Check every routine immediately on a fresh
+            start, then follow its UTC schedule. False waits for the
+            next cron times. This option has no effect on an active
+            monitor.
 
     Returns:
         Background scheduler for inspecting, pausing, or stopping the
@@ -61,7 +68,11 @@ def run(
         ValueError: An active monitor uses another output mode, or cache
             clearing was requested while a monitor is active.
     """
-    return monitor.start(dry=dry, clear_cache=clear_cache)
+    return monitor.start(
+        dry=dry,
+        clear_cache=clear_cache,
+        run_immediately=run_immediately,
+    )
 
 
 def _select_tasks(tasks: Sequence[str] | str | None) -> tuple[ModuleType, ...]:

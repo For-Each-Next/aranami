@@ -1,12 +1,15 @@
-"""Install an Aranami wheel and monitor its live routine schedules.
+"""Install an Aranami wheel and monitor its routine schedules.
 
 Run ``python scripts/run_aranami.py [path/to/aranami-<version>.whl]``.
 Without a path, use the newest Aranami wheel by its modification time in
 the current directory or its ``dist/`` subdirectory. After installation
 succeeds, delete older Aranami wheels from those two directories.
 Pip installs dependencies using this Python interpreter, then a fresh
-process monitors the newly installed package's schedules with live wiki
-edits and PexBot refresh requests until interrupted.
+process monitors the newly installed package until interrupted.
+Set ``DRY_RUN=True`` below to write previews. Its default ``False``
+publishes wiki edits and requests PexBot refreshes.
+``RUN_IMMEDIATELY=True`` checks every routine on startup; set it to
+``False`` to wait for cron times.
 Existing Pywikibot configuration and Wiki Replica access are needed.
 Runtime logs and caches are saved beside this script.
 The complete script can also be pasted into a PAWS notebook cell, where
@@ -22,20 +25,11 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+DRY_RUN = False
+RUN_IMMEDIATELY = True
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-_MONITOR_CODE = """\
-from threading import Event
-
-import aranami
-
-scheduler = aranami.run(dry=False)
-try:
-    Event().wait()
-except KeyboardInterrupt:
-    scheduler.shutdown(wait=True)
-"""
 
 
 def _local_wheels() -> list[Path]:
@@ -127,14 +121,15 @@ def install_wheel(argv: Sequence[str] | None = None) -> None:
     _remove_older_wheels(wheel)
 
 
-def run() -> None:
-    """Monitor live schedules in a fresh process until interrupted.
+def run_schedule() -> None:
+    """Monitor schedules in a fresh process until interrupted.
 
     Save runtime files beside the script, or in the current directory
     for a pasted notebook cell. Preserve the caller's working directory.
     An interrupt stops the scheduler after its active jobs finish. The
     fresh process uses the newly installed package independently of
-    imports already loaded in a notebook.
+    imports already loaded in a notebook. ``DRY_RUN`` selects preview
+    output. ``RUN_IMMEDIATELY`` starts a pass before scheduled times.
 
     Raises:
         subprocess.CalledProcessError: The monitor process exits with a
@@ -142,8 +137,15 @@ def run() -> None:
     """
     script_file = globals().get("__file__")
     root = Path(script_file).resolve().parent if script_file else Path.cwd()
-    print(f"Monitoring live schedules; runtime files in {root}", flush=True)  # ruff: ignore[print]
-    command = (sys.executable, "-c", _MONITOR_CODE)
+    mode = "preview" if DRY_RUN else "live"
+    print(f"Monitoring {mode} schedules; runtime files in {root}", flush=True)  # ruff: ignore[print]
+    command = (
+        sys.executable,
+        "-m",
+        "aranami",
+        "--dry" if DRY_RUN else "--no-dry",
+        "--run-immediately" if RUN_IMMEDIATELY else "--no-run-immediately",
+    )
     with subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true]
         command,
         cwd=root,
@@ -158,6 +160,11 @@ def run() -> None:
             raise subprocess.CalledProcessError(returncode, command)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Install the selected wheel and monitor its schedules."""
     install_wheel()
-    run()
+    run_schedule()
+
+
+if __name__ == "__main__":
+    main()

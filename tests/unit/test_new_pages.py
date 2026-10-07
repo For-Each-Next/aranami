@@ -11,7 +11,7 @@ from pywikibot.site import BaseSite, Namespace
 
 from aranami.jobs import JobContext, new_pages as new_pages_job
 from aranami.services.zhwiki import new_pages
-from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
+from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
 from aranami.support.wikitext import managed_region
 
 _DAY_HEADING_LEVEL = 3
@@ -212,11 +212,12 @@ class TestNewPageRecords(TestCase):
         assert repeated == updated
 
     @staticmethod
-    def test_retained_rows_receive_comments_without_rebuilding_dates() -> None:
-        """Annotate retained records and preserve saved identities."""
+    def test_backfill_enriches_retained_rows_without_rebuilding_them() -> None:
+        """Annotate retained records while filling an older date."""
         today = dt.date(2026, 10, 3)
         yesterday = today - dt.timedelta(days=1)
         previous = today - dt.timedelta(days=2)
+        missing = today - dt.timedelta(days=3)
         site = _TitleSite("zh", "wikipedia")
         saved_comment = "<!-- 页面ID 99 · 创建时间 2026-07-01 01:02:03 -->"
         outside = "* [[:Outside game]]\n"
@@ -227,7 +228,7 @@ class TestNewPageRecords(TestCase):
             + "* [[:Template:Game#Details|Display]] <!-- keep this -->\n"
             + _section(previous)
             + "* [[:模板:Game]] — 自重定向页改写\n",
-            {"days": "2"},
+            {"days": "3"},
         )
         creation_metadata = pl.DataFrame(
             {
@@ -248,7 +249,11 @@ class TestNewPageRecords(TestCase):
             "pa_class": ["优良", "初"],
         })
         with (
-            patch.object(new_pages, "_build_section") as build,
+            patch.object(
+                new_pages,
+                "_build_section",
+                return_value=_section(missing),
+            ) as build,
             patch.object(
                 new_pages,
                 "page_creation_metadata",
@@ -272,7 +277,7 @@ class TestNewPageRecords(TestCase):
                 today,
                 project="电子游戏",
             )
-        build.assert_not_called()
+        build.assert_called_once_with(site, missing)
         fetch.assert_called_once_with(site, ["模板:Game"])
         assert updated.startswith(outside)
         assert (
@@ -283,7 +288,7 @@ class TestNewPageRecords(TestCase):
         assert updated.count(annotation) == 2  # ruff: ignore[magic-value-comparison]
         assert f"<!-- keep this --> {annotation}" in updated
         assert f"— 自重定向页改写 {annotation}" in updated
-        days = {yesterday, previous}
+        days = {yesterday, previous, missing}
         assert new_pages.record_counts(updated, site, days) == (1, 2)
         assert updated == repeated
 
@@ -396,7 +401,9 @@ class TestNewPageRecords(TestCase):
                 - new_pages.record_dates(original)
                 == missing
             )
+            query_members.assert_called_once_with(site, "Example project")
             build.reset_mock()
+            query_members.reset_mock()
             repeated = new_pages.update_text(
                 updated,
                 site,
@@ -404,8 +411,8 @@ class TestNewPageRecords(TestCase):
                 project="Example project",
             )
             build.assert_not_called()
+            query_members.assert_not_called()
             assert repeated == updated
-        query_members.assert_called_with(site, "Example project")
         read_pages.assert_not_called()
 
     @staticmethod
@@ -501,20 +508,18 @@ class TestNewPageRecords(TestCase):
             assert edit.title == title
             assert edit.original_text == original
             assert edit.text == updated
-            assert edit.summary == (
+            assert edit.summary == EditSummary.with_execution_time(
                 "Updated for 2 Oct 2026. "
-                "Found 0 article pages and 0 non-article pages. "
-                "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
+                "Found 0 article pages and 0 non-article pages.",
+                0,
             )
             assert edit.tags == ("new-pages", "filled-1-dates")
             page.text = updated
             new_pages_job.run(context=context)
-        assert context.edits[-1].original_text == updated
-        assert context.edits[-1].text == updated
-        assert context.edits[-1].summary == (
-            "Updated class icons. Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
-        )
-        assert context.edits[-1].tags == ("new-pages", "filled-0-dates")
+        assert len(context.edits) == 1
+        assert context.notes == [
+            "No missing retained new-page dates; skipped update.",
+        ]
         page.save.assert_not_called()
 
     @staticmethod
@@ -573,11 +578,11 @@ class TestNewPageRecords(TestCase):
         ):
             new_pages_job.run(context=context)
         [edit] = context.edits
-        assert edit.summary == (
+        assert edit.summary == EditSummary.with_execution_time(
             "Updated for 5 May 2025. "
             "Found 1 article page and 1 non-article page. "
-            "Backfilled 11 older daily records. "
-            "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
+            "Backfilled 11 older daily records.",
+            0,
         )
         assert len(edit.summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
         assert (
@@ -591,57 +596,93 @@ class TestNewPageRecords(TestCase):
         )
 
     @staticmethod
-    @patch("aranami.jobs._execution.perf_counter", new=lambda: 0.0)
-    def test_existing_date_icon_refresh_uses_short_summary() -> None:
-        """Describe icon refreshes for existing daily records."""
+    def test_complete_date_window_preserves_existing_report_exactly() -> None:
+        """Skip icon updates, enrichment, pruning, and normalization."""
         today = dt.date(2026, 10, 3)
         day = today - dt.timedelta(days=1)
-        original = managed_region(
+        original = "Manual introduction.\r\n" + managed_region(
             "new-pages",
             _section(day) + "* {{class/icon|初}} [[:Game]]"
             " <!-- 页面ID 1 · 创建时间 2026-10-02 00:00:00 -->\n"
-            "* [[:Other game]]"
-            " <!-- 页面ID 2 · 创建时间 2026-10-02 01:00:00 -->\n"
-            "* [[:Category:Games]]"
-            " <!-- 页面ID 3 · 创建时间 2026-10-02 02:00:00 -->\n",
+            "* [[:Other game]]\n"
+            + _section(day)
+            + _section(today - dt.timedelta(days=100)),
             {"days": "1"},
         )
         site = _TitleSite("zh", "wikipedia")
-        context = JobContext(site, today, dry=True)
-        page = Mock(text=original)
-        grades = pl.DataFrame({
-            "full_title": ["Game"],
-            "pa_class": ["优良"],
-        })
         with (
-            patch.object(
-                new_pages_job,
-                "job_run",
-                return_value=nullcontext(context),
-            ),
-            patch.object(new_pages_job, "read_pages", return_value=[page]),
             patch.object(new_pages, "_build_section") as build,
             patch.object(new_pages, "page_creation_metadata") as metadata,
             patch.object(
                 new_pages,
                 "query_pages_by_wikiproject",
-                return_value=grades,
-            ),
-            patch.object(new_pages_job, "record_counts") as counts,
+            ) as grades,
+            patch.object(new_pages, "update_icons") as icons,
         ):
-            new_pages_job.run(context=context)
-        [edit] = context.edits
-        assert "{{class/icon|优良}} [[:Game]]" in edit.text
-        assert new_pages.record_dates(edit.text) == {day}
-        assert new_pages.record_counts(edit.text, site, {day}) == (2, 1)
-        assert edit.summary == (
-            "Updated class icons. Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0.00\u2033."
-        )
-        assert edit.tags == ("new-pages", "filled-0-dates")
+            updated = new_pages.update_text(
+                original,
+                site,
+                today,
+                project="电子游戏",
+            )
+        assert updated == original
         build.assert_not_called()
         metadata.assert_not_called()
-        counts.assert_not_called()
-        page.save.assert_not_called()
+        grades.assert_not_called()
+        icons.assert_not_called()
+
+    def test_complete_date_window_job_skips_live_and_dry_publication(
+        self,
+    ) -> None:
+        """Record a skip without a proposal in either output mode."""
+        today = dt.date(2026, 10, 3)
+        day = today - dt.timedelta(days=1)
+        original = managed_region(
+            "new-pages",
+            _section(day) + "* {{class/icon|初}} [[:Game]]\n",
+            {"days": "1"},
+        )
+        for dry in (False, True):
+            with self.subTest(dry=dry):
+                context = JobContext(
+                    _TitleSite("zh", "wikipedia"),
+                    today,
+                    dry=dry,
+                )
+                page = Mock(text=original)
+                with (
+                    patch.object(
+                        new_pages_job,
+                        "job_run",
+                        return_value=nullcontext(context),
+                    ),
+                    patch.object(
+                        new_pages_job,
+                        "read_pages",
+                        return_value=[page],
+                    ),
+                    patch.object(new_pages, "_build_section") as build,
+                    patch.object(
+                        new_pages,
+                        "page_creation_metadata",
+                    ) as metadata,
+                    patch.object(
+                        new_pages,
+                        "query_pages_by_wikiproject",
+                    ) as grades,
+                    patch.object(new_pages_job, "record_counts") as counts,
+                ):
+                    new_pages_job.run(context=context)
+                assert context.edits == []
+                assert context.notes == [
+                    "No missing retained new-page dates; skipped update.",
+                ]
+                assert page.text == original
+                build.assert_not_called()
+                metadata.assert_not_called()
+                grades.assert_not_called()
+                counts.assert_not_called()
+                page.save.assert_not_called()
 
     @staticmethod
     def test_icons_are_repeatable_and_preserve_links() -> None:

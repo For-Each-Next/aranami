@@ -77,7 +77,7 @@ REPORT_SETTINGS = pageviews.ReportSettings(
 
 
 def _edit_summary(report: pageviews.PageviewReport) -> str:
-    """Group each hottest page's periods and link its title once.
+    """Group each top page's periods and link its title once.
 
     Args:
         report: Processed ranking text and its leading articles.
@@ -100,7 +100,7 @@ def _edit_summary(report: pageviews.PageviewReport) -> str:
             continue
         rankings.append((period, title, gain))
     clauses = [
-        _hottest_clause(rankings[:retained])
+        _top_clause(rankings[:retained])
         for retained in range(len(rankings), 0, -1)
     ]
     if clauses:
@@ -108,14 +108,14 @@ def _edit_summary(report: pageviews.PageviewReport) -> str:
     return summary.render()
 
 
-def _hottest_clause(rankings: Sequence[tuple[str, str, int | None]]) -> str:
+def _top_clause(rankings: Sequence[tuple[str, str, int | None]]) -> str:
     """Group retained periods by leader with separate rank gains.
 
     Args:
         rankings: Observed leaders in increasing period order.
 
     Returns:
-        Complete hottest-pages sentence linking each title once.
+        Complete top-pages sentence linking each title once.
     """
     title_periods: dict[str, list[str]] = {}
     for period, title, gain in rankings:
@@ -128,7 +128,7 @@ def _hottest_clause(rankings: Sequence[tuple[str, str, int | None]]) -> str:
         else:
             period_text = " and ".join(periods)
         leaders.append(f"«{Wikilink(title)}» for {period_text}")
-    return f"Hottest: {'; '.join(leaders)}."
+    return f"Top: {'; '.join(leaders)}."
 
 
 def _report_cutoff(
