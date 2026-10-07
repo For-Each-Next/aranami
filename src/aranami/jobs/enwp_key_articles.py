@@ -97,6 +97,7 @@ def run(
                         old_articles,
                         rows,
                         data.linked_titles,
+                        quality=spec.name == "quality",
                     ),
                     tags=("enwp-key-articles", spec.name),
                     original_text=existing[spec.name],

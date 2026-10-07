@@ -258,12 +258,24 @@ to choose project membership and ranking periods.
 ### English comparisons
 
 The importance report lists Top-importance and High-importance English
-articles.
+articles in alphabetical sections and refreshes their counters.
 The quality report lists featured and good English content: featured articles
-(FA), featured lists (FL), and good articles (GA). Both refresh their Chinese
-counterparts, assessment grades, and counts. Grades refresh when the lists
-are rebuilt. Choose destinations with `targets` containing both `important`
-and `quality`.
+(FA), featured lists (FL), and good articles (GA). It groups all three classes
+by the year of their latest English promotion or listing, with the newest
+dates first. Dated entries end with `<!-- YYYY-MM-DD -->`; unresolved dates
+appear under `年份未知`. Same-day entries use English title sort keys.
+The routine replaces only the quality page's managed `body` range, preserving
+its manually maintained description and counters. Both reports refresh their
+Chinese counterparts and assessment grades. Choose destinations with `targets`
+containing both `important` and `quality`.
+
+Quality summaries distinguish `GA listed` and `GA delisted` from
+`FA prompted`, `FL prompted`, `FA removed`, and `FL removed`. A change within
+the quality list includes the previous English class, such as `(from GA)`.
+Importance changes do not produce quality-summary events. Dates come from the
+existing English Article history and GA extractors. A disposable Parquet cache
+stores resolved and unresolved dates by class, discussion revision, and
+template aliases; unchanged discussions reuse the cache without content reads.
 
 ### PexBot
 
@@ -501,7 +513,8 @@ exporting files.
 | [`aranami.services.zhwiki.new_pages`](../src/aranami/services/zhwiki/new_pages.py) | `update_text`, `matches_keywords`, `update_icons`, `record_dates`, `record_counts` | Returns updated daily-list text, keyword matches, refreshed icons, recorded dates, or article/non-article counts. |
 | [`aranami.services.zhwiki.assessment_lists`](../src/aranami/services/zhwiki/assessment_lists.py) | `ReviewInfo`, `AssessmentList`; `prepare_report`, `prepare_text`, `update_text`, `review_heading`, `article_members`, `article_titles` | Configures lists and returns report text with article identities, prepared list text, review anchors, or membership. |
 | [`aranami.services.zhwiki.pageviews`](../src/aranami/services/zhwiki/pageviews.py) | `ReportPeriod`, `TaskForce`, `ReportSettings`, `PageviewReport`; `current_data_date`, `report_periods`, `require_daily_observations`, `aggregate_views`, `build_report`, `update_text`; `PageviewsUnavailableError`, `PageviewsDeferredError` | Configures rankings and returns dates, intervals, traffic totals, or report text. `build_report` writes disposable healthy/pending files under `cache/`; `aggregate_views` stages data only when supplied a cache. Errors identify unavailable observations or deferred requests. |
-| [`aranami.services.zhwiki.enwp_key_articles`](../src/aranami/services/zhwiki/enwp_key_articles.py) | `ReportSpec`, `OldArticle`, `ReportData`; `prepare_reports`, `build_reports`, `build_enriched_rows`, `filter_report_rows`, `count_report_rows`, `normalize_en_pages`; `build_report_item_template`, `render_item`, `render_body`, `update_page_text`; `parse_item_id`, `parse_old_articles`, `build_item_to_zh_title`, `format_summary_article`, `encode_length`, `truncate_summary_parts`, `build_edit_summary`; `english_sort_key`, `heading_key`, `safe_text`, `escape_template_value`, `replace_marker_value`, `replace_body` | Prepares English/Chinese article comparisons, filters and counts rows, renders report text, reads previous membership, and formats summaries or scalar text. Returns values without publication. |
+| [`aranami.services.enwiki.quality_listing_dates`](../src/aranami/services/enwiki/quality_listing_dates.py) | `listing_dates(pages, *, site=None)` | Returns nullable English quality listing dates by article ID, refreshing disposable revision-keyed caches only for changed discussions. |
+| [`aranami.services.zhwiki.enwp_key_articles`](../src/aranami/services/zhwiki/enwp_key_articles.py) | `ReportSpec`, `OldArticle`, `ReportData`; `prepare_reports`, `build_reports`, `build_enriched_rows`, `filter_report_rows`, `count_report_rows`, `normalize_en_pages`; `build_report_item_template`, `render_item`, `render_body`, `render_quality_body`, `update_page_text`; `parse_item_id`, `parse_old_articles`, `build_item_to_zh_title`, `format_summary_article`, `encode_length`, `truncate_summary_parts`, `build_edit_summary`; `english_sort_key`, `heading_key`, `safe_text`, `escape_template_value`, `replace_marker_value`, `replace_body` | Prepares English/Chinese article comparisons, filters and counts rows, renders alphabetical importance or dated quality sections, reads previous membership and English classes, and formats summaries or scalar text. Returns values without publication; quality preparation can refresh its disposable date cache. |
 | [`aranami.services.zhwiki.pexbot`](../src/aranami/services/zhwiki/pexbot.py) | `StreamEvent`; `require_zhwiki`, `subscribed_titles`, `parse_event` | Validates the site, returns scoped subscription titles, or decodes progress messages. These helpers do not request refreshes. |
 
 ### Read-only data sources
@@ -512,7 +525,7 @@ exporting files.
 | [`aranami.sources.dyk`](../src/aranami/sources/dyk.py) | `TalkPage`, `read_talk_pages` | Talk-page text with its actual revision ID. |
 | [`aranami.sources.quarry.projects`](../src/aranami/sources/quarry/projects.py) | `TagSpec`; `query_pages_by_wikiproject`, `category_members`, `latest_revisions`, `new_page_ids`, `redirect_converted_page_ids`, `page_creation_metadata`, `query_tags` | Project assessments, category membership, revision IDs, created or redirect-converted page IDs, page identities with first-revision UTC times, or attached maintenance tags. |
 | [`aranami.sources.quarry.quality`](../src/aranami/sources/quarry/quality.py) | `fetch_quality_articles(site, *, project_title, classes)` | Selected assessed articles with grade, importance, and display/sort titles. Listing dates are supplied by `analyze_quality_contents`, not this metadata query. |
-| [`aranami.sources.quarry.enwp`](../src/aranami/sources/quarry/enwp.py) | `fetch_en_key_pages`, `fetch_wikidata_sitelinks`, `fetch_wikidata_labels`, `fetch_zh_page_states` | English key articles, preferred linked titles/labels, or Chinese article states. |
+| [`aranami.sources.quarry.enwp`](../src/aranami/sources/quarry/enwp.py) | `fetch_en_key_pages`, `fetch_en_talk_revisions`, `fetch_wikidata_sitelinks`, `fetch_wikidata_labels`, `fetch_zh_page_states` | English key articles, nullable talk-page revision identities, preferred linked titles/labels, or Chinese article states. |
 
 `aranami.sources` exports the `pageviews` and `quarry` modules. `QueryFrame`
 is also importable from `aranami.sources.quarry`; `DailyPageviews` is

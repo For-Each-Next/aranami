@@ -335,6 +335,18 @@ new-page list retains its requested ID and creation-time comments.
 Both English key-article reports list English
 additions and removals as `[[:en:Title]]` links and match English page IDs
 across title changes.
+The quality report mixes FA, FL, and GA in descending order of the latest
+English promotion or listing date, grouped by year. Same-day entries use
+English title sort keys; null dates form the final `年份未知` section.
+Append an ISO date comment to each resolved item. Reuse the English quality
+extractor and cache null results as well as resolved dates. Validate cached
+dates against the current English class, talk-page ID, revision, and template
+aliases, and preload only discussions needing refresh. Save the actual
+revision fetched with each text snapshot. Quality summaries use the English
+class with `listed`/`delisted` for GA and `prompted`/`removed` for FA and FL,
+including the previous class when it changes. Only replace the quality
+page's managed body; preserve its manually maintained surroundings.
+The importance report retains its alphabetical sections and counter updates.
 
 ## Verification and releases
 
