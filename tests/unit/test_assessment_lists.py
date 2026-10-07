@@ -19,8 +19,11 @@ from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
 from aranami.support.report_membership import MembershipReport
 
 _TEXT = (
-    'Intro<section begin="count" />1<section end="count" />'
-    "\n<section begin=list />\n# {{icon|A}} [[Old]]\n<section end=list />"
+    'Intro<section begin="count" /><!-- aranami begin="assessment-count" -->'
+    '1<!-- aranami end="assessment-count" --><section end="count" />'
+    '\n<section begin=list /><!-- aranami begin="assessment-list" -->'
+    '\n# {{icon|A}} [[Old]]\n<!-- aranami end="assessment-list" -->'
+    "<section end=list />"
     "\nFooter [[Unmanaged]]"
 )
 _A_CONFIG = service.AssessmentList(
@@ -65,10 +68,14 @@ class TestAssessmentContent(TestCase):
             _TEXT,
             ["New"],
             {},
-            member_ids={"New": 7458204},
         )
         assert "aranami-member" not in text
         assert service.article_members(text) == {"New": None}
+        annotated = text.replace(
+            "[[New]]",
+            '[[New]]<!-- aranami-member id="7458204" -->',
+        )
+        assert service.article_members(annotated) == {"New": None}
 
     @staticmethod
     def test_content_configuration_has_no_destination() -> None:
@@ -101,27 +108,47 @@ class TestAssessmentContent(TestCase):
         assert "<small>〔[[Talk:Game#甲级评审 2|评审]]〕</small>" in text
         assert service.article_titles(text) == {"Game"}
 
-    def test_missing_or_duplicate_section_boundaries_reject_updates(
+    def test_missing_or_duplicate_marker_boundaries_reject_updates(
         self,
     ) -> None:
         """Reject missing or ambiguous managed sections."""
-        for text in ("No sections", _TEXT + "<section begin=list />"):
+        for text in (
+            "No markers",
+            (
+                '<section begin="count" />1<section end="count" />'
+                '<section begin="list" />old<section end="list" />'
+            ),
+            _TEXT + '<!-- aranami begin="assessment-list" -->',
+        ):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 service.update_text(_BPLUS_CONFIG, text, [], {})
+
+    @staticmethod
+    def test_section_wrappers_and_unmanaged_members_are_preserved() -> None:
+        """Preserve transclusion tags and unmanaged list entries."""
+        source = _TEXT.replace(
+            '<!-- aranami begin="assessment-list" -->',
+            '\n# [[Manual]]\n<!-- aranami begin="assessment-list" -->',
+        )
+        updated = service.update_text(_A_CONFIG, source, ["New"], {})
+        assert "\n# [[Manual]]\n" in updated
+        assert "<section begin=list />" in updated
+        assert "<section end=list />" in updated
+        assert service.article_titles(updated) == {"New"}
 
 
 class TestReviewSources(TestCase):
     """Verify review matching and replica-based member selection."""
 
     @staticmethod
-    def test_latest_matching_heading_and_grade_alias() -> None:
+    def test_latest_matching_heading() -> None:
         """Match Chinese and English review headings."""
         text = (
             "== A-Class review ==\n== 甲級評審 2 ==\n"
             "=== 甲级评审 wrong level ===\n== Unrelated ==\n"
         )
         assert service.review_heading(text, "acc") == "甲級評審 2"
-        assert service.review_heading("== B-Class assessment ==", "bpcn") == (
+        assert service.review_heading("== B-Class assessment ==", "bpan") == (
             "B-Class assessment"
         )
         assert service.review_heading("No review", "ppr") is None
@@ -183,12 +210,9 @@ class TestReviewSources(TestCase):
     def test_marker_category_override_survives_repeated_updates() -> None:
         """Retain category settings inside labeled sections."""
         text = _TEXT.replace(
-            "<section begin=list />",
-            '<section begin=list /><!-- aranami begin="assessment-list" '
+            '<!-- aranami begin="assessment-list" -->',
+            '<!-- aranami begin="assessment-list" '
             'category="分类:自定义电子游戏条目" -->',
-        ).replace(
-            "<section end=list />",
-            '<!-- aranami end="assessment-list" --><section end=list />',
         )
         site = MagicMock()
         empty = pl.DataFrame(
@@ -318,14 +342,12 @@ class TestAssessmentJob(TestCase):
             _TEXT,
             ["Old"],
             {"Old": "Talk:Old#甲级评审"},
-            member_ids={"Old": 11},
         )
         updated = service.update_text(
             _ACC_CONFIG,
             original,
             ["Renamed"],
             {"Renamed": "Talk:Renamed#甲级评审 2"},
-            member_ids={"Renamed": 11},
         )
         assert (
             job._content_summary(
@@ -340,14 +362,13 @@ class TestAssessmentJob(TestCase):
         assert "aranami-member" not in updated
 
     @staticmethod
-    def test_migrating_unchanged_legacy_titles_only_reports_total() -> None:
-        """Keep existing titles unchanged when adding identifiers."""
+    def test_uncached_unchanged_titles_only_report_total() -> None:
+        """Compare unchanged titles when cached IDs are unavailable."""
         updated = service.update_text(
             _A_CONFIG,
             _TEXT,
             ["Old"],
             {},
-            member_ids={"Old": 11},
         )
         assert (
             job._content_summary(
@@ -366,14 +387,12 @@ class TestAssessmentJob(TestCase):
             _TEXT,
             ["Old"],
             {},
-            member_ids={"Old": 11},
         )
         updated = service.update_text(
             _A_CONFIG,
             original,
             ["Old"],
             {},
-            member_ids={"Old": 12},
         )
         assert job._content_summary(
             original,

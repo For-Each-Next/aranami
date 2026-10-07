@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -19,10 +18,8 @@ import polars as pl
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from mwparserfromhell.wikicode import Wikicode
     from pywikibot.site import BaseSite
 
-_IDENTIFIER = re.compile(r'aranami-member id="([1-9][0-9]*)"')
 _LOGGER = logging.getLogger(__name__)
 _SCHEMA = {
     "text_sha256": pl.String,
@@ -190,32 +187,15 @@ def save_membership(
                 )
 
 
-def member_identifier(code: Wikicode) -> int | None:
-    """Read a legacy identifier while migrating an existing report row.
-
-    Args:
-        code: Parsed row containing a member and its comments.
-
-    Returns:
-        The positive identifier, or none for unmarked or ambiguous rows.
-    """
-    identifiers = [
-        int(match.group(1))
-        for comment in code.filter_comments(recursive=False)
-        if (match := _IDENTIFIER.fullmatch(str(comment.contents).strip()))
-    ]
-    return identifiers[0] if len(identifiers) == 1 else None
-
-
 def membership_changes(
     previous: Mapping[str, int | None],
     current: Mapping[str, int | None],
 ) -> tuple[list[str], list[str]]:
     """Compare members while recognizing stable-ID renames.
 
-    Unmarked legacy rows fall back to exact normalized titles. Known IDs
-    distinguish replacing a deleted page at the same title. Identifiers
-    must have the same source meaning in both maps.
+    Rows without cached IDs fall back to exact normalized titles. Known
+    IDs distinguish replacing a deleted page at the same title.
+    Identifiers must have the same source meaning in both maps.
 
     Args:
         previous: Original titles and optional source identifiers.

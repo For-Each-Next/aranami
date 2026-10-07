@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "aranami"
-version = "0.3.5"
+version = "0.4.0"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [
@@ -44,7 +44,6 @@ dependencies = [
     "python-dateutil",
     "sqlalchemy",
     "tqdm",
-    "ipykernel>=7.4.0",
 ]
 
 [dependency-groups]

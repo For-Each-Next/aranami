@@ -26,8 +26,6 @@ if TYPE_CHECKING:
 
     from pywikibot.site import BaseSite
 
-PEXBOT_PREFIXES: tuple[str, ...] = TASK_DEFINITIONS["pexbot"].prefixes
-
 _LOGGER = logging.getLogger(__name__)
 _ENDPOINT = "https://pexbot.toolforge.org/database-report/stream"
 _COOLDOWN_SECONDS = 15
@@ -94,7 +92,11 @@ def run(
     """
     with job_run("pexbot", dry=dry, context=context) as active:
         require_zhwiki(active.site)
-        allowed = PEXBOT_PREFIXES if prefixes is None else prefixes
+        allowed = (
+            TASK_DEFINITIONS["pexbot"].prefixes
+            if prefixes is None
+            else prefixes
+        )
         titles = subscribed_titles(active.site, allowed)
         _LOGGER.info("Selected %d subscribed PexBot reports.", len(titles))
         failures: list[Exception] = []

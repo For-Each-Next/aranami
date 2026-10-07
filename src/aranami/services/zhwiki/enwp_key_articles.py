@@ -19,13 +19,12 @@ from mwparserfromhell.nodes import Heading, Wikilink
 from aranami.services.enwiki import quality_listing_dates
 from aranami.sources.quarry import enwp
 from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
+from aranami.support.regions import region_content, replace_by_tag
 from aranami.support.templates import template_page
-from aranami.support.wikitext import region_content, replace_by_tag
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
-    from mwparserfromhell.wikicode import Wikicode
     from pywikibot.site import BaseSite
 
 
@@ -73,10 +72,10 @@ class OldArticle:
 
 
 class _ArticleMembership:
-    """Match stable page IDs and legacy report identities."""
+    """Match cached page IDs and identities from report templates."""
 
     def __init__(self, articles: Mapping[str, OldArticle]) -> None:
-        """Index stable IDs and fallback identities for legacy rows.
+        """Index stable IDs and fallback identities for uncached rows.
 
         Args:
             articles: Report articles keyed by their English title.
@@ -92,7 +91,7 @@ class _ArticleMembership:
             for article in articles.values()
             if article.item_id is not None
         }
-        self.legacy_by_item_id = {
+        self.uncached_by_item_id = {
             article.item_id: article
             for article in articles.values()
             if article.page_id is None and article.item_id is not None
@@ -110,7 +109,7 @@ class _ArticleMembership:
         return self.find(article) is not None
 
     def find(self, article: OldArticle) -> OldArticle | None:
-        """Return the article with the same stable or legacy identity.
+        """Return the article with the same cached or template identity.
 
         Args:
             article: Candidate article to compare with this report.
@@ -123,7 +122,7 @@ class _ArticleMembership:
         if article.page_id is not None:
             match = self.by_page_id.get(
                 article.page_id,
-            ) or self.legacy_by_item_id.get(article.item_id)
+            ) or self.uncached_by_item_id.get(article.item_id)
         elif article.item_id is not None:
             match = self.by_item_id.get(article.item_id)
         else:
@@ -555,16 +554,16 @@ def update_page_text(
     """
     if spec.name == "quality":
         return replace_body(old_text, body)
-    new_text = replace_marker_value(
-        old_text,
+    new_text = replace_by_tag(
         "count_all",
         f"{sum(counts.values()):,}",
+        old_text,
     )
     for value, marker_name in spec.count_markers:
-        new_text = replace_marker_value(
-            new_text,
+        new_text = replace_by_tag(
             marker_name,
             f"{counts.get(value, 0):,}",
+            new_text,
         )
     return replace_body(new_text, body)
 
@@ -601,7 +600,7 @@ def parse_old_articles(
     articles: dict[str, OldArticle] = {}
     wikicode = mwparserfromhell.parse(page_text)
 
-    for template, page_id in _templates_with_page_ids(wikicode):
+    for template in wikicode.filter_templates():
         if template_page(template.name, site) != expected_name:
             continue
         if not template.has("en"):
@@ -623,7 +622,6 @@ def parse_old_articles(
         articles[english_title] = OldArticle(
             english_title=english_title,
             item_id=item_id,
-            page_id=page_id,
             en_class=(
                 html
                 .unescape(str(template.get("en_cls").value))
@@ -636,36 +634,6 @@ def parse_old_articles(
         )
 
     return articles
-
-
-def _templates_with_page_ids(
-    code: Wikicode,
-) -> Iterator[tuple[mwparserfromhell.nodes.Template, int | None]]:
-    """Yield templates with page IDs from their following HTML comments.
-
-    Args:
-        code: Root or nested wikitext containing report items.
-
-    Yields:
-        Each template and its adjacent stable page ID, when available.
-    """
-    for index, node in enumerate(code.nodes):
-        if isinstance(node, mwparserfromhell.nodes.Template):
-            page_id = None
-            following = code.nodes[index + 1 : index + 2]
-            if following and isinstance(
-                following[0],
-                mwparserfromhell.nodes.Comment,
-            ):
-                marker = str(following[0].contents).strip()
-                prefix = 'aranami-enwp page-id="'
-                if marker.startswith(prefix) and marker.endswith('"'):
-                    value = marker[len(prefix) : -1]
-                    if value.isdigit() and int(value) > 0:
-                        page_id = int(value)
-            yield node, page_id
-        for child in node.__children__():
-            yield from _templates_with_page_ids(child)
 
 
 def build_item_to_zh_title(
@@ -711,38 +679,6 @@ def format_summary_article(
     return f"{english_link} &#91;{Wikilink(chinese_title)}&#93;"
 
 
-def encode_length(value: str) -> int:
-    """Return the UTF-8 byte length of a string.
-
-    Args:
-        value: Text to measure.
-
-    Returns:
-        Number of UTF-8 bytes.
-    """
-    return len(value.encode("utf-8"))
-
-
-def truncate_summary_parts(
-    parts: Sequence[str],
-    max_bytes: int,
-) -> str:
-    """Fit summary parts within a UTF-8 byte limit.
-
-    Args:
-        parts: Complete summary clauses.
-        max_bytes: Maximum allowed UTF-8 byte length.
-
-    Returns:
-        Joined clauses, with an omission count when truncated.
-    """
-    return (
-        EditSummary("", max_bytes=max_bytes)
-        .add_group("", parts, separator="; ", group_separator="")
-        .render()
-    )
-
-
 def build_edit_summary(
     old_articles: Mapping[str, OldArticle],
     new_rows: pl.DataFrame,
@@ -765,7 +701,7 @@ def build_edit_summary(
         retaining their page ID keep only the count. Quality reports
         describe GA listings and delistings and FA/FL promotions and
         removals, including earlier classes for known transitions.
-        Importance and Chinese assessment changes are ignored. Legacy
+        Importance and Chinese assessment changes are ignored. Uncached
         entries use their Wikidata item or title. Chinese links require
         a Chinese Wikipedia sitelink.
     """
@@ -850,7 +786,7 @@ def _build_quality_summary(
 
     Returns:
         Summary grouped by English class and quality action. Matched
-        legacy entries without a stored class do not imply a promotion.
+        entries without a stored class do not imply a promotion.
     """
     actions = {
         "GA": ("listed", "delisted"),
@@ -907,36 +843,6 @@ def _build_quality_summary(
     return summary.render()
 
 
-def replace_marker_value(
-    source: str,
-    name: str,
-    new_value: str,
-) -> str:
-    """Replace content between named marker comments.
-
-    Counter markers also accept the legacy repeated ``begin`` spelling
-    for their closing marker. Body markers require ``end``.
-
-    Args:
-        source: Existing page wikitext with marker comments.
-        name: Marker name to locate.
-        new_value: Replacement wikitext between the comments.
-
-    Returns:
-        Wikitext with the first matching region replaced.
-
-    Raises:
-        ValueError: If a complete marker pair cannot be found.
-    """  # ruff: ignore[docstring-extraneous-exception]
-    return replace_by_tag(
-        name,
-        new_value,
-        source,
-        legacy_begin="begin",
-        allow_repeated_begin=name != "body",
-    )
-
-
 def replace_body(source: str, new_body: str) -> str:
     """Replace the report body while retaining both marker comments.
 
@@ -947,7 +853,7 @@ def replace_body(source: str, new_body: str) -> str:
     Returns:
         Updated wikitext with a newline on each side of the report body.
     """
-    return replace_marker_value(source, "body", f"\n{new_body}\n")
+    return replace_by_tag("body", f"\n{new_body}\n", source)
 
 
 def normalize_en_pages(frame: pl.DataFrame) -> pl.DataFrame:
@@ -1030,7 +936,7 @@ def prepare_reports(
     for spec in specs:
         text = existing[spec.name]
         if spec.name == "quality":
-            body = region_content(text, "body", legacy_begin="begin")
+            body = region_content(text, "body")
             if body is None:
                 message = "Quality reports require a managed body region."
                 raise ValueError(message)

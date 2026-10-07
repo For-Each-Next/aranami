@@ -21,7 +21,7 @@ from mwparserfromhell.nodes import Template
 from aranami.sources import pageviews
 from aranami.sources.quarry.projects import query_pages_by_wikiproject
 from aranami.support.pageviews_cache import HISTORY_DAYS, PageviewsCache
-from aranami.support.wikitext import replace_by_tag
+from aranami.support.regions import replace_by_tag
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -141,8 +141,7 @@ def current_data_date(text: str) -> dt.date:
     """Read the checkpoint from a canonical report-date comment.
 
     Recognize only ``<!-- report date YYYY-MM-DD -->`` comments, with
-    surrounding whitespace allowed in their contents. Ignore legacy
-    markers and ranking-template dates.
+    surrounding whitespace allowed in their contents.
 
     Args:
         text: Current report page containing a report-date comment.

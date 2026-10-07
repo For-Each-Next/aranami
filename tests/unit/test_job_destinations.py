@@ -12,6 +12,7 @@ import polars as pl
 from aranami.jobs import assessment_lists, dyks, enwp_key_articles, new_pages
 from aranami.monitor import TASK_DEFINITIONS
 from aranami.services.zhwiki import enwp_key_articles as english_reports
+from aranami.support.regions import managed_region
 from aranami.support.report_membership import MembershipReport
 
 
@@ -40,12 +41,17 @@ class TestJobDestinations(TestCase):
                     patch.object(
                         new_pages,
                         "read_pages",
-                        return_value=[Mock(text="Existing report")],
+                        return_value=[
+                            Mock(text=managed_region("new-pages", "")),
+                        ],
                     ) as read,
                     patch.object(
                         new_pages,
                         "update_text",
-                        return_value="Updated report",
+                        return_value=managed_region(
+                            "new-pages",
+                            "Updated report",
+                        ),
                     ),
                     patch.object(
                         new_pages,
@@ -65,7 +71,8 @@ class TestJobDestinations(TestCase):
         """Read and propose a custom page with the keyword scope."""
         context = Mock(today=date(2026, 10, 3))
         target = "User:Example/New pages"
-        original = "Existing managed report"
+        original = managed_region("new-pages", "Existing managed report")
+        updated = managed_region("new-pages", "Updated report")
         with (
             patch.object(
                 new_pages,
@@ -80,7 +87,7 @@ class TestJobDestinations(TestCase):
             patch.object(
                 new_pages,
                 "update_text",
-                return_value="Updated report",
+                return_value=updated,
             ) as update,
             patch.object(
                 new_pages,
@@ -98,7 +105,7 @@ class TestJobDestinations(TestCase):
         )
         edit = context.publish.call_args.args[0]
         assert edit.title == target
-        assert edit.text == "Updated report"
+        assert edit.text == updated
         assert edit.original_text == original
 
     @staticmethod
@@ -151,7 +158,10 @@ class TestJobDestinations(TestCase):
         context = Mock(dry=False)
         target = "User:Example/Assessment report"
         config = assessment_lists.ASSESSMENT_LISTS[0][1]
-        original = "<section begin=list />\n<section end=list />"
+        original = (
+            '<!-- aranami begin="assessment-list" -->\n'
+            '<!-- aranami end="assessment-list" -->'
+        )
         with (
             patch.object(
                 assessment_lists,

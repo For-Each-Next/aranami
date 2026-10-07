@@ -103,7 +103,7 @@ def _content_summary(
         original_text: Page content before transformation.
         text: Page content returned by the assessment service.
         previous_members: Original members with validated local IDs, or
-            omit to parse legacy page text.
+            omit to compare titles from page text.
         current_members: Source members returned with updated text, or
             omit to parse page text.
 
@@ -139,8 +139,7 @@ def _publish_list(
     report = prepare_report(active.site, config, original_text)
     cached = load_membership(active.site, title, original_text)
     previous = {
-        member: cached.get(member) or identifier
-        for member, identifier in article_members(original_text).items()
+        member: cached.get(member) for member in article_members(original_text)
     }
     active.publish(
         ProposedEdit(

@@ -419,7 +419,7 @@ export result files automatically. Traffic ranges include `start` and exclude
 | `aranami.sources.pageviews.massive(site, pages, start, stop)` | Returns daily observations for multiple pages over the same interval. |
 | `aranami.sources.quarry.Replica(project, extension=None)` | Selects a Wiki Replica. `Replica.from_site(site, *, extension=None)` selects the supplied site's replica; `Replica.wikidata_terms()` selects Wikidata terms. |
 | `Replica.query(statement, *, parameters=None, schema_overrides=None)` | Returns a `QueryFrame`; `.pipe(postprocessor)` adds a table transformation and `.collect()` reads the results. Connection properties are `hostname`, `database`, `url`, and `engine`. |
-| `aranami.sources.quarry.tables` | Provides read-only table definitions for custom queries; see the mapping catalog below. |
+| `aranami.sources.quarry.tables` | Provides [read-only table definitions](../src/aranami/sources/quarry/tables.py) for custom queries. |
 | `aranami.support.gtshow(frame, *, first=5, last=5)` | Displays a compact table preview in JupyterLab; returns `None` and creates no file. |
 | `aranami.support.get_templates(text, template, site)` | Returns matching editable template nodes from supplied wikitext. Mutating a node changes only its in-memory parsed text. |
 | `aranami.support.open_run_log(directory=None)` | Opens a logging context and yields a logger; appends the daily UTC log in `logs/` or the chosen directory. |
@@ -447,9 +447,9 @@ combines article selection and traffic collection.
 
 ## Configuration and files
 
-Reports replace content inside marked HTML comments and preserve surrounding
-page content. Settings on the opening comment control retention, traffic
-history, missing-data thresholds, or assessment categories:
+Reports require paired `aranami` HTML comments around generated content and
+preserve surrounding page content. Settings on the opening comment control
+retention, traffic history, missing-data thresholds, or assessment categories:
 
 ```wikitext
 <!-- aranami begin="new-pages" days="100" -->
@@ -457,14 +457,27 @@ history, missing-data thresholds, or assessment categories:
 <!-- aranami end="new-pages" -->
 ```
 
+Each name below needs one ordered begin/end pair on its destination page:
+
+| Report | Required range names |
+|---|---|
+| DYK | `dyk` for completed entries; `dykn` for nominees. |
+| New pages | `new-pages`. |
+| Assessment lists | `assessment-count`, `assessment-list`. |
+| Pageviews | `page_views`. |
+| English importance comparisons | `count_all`, `count_top`, `count_high`, `body`. |
+| English quality comparisons | `body`; surrounding counters remain manually maintained. |
+
+Keep section-transclusion tags outside these comments. PexBot controls its
+own report content and does not require Aranami ranges.
+
 See the [development guide][9] for supported markers and defaults.
 Edit the PexBot
 `prefixes` in `TASK_DEFINITIONS` in
 [src/aranami/monitor.py](../src/aranami/monitor.py) and build
 a replacement wheel to choose allowed subscription roots.
-`aranami.jobs.pexbot.PEXBOT_PREFIXES` remains a compatibility alias for these
-defaults. Pass `prefixes` to the routine for a single-call override. An empty
-selection disables refreshes.
+Pass `prefixes` to the routine for a single-call override. An empty selection
+disables refreshes.
 
 Unless using the launcher, paths are relative to the caller's current
 directory:
@@ -483,103 +496,10 @@ the actual invocation starts at or after 18:00 UTC. With the hourly `HH:59`
 schedule, the first regular attempt is at 18:59 UTC. Before 18:00, older
 gaps can still advance one date per invocation. This applies to live runs,
 previews, and manual job calls; a supplied date anchor cannot bypass the
-cutoff. Existing `lag-days` attributes no longer affect the selected report
-date.
+cutoff.
 If at least 95% of articles lack data for the target day,
 publication waits. Temporary request failures are retried; later runs can
 resume completed work without advancing the published date.
-
-## Additional public interface reference
-
-This catalog lists the remaining public classes and functions by import
-module. The primary entry points above cover routine use. Names in the same
-row share the described purpose; the source links contain their full
-argument contracts. Unless a file effect is stated, these interfaces return
-values or modify supplied in-memory objects without saving wiki pages or
-exporting files.
-
-### Execution and report services
-
-| Module | Public interfaces | Result or effect |
-|---|---|---|
-| [`aranami.monitor`](../src/aranami/monitor.py) | `TaskDefinition`, `TASK_DEFINITIONS`, `RoutineSchedule`, `SCHEDULES`, `start`, `clear_caches` | Defines default target pages, UTC cron fields, and PexBot subscription prefixes in one module; derives schedules and starts or reuses the monitor returned by `aranami.run()`. `RoutineSchedule.trigger()` returns its UTC cron trigger. `clear_caches()` deletes disposable caches after the monitor has stopped. |
-| [`aranami.runner`](../src/aranami/runner.py) | `run`, `run_once` | Public scheduled and immediate entry points also exported by `aranami`. |
-| [`aranami.jobs`](../src/aranami/jobs/__init__.py) | `JobContext`, `ProposedEdit`, `job_run` | Shared run context, an edit proposal, and a routine lifecycle context. `JobContext.publish()` saves changed pages in live mode or records local proposals in dry-run mode. `write_report()` returns a preview path or `None` for a live run; `start_task()`, `finish_task()`, and `defer()` record routine status. `job_run()` yields the context and logs routine activity. |
-| [`aranami.services.quality_milestones`](../src/aranami/services/quality_milestones.py) | `QualityTarget`, `QualityMilestone`, `QualityProfile`; `normalize_status_code`, `normalize_action_name`, `normalize_result`, `is_target_action`, `is_success_result`, `choose_milestone`, `extract_history_milestones`, `extract_quality_milestone_from_wikitext` | Describes and extracts supported successful promotions from supplied text; returns milestone records or no result when unresolved. |
-| [`aranami.services.quality_profile`](../src/aranami/services/quality_profile.py) | `MilestoneExtractor`, `QualityAnalysisProfile` | Describes a wiki's quality-analysis choices and date-extraction interface. |
-| [`aranami.services.enwiki.quality_dates`](../src/aranami/services/enwiki/quality_dates.py), [`aranami.services.zhwiki.quality_dates`](../src/aranami/services/zhwiki/quality_dates.py) | `extract_milestone(text, status, *, site, most_recent=True, aliases=None)` | Returns a wiki-specific `QualityMilestone` or `None`. |
-| [`aranami.services.zhwiki.dyk_dates`](../src/aranami/services/zhwiki/dyk_dates.py) | `extract_dates` | Returns DYK dates from supplied talk-page text, including unknown values. |
-| [`aranami.services.zhwiki.dyks`](../src/aranami/services/zhwiki/dyks.py) | `prepare_report`, `update_text`, `render_reports`, `build_statistics`, `article_members`, `nomination_changes` | Returns report text with article identities, updated DYK page text, rendered sections, dated counts, membership, or nomination outcomes. Source reads can update the disposable DYK cache. |
-| [`aranami.services.zhwiki.new_pages`](../src/aranami/services/zhwiki/new_pages.py) | `update_text`, `matches_keywords`, `update_icons`, `record_dates`, `record_counts` | Returns updated daily-list text, keyword matches, refreshed icons, recorded dates, or article/non-article counts. |
-| [`aranami.services.zhwiki.assessment_lists`](../src/aranami/services/zhwiki/assessment_lists.py) | `ReviewInfo`, `AssessmentList`; `prepare_report`, `prepare_text`, `update_text`, `review_heading`, `article_members`, `article_titles` | Configures lists and returns report text with article identities, prepared list text, review anchors, or membership. |
-| [`aranami.services.zhwiki.pageviews`](../src/aranami/services/zhwiki/pageviews.py) | `ReportPeriod`, `TaskForce`, `ReportSettings`, `PageviewReport`; `current_data_date`, `report_periods`, `require_daily_observations`, `aggregate_views`, `build_report`, `update_text`; `PageviewsUnavailableError`, `PageviewsDeferredError` | Configures rankings and returns dates, intervals, traffic totals, or report text. `build_report` writes disposable healthy/pending files under `cache/`; `aggregate_views` stages data only when supplied a cache. Errors identify unavailable observations or deferred requests. |
-| [`aranami.services.enwiki.quality_listing_dates`](../src/aranami/services/enwiki/quality_listing_dates.py) | `listing_dates(pages, *, site=None)` | Returns nullable English quality listing dates by article ID, refreshing disposable revision-keyed caches only for changed discussions. |
-| [`aranami.services.zhwiki.enwp_key_articles`](../src/aranami/services/zhwiki/enwp_key_articles.py) | `ReportSpec`, `OldArticle`, `ReportData`; `prepare_reports`, `build_reports`, `build_enriched_rows`, `filter_report_rows`, `count_report_rows`, `normalize_en_pages`; `build_report_item_template`, `render_item`, `render_body`, `render_quality_body`, `update_page_text`; `parse_item_id`, `parse_old_articles`, `build_item_to_zh_title`, `format_summary_article`, `encode_length`, `truncate_summary_parts`, `build_edit_summary`; `english_sort_key`, `heading_key`, `safe_text`, `escape_template_value`, `replace_marker_value`, `replace_body` | Prepares English/Chinese article comparisons, filters and counts rows, renders alphabetical importance or dated quality sections, reads previous membership and English classes, and formats summaries or scalar text. Returns values without publication; quality preparation can refresh its disposable date cache. |
-| [`aranami.services.zhwiki.pexbot`](../src/aranami/services/zhwiki/pexbot.py) | `StreamEvent`; `require_zhwiki`, `subscribed_titles`, `parse_event` | Validates the site, returns scoped subscription titles, or decodes progress messages. These helpers do not request refreshes. |
-
-### Read-only data sources
-
-| Module | Public interfaces | Returned result |
-|---|---|---|
-| [`aranami.sources.wiki`](../src/aranami/sources/wiki.py) | `read_pages`, `read_page_ids`, `template_aliases` | Preloaded current pages or template titles and aliases. |
-| [`aranami.sources.dyk`](../src/aranami/sources/dyk.py) | `TalkPage`, `read_talk_pages` | Talk-page text with its actual revision ID. |
-| [`aranami.sources.quarry.projects`](../src/aranami/sources/quarry/projects.py) | `TagSpec`; `query_pages_by_wikiproject`, `category_members`, `latest_revisions`, `new_page_ids`, `redirect_converted_page_ids`, `page_creation_metadata`, `query_tags` | Project assessments, category membership, revision IDs, created or redirect-converted page IDs, page identities with first-revision UTC times, or attached maintenance tags. |
-| [`aranami.sources.quarry.quality`](../src/aranami/sources/quarry/quality.py) | `fetch_quality_articles(site, *, project_title, classes)` | Selected assessed articles with grade, importance, and display/sort titles. Listing dates are supplied by `analyze_quality_contents`, not this metadata query. |
-| [`aranami.sources.quarry.enwp`](../src/aranami/sources/quarry/enwp.py) | `fetch_en_key_pages`, `fetch_en_talk_revisions`, `fetch_wikidata_sitelinks`, `fetch_wikidata_labels`, `fetch_zh_page_states` | English key articles, nullable talk-page revision identities, preferred linked titles/labels, or Chinese article states. |
-
-`aranami.sources` exports the `pageviews` and `quarry` modules. `QueryFrame`
-is also importable from `aranami.sources.quarry`; `DailyPageviews` is
-importable from `aranami.sources.pageviews`.
-
-<details>
-<summary>Public names in aranami.sources.quarry.tables</summary>
-
-These classes describe read-only query fields; they do not fetch data, change
-wiki pages, or create files by themselves. `Base` holds the table metadata.
-`StringDecoder`, `TextDecoder`, `EnumDecoder`, and `BinaryDecoder` normalize
-query values; their `process_bind_param` and `process_result_value` callbacks
-return converted values.
-
-The table mappings are:
-
-`Actor`, `Archive`, `Block`, `BlockTarget`, `BotPasswords`, `Category`,
-`Categorylinks`, `ChangeTag`, `ChangeTagDef`, `Collation`, `Comment`,
-`Content`, `ContentModels`, `Existencelinks`, `Externallinks`, `File`,
-`Filearchive`, `Filerevision`, `Filetypes`, `Image`, `Imagelinks`, `Interwiki`,
-`IpChanges`, `IpblocksRestrictions`, `Iwlinks`, `Job`, `L10nCache`, `Langlinks`,
-`Linktarget`, `LogSearch`, `Logging`, `Objectcache`, `Oldimage`, `Page`,
-`PageAssessments`, `PageAssessmentsProjects`, `PageProps`, `PageRestrictions`,
-`Pagelinks`, `ProtectedTitles`, `Querycache`, `QuerycacheInfo`, `Querycachetwo`,
-`Recentchanges`, `Redirect`, `Revision`, `Searchindex`, `SiteIdentifiers`,
-`SiteStats`, `Sites`, `SlotRoles`, `Slots`, `Templatelinks`, `Text`, `Updatelog`,
-`Uploadstash`, `User`, `UserAutocreateSerial`, `UserFormerGroups`, `UserGroups`,
-`UserNewtalk`, `UserProperties`, `Watchlist`, `WatchlistExpiry`, `WatchlistLabel`,
-`WatchlistLabelMember`, `WbChanges`, `WbChangesSubscription`, `WbIdCounters`,
-`WbItemsPerSite`, `WbPropertyInfo`, `WbtItemTerms`, `WbtPropertyTerms`,
-`WbtTermInLang`, `WbtText`, and `WbtTextInLang`.
-
-See the [table definitions](../src/aranami/sources/quarry/tables.py) for fields.
-
-</details>
-
-### Text, logging, and cache support
-
-| Module | Public interfaces | Result or file effect |
-|---|---|---|
-| [`aranami.support.cache`](../src/aranami/support/cache.py) | `clear_runtime_cache` | Removes the caller's `cache/` directory. |
-| [`aranami.support.dates`](../src/aranami/support/dates.py) | `parse_date`, `parse_complete_date` | Returns a parsed date or `None`; the latter requires a complete calendar date. |
-| [`aranami.support.templates`](../src/aranami/support/templates.py) | `template_page`, `normalize_param_name`, `template_get_raw_param`, `template_get_param`, `normalize_oldid` | Returns template identities, editable or cleaned parameter values, normalized names, or revision IDs. |
-| [`aranami.support.wikitext`](../src/aranami/support/wikitext.py) | `clean_value`, `get_templates`; reexports the region functions below | Returns cleaned scalar text or matching editable templates. |
-| [`aranami.support.regions`](../src/aranami/support/regions.py) | `has_region`, `region_options`, `region_content`, `integer_option`, `managed_region`, `replace_by_tag` | Inspects named comment ranges/settings or returns wrapped/replaced text. |
-| [`aranami.support.prose`](../src/aranami/support/prose.py) | `ProseProfile`, `extract_prose` | Configures extraction and returns readable article prose. |
-| [`aranami.support.words`](../src/aranami/support/words.py) | `count_words` | Returns an English word or Chinese token count; Chinese counting may create `cache/words/` files. |
-| [`aranami.support.edit_summary`](../src/aranami/support/edit_summary.py) | `EditSummary`; `append`, `add_group`, `daily`, `membership`, `render`, `with_execution_time` | Builds an edit-summary string with optional clauses, membership changes, and elapsed time. |
-| [`aranami.support.report_membership`](../src/aranami/support/report_membership.py) | `MembershipReport`, `load_membership`, `save_membership`, `member_identifier`, `membership_changes` | Returns report text with article identities, cached identities, legacy row IDs, or added/removed title lists. `save_membership` writes `cache/report-membership-<hash>-v1.parquet`. |
-| [`aranami.support.dyk_cache`](../src/aranami/support/dyk_cache.py) | `load`, `save` | Reads/writes disposable `cache/vg_dyks_talk_pages-v2.parquet`. |
-| [`aranami.support.pageviews_cache`](../src/aranami/support/pageviews_cache.py) | `PageviewsCache`; `load`, `get`, `replace`, `save_pending`, `discard_pending`, `save` | Reads or stages daily histories; save/discard methods write or remove `cache/pageviews-<hash>-v1.parquet` and dated pending files. |
-
-`aranami.support` reexports `get_templates`, `gtshow`, and `open_run_log`.
-The latter two are also available from the same-named support modules.
 
 ## Development
 

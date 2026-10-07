@@ -36,7 +36,7 @@ class TestQualitySummaries(TestCase):
 
     @staticmethod
     def test_parse_stored_english_class() -> None:
-        """Read classes from report templates and legacy rows."""
+        """Read template classes and ignore obsolete ID comments."""
         parsed = reports.parse_old_articles(
             "{{PJ:VG/DBR/EN/item|en=Known|en_cls= ga |wd=Q1}}"
             '<!-- aranami-enwp page-id="10" -->\n'
@@ -44,7 +44,7 @@ class TestQualitySummaries(TestCase):
             OfflineSite("zh", "wikipedia"),
         )
         assert parsed == {
-            "Known": reports.OldArticle("Known", 1, 10, "GA"),
+            "Known": reports.OldArticle("Known", 1, en_class="GA"),
             "Legacy": reports.OldArticle("Legacy", 2),
         }
 
@@ -108,7 +108,7 @@ class TestQualitySummaries(TestCase):
         )
 
     @staticmethod
-    def test_class_change_uses_wikidata_or_title_for_legacy_rows() -> None:
+    def test_class_change_uses_wikidata_or_title_without_cached_ids() -> None:
         """Find transitions when earlier rows have no stored page ID."""
         cases = (
             ({"Before": reports.OldArticle("Before", 1, en_class="GA")}, 1),
@@ -171,7 +171,7 @@ class TestQualitySummaries(TestCase):
 
     @staticmethod
     def test_unknown_previous_class_does_not_imply_promotion() -> None:
-        """Keep legacy members quiet without a known baseline class."""
+        """Keep matched members quiet without a known baseline class."""
         previous = {"Before": reports.OldArticle("Before", 1, 10)}
         assert (
             reports.build_edit_summary(

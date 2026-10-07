@@ -1,4 +1,4 @@
-"""Verify local identity snapshots and legacy membership comparisons."""
+"""Verify cached identities and uncached membership comparisons."""
 
 import hashlib
 from pathlib import Path
@@ -6,45 +6,19 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-import mwparserfromhell
 import polars as pl
 from wiki_fixtures import OfflineSite
 
 from aranami.support import report_membership as cache
-from aranami.support.report_membership import (
-    member_identifier,
-    membership_changes,
-)
+from aranami.support.report_membership import membership_changes
 
 
 class TestReportMembership(TestCase):
-    """Cover stable identifiers, legacy rows, and malformed comments."""
+    """Cover stable identifiers and title fallback without a cache."""
 
     @staticmethod
-    def test_legacy_identifier_can_be_read_during_migration() -> None:
-        """Read legacy row IDs without generating new comments."""
-        code = mwparserfromhell.parse(
-            '# [[Game]]<!-- aranami-member id="123" -->',
-        )
-        assert member_identifier(code) == 123  # ruff: ignore[magic-value-comparison]
-
-    @staticmethod
-    def test_ambiguous_and_malformed_identifiers_fall_back_to_titles() -> None:
-        """Avoid trusting multiple or invalid membership identifiers."""
-        for text in (
-            "# [[Game]]",
-            '# [[Game]]<!-- aranami-member id="0" -->',
-            '# [[Game]]<!-- aranami-member id="not-a-number" -->',
-            (
-                '# [[Game]]<!-- aranami-member id="1" -->'
-                '<!-- aranami-member id="2" -->'
-            ),
-        ):
-            assert member_identifier(mwparserfromhell.parse(text)) is None
-
-    @staticmethod
-    def test_mixed_identifier_and_legacy_comparison() -> None:
-        """Match known renames and unchanged legacy titles together."""
+    def test_mixed_identifier_and_uncached_comparison() -> None:
+        """Match known renames and unchanged uncached titles."""
         previous = {"Old": 1, "Same": None, "Removed": 2}
         current = {"Renamed": 1, "Same": 3, "Added": 4}
         assert membership_changes(previous, current) == (
