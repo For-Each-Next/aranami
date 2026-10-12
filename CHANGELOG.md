@@ -4,6 +4,16 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.5
 
+### 0.4.1 (2026-10-12 11:51 UTC)
+
+Overview: Refreshed English quality report introduction counters alongside
+the dated article list.
+
+- Updated total, featured article, featured list, and good article counts
+  from the current English quality report membership.
+- Required paired counter ranges and preserved surrounding descriptions
+  and section-transclusion tags.
+
 ### 0.4.0 (2026-10-07 08:29 UTC)
 
 Overview: Simplified report maintenance around current marker and identity

@@ -540,20 +540,18 @@ def update_page_text(
     counts: Mapping[str, int],
     spec: ReportSpec,
 ) -> str:
-    """Update the managed body and applicable importance counters.
+    """Update the managed body and configured assessment counters.
 
     Args:
-        old_text: Existing page wikitext.
+        old_text: Existing page wikitext with body and counter markers.
         body: Newly rendered report body.
         counts: Article counts keyed by assessment value.
         spec: Report configuration.
 
     Returns:
-        Updated page wikitext. Quality reports preserve all surrounding
-        text and require only body markers.
+        Updated total, assessment counts, and report body, preserving
+        text outside the configured managed ranges.
     """
-    if spec.name == "quality":
-        return replace_body(old_text, body)
     new_text = replace_by_tag(
         "count_all",
         f"{sum(counts.values()):,}",

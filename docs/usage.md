@@ -264,10 +264,11 @@ The quality report lists featured and good English content: featured articles
 by the year of their latest English promotion or listing, with the newest
 dates first. Dated entries end with `<!-- YYYY-MM-DD -->`; unresolved dates
 appear under `年份未知`. Same-day entries use English title sort keys.
-The routine replaces only the quality page's managed `body` range, preserving
-its manually maintained description and counters. Both reports refresh their
-Chinese counterparts and assessment grades. Choose destinations with `targets`
-containing both `important` and `quality`.
+The routine refreshes the quality page's total and FA, FL, and GA counters in
+the introduction, along with its managed `body` range. All other page content
+is preserved. Both reports refresh their Chinese counterparts and assessment
+grades. Choose destinations with `targets` containing both `important` and
+`quality`.
 
 Quality summaries distinguish `GA listed` and `GA delisted` from
 `FA prompted`, `FL prompted`, `FA removed`, and `FL removed`. A change within
@@ -466,7 +467,7 @@ Each name below needs one ordered begin/end pair on its destination page:
 | Assessment lists | `assessment-count`, `assessment-list`. |
 | Pageviews | `page_views`. |
 | English importance comparisons | `count_all`, `count_top`, `count_high`, `body`. |
-| English quality comparisons | `body`; surrounding counters remain manually maintained. |
+| English quality comparisons | `count_all`, `count_fa`, `count_fl`, `count_ga`, `body`. |
 
 Keep section-transclusion tags outside these comments. PexBot controls its
 own report content and does not require Aranami ranges.

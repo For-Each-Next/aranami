@@ -10,6 +10,7 @@ import polars as pl
 
 from aranami.jobs.enwp_key_articles import REPORT_SPECS
 from aranami.services.zhwiki import enwp_key_articles as reports
+from aranami.support.regions import managed_region, region_content
 
 
 def _rows() -> pl.DataFrame:
@@ -93,23 +94,46 @@ class TestQualityRendering(TestCase):
         assert not reports.render_quality_body(rows.clear())
 
     @staticmethod
-    def test_quality_preserves_descriptions_and_requires_only_body() -> None:
-        """Keep optional counters and manual surroundings intact."""
+    def test_quality_updates_counts_and_preserves_surroundings() -> None:
+        """Count quality entries and preserve manual page content."""
         quality = REPORT_SPECS[1]
-        prefix = 'Description <!-- aranami begin="count_all" -->99'
-        prefix += '<!-- aranami end="count_all" -->\n'
+        prefix = "Description " + " / ".join(
+            f'<section begin="{name}"/>'
+            + managed_region(name, "99", {"note": "keep"})
+            + f'<section end="{name}"/>'
+            for name in ("count_all", "count_fa", "count_fl", "count_ga")
+        )
+        prefix += "\n{{Manual example|en_cls=GA}}\n"
         begin = '<!-- aranami begin="body" note="keep" -->'
         end = '<!-- aranami end="body" -->'
         suffix = "\nManual footer"
         original = prefix + begin + "Old body" + end + suffix
-        data = reports.ReportData(_rows(), {"quality": {}}, {})
+        rows = _rows()
+        unrelated = rows.head(1).with_columns(pl.lit("B").alias("en_class"))
+        data = reports.ReportData(
+            pl.concat([rows, unrelated]),
+            {"quality": {}},
+            {},
+        )
         updated = reports.build_reports(
             {"quality": original},
             data,
             (quality,),
+        )["quality"]
+        expected_prefix = "Description " + " / ".join(
+            f'<section begin="{name}"/>'
+            + managed_region(name, str(count), {"note": "keep"})
+            + f'<section end="{name}"/>'
+            for name, count in (
+                ("count_all", 5),
+                ("count_fa", 1),
+                ("count_fl", 2),
+                ("count_ga", 2),
+            )
         )
-        assert updated["quality"] == (
-            prefix
+        expected_prefix += "\n{{Manual example|en_cls=GA}}\n"
+        assert updated == (
+            expected_prefix
             + begin
             + "\n"
             + reports.render_quality_body(_rows())
@@ -117,15 +141,46 @@ class TestQualityRendering(TestCase):
             + end
             + suffix
         )
-        assert (
-            reports.update_page_text(
-                begin + "old" + end,
-                "",
-                {},
-                quality,
-            )
-            == begin + "\n\n" + end
-        )
+
+    @staticmethod
+    def test_quality_clears_counts_when_no_articles_remain() -> None:
+        """Reset all counts when the report empties."""
+        quality = REPORT_SPECS[1]
+        names = ("count_all", "count_fa", "count_fl", "count_ga")
+        original = " / ".join(managed_region(name, "99") for name in names)
+        original += managed_region("body", "Old body")
+        data = reports.ReportData(_rows().clear(), {"quality": {}}, {})
+        updated = reports.build_reports(
+            {"quality": original},
+            data,
+            (quality,),
+        )["quality"]
+        assert all(region_content(updated, name) == "0" for name in names)
+        assert region_content(updated, "body") == "\n\n"
+
+    def test_quality_requires_intro_counter_markers(self) -> None:
+        """Refuse an update when a required counter is absent."""
+        quality = REPORT_SPECS[1]
+        names = ("count_all", "count_fa", "count_fl", "count_ga")
+        for missing in names:
+            with self.subTest(missing=missing):
+                original = " / ".join(
+                    managed_region(name, "99")
+                    for name in names
+                    if name != missing
+                )
+                original += managed_region("body", "Old body")
+                failure = None
+                try:
+                    reports.build_reports(
+                        {"quality": original},
+                        reports.ReportData(_rows(), {"quality": {}}, {}),
+                        (quality,),
+                    )
+                except ValueError as error:
+                    failure = error
+                assert failure is not None
+                assert missing in str(failure)
 
     @staticmethod
     def test_importance_remains_alphabetical_without_date_comments() -> None:
