@@ -341,8 +341,10 @@ dates against the current English class, talk-page ID, revision, and template
 aliases, and preload only discussions needing refresh. Save the actual
 revision fetched with each text snapshot. Quality summaries use the English
 class with `listed`/`delisted` for GA and `prompted`/`removed` for FA and FL,
-including the previous class when it changes. Only replace the quality
-page's managed body; preserve its manually maintained surroundings.
+including the previous class when it changes. Refresh the quality page's
+introduction counters and body through required paired `aranami` ranges:
+`count_all` for the total, `count_fa`, `count_fl`, and `count_ga` for each
+English class, and `body` for the list. Preserve all surrounding content.
 The importance report retains its alphabetical sections and counter updates.
 
 ## Verification and releases
