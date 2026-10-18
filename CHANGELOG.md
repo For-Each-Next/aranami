@@ -4,6 +4,18 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.6
 
+### 0.5.1 (2026-10-18 05:21 UTC)
+
+Overview: Shortened edit-summary attribution to leave more room for report
+changes while linking to Aranami's Toolforge homepage.
+
+- Added a concise parenthetical Toolforge link with the installed version
+  and measured duration to live and dry-run edit summaries.
+- Kept two decimal places below one minute and rounded longer durations
+  to whole seconds in edit summaries.
+- Replaced prior attribution when reusing summaries, preserving complete
+  links within the 255-byte limit.
+
 ### 0.5.0 (2026-10-18 04:51 UTC)
 
 Overview: Established Toolforge as the primary runtime, with repeatable wheel

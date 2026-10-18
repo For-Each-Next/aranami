@@ -14,7 +14,7 @@ from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
 
 _CHINESE_CHARACTER_BYTES = 3
 _EXAMPLE_DURATION = 1313.95
-_EXAMPLE_SUFFIX = "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 21′53.95″."
+_EXAMPLE_SUFFIX = "([[toolforge:aranami|Aranami 0.3.5]] in 21′54″)"
 
 
 class TestEditSummary(TestCase):
@@ -116,8 +116,8 @@ class TestEditSummary(TestCase):
         assert not EditSummary("Items.", max_bytes=0).render()
 
     @staticmethod
-    def test_execution_time_uses_measured_minutes_and_hundredths() -> None:
-        """Omit zero minutes and carry rounded seconds into minutes."""
+    def test_execution_time_precision_depends_on_duration() -> None:
+        """Keep hundredths below a minute and whole seconds above it."""
         assert (
             EditSummary.with_execution_time(
                 EditSummary("1 item total.").render(),
@@ -126,36 +126,45 @@ class TestEditSummary(TestCase):
             == f"1 item total. {_EXAMPLE_SUFFIX}"
         )
         assert EditSummary.with_execution_time("summary", 0) == (
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 0.00″."
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 0.00″)"
         )
         assert EditSummary.with_execution_time("summary", 5.2) == (
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 5.20″."
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 5.20″)"
         )
         assert EditSummary.with_execution_time("summary", 7.12) == (
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 7.12″."
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 7.12″)"
+        )
+        assert EditSummary.with_execution_time("summary", 59.99) == (
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 59.99″)"
         )
         assert EditSummary.with_execution_time("summary", 59.999) == (
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 1′00.00″."
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 1′00″)"
+        )
+        assert EditSummary.with_execution_time("summary", 60) == (
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 1′00″)"
+        )
+        assert EditSummary.with_execution_time("summary", 67.12) == (
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 1′07″)"
+        )
+        assert EditSummary.with_execution_time("summary", 119.99) == (
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 2′00″)"
         )
         assert EditSummary.with_execution_time("summary", 3600) == (
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 60′00.00″."
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 60′00″)"
         )
 
     @staticmethod
     def test_version_preserves_release_and_build_identifiers() -> None:
         """Render the installed version without losing its suffix."""
-        for installed, rendered in (
-            ("0.3.5", "𝟶.𝟹.𝟻"),
-            ("0.3.5.dev12", "𝟶.𝟹.𝟻.𝚍𝚎𝚟𝟷𝟸"),
-            ("0.3.3.post1", "𝟶.𝟹.𝟹.𝚙𝚘𝚜𝚝𝟷"),
-        ):
+        for installed in ("0.3.5", "0.3.5.dev12", "0.3.3.post1"):
             with patch(
                 "aranami.support.edit_summary.version",
                 return_value=installed,
             ) as installed_version:
                 summary = EditSummary.with_execution_time("summary", 7.12)
                 assert summary == (
-                    f"summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 {rendered} in 7.12″."
+                    f"summary ([[toolforge:aranami|Aranami {installed}]] "
+                    "in 7.12″)"
                 )
                 installed_version.assert_called_once_with("aranami")
                 assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
@@ -183,6 +192,20 @@ class TestEditSummary(TestCase):
         assert "more" not in original
 
     @staticmethod
+    def test_short_attribution_retains_complete_article_details() -> None:
+        """Retain an article link with the shorter attribution."""
+        title = "遊" * 51
+        original = EditSummary.membership([title], [], 1).render()
+        summary = EditSummary.with_execution_time(
+            original,
+            _EXAMPLE_DURATION,
+        )
+        assert summary == (
+            f"1 item total. Added «[[{title}]]». {_EXAMPLE_SUFFIX}"
+        )
+        assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+
+    @staticmethod
     def test_timing_omits_whole_oversized_leader_clause() -> None:
         """Keep the date and duration when a leader no longer fits."""
         original = (
@@ -202,7 +225,7 @@ class TestEditSummary(TestCase):
     def test_timing_tries_ordered_complete_clause_alternatives() -> None:
         """Drop yearly then seasonal details when timing needs space."""
         daily = "Top: «[[Game]]» daily, weekly, and monthly"
-        seasonal = f"«[[{'遊' * 35}]]» seasonal"
+        seasonal = f"«[[{'遊' * 40}]]» seasonal"
         yearly = "«[[Year]]» yearly"
         original = (
             EditSummary
@@ -253,9 +276,25 @@ class TestEditSummary(TestCase):
         )
         for previous in (
             first,
-            first.replace("Executed", "executed"),
-            first.replace("𝟶.𝟹.𝟻", "𝟶.𝟹.𝟹.𝚙𝚘𝚜𝚝𝟷"),
-            first.replace("𝟶.𝟹.𝟻", "0.3.5.dev12"),
+            first.replace("0.3.5", "0.3.3.post1"),
+            first.replace("0.3.5", "0.3.5.dev12"),
+            first.replace("21′54″", "21′53.95″"),
+            first.replace(
+                _EXAMPLE_SUFFIX,
+                "By [[toolforge:aranami|Aranami 0.3.5]] in 21′54″.",
+            ),
+            first.replace(
+                _EXAMPLE_SUFFIX,
+                "By [[toolforge:aranami|Aranami 0.3.5]] in 21′53.95″.",
+            ),
+            first.replace(
+                _EXAMPLE_SUFFIX,
+                "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟹.𝚙𝚘𝚜𝚝𝟷 in 5.20″.",
+            ),
+            first.replace(
+                _EXAMPLE_SUFFIX,
+                "executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 0.3.5.dev12 in 5.20″.",
+            ),
             first.replace(_EXAMPLE_SUFFIX, "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0′05.20″."),
             first.replace(_EXAMPLE_SUFFIX, "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 5.20″."),
             first.replace(_EXAMPLE_SUFFIX, "Executed in 0′05.20″."),
@@ -265,9 +304,9 @@ class TestEditSummary(TestCase):
             second = EditSummary.with_execution_time(previous, 5.2)
             assert second == (
                 "2 items total. Added «[[Short]]». "
-                "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 5.20″."
+                "([[toolforge:aranami|Aranami 0.3.5]] in 5.20″)"
             )
-            assert second.count("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒") == 1
+            assert second.count("[[toolforge:aranami|") == 1
             assert len(second.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
 
     @staticmethod
