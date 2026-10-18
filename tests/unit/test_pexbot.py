@@ -237,6 +237,41 @@ class TestPexbotEvents(TestCase):
             "PexBot Wikipedia:Report: end.",
         ]
 
+    def test_refresh_omits_query_text_and_keeps_query_timing(self) -> None:
+        """Abbreviate SQL arguments while retaining query timing."""
+        sql = "\nWITH recent_project_pages AS (\n" + "SELECT page_id;\n" * 300
+        events = [
+            {"code": "query-executing", "args": [sql]},
+            {"code": "query-executed", "args": ["1.25 seconds", 42]},
+            {"code": "end"},
+        ]
+        body = "".join(f"data: {json.dumps(event)}\n" for event in events)
+        response = BytesIO(body.encode())
+        with (
+            patch.object(
+                job.urllib.request,
+                "urlopen",
+                return_value=response,
+            ) as request,
+            self.assertLogs(job._LOGGER, level="INFO") as logs,
+        ):
+            job._refresh(_site(), "Wikipedia:Report name/C++")
+        assert [record.getMessage() for record in logs.records] == [
+            "PexBot Wikipedia:Report name/C++: query-executing (...).",
+            (
+                "PexBot Wikipedia:Report name/C++: "
+                "query-executed ('1.25 seconds', 42)."
+            ),
+            "PexBot Wikipedia:Report name/C++: end.",
+        ]
+        assert "SELECT" not in "\n".join(logs.output)
+        prepared = request.call_args.args[0]
+        assert parse_qs(urlparse(prepared.full_url).query) == {
+            "page": ["Wikipedia:Report_name/C++"],
+        }
+        assert prepared.get_header("Accept") == "text/event-stream"
+        assert response.closed
+
     def test_refresh_rejects_other_wiki_without_request(self) -> None:
         """Validate the site at the publication transport boundary."""
         with (
@@ -249,6 +284,13 @@ class TestPexbotEvents(TestCase):
 
 class TestPexbotJob(TestCase):
     """Verify configuration, overrides, dry runs, and failures."""
+
+    @override
+    def setUp(self) -> None:
+        """Default to offline history without a matching edit."""
+        history = patch.object(job, "edited_by_on_date", return_value=False)
+        history.start()
+        self.addCleanup(history.stop)
 
     @staticmethod
     def test_dry_run_reads_wheel_defaults_without_refreshing() -> None:
@@ -365,3 +407,132 @@ class TestPexbotJob(TestCase):
             call.pause(15),
             call.refresh(context.site, "B"),
         ]
+
+    def test_already_updated_reports_are_skipped_in_both_modes(self) -> None:
+        """Record today's edit and skip proposals and refreshes."""
+        today = dt.date(2026, 10, 18)
+        for dry in (False, True):
+            context = JobContext(_site(), dt.date(2000, 1, 1), dry=dry)
+            with (
+                self.subTest(dry=dry),
+                patch.object(
+                    job,
+                    "job_run",
+                    return_value=nullcontext(context),
+                ),
+                patch.object(job, "subscribed_titles", return_value=["A"]),
+                patch.object(job, "_utc_today", return_value=today),
+                patch.object(
+                    job,
+                    "edited_by_on_date",
+                    return_value=True,
+                ) as history,
+                patch.object(job, "_refresh") as refresh,
+                patch.object(job.urllib.request, "urlopen") as request,
+                patch.object(job.time, "sleep") as pause,
+                self.assertLogs(job._LOGGER, level="INFO") as logs,
+            ):
+                job.run(context=context)
+            history.assert_called_once_with(
+                context.site,
+                "A",
+                user="PexBot",
+                day=today,
+            )
+            refresh.assert_not_called()
+            request.assert_not_called()
+            pause.assert_not_called()
+            assert context.notes == [
+                (
+                    "Skipped PexBot refresh: A. PexBot already edited "
+                    "this page on 2026-10-18 UTC."
+                ),
+            ]
+            assert context.notes[0] in logs.output[-1]
+
+    @staticmethod
+    def test_skips_do_not_add_cooldowns_between_live_attempts() -> None:
+        """Pause between requests without extra sleeps for skips."""
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
+        sequence = Mock()
+        with (
+            patch.object(job, "job_run", return_value=nullcontext(context)),
+            patch.object(
+                job,
+                "subscribed_titles",
+                return_value=[
+                    "Skip first",
+                    "A",
+                    "Skip middle",
+                    "B",
+                    "Skip last",
+                ],
+            ),
+            patch.object(
+                job,
+                "edited_by_on_date",
+                side_effect=[True, False, True, False, True],
+            ),
+            patch.object(job, "_refresh") as refresh,
+            patch.object(job.time, "sleep") as pause,
+        ):
+            sequence.attach_mock(refresh, "refresh")
+            sequence.attach_mock(pause, "pause")
+            job.run(context=context)
+        assert sequence.mock_calls == [
+            call.refresh(context.site, "A"),
+            call.pause(15),
+            call.refresh(context.site, "B"),
+        ]
+
+    def test_history_failure_suppresses_refresh_and_continues(self) -> None:
+        """Suppress refreshes with unreadable history and continue."""
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
+        error = RuntimeError("history unavailable")
+        with (
+            patch.object(job, "job_run", return_value=nullcontext(context)),
+            patch.object(job, "subscribed_titles", return_value=["A", "B"]),
+            patch.object(
+                job,
+                "edited_by_on_date",
+                side_effect=[error, False],
+            ),
+            patch.object(job, "_refresh") as refresh,
+            patch.object(job.time, "sleep") as pause,
+            self.assertLogs(job._LOGGER, level="ERROR"),
+            self.assertRaises(ExceptionGroup) as raised,
+        ):
+            job.run(context=context)
+        assert raised.exception.exceptions == (error,)
+        refresh.assert_called_once_with(context.site, "B")
+        pause.assert_not_called()
+
+    @staticmethod
+    def test_each_report_uses_current_utc_date_across_midnight() -> None:
+        """Use the new day after midnight despite an old anchor."""
+        context = JobContext(_site(), dt.date(2000, 1, 1), dry=True)
+        before_midnight = dt.date(2026, 10, 18)
+        after_midnight = dt.date(2026, 10, 19)
+        with (
+            patch.object(job, "job_run", return_value=nullcontext(context)),
+            patch.object(job, "subscribed_titles", return_value=["A", "B"]),
+            patch.object(
+                job,
+                "_utc_today",
+                side_effect=[before_midnight, after_midnight],
+            ),
+            patch.object(
+                job,
+                "edited_by_on_date",
+                return_value=False,
+            ) as history,
+            patch.object(job.urllib.request, "urlopen") as request,
+            patch.object(job.time, "sleep") as pause,
+        ):
+            job.run(context=context)
+        assert history.call_args_list == [
+            call(context.site, "A", user="PexBot", day=before_midnight),
+            call(context.site, "B", user="PexBot", day=after_midnight),
+        ]
+        request.assert_not_called()
+        pause.assert_not_called()

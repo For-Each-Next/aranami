@@ -5,9 +5,11 @@ repository-wide instructions.
 
 ## Runtime boundary
 
-- Target Wikimedia PAWS with Python 3.12.
-- The PAWS notebook is an external consumer. It uploads and installs the
-  wheel, imports `aranami`, and calls the public package API.
+- Target Toolforge as the primary runtime, using a continuous Python 3.13
+  job. Keep compatibility with Python 3.12 or newer for optional PAWS use.
+- Toolforge and PAWS are external consumers of the wheel. Toolforge runs
+  the installed package with `python -m aranami`; PAWS notebooks may import
+  `aranami` and call the public package API.
 - Runtime package code must behave as ordinary Python and must not detect
   or depend on a notebook environment.
 - Keep Aranami buildable as a pure-Python wheel with
@@ -24,7 +26,8 @@ repository-wide instructions.
   publication. Job-level APIs use the same `dry` keyword and accept an
   optional `context`.
 - Keep sleep loops and notebook-specific callbacks out of runtime code.
-- On PAWS, runtime data belongs under the caller's current directory:
+- Runtime data belongs under the caller's current directory, set to
+  `/data/project/aranami` by the documented Toolforge job command:
   `logs/` for UTC daily logs, `cache/` for disposable cached data, and
   `dry-run/` for proposed-edit artifacts.
 - Append all runs on one UTC date to one file under `logs/` and retain
@@ -34,9 +37,10 @@ repository-wide instructions.
 - Treat `cache/` as an optimization only. Deleting it must never lose
   authoritative data or change the final report.
 - Never write runtime data into the installed package or `site-packages`.
-- Preserve PAWS's Wikimedia OAuth integration throughout runtime code. Do
-  not add custom credential handling when the authenticated PAWS `Site` is
-  sufficient.
+- Use the runtime's existing Pywikibot authentication and Wiki Replica
+  configuration. Preserve PAWS's Wikimedia OAuth integration, and use
+  Toolforge's configured `PYWIKIBOT_DIR` and working-directory `.my.cnf`.
+  Keep credential provisioning outside the runtime package.
 
 ## Package architecture
 

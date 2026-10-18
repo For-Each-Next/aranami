@@ -539,7 +539,7 @@ def prepare_report(  # ruff: ignore[too-many-arguments]
 
     Args:
         original_text: Existing report text with managed DYK ranges.
-        site: PAWS-authenticated Chinese Wikipedia site.
+        site: Authenticated Chinese Wikipedia site.
         today: UTC date used to finish the statistics timeline.
         project: WikiProject name used to select report members.
         report_title: Chinese Wikipedia title cited as the data source.
@@ -621,7 +621,7 @@ def update_text(  # ruff: ignore[too-many-arguments]
 
     Args:
         original_text: Existing report text with managed DYK ranges.
-        site: PAWS-authenticated Chinese Wikipedia site.
+        site: Authenticated Chinese Wikipedia site.
         today: UTC date used to finish the statistics timeline.
         project: WikiProject name used to select report members.
         report_title: Chinese Wikipedia title cited as the data source.

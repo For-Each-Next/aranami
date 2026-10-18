@@ -1,6 +1,6 @@
 """Expose recurring monitoring, immediate reports, and data sources.
 
-Call :func:`run` on PAWS to start its scheduled WikiProject Video games
+Call :func:`run` to start the scheduled WikiProject Video games
 monitor, with an immediate check of all reports on a fresh start in live
 or preview mode. Pass ``run_immediately=False`` to wait for scheduled
 times.

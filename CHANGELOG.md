@@ -2,6 +2,27 @@
 
 This file records major completed changes, grouped by package release line.
 
+## Until 0.6
+
+### 0.5.0 (2026-10-18 04:51 UTC)
+
+Overview: Established Toolforge as the primary runtime, with repeatable wheel
+deployment, public status and daily logs, and a consolidated maintenance
+workflow.
+
+- Added validated wheel uploads and Python 3.13 environment setup using
+  existing wiki authentication and Wiki Replica configuration.
+- Added a public daily-log viewer at `/logs/`, served by the separate
+  `aranami-logs` webservice with its own uploader.
+- Added a homepage with the version, action names, results, and durations,
+  linked to WikiProject Video games on Chinese Wikipedia.
+- Abbreviated PexBot query payloads in application logs while retaining
+  other progress and failure details.
+- Skipped reports already edited by PexBot on the current UTC date, including
+  when a later edit was made by another author.
+- Consolidated Toolforge operation, upgrades, previews, and recovery across
+  the documentation, retaining PAWS as an optional notebook environment.
+
 ## Until 0.5
 
 ### 0.4.1 (2026-10-12 11:51 UTC)
