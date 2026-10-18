@@ -156,6 +156,8 @@ function serveLogs(string $kind, string $directory = '/data/project/aranami/logs
     th, td { padding: 0.8rem 0.5rem; border-bottom: 1px solid #d9ebe4; text-align: left; }
     thead { background: #edf9f4; }
     th:last-child, td:last-child { text-align: right; white-space: nowrap; }
+    .modified { font-variant-numeric: tabular-nums; }
+    .modified time span { display: inline-block; white-space: nowrap; }
     code { overflow-wrap: anywhere; }
     footer { margin-top: 2rem; font-size: 0.9rem; }
     @media (max-width: 36rem) { body { margin-top: 1.5rem; } .filename { display: none; } }
@@ -176,12 +178,13 @@ function serveLogs(string $kind, string $directory = '/data/project/aranami/logs
     <p><?= logEscape(uiText($isProject ? 'logs.project_empty' : 'logs.empty')) ?></p>
 <?php else: ?>
     <table>
-      <thead><tr><th scope="col"><?= logEscape(uiText('logs.column_date')) ?></th><th class="filename" scope="col"><?= logEscape(uiText('logs.column_file')) ?></th><th scope="col"><?= logEscape(uiText('logs.column_size')) ?></th></tr></thead>
+      <thead><tr><th scope="col"><?= logEscape(uiText('logs.column_date')) ?></th><th class="filename" scope="col"><?= logEscape(uiText('logs.column_file')) ?></th><th scope="col"><?= logEscape(uiText('logs.column_modified')) ?></th><th scope="col"><?= logEscape(uiText('logs.column_size')) ?></th></tr></thead>
       <tbody>
 <?php foreach ($logs as $filename => $stat): ?>
         <tr>
           <td><a href="<?= logEscape($basePath . rawurlencode($filename)) ?>"><?= logEscape((string) logFileDate($filename, $kind)) ?></a></td>
           <td class="filename"><code><?= logEscape($filename) ?></code></td>
+          <td class="modified"><time datetime="<?= logEscape(gmdate('Y-m-d\TH:i:s\Z', $stat['mtime'])) ?>"><span><?= logEscape(gmdate('Y-m-d', $stat['mtime'])) ?></span> <span><?= logEscape(gmdate('H:i:s', $stat['mtime'])) ?></span></time></td>
           <td title="<?= logEscape(uiText('logs.bytes', ['count' => number_format($stat['size'])])) ?>"><?= logEscape(readableLogSize($stat['size'])) ?></td>
         </tr>
 <?php endforeach; ?>

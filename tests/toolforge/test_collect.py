@@ -203,12 +203,57 @@ class TestQualityCache(TestCase):
             schema=quality.RECORD_SCHEMA,
         )
 
+    def test_raw_badges_refresh_at_twenty_four_hours(self) -> None:
+        """Reuse raw badges until the daily source refresh is due."""
+        records = self._single_record()
+        refreshed_records = records.with_columns(pl.lit("FA").alias("status"))
+        for age, expected_queries in [
+            (dt.timedelta(hours=23, minutes=59), 0),
+            (dt.timedelta(hours=24), 1),
+        ]:
+            with (
+                self.subTest(cache_age=age),
+                tempfile.TemporaryDirectory() as directory,
+                patch(
+                    "toolforge.collect.quality.collect_video_game_quality",
+                    return_value={"records": refreshed_records},
+                ) as collect,
+            ):
+                cache = Path(directory)
+                raw_path = cache / "quality-video-games-all.parquet"
+                observed = dt.datetime.now(dt.UTC).replace(microsecond=0) - age
+                records.write_parquet(raw_path)
+                os.utime(
+                    raw_path,
+                    (observed.timestamp(), observed.timestamp()),
+                )
+                raw_before = raw_path.read_bytes(), raw_path.stat().st_mtime_ns
+                result = quality_snapshot(cache)
+                repeated = quality_snapshot(cache)
+                assert collect.call_count == expected_queries
+                assert result == repeated
+                assert result["stale"] is False
+                if expected_queries:
+                    assert pl.read_parquet(raw_path).equals(refreshed_records)
+                    assert dt.datetime.fromisoformat(result["observed_at"]) > (
+                        observed
+                    )
+                else:
+                    assert (
+                        raw_path.read_bytes(),
+                        raw_path.stat().st_mtime_ns,
+                    ) == raw_before
+                    assert result["observed_at"] == observed.isoformat(
+                        timespec="seconds",
+                    )
+                    assert result["items"] == records.to_dicts()
+
     def test_failed_refresh_retains_stale_records_and_observation_state(
         self,
     ) -> None:
         """Serve expired data without changing either cached file."""
         observed = dt.datetime.now(dt.UTC).replace(microsecond=0)
-        observed -= dt.timedelta(hours=2)
+        observed -= dt.timedelta(hours=25)
         records = self._single_record()
         membership = pl.DataFrame({
             "full_title": ["游戏"],
@@ -310,7 +355,7 @@ class TestQualityCache(TestCase):
         self,
     ) -> None:
         """Recover from fallback without inventing badge dates."""
-        observed = dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)
+        observed = dt.datetime.now(dt.UTC) - dt.timedelta(hours=25)
         records = self._single_record()
         with (
             tempfile.TemporaryDirectory() as directory,
@@ -376,7 +421,7 @@ class TestQualityCache(TestCase):
             ("zh_class", "x" * 65),
             ("zh_class", "字" * 22),
         ])
-        observed = dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)
+        observed = dt.datetime.now(dt.UTC) - dt.timedelta(hours=25)
         for field, value in invalid:
             with (
                 self.subTest(field=field, value=value),
@@ -435,7 +480,7 @@ class TestQualityCache(TestCase):
                 pl.lit("Future grade").alias("zh_class"),
             ),
         ]
-        observed = dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)
+        observed = dt.datetime.now(dt.UTC) - dt.timedelta(hours=25)
         for frame in records:
             with (
                 self.subTest(record=frame.to_dicts()),

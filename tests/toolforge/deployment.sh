@@ -80,6 +80,7 @@ assessment.php
 i18n.php
 log-viewer.lighttpd.conf
 logs.php
+page-cache.php
 project.php
 public_html/aranami.svg
 public_html/dashboard.js

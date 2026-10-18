@@ -12,11 +12,57 @@ const ROUTINES = [
     'enwp_key_articles' => 'English article comparisons',
     'pexbot' => 'PexBot reports',
 ];
+// Keep these destinations aligned with TASK_DEFINITIONS in aranami/monitor.py.
+// PexBot selects subscribed descendants dynamically, so link its configured root.
+const ROUTINE_REPORT_PAGES = [
+    'dyks' => ['WikiProject:电子游戏/新条目推荐'],
+    'new_pages' => ['WikiProject:电子游戏/新进条目/关键词筛选'],
+    'assessment_lists' => [
+        'WikiProject:电子游戏/认证条目/Bplus',
+        'WikiProject:电子游戏/认证条目/BPAN',
+        'WikiProject:电子游戏/认证条目/A',
+        'WikiProject:电子游戏/认证条目/AL',
+        'WikiProject:电子游戏/认证条目/ACC',
+        'WikiProject:电子游戏/认证条目/PPR',
+    ],
+    'pageviews' => ['WikiProject:电子游戏/热门条目'],
+    'enwp_key_articles' => [
+        'WikiProject:电子游戏/数据库报告/英文维基百科重要条目',
+        'WikiProject:电子游戏/数据库报告/英文维基百科优质条目',
+    ],
+    'pexbot' => ['WikiProject:电子游戏/数据库报告'],
+];
 
 /** Escape a value for HTML text or a quoted attribute. */
 function html(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+/** Render a localized job name with its configured Wikipedia report links. */
+function dashboardRoutineLinks(string $routine, string $name): void
+{
+    $pages = ROUTINE_REPORT_PAGES[$routine] ?? [];
+    if ($pages === []) {
+        echo html($name);
+        return;
+    }
+    $multiple = count($pages) > 1;
+    if ($multiple) {
+        echo html($name) . (uiLocale() === 'en' ? ' (' : '（');
+    }
+    foreach ($pages as $index => $title) {
+        $number = (string) ($index + 1);
+        $label = $multiple ? $number : $name;
+        $description = ($multiple ? $number . ' · ' : '') . $name . ' · ' . $title;
+        $url = 'https://zh.wikipedia.org/wiki/' . rawurlencode(str_replace(' ', '_', $title));
+        echo ($multiple && $index > 0 ? ' ' : '') . '<a href="' . html($url)
+            . '" title="' . html($description) . '" aria-label="' . html($description)
+            . '">' . html($label) . '</a>';
+    }
+    if ($multiple) {
+        echo uiLocale() === 'en' ? ')' : '）';
+    }
 }
 
 /** Check a directory without following a symlink at that path. */

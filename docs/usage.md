@@ -66,9 +66,10 @@ the next 30 days of scheduled featured and good content, and daily
 video-game pageviews. On desktop, featured and good content share the left
 column with DYK; popular articles and 旧事新闻, the combined news and
 anniversaries panel, occupy the right. Quality content and DYK use compact,
-numbered rows like the popular-article list. DYK uses a scrollable
-list containing every collected entry, with dates on the right and space
-reserved between the rows and the scrollbar. Popular and DYK article titles are
+numbered rows like the popular-article list. DYK shows its first ten entries
+without an internal scrollbar, with dates on the right and the same reserved
+right gutter as the other panels. Scheduled appearances use a prefix such
+as `预定2026-10-31`. Popular and DYK article titles are
 followed by available current project grade and importance chips, such as
 乙级列表 and 高; importance uses the short 极高/高/中/低 labels. Chinese
 assessment names use the project's labels, including 初 and 丙, in chips
@@ -112,13 +113,15 @@ long titles have full-title tooltips and narrow screens can scroll the
 table horizontally. Recorded additions include their observation time in
 the recognition chip's tooltip, indicating when the dashboard detected an item,
 language, and badge combination, rather than a local promotion date.
-Language and recognition query parameters filter the full collection; a
-random-language action offers another entry point.
+The language dropdown limits the available collection. “随机筛选10条”
+immediately samples up to ten records from that selection in place,
+without another request. Language and recognition query parameters also
+filter the full collection.
 Chinese articles appear as counterpart links recorded on the same item,
 with their known Chinese project assessment, including 乙 or 丙, shown
 outside the title link; missing counterparts are marked explicitly.
 Chinese is included in the all-language
-view. Filters, random switching, and browser history update the section in
+view. Filters, random samples, and browser history update the section in
 place. Language lists initially show 25 records and can expand to every
 collected record without another request.
 The updater compares successful badge results against a disposable
@@ -223,12 +226,14 @@ background refresh reads it. Restart `aranami-dashboard` to refresh
 immediately. The website has no configuration editor.
 
 The separate `aranami-dashboard` background job refreshes data immediately
-and then hourly, including the maintenance lists. Badge data is reused for
-up to one hour. The homepage reads the saved snapshot when the visitor loads it;
-the browser does not refresh automatically.
+and then hourly, including the maintenance lists. Wikidata badge data is
+reused for up to 24 hours. The default homepage reuses rendered content for
+up to 60 seconds per interface language. Snapshot, routine-status, and template
+changes invalidate that cache; filtered and random requests render afresh.
+The browser does not refresh automatically.
 It distinguishes an unavailable source from a measured empty result.
 
-Open [the main project log](https://aranami.toolforge.org/logs/) for daily
+Open [the run log](https://aranami.toolforge.org/logs/) for daily
 high-level events from Aranami and the dashboard server, including routine
 outcomes, server lifecycle events, and complete, partial, or failed data
 refreshes. These records use `logs/project.YYYY-MM-DD.log` and contain
@@ -236,9 +241,11 @@ structured fields without detailed progress messages or tracebacks.
 The [detailed Aranami logs](https://aranami.toolforge.org/logs/aranami/)
 remain available separately. Read a detailed day directly at
 `https://aranami.toolforge.org/logs/aranami/aranami.YYYY-MM-DD.log`, replacing
-`YYYY-MM-DD` with its UTC date. The viewers read current files on each
-request; refresh the page for new output. Both series retain today and the
-latest 90 completed UTC dates. These logs are public. PexBot's `query-executing` messages
+`YYYY-MM-DD` with its UTC date. Each listing shows the files' latest
+modification times in UTC, separately from their daily log dates. The viewers
+read current files on each request; refresh the page for new output.
+Both series retain today and the latest 90 completed UTC dates. These logs
+are public. PexBot's `query-executing` messages
 abbreviate query arguments to `...`; other progress and failure details
 remain available.
 
