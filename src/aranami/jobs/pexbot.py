@@ -154,6 +154,7 @@ def run(
             if attempted:
                 time.sleep(_COOLDOWN_SECONDS)
             attempted = True
+            active.mark_updates_unknown()
             try:
                 _refresh(active.site, title)
             except Exception as error:

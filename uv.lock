@@ -16,7 +16,7 @@ wheels = [
 
 [[package]]
 name = "aranami"
-version = "0.5.1"
+version = "0.5.1.post4"
 source = { editable = "." }
 dependencies = [
     { name = "apscheduler" },

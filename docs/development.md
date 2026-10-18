@@ -25,6 +25,54 @@ Maintain documentation in `docs/` in English.
 
 ## Runtime and architecture
 
+The standalone Toolforge dashboard lives under `src/toolforge/` and is
+deployed separately from the Aranami wheel. Its background server collects
+read-only quality badges, 100 days of Chinese main-page appearances,
+30 days of upcoming quality content, and measured daily pageviews.
+The PHP webservice renders a validated, atomically replaced snapshot.
+Keep it independent of Aranami's monitor, jobs, and publication APIs.
+It may reuse the existing read-only Wiki Replica adapters. Track dates
+according to their meaning: historical display revisions establish
+main-page appearances, whereas Wikidata badges establish current status.
+A subject already displayed at the retention boundary is labelled as
+carried in rather than given an invented first-appearance date.
+Only direct `P31=Q7889` instances establish multilingual video-game scope.
+Count each recognized language edition once in article rankings, and each
+distinct article once in language totals. Preserve all collected records
+for in-place filters and incremental display. Enrich Chinese counterpart
+grades from current project assessments after reading the badge cache.
+The pageviews source filters the official daily site top-1,000 list against
+current project membership with a native Polars join. Preserve the source
+date, measured zeros, and the distinction between empty and unavailable
+results. Python writers, local HTTP reads, and PHP reads share an 8 MiB
+snapshot bound. Browser filters never trigger source collection, and the
+page does not refresh automatically.
+
+Run its offline Python suite with `PYTHONPATH=src uv run python -m unittest
+discover -s tests/toolforge -p 'test_*.py'`; native PHP fixtures use
+`php tests/toolforge/status.php`, `php tests/toolforge/project.php`, and
+`php tests/toolforge/i18n.php`.
+`sh tests/toolforge/deployment.sh` verifies the exact upload payload with
+fake SSH and never contacts Toolforge.
+
+Each report routine emits one `Routine result: <JSON>` terminal record
+from its `aranami.jobs.<routine>.job_run` logger. Schema 1 contains `routine`,
+`dry`, `status`, `updated`, and `duration_seconds`. Count `updated` only
+after a successful direct save; unchanged content and preview proposals
+do not count. Preserve null for unconfirmed delegated writes. The status
+is `updated`, `no_update`, `failed`, `deferred`, or `unknown`; failures and
+deferrals take precedence over any partial save count. Keep the routine
+start record and failure traceback. The dashboard hides preview activity
+and treats older unstructured successful completions as unconfirmed.
+
+The main project log, `logs/project.YYYY-MM-DD.log`, combines high-level
+Aranami and dashboard events in one append-only JSONL series with explicit
+UTC timestamps and component names. Keep detailed progress and tracebacks
+in the existing Aranami daily logs, exposed through `/logs/aranami/`.
+The main `/logs/` viewer exposes project logs. Preserve actual measured
+outcomes in both series; partial dashboard refreshes include the count of
+unavailable sources. Retain today and the latest 90 completed dates.
+
 `aranami.run(dry=False, run_immediately=True)` starts a background monitor
 and returns its scheduler. Define default target pages, per-routine UTC cron
 triggers, and PexBot subscription roots together in

@@ -1,4 +1,4 @@
-# Aranami
+# <img src="src/toolforge/public_html/aranami.svg" width="40" height="40" alt=""> Aranami
 
 [English][1] · [繁體中文][2] · [简体中文][3]
 
@@ -9,6 +9,11 @@ Aranami（<span lang="ja">荒波</span>，意為「狂瀾」）協助維護
 Aranami 以 [Wikimedia Toolforge][4] 為主要執行環境，
 持續運行以定時維護報告，也能立即執行或預覽修改。
 [Wikimedia PAWS][22] 是使用筆記本或手動操作時的可選環境。
+
+獨立的 [Toolforge 看板](https://aranami.toolforge.org/) 展示中文首頁最近
+100 天的專題條目記錄、未來 30 天的優質內容、每日瀏覽量，以及各語言
+維基百科的優質電子遊戲條目。
+Python 背景更新器每小時自動更新資料。
 
 ## 定時工作
 

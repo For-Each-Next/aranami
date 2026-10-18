@@ -4,6 +4,7 @@
 # ruff: file-ignore[pytest-unittest-raises-assertion]
 
 import datetime as dt
+import json
 from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -78,6 +79,22 @@ class TestMonitor(TestCase):
         for scheduler in self.schedulers:
             if scheduler.running:
                 scheduler.shutdown(wait=True)
+
+    def test_major_events_record_actual_start_and_shutdown_once(self) -> None:
+        """Reuse an active monitor without duplicate major records."""
+        scheduler = monitor.start(dry=True)
+        assert monitor.start(dry=True) is scheduler
+        scheduler.shutdown(wait=True)
+        rows = [
+            json.loads(line)
+            for path in (self.root / "logs").glob("project.*.log")
+            for line in path.read_text().splitlines()
+        ]
+        assert [row["event"] for row in rows] == [
+            "monitor.started",
+            "monitor.stopped",
+        ]
+        assert all(row["dry"] is True for row in rows)
 
     @staticmethod
     def test_registered_jobs_match_standalone_routines() -> None:

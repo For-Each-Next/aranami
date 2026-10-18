@@ -28,14 +28,17 @@ from importlib import import_module
 from threading import Lock
 from typing import TYPE_CHECKING
 
+from apscheduler.events import EVENT_SCHEDULER_SHUTDOWN
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from aranami.support.cache import clear_runtime_cache
-from aranami.support.logs import open_run_log
+from aranami.support.logs import log_project_event, open_run_log
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+
+    from apscheduler.events import SchedulerEvent
 
 _LOGGER = logging.getLogger(__name__)
 _START_LOCK = Lock()
@@ -242,6 +245,12 @@ def start(
                 clear_runtime_cache()
                 _LOGGER.info("Cleared disposable runtime cache.")
             scheduler = BackgroundScheduler(timezone=dt.UTC)
+
+            def stopped(_event: SchedulerEvent) -> None:
+                """Record the actual scheduler shutdown once."""
+                log_project_event("aranami", "monitor.stopped", dry=dry)
+
+            scheduler.add_listener(stopped, EVENT_SCHEDULER_SHUTDOWN)
             callbacks = tuple(
                 (schedule, schedule.run) for schedule in SCHEDULES
             )
@@ -269,6 +278,13 @@ def start(
             scheduler.start()
             _scheduler = scheduler
             _dry = dry
+            log_project_event(
+                "aranami",
+                "monitor.started",
+                dry=dry,
+                run_immediately=run_immediately,
+                routine_count=len(SCHEDULES),
+            )
             _LOGGER.info(
                 "Aranami monitor started with %d UTC routine schedules "
                 "(dry=%s, run_immediately=%s).",

@@ -4,6 +4,32 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.6
 
+### 0.5.1.post4 (2026-10-18 06:22 UTC)
+
+Overview: Added an independent Toolforge dashboard for Chinese main-page
+highlights, daily pageviews, and multilingual quality content, with a
+background updater and structured on-wiki report results.
+
+- Added a light, responsive 960 px dashboard with automatic Simplified
+  Chinese, Traditional Chinese, and English interfaces.
+- Created a shared wave logo and SVG favicon for the project.
+- Queried direct Wikidata video-game instances with uniform recognition
+  badges and Chinese counterpart links carrying known project assessments.
+- Added recognition rankings, language statistics, in-place filters,
+  random switching, and expandable complete article lists.
+- Retained 100 days of Chinese main-page displays and 30 days of upcoming
+  quality content, using verified source dates and explicit carry-in labels.
+- Added daily project pageviews from Wikimedia's site top-1,000 list,
+  preserving measured dates and distinguishing unavailable data from zero.
+- Added a separate hourly updater with automatic retries, atomic snapshots,
+  early initial results, and preservation of the last saved data.
+- Recorded structured routine results with actual save counts and
+  durations, distinguishing updates, no-ops, and unconfirmed outcomes.
+- Added a shared daily project log for Aranami and dashboard events,
+  with detailed Aranami output available through a separate viewer.
+- Moved web maintenance into `src/toolforge/` with a compatibility wrapper
+  and a fixed upload payload independent of the Aranami wheel.
+
 ### 0.5.1 (2026-10-18 05:21 UTC)
 
 Overview: Shortened edit-summary attribution to leave more room for report

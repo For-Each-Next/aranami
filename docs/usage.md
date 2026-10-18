@@ -49,53 +49,125 @@ toolforge jobs logs aranami
 tail -n 80 "logs/aranami.$(date -u +%F).log"
 ```
 
-Use the daily application log for individual task results and Toolforge job
-logs for process startup and failures. The daily log uses UTC dates and
-appears after a routine starts. See the official [Toolforge jobs guide][10]
+Use the main project log for Aranami and dashboard lifecycle events, the
+detailed application log for individual task progress and tracebacks, and
+Toolforge job logs for process startup failures. Daily logs use UTC dates.
+See the official [Toolforge jobs guide][10]
 for job status, lifecycle, and log commands.
 
-### Read logs in a browser
+### Read the dashboard and logs
 
-The [homepage](https://aranami.toolforge.org/) shows the installed Aranami
-version and latest completed action, including its name, result, execution
-duration, and UTC time. The homepage refreshes every 30 seconds.
+The [homepage](https://aranami.toolforge.org/) displays recognized quality
+content across Wikipedia languages. Its first section, 动态热门, combines
+100 UTC dates of Chinese main-page appearances, the next 30 days of
+scheduled featured and good content, and daily video-game pageviews.
+Featured and good content share one panel; news and anniversaries share
+another. DYK occupies its own right column on desktop. Its light palette
+follows the Chinese
+video-game project, with a maximum width of 960 px and a mobile layout.
+The interface selects Simplified Chinese, Traditional Chinese, or English
+from the browser's language preferences. Article titles and links retain
+their original language.
+An expandable panel shows Aranami's on-wiki report updates: the installed
+version, routine outcomes, durations, UTC timestamps, and daily-log links.
+Confirmed saves show as updated; successful runs without saves show as
+no update needed. Older logs and delegated refreshes without confirmed
+edit counts remain unconfirmed. Preview activity is omitted.
 
-Open [the public log viewer](https://aranami.toolforge.org/logs/) to list
-available daily logs, newest first. Read a day directly at
-`https://aranami.toolforge.org/logs/aranami.YYYY-MM-DD.log`, replacing
-`YYYY-MM-DD` with its UTC date. The viewer reads the current files on each
-request; refresh the page for new output. Aranami retains today and the
-latest 90 completed UTC dates. There is no authentication: task results
-and failures in these logs are public. PexBot's `query-executing` messages
+The multilingual section, 他山之石, directly queries Wikidata items with
+`P31=Q7889` and reads their quality badges across other Wikipedia languages.
+It applies the same FA, FL, GA, and recommended badge definitions to every
+language. The default view ranks articles by the number of language
+editions recognizing them, counting each edition once. The right-hand
+matrix filters by language and recognition; a random-language action
+offers another entry point. Languages are ordered by distinct article
+count, from most to least.
+Chinese articles appear as counterpart links recorded on the same item,
+with their known Chinese project assessment, including B or C; missing
+counterparts are marked explicitly. The statistics include Chinese, which
+is also available through the matrix; default rankings count foreign
+editions only. Filters, random switching, and browser history update the
+section in place. Language lists initially show 25 records and can expand
+to every collected record without another request.
+This exact type scope excludes game subclasses,
+lists, and broader project topics unless they also carry `P31=Q7889`.
+Badge data can lag local status changes and does not establish nomination
+or promotion dates. DYK is collected from the Chinese main-page templates,
+separately from recognized quality badges.
+
+Daily pageviews use the [official Wikimedia all-access top-1,000 list](https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/examples/project-metrics.html) for
+Chinese Wikipedia, filtered to current project members. This coverage may
+produce fewer than ten video-game entries. The card shows the measured UTC
+date; missing daily results may fall back within the last seven completed
+dates. Unavailable data is never presented as zero views or assigned a
+newer date.
+
+The separate `aranami-dashboard` background job refreshes data immediately
+and then hourly. Badge data is reused for up to one
+hour. The homepage reads the saved snapshot when the visitor loads it;
+the browser does not refresh automatically.
+It distinguishes an unavailable source from a measured empty result.
+
+Open [the main project log](https://aranami.toolforge.org/logs/) for daily
+high-level events from Aranami and the dashboard server, including routine
+outcomes, server lifecycle events, and complete, partial, or failed data
+refreshes. These records use `logs/project.YYYY-MM-DD.log` and contain
+structured fields without detailed progress messages or tracebacks.
+The [detailed Aranami logs](https://aranami.toolforge.org/logs/aranami/)
+remain available separately. Read a detailed day directly at
+`https://aranami.toolforge.org/logs/aranami/aranami.YYYY-MM-DD.log`, replacing
+`YYYY-MM-DD` with its UTC date. The viewers read current files on each
+request; refresh the page for new output. Both series retain today and the
+latest 90 completed UTC dates. These logs are public. PexBot's `query-executing` messages
 abbreviate query arguments to `...`; other progress and failure details
 remain available.
 
-To install or update the viewer, run this in a local terminal at the
+To install or update the standalone tool, run this in a local terminal at the
 repository root:
 
 ```shell
-sh scripts/toolforge/upload-web.sh
+sh src/toolforge/upload-web.sh
 ```
 
-The uploader installs the PHP viewer in `/data/project/aranami/public_html/`
-and uploads `log-viewer.lighttpd.conf`.
-Its `setup-web.sh` adds the viewer's include to `.lighttpd.conf`,
-preserving existing configuration. Creating
-`public_html` and adding the configuration prepare the first webservice
-start. The upload does not install a wheel or restart the monitor.
+The uploader installs the PHP pages in `/data/project/aranami/public_html/`,
+the Python tool in `/data/project/aranami/toolforge/`, and the private
+readers, launcher, and routing configuration beside them. Its setup adds
+the routing include while preserving existing lighttpd configuration.
+The previous `scripts/toolforge/upload-web.sh` command remains a wrapper.
+The upload does not install a wheel or restart Aranami's editing monitor.
+The dashboard reuses the installed Aranami package for replica access and
+shared project logging. When these interfaces change, install the matching
+wheel before restarting the dashboard updater.
+Use `--dry-run` to check the payload without uploading.
 
 Then, in the Toolforge terminal, start the viewer for the first time:
 
 ```shell
 toolforge jobs run aranami-logs --image php8.4 --webservice --mount=all
+toolforge jobs run aranami-dashboard --image python3.13 --continuous --mount=all --command '/bin/sh /data/project/aranami/run-dashboard.sh'
 ```
 
-After subsequent viewer uploads, apply the update with
-`toolforge jobs restart aranami-logs`. Check its status and process output
-with `toolforge jobs show aranami-logs` and `toolforge jobs logs aranami-logs`.
-The separate `aranami-logs` name avoids a deployment-name conflict with the
-continuous `aranami` monitor; the viewer runs independently. See the official
+After subsequent uploads, restart `aranami-logs` and `aranami-dashboard`.
+Check them with `toolforge jobs show <name>`. The updater writes detailed
+source failures to `aranami-dashboard.err` and high-level UTC events
+to the shared project log. It serializes refreshes, preserves the
+last saved snapshot after a failed refresh, and retries automatically.
+The first complete history and badge fetch can take longer than later
+updates. These two jobs run independently of the `aranami` editing monitor.
+See the official
 [Toolforge webservice job guide][11] for these commands.
+
+The launcher reuses `/data/project/aranami/pyvenv` and the tool's existing
+Pywikibot and Wiki Replica configuration. Runtime presentation data belongs
+in `cache/toolforge/dashboard.json`; tabular badge data uses Parquet in the
+same disposable directory. For a manual read-only refresh, run
+`pyvenv/bin/python -m toolforge collect` from the tool directory. The
+background server's local `/healthz` and `/dashboard.json` endpoints use
+`127.0.0.1:8765`; browser requests never start source collection.
+
+If the normal bastion is unavailable, `TOOLFORGE_SSH_TARGET` may select the
+documented development host. `TOOLFORGE_KNOWN_HOSTS` may point to a verified
+known-hosts file; the uploader then enforces strict host-key checking.
 
 ### Upgrade the installed wheel
 
@@ -122,9 +194,11 @@ In the Toolforge terminal:
 ```shell
 toolforge jobs list
 toolforge jobs delete aranami
+toolforge jobs delete aranami-dashboard
 ```
 
-Stop every live or preview monitor using `/data/project/aranami/pyvenv`.
+Stop the dashboard updater and every live or preview monitor using
+`/data/project/aranami/pyvenv`.
 If an `aranami-preview` job is present, stop it too:
 
 ```shell
@@ -178,6 +252,7 @@ toolforge jobs run aranami \
   --continuous --no-filelog \
   --command 'cd /data/project/aranami && umask 077 && exec env LC_ALL=C.UTF-8 LANG=C.UTF-8 LC_CTYPE=C.UTF-8 PYWIKIBOT_DIR=/data/project/aranami /data/project/aranami/pyvenv/bin/python -m aranami'
 toolforge jobs show aranami
+toolforge jobs run aranami-dashboard --image python3.13 --continuous --mount=all --command '/bin/sh /data/project/aranami/run-dashboard.sh'
 ```
 
 This starts live wiki edits immediately, then follows the internal UTC
@@ -212,6 +287,7 @@ the working directory, and runtime output goes under the same directory.
 
 | Location in `/data/project/aranami/` | Maintenance |
 |---|---|
+| `logs/project.YYYY-MM-DD.log` | Read high-level Aranami and dashboard events here. Retains today and the latest 90 completed UTC dates. |
 | `logs/aranami.YYYY-MM-DD.log` | Read routine starts, results, and failures here. Aranami retains today and the latest 90 completed UTC dates. |
 | `cache/` | Reused data and recoverable checkpoints. Keep it during ordinary upgrades; remove it only with the monitor stopped when a rebuild is needed. |
 | `dry-run/` | Preview summaries and linked `.wikitext` proposals for review. |

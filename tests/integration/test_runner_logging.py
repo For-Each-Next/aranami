@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -29,6 +30,23 @@ _ROUTINES = (
     "enwp_key_articles",
     "pexbot",
 )
+
+
+def _routine_results(log: str) -> list[dict[str, object]]:
+    """Decode terminal routine records from the real daily log format.
+
+    Args:
+        log: Complete UTF-8 daily log contents.
+
+    Returns:
+        Versioned routine outcomes without traceback continuation lines.
+    """
+    marker = ": Routine result: "
+    return [
+        json.loads(line.partition(marker)[2])
+        for line in log.splitlines()
+        if marker in line
+    ]
 
 
 def _routine(*, context: JobContext, name: str) -> None:
@@ -125,13 +143,35 @@ class TestRunnerLoggingIntegration(TestCase):
             root = Path(directory)
             with _offline_runner(root) as calls:
                 results = [aranami.run_once(dry=True) for _ in range(runs)]
-            files = list((root / "logs").iterdir())
+            files = list((root / "logs").glob("aranami.*.log"))
             assert [path.name for path in files] == ["aranami.2026-10-03.log"]
             content = files[0].read_text(encoding="utf-8")
+            major = (root / "logs/project.2026-10-03.log").read_text(
+                encoding="utf-8",
+            )
+            major_events = [json.loads(line) for line in major.splitlines()]
+            assert len(major_events) == runs * len(_ROUTINES) * 2
+            assert all(
+                event["component"] == "aranami" for event in major_events
+            )
+            assert {event["event"] for event in major_events} == {
+                "routine.started",
+                "routine.result",
+            }
+            assert "Report built" not in major
             assert aranami.run_once is runner.run_once
             assert results == [None, None]
             assert content.count("Aranami run started") == runs
             assert content.count("Aranami run finished") == runs
+            outcomes = _routine_results(content)
+            assert len(outcomes) == runs * len(_ROUTINES)
+            assert all(
+                result["schema"] == 1
+                and result["status"] == "no_update"
+                and result["updated"] == 0
+                and result["dry"] is True
+                for result in outcomes
+            )
             for name, call in calls.items():
                 assert call.call_count == runs
                 assert (
@@ -198,10 +238,15 @@ class TestRunnerLoggingIntegration(TestCase):
             assert len(captured.exception.exceptions) == 1
             for call in calls.values():
                 call.assert_called_once()
-            content = next((root / "logs").glob("*.log")).read_text(
+            content = next((root / "logs").glob("aranami.*.log")).read_text(
                 encoding="utf-8",
             )
-            assert "Routine failed" in content
+            outcomes = _routine_results(content)
+            assert len(outcomes) == len(_ROUTINES)
+            assert outcomes[0]["routine"] == "dyks"
+            assert outcomes[0]["status"] == "failed"
+            assert outcomes[0]["updated"] == 0
+            assert "Traceback (most recent call last):" in content
             assert "Simulated DYK source failure." in content
             assert "6 jobs, 1 failures" in content
             reports = list((root / "dry-run").glob("*.md"))
@@ -268,10 +313,14 @@ class TestRunnerLoggingIntegration(TestCase):
             assert artifact.read_text(encoding="utf-8") == (
                 "{{Example|complete wikitext}}\n"
             )
-            log = next((root / "logs").glob("*.log")).read_text(
+            log = next((root / "logs").glob("aranami.*.log")).read_text(
                 encoding="utf-8",
             )
-            assert "Routine deferred" in log
+            outcomes = _routine_results(log)
+            assert len(outcomes) == len(_ROUTINES)
+            assert outcomes[3]["routine"] == "pageviews"
+            assert outcomes[3]["status"] == "deferred"
+            assert outcomes[3]["updated"] == 0
             assert "6 jobs, 0 failures, 1 deferred" in log
 
     @staticmethod
