@@ -77,6 +77,8 @@ and counterpart grades. Recognition, assessment, and importance chips share
 one appearance throughout the dashboard and maintenance lists.
 Larger serif section headings and full-width bottom
 rules distinguish the main sections.
+The 动态热门 heading shows that module's last source update time on the right;
+its data is reused for 12 hours. Maintenance lists are reused for 24 hours.
 All appearance lists place dates on the right, including lists without a
 scroll container; observation and carry-in details remain in labelled
 tooltip markers.
@@ -89,10 +91,13 @@ The interface selects Simplified Chinese, Traditional Chinese, or English
 from the browser's language preferences. Article titles and links retain
 their original language.
 An always-visible table shows Aranami's on-wiki report updates: routine
-outcomes, durations, and plain UTC timestamps. Its footer shows
+outcome emoji, durations, and plain UTC timestamps. Hover text and accessible
+labels retain each exact state. Its footer shows
 the installed version and log link once. Tables use row rules without
 alternating row colors. Article text uses the normal 16 px size, module
 headings use 20 px, and chips use a smaller shared size.
+Running rows display elapsed time followed by an ellipsis, such as
+`6分15秒…`; completed rows retain their measured execution time.
 Confirmed saves show as updated; successful runs without saves show as
 no update needed. Aranami publishes each live start and outcome to
 `logs/aranami-status.json`; the table reads that snapshot without parsing
@@ -106,23 +111,25 @@ It applies the same FA, FL, GA, and recommended badge definitions to every
 language, with FL labelled 特色列表 in Chinese. The default view shows ten
 entries across all languages, placing
 recently observed badge additions first and filling remaining places with
-other currently recognized content. Each row has three columns: language
-name with its code, the foreign article with a recognition chip, and the
-Chinese counterpart with an assessment chip. Rows stay on one line;
+other currently recognized content. Each row shows the language name with
+its code, the foreign article with a recognition chip, the Chinese counterpart
+with an assessment chip, and a linked Wikidata item ID. Rows stay on one line;
 long titles have full-title tooltips and narrow screens can scroll the
 table horizontally. Recorded additions include their observation time in
 the recognition chip's tooltip, indicating when the dashboard detected an item,
 language, and badge combination, rather than a local promotion date.
-The language dropdown limits the available collection. “随机筛选10条”
-immediately samples up to ten records from that selection in place,
-without another request. Language and recognition query parameters also
-filter the full collection.
+The language dropdown limits the available collection and orders languages
+by their distinct badged-article totals, highest first. “显示全部” opens
+the complete collection in place, without another request. Language and
+recognition query parameters also filter the full collection.
+The local-article selector includes all records, only linked Chinese
+counterparts, or records without a Chinese counterpart.
 Chinese articles appear as counterpart links recorded on the same item,
 with their known Chinese project assessment, including 乙 or 丙, shown
 outside the title link; missing counterparts are marked explicitly.
 Chinese is included in the all-language
-view. Filters, random samples, and browser history update the section in
-place. Language lists initially show 25 records and can expand to every
+view. Filters and browser history update the section in
+place. Complete lists initially show 25 records and can expand to every
 collected record without another request.
 The updater compares successful badge results against a disposable
 Parquet observation cache and retains additions for 30 days. The first
@@ -144,17 +151,18 @@ produce fewer than ten video-game entries. The card includes its measured
 date in the description and links “top 1,000” to the readable Topviews list;
 missing daily results may fall back within the last seven completed
 dates. Unavailable data is never presented as zero views or assigned a
-newer date. Hovering over an article's view count shows its original sitewide
-rank for that observation, rather than its position within the filtered list.
+newer date. Hovering over an article's view count shows its sitewide
+article rank using Topviews' default exclusions, before project filtering.
 
 The 条目维护 section provides Chinese project worklists, following the
 grouped issue lists in the [English project backlog](https://en.wikipedia.org/wiki/Wikipedia:WikiProject_Video_games/Backlog)
 and [cleanup report](https://bambots.brucemyers.com/cwb/bycat/Video_games.html).
-Its 37 tasks are organized in eight equal-height cards, each at least
+Its 37 tasks are organized in nine equal-height cards, each at least
 240 px wide when space permits, under notability, references, accuracy, content,
 links, layout, style, and other maintenance. The categories are checked
 against Chinese Wikipedia's actual templates, including expansion from
-English and Japanese Wikipedia and translation proofreading.
+English and Japanese Wikipedia and translation proofreading. The four
+translation tasks share their own 翻译 card.
 The server selects current main-namespace project members and reads their
 maintenance categories from the read-only Chinese Wikipedia replica. It
 matches verified undated roots, monthly forms, and explicit aggregates.
@@ -170,8 +178,11 @@ contains every matching article; the maintenance page reads only the
 requested slice without collecting source data. The overall article count
 deduplicates articles with multiple issues.
 Worklists default to the earliest tagged month first, with missing months
-last. Click the article or month heading to change the sort and direction;
-mobile pages expose the same links above the list. Pagination retains the
+last. Click article, rating, importance, or month to change the sort and direction;
+rating and importance initially put the highest values first. Article and
+list counterparts share their quality tier, following WP:ASSESS, and unranked
+values remain last in either direction.
+Mobile pages expose the same links above the list. Pagination retains the
 chosen order. Sorting uses only the saved snapshot and adds no database
 requests.
 
@@ -225,11 +236,13 @@ copy is `/data/project/aranami/toolforge/maintenance.json`; the next
 background refresh reads it. Restart `aranami-dashboard` to refresh
 immediately. The website has no configuration editor.
 
-The separate `aranami-dashboard` background job refreshes data immediately
-and then hourly, including the maintenance lists. Wikidata badge data is
-reused for up to 24 hours. The default homepage reuses rendered content for
+The separate `aranami-dashboard` background job checks data immediately
+and then hourly. Main-page highlights and daily popularity are reused for
+12 hours; maintenance lists and Wikidata badge data are reused for 24 hours.
+The default homepage reuses rendered content for
 up to 60 seconds per interface language. Snapshot, routine-status, and template
 changes invalidate that cache; filtered and random requests render afresh.
+Browsers that accept compressed pages receive compressed HTML.
 The browser does not refresh automatically.
 It distinguishes an unavailable source from a measured empty result.
 

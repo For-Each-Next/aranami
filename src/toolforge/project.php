@@ -353,6 +353,8 @@ function projectDashboard(string $path): ?array
         || !validDate($data['period']['start'] ?? null) || !validDate($data['period']['end'] ?? null)
         || $data['period']['start'] >= $data['period']['end']
         || !validUtcTime($data['updated_at'] ?? null)
+        || (array_key_exists('highlights_updated_at', $data)
+            && $data['highlights_updated_at'] !== null && !validUtcTime($data['highlights_updated_at']))
         || !array_key_exists('quality', $data) || !is_array($data['homepage'] ?? null)) {
         return null;
     }

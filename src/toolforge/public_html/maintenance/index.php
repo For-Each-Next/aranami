@@ -22,10 +22,10 @@ if (!in_array($method, ['GET', 'HEAD'], true)) {
 $task = $_GET['task'] ?? null;
 $requestedPage = $_GET['page'] ?? '1';
 $sort = $_GET['sort'] ?? 'oldest';
-$order = $_GET['order'] ?? 'asc';
+$order = $_GET['order'] ?? (in_array($sort, ['class', 'importance'], true) ? 'desc' : 'asc');
 if (!is_string($task) || preg_match('/\A[a-z][a-z0-9_]*\z/', $task) !== 1
     || !is_string($requestedPage) || preg_match('/\A[1-9][0-9]*\z/', $requestedPage) !== 1
-    || !is_string($sort) || !in_array($sort, ['oldest', 'title'], true)
+    || !is_string($sort) || !in_array($sort, ['oldest', 'title', 'class', 'importance'], true)
     || !is_string($order) || !in_array($order, ['asc', 'desc'], true)) {
     http_response_code(404);
     header('Content-Type: text/plain; charset=UTF-8');
@@ -77,6 +77,8 @@ $items = array_slice($orderedItems, $offset, $perPage);
 $sortParameters = $sort === 'oldest' && $order === 'asc' ? [] : ['sort' => $sort, 'order' => $order];
 $titleSortUrl = uiUrl('/maintenance/', ['task' => $task, 'sort' => 'title', 'order' => $sort === 'title' && $order === 'asc' ? 'desc' : 'asc']);
 $monthSortUrl = uiUrl('/maintenance/', ['task' => $task, 'sort' => 'oldest', 'order' => $sort === 'oldest' && $order === 'asc' ? 'desc' : 'asc']);
+$classSortUrl = uiUrl('/maintenance/', ['task' => $task, 'sort' => 'class', 'order' => $sort === 'class' && $order === 'desc' ? 'asc' : 'desc']);
+$importanceSortUrl = uiUrl('/maintenance/', ['task' => $task, 'sort' => 'importance', 'order' => $sort === 'importance' && $order === 'desc' ? 'asc' : 'desc']);
 $heading = dashboardMaintenanceTaskLabel($selected);
 $updated = (new DateTimeImmutable($backlog['observed_at']))->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i');
 header('Content-Type: text/html; charset=UTF-8');
@@ -153,7 +155,7 @@ if ($method === 'HEAD') {
     </div>
   </header>
   <main class="shell">
-    <nav class="sort-controls" aria-label="<?= html(uiText('backlog.sort')) ?>"><a href="<?= html($titleSortUrl) ?>"><?= html(uiText('column.article')) ?><?= $sort === 'title' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a><a href="<?= html($monthSortUrl) ?>"><?= html(uiText('backlog.column.oldest')) ?><?= $sort === 'oldest' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a></nav>
+    <nav class="sort-controls" aria-label="<?= html(uiText('backlog.sort')) ?>"><a href="<?= html($titleSortUrl) ?>"><?= html(uiText('column.article')) ?><?= $sort === 'title' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a><a href="<?= html($classSortUrl) ?>"><?= html(uiText('backlog.column.class')) ?><?= $sort === 'class' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a><a href="<?= html($importanceSortUrl) ?>"><?= html(uiText('backlog.column.importance')) ?><?= $sort === 'importance' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a><a href="<?= html($monthSortUrl) ?>"><?= html(uiText('backlog.column.oldest')) ?><?= $sort === 'oldest' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a></nav>
     <?php if ($items === []): ?>
       <p class="empty"><?= html(uiText('backlog.empty')) ?></p>
     <?php else: ?>
@@ -162,7 +164,7 @@ if ($method === 'HEAD') {
           <tr>
             <th class="number" scope="col">#</th>
             <th class="article" scope="col"<?= $sort === 'title' ? ' aria-sort="' . ($order === 'asc' ? 'ascending' : 'descending') . '"' : '' ?>><a href="<?= html($titleSortUrl) ?>"><?= html(uiText('column.article')) ?><?= $sort === 'title' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a></th>
-            <th class="assessment" scope="col"><?= html(uiText('backlog.column.assessment')) ?></th>
+            <th class="assessment" scope="col"<?= in_array($sort, ['class', 'importance'], true) ? ' aria-sort="' . ($order === 'asc' ? 'ascending' : 'descending') . '"' : '' ?>><a href="<?= html($classSortUrl) ?>"><?= html(uiText('backlog.column.class')) ?><?= $sort === 'class' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a> · <a href="<?= html($importanceSortUrl) ?>"><?= html(uiText('backlog.column.importance')) ?><?= $sort === 'importance' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a></th>
             <th scope="col"><?= html(uiText('backlog.column.issues')) ?></th>
             <th class="oldest" scope="col"<?= $sort === 'oldest' ? ' aria-sort="' . ($order === 'asc' ? 'ascending' : 'descending') . '"' : '' ?>><a href="<?= html($monthSortUrl) ?>"><?= html(uiText('backlog.column.oldest')) ?><?= $sort === 'oldest' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a></th>
           </tr>

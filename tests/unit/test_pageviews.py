@@ -74,6 +74,7 @@ class TestPageviewValues(TestCase):
         assert "pageviews" in sources.__all__
         assert pageviews.__all__ == (
             "DailyPageviews",
+            "article_rank_filter",
             "fetch_data",
             "fetch_data_dataframe",
             "fetch_top_dataframe",
@@ -216,7 +217,15 @@ class TestTopPageviewFrames(TestCase):
         """
         site = MagicMock()
         site.hostname.return_value = " ZH.WIKIPEDIA.ORG "
-        site.siteinfo = {"mainpage": mainpage}
+        site.siteinfo = {
+            "mainpage": mainpage,
+            "namespaces": {
+                "0": {"*": ""},
+                "2": {"*": "User"},
+                "4": {"*": "Wikipedia"},
+                "-1": {"*": "Special"},
+            },
+        }
         pages = {}
         for title, namespace in {
             "Wikipedia:首页": 4,
@@ -307,6 +316,8 @@ class TestTopPageviewFrames(TestCase):
             {"article": "Star_Trek:_Discovery", "rank": 6},
             {"article": "Special:Search", "rank": 2},
             {"article": "Video_game", "rank": 3},
+            {"article": "首页", "rank": 4},
+            {"article": "XHamster", "rank": 7},
         ]
         response = BytesIO(json.dumps(payload).encode())
         with (
@@ -330,15 +341,7 @@ class TestTopPageviewFrames(TestCase):
             "top": [1, 2, 3],
         }
         assert frame.schema == {"title": pl.String, "top": pl.Int64}
-        assert page.call_args_list == [
-            call(site, "Wikipedia:首页"),
-            call(site, "Other article"),
-            call(site, "Wikipedia:首页"),
-            call(site, "User:Example"),
-            call(site, "Star Trek: Discovery"),
-            call(site, "Special:Search"),
-            call(site, "Video game"),
-        ]
+        page.assert_called_once_with(site, "Wikipedia:首页")
 
     def test_main_namespace_homepage_is_excluded(self) -> None:
         """Exclude the main page even from namespace zero."""
@@ -356,6 +359,32 @@ class TestTopPageviewFrames(TestCase):
         assert frame.to_dict(as_series=False) == {
             "title": ["Video game"],
             "top": [1],
+        }
+
+    def test_duplicate_rank_ties_and_gaps_keep_stable_article_order(
+        self,
+    ) -> None:
+        """Keep tied ranks stable while removing excluded titles."""
+        site, pages = self._site_pages()
+        ranks = pl.DataFrame({
+            "title": [
+                "Star Trek: Discovery",
+                "首页",
+                "Other article",
+                "Video game",
+                "XHamster",
+            ],
+            "top": [5, 2, 10, 5, 3],
+        })
+        with patch.object(
+            pageviews.pywikibot,
+            "Page",
+            side_effect=lambda _site, title: pages[title],
+        ):
+            frame = pageviews._article_top_ranks(site, ranks)
+        assert frame.to_dict(as_series=False) == {
+            "title": ["Star Trek: Discovery", "Video game", "Other article"],
+            "top": [1, 2, 3],
         }
 
     def test_valid_nonarticle_list_returns_typed_empty(self) -> None:

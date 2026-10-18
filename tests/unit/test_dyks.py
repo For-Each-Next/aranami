@@ -412,7 +412,7 @@ class TestDykEdit(TestCase):
         assert edit.text == updated
         assert (
             edit.summary == "1 article, 0 nominees. "
-            "([[toolforge:aranami|Aranami 0.3.5]] in 0.00\u2033)"
+            "(in 0.00\u2033 by [[toolforge:aranami|Aranami 0.3.5]])"
         )
         assert "aranami-member" not in edit.text
         save.assert_called_once_with(site, title, original, {"Old": 1})
@@ -778,7 +778,7 @@ class TestDykEdit(TestCase):
         assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
         assert summary.startswith("1 article, 2 nominees.")
         assert summary.endswith(
-            "([[toolforge:aranami|Aranami 0.3.5]] in 7.12\u2033)",
+            "(in 7.12\u2033 by [[toolforge:aranami|Aranami 0.3.5]])",
         )
         assert f"«[[{short_title}]]»" in summary
         assert summary.count("«") == summary.count("»")

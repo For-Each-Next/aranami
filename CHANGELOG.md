@@ -4,6 +4,30 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.6
 
+### 0.5.5 (2026-10-18 09:11 UTC)
+
+Overview: Matched Topviews article rankings, accelerated dashboard delivery,
+and clarified complete multilingual browsing and homepage headings.
+
+- Matched dashboard and Aranami site ranks to Topviews' article-only list,
+  excluding non-article pages before numbering and retaining measured views.
+- Enabled negotiated HTML compression while retaining the rendered-page cache.
+- Removed totals from the four homepage panels and the maintenance heading.
+- Rendered job states as labelled emoji and showed unfinished elapsed times
+  with an ellipsis beside the status update time.
+- Sorted language choices by distinct badged-article totals, highest first.
+- Replaced the random-filter button with a styled display-all action that
+  opens the complete multilingual collection in place.
+- Added local-counterpart filters and linked Wikidata item IDs to
+  multilingual article comparisons.
+- Reused highlights for 12 hours and maintenance lists for 24 hours, and
+  moved the highlights update time into its section heading.
+- Added rating and importance sorting to maintenance lists, following
+  Wikipedia's assessment tiers and keeping unranked observations last.
+- Grouped the four translation maintenance tasks into a separate 翻译 block.
+- Reordered edit-summary attribution to `(in duration by Aranami version)`,
+  preserving its Toolforge link and complete UTF-8 byte budget.
+
 ### 0.5.4 (2026-10-18 08:58 UTC)
 
 Overview: Simplified dashboard pages, made multilingual sampling immediate,

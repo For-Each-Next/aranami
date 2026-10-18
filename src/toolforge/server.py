@@ -375,6 +375,7 @@ def collect_dashboard_pass(
         dt.datetime.now(dt.UTC).date(),
         days,
         publish=publisher,
+        cache_directory=updater.output.parent,
     )
 
 

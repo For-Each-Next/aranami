@@ -7,11 +7,21 @@
     return JSON.stringify([item.item, item.site, item.status]);
   }
 
-  /** Select a complete language/status pool with one copy of each recognition. */
-  function qualityPool(items, language = "", status = "") {
+  /** Recognize a known Chinese counterpart or the Chinese article itself. */
+  function qualityHasLocal(item) {
+    return item.language === "zh" || (
+      typeof item.zh_title === "string" && item.zh_title !== "" &&
+      typeof item.zh_url === "string" && item.zh_url !== ""
+    );
+  }
+
+  /** Select a complete filtered pool with one copy of each recognition. */
+  function qualityPool(items, language = "", status = "", local = "") {
     const seen = new Set();
     return items.filter((item) => {
       if ((language && item.language !== language) || (status && item.status !== status)) return false;
+      if (local === "exists" && !qualityHasLocal(item)) return false;
+      if (local === "missing" && qualityHasLocal(item)) return false;
       const identity = qualityIdentity(item);
       if (seen.has(identity)) return false;
       seen.add(identity);
@@ -30,9 +40,17 @@
     return pool.slice(0, count);
   }
 
+  /** Distinguish the initial recommendations from an explicit complete collection. */
+  function qualityViewItems(data, state) {
+    const pool = qualityPool(data.items, state.language, state.status, state.local);
+    if (state.all || state.local === "exists" || state.local === "missing") return pool;
+    if (state.random) return state.sample || randomQualityItems(pool);
+    return state.language ? pool : data.defaults[state.status] || [];
+  }
+
   // Keep the selection rules directly testable with Node's built-in test runner.
   if (typeof module === "object" && module.exports) {
-    module.exports = { qualityIdentity, qualityPool, randomQualityItems };
+    module.exports = { qualityIdentity, qualityHasLocal, qualityPool, randomQualityItems, qualityViewItems };
     return;
   }
 
@@ -48,6 +66,7 @@
     return;
   }
   const select = form.querySelector("select[name=language]");
+  const localSelect = form.querySelector("select[name=local]");
   const table = panel.querySelector("[data-quality-table]");
   const body = table?.tBodies[0];
   const summary = panel.querySelector("[data-quality-label]");
@@ -57,7 +76,7 @@
   const progress = panel.querySelector("[data-quality-progress]");
   const more = panel.querySelector("[data-quality-show-more]");
   const all = form.querySelector("[data-quality-all]");
-  if (!select || !body || !summary || !empty || !scroll || !pagination || !progress || !more || !all) return;
+  if (!select || !localSelect || !body || !summary || !empty || !scroll || !pagination || !progress || !more || !all) return;
 
   const pageSize = 25;
   const numbers = new Intl.NumberFormat(document.documentElement.lang || "en");
@@ -122,7 +141,12 @@
     } else {
       local.append(element("span", "companion-missing", data.messages["quality.companion_missing"]));
     }
-    result.append(languageCell, foreign, local);
+    const identity = element("td", "quality-item");
+    const itemLink = element("a", "", item.item);
+    itemLink.href = `https://www.wikidata.org/wiki/${item.item}`;
+    itemLink.title = item.item;
+    identity.append(itemLink);
+    result.append(languageCell, foreign, local, identity);
     return result;
   }
 
@@ -149,10 +173,14 @@
     const url = new URL(window.location.href);
     const language = url.searchParams.get("language") || "";
     const status = url.searchParams.get("status") || "";
+    const requestedLocal = url.searchParams.get("local") || "";
+    const local = ["exists", "missing"].includes(requestedLocal) ? requestedLocal : "";
     return {
       language: Object.hasOwn(data.languages, language) ? language : "",
       status: Object.hasOwn(data.statusLabels, status) ? status : "",
-      random: url.searchParams.get("random") === "1",
+      local,
+      all: url.searchParams.get("all") === "1",
+      random: !local && url.searchParams.get("all") !== "1" && url.searchParams.get("random") === "1",
     };
   }
 
@@ -160,20 +188,17 @@
   function render(next, pushHistory = false) {
     state = next;
     select.value = state.language;
+    localSelect.value = state.local || "";
     const statusInput = form.querySelector("input[name=status]");
     if (statusInput) statusInput.value = state.status;
-    const pool = qualityPool(data.items, state.language, state.status);
-    records = state.random
-      ? (state.sample || randomQualityItems(pool))
-      : (state.language ? pool : data.defaults[state.status] || []);
+    records = qualityViewItems(data, state);
     if (state.random) state.sample = records;
     body.replaceChildren();
     shown = 0;
     reveal();
     scroll.hidden = records.length === 0;
     empty.hidden = records.length !== 0;
-    pagination.hidden = !state.language || state.random || records.length === 0;
-    all.hidden = !state.language && !state.random && !state.status;
+    pagination.hidden = (!state.language && !state.all && !state.local) || state.random || records.length === 0;
     summary.hidden = !state.language;
     const language = data.languages[state.language] || state.language;
     summary.textContent = message(data.messages[state.status ? "quality.sample_status" : "quality.sample"], {
@@ -183,10 +208,17 @@
       ? message(data.messages["quality.table_aria"], { language }) : data.messages["quality.all_aria"]);
 
     const url = new URL(window.location.href);
-    ["language", "status", "random"].forEach((key) => url.searchParams.delete(key));
+    ["language", "status", "local", "random", "all"].forEach((key) => url.searchParams.delete(key));
     if (state.language) url.searchParams.set("language", state.language);
     if (state.status) url.searchParams.set("status", state.status);
+    if (state.local) url.searchParams.set("local", state.local);
     if (state.random) url.searchParams.set("random", "1");
+    if (state.all) url.searchParams.set("all", "1");
+    const allUrl = new URL(window.location.pathname, window.location.origin);
+    allUrl.searchParams.set("all", "1");
+    if (state.status) allUrl.searchParams.set("status", state.status);
+    allUrl.hash = "quality";
+    all.href = allUrl.href;
     if (pushHistory) url.hash = "quality";
     const history = { ...window.history.state, aranamiQuality: state };
     if (pushHistory) window.history.pushState(history, "", url);
@@ -199,16 +231,19 @@
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    render({ language: select.value, status: state.status, random: true }, true);
+    render({ language: select.value, local: localSelect.value, status: state.status, random: false, all: true }, true);
   });
   select.addEventListener("change", () => {
-    render({ language: select.value, status: state.status, random: false }, true);
+    render({ language: select.value, local: localSelect.value, status: state.status, random: false, all: true }, true);
+  });
+  localSelect.addEventListener("change", () => {
+    render({ language: select.value, local: localSelect.value, status: state.status, random: false, all: true }, true);
   });
   more.addEventListener("click", reveal);
   all.addEventListener("click", (event) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    render({ language: "", status: "", random: false }, true);
+    render({ language: "", local: "", status: state.status, random: false, all: true }, true);
   });
   window.addEventListener("popstate", (event) => {
     if (window.location.pathname === initialPath) render(event.state?.aranamiQuality || urlState());

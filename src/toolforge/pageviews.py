@@ -4,6 +4,9 @@ The official all-access endpoint covers at most the site's top 1,000
 pages. Filter that observed list by current project membership instead
 of requesting every article or combining redirect counts. Search only
 the previous seven completed UTC dates when daily data is unavailable.
+Site ranks follow Topviews' default article-only numbering, excluding
+namespace pages, the main page and its short title, and its configured
+global false positive. Raw API ranks remain sorting tie breakers.
 
 The response contract was checked against the official Analytics API
 project-metrics documentation and the Chinese daily response for
@@ -18,10 +21,16 @@ from __future__ import annotations
 
 import datetime as dt
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 import polars as pl
 from pywikibot.comms import http
+
+from aranami.sources.pageviews import article_rank_filter
+
+if TYPE_CHECKING:
+    from pywikibot.site import BaseSite
 
 _API_ROOT = (
     "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/"
@@ -175,7 +184,39 @@ def _request(day: dt.date) -> pl.DataFrame | None:
     return _daily_articles(response.json(), day)
 
 
-def collect_pageviews(today: dt.date, members: set[str]) -> dict[str, object]:
+def _article_ranks(observed: pl.DataFrame, site: BaseSite) -> pl.DataFrame:
+    """Number the complete daily article list using Topviews' defaults.
+
+    Use shared site metadata without resolving or fetching each title.
+    Preserve colon-bearing titles whose prefix is not a namespace.
+    Topviews also excludes the namespace-stripped main-page title, such
+    as Chinese Wikipedia's ``首页`` redirect.
+
+    Args:
+        observed: Validated daily observations retaining raw API ranks.
+        site: Chinese Wikipedia with its current namespace metadata.
+
+    Returns:
+        Retained observations with contiguous article-only site ranks.
+    """
+    namespaces = (
+        namespace["*"] for namespace in site.siteinfo["namespaces"].values()
+    )
+    mainpage = site.siteinfo["mainpage"].replace("_", " ")
+    return (
+        observed
+        .filter(article_rank_filter(pl.col("title"), namespaces, mainpage))
+        .sort("_source_rank", maintain_order=True)
+        .with_row_index("site_rank", offset=1)
+    )
+
+
+def collect_pageviews(
+    today: dt.date,
+    members: set[str],
+    *,
+    site: BaseSite,
+) -> dict[str, object]:
     """Rank project members in the latest available daily top list.
 
     Start with yesterday and inspect at most seven completed UTC dates.
@@ -186,11 +227,13 @@ def collect_pageviews(today: dt.date, members: set[str]) -> dict[str, object]:
     Args:
         today: Current UTC date excluded from daily measurements.
         members: Current Chinese project article titles.
+        site: Chinese Wikipedia supplying shared namespace metadata.
 
     Returns:
         Date, coverage, source URL, and up to ten ranked articles.
-        Ranks identify this filtered list; ``site_rank`` retains the
-        original all-site rank and views keep their original counts.
+        Ranks identify this filtered list; ``site_rank`` follows the
+        complete article-only list before project filtering, matching
+        Topviews' defaults. Views keep their original counts.
 
     Raises:
         RuntimeError: No daily observation exists in the bounded window.
@@ -214,7 +257,7 @@ def collect_pageviews(today: dt.date, members: set[str]) -> dict[str, object]:
         if observed is None:
             continue
         items = (
-            observed
+            _article_ranks(observed, site)
             .join(membership, on="title", how="semi")
             .sort(
                 ["views", "_source_rank", "title"],
@@ -227,7 +270,7 @@ def collect_pageviews(today: dt.date, members: set[str]) -> dict[str, object]:
                 "url",
                 "views",
                 "rank",
-                pl.col("_source_rank").alias("site_rank"),
+                "site_rank",
             )
         )
         return {
