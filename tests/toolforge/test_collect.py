@@ -24,13 +24,438 @@ from toolforge import homepage, quality
 from toolforge.collect import (
     WikiReader,
     collect_dashboard,
+    enrich_project_assessments,
     quality_snapshot,
     save_snapshot,
 )
 
 
+class TestProjectAssessmentEnrichment(TestCase):
+    """Attach assessments while preserving source observations."""
+
+    @staticmethod
+    def test_pageviews_keep_order_zero_and_unsigned_counts() -> None:
+        """Retain full UInt64 observations while joining raw labels."""
+        records = [
+            {"title": "Second", "views": 2**64 - 1, "rank": 1},
+            {"title": "First", "views": 0, "rank": 2},
+            {"title": "Missing", "views": 5, "rank": 3},
+        ]
+        original = [record.copy() for record in records]
+        membership = pl.DataFrame({
+            "full_title": ["First", "Second"],
+            "page_namespace": [0, 0],
+            "pa_class": ["Future grade", "乙级列表"],
+            "pa_importance": [None, "低"],
+        })
+        enriched = enrich_project_assessments(records, membership)
+        assert enriched == [
+            {
+                **records[0],
+                "assessment_class": "乙级列表",
+                "assessment_importance": "低",
+            },
+            {
+                **records[1],
+                "assessment_class": "Future grade",
+                "assessment_importance": None,
+            },
+            {
+                **records[2],
+                "assessment_class": None,
+                "assessment_importance": None,
+            },
+        ]
+        assert records == original
+        assert type(enriched[0]["views"]) is int
+
+    @staticmethod
+    def test_dyk_dates_kinds_and_repeated_appearances_are_unchanged() -> None:
+        """Enrich display rows while retaining repeat subjects."""
+        records = [
+            {
+                "title": "Game",
+                "url": "https://zh.wikipedia.org/wiki/Game",
+                "date": "2026-10-18",
+                "date_kind": "appearance",
+            },
+            {
+                "title": "Game",
+                "url": "https://zh.wikipedia.org/wiki/Game",
+                "date": None,
+                "date_kind": "window_start",
+            },
+        ]
+        membership = pl.DataFrame({
+            "full_title": ["Game"],
+            "page_namespace": [0],
+            "pa_class": [None],
+            "pa_importance": ["Future importance"],
+        })
+        enriched = enrich_project_assessments(records, membership)
+        assert enriched == [
+            {
+                **record,
+                "assessment_class": None,
+                "assessment_importance": "Future importance",
+            }
+            for record in records
+        ]
+
+    @staticmethod
+    def test_identical_metadata_collapses_and_conflicts_are_omitted() -> None:
+        """Omit ambiguous pairs and exclude non-main namespace rows."""
+        membership = pl.DataFrame({
+            "full_title": [
+                "Same",
+                "Same",
+                "Class",
+                "Class",
+                "Importance",
+                "Importance",
+                "Main",
+                "Main",
+                "Talk",
+            ],
+            "page_namespace": [0, 0, 0, 0, 0, 0, 0, 1, 1],
+            "pa_class": ["乙", "乙", "乙", "丙", "乙", "乙", "乙", "丙", "乙"],
+            "pa_importance": [
+                "低",
+                "低",
+                "低",
+                "低",
+                "低",
+                "高",
+                "低",
+                "高",
+                "低",
+            ],
+        })
+        names = ["Same", "Class", "Importance", "Main", "Talk"]
+        enriched = enrich_project_assessments(
+            [{"title": name} for name in names],
+            membership,
+        )
+        assert [record["title"] for record in enriched] == names
+        assert [
+            (record["assessment_class"], record["assessment_importance"])
+            for record in enriched
+        ] == [
+            ("乙", "低"),
+            (None, None),
+            (None, None),
+            ("乙", "低"),
+            (None, None),
+        ]
+
+    @staticmethod
+    def test_missing_columns_and_blank_values_remain_nullable() -> None:
+        """Keep missing and blank assessments nullable."""
+        records = [{"title": "Game"}]
+        scope = {"full_title": ["Game"], "page_namespace": [0]}
+        for membership in (
+            None,
+            pl.DataFrame(scope),
+            pl.DataFrame({"full_title": ["Game"], "pa_class": ["乙"]}),
+            pl.DataFrame({"page_namespace": [0], "pa_class": ["乙"]}),
+            pl.DataFrame({**scope, "pa_class": [" "], "pa_importance": [""]}),
+        ):
+            assert enrich_project_assessments(records, membership) == [
+                {
+                    "title": "Game",
+                    "assessment_class": None,
+                    "assessment_importance": None,
+                },
+            ]
+        assert enrich_project_assessments(
+            records,
+            pl.DataFrame({**scope, "pa_class": ["GA"]}),
+        ) == [
+            {
+                "title": "Game",
+                "assessment_class": "GA",
+                "assessment_importance": None,
+            },
+        ]
+        assert enrich_project_assessments([], pl.DataFrame()) == []
+
+
 class TestQualityCache(TestCase):
     """Keep exact-type quality caches separate from old project data."""
+
+    @staticmethod
+    def _single_record() -> pl.DataFrame:
+        """Return one exact-schema badge record for cache recovery."""
+        return pl.DataFrame(
+            [
+                {
+                    "item": "Q1",
+                    "site": "enwiki",
+                    "language": "en",
+                    "title": "Game",
+                    "url": "https://en.wikipedia.org/wiki/Game",
+                    "status": "GA",
+                    "zh_title": "游戏",
+                    "zh_url": "https://zh.wikipedia.org/wiki/游戏",
+                    "zh_class": "GA",
+                },
+            ],
+            schema=quality.RECORD_SCHEMA,
+        )
+
+    def test_failed_refresh_retains_stale_records_and_observation_state(
+        self,
+    ) -> None:
+        """Serve expired data without changing either cached file."""
+        observed = dt.datetime.now(dt.UTC).replace(microsecond=0)
+        observed -= dt.timedelta(hours=2)
+        records = self._single_record()
+        membership = pl.DataFrame({
+            "full_title": ["游戏"],
+            "page_namespace": [0],
+            "pa_class": ["乙"],
+        })
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "toolforge.collect.quality.collect_video_game_quality",
+                side_effect=ValueError("Wikidata API failed: maxlag."),
+            ) as collect,
+            self.assertLogs("toolforge.collect", level="ERROR"),
+        ):
+            cache = Path(directory)
+            raw_path = cache / "quality-video-games-all.parquet"
+            state_path = cache / "recognition-observations.parquet"
+            quality.observe_quality(
+                records.clear(),
+                state_path,
+                observed_at=observed - dt.timedelta(hours=1),
+            )
+            quality.observe_quality(
+                records,
+                state_path,
+                observed_at=observed,
+            )
+            records.write_parquet(raw_path)
+            os.utime(raw_path, (observed.timestamp(), observed.timestamp()))
+            raw_before = raw_path.read_bytes(), raw_path.stat().st_mtime_ns
+            state_before = (
+                state_path.read_bytes(),
+                state_path.stat().st_mtime_ns,
+            )
+            result = quality_snapshot(cache, membership)
+            repeated = quality_snapshot(cache, membership)
+            assert (raw_path.read_bytes(), raw_path.stat().st_mtime_ns) == (
+                raw_before
+            )
+            assert (
+                state_path.read_bytes(),
+                state_path.stat().st_mtime_ns,
+            ) == state_before
+        expected_attempts = 2
+        assert collect.call_count == expected_attempts
+        assert result == repeated
+        assert result["stale"] is True
+        assert result["observed_at"] == observed.isoformat(timespec="seconds")
+        assert result["total"] == 1
+        assert result["items"][0]["zh_class"] == "B"
+        assert result["recent_items"][0]["badge_observed_at"] == (
+            observed.strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
+
+    def test_failed_refresh_rejects_unusable_cache(self) -> None:
+        """Propagate failure without usable past raw observations."""
+        records = self._single_record()
+        invalid = (
+            ("missing", None),
+            ("corrupt", None),
+            ("obsolete", records.drop("zh_class")),
+            ("future", records),
+            ("duplicate", pl.concat([records, records])),
+            (
+                "null",
+                records.with_columns(
+                    pl.lit(None, dtype=pl.String).alias("item"),
+                ),
+            ),
+        )
+        for name, frame in invalid:
+            with (
+                self.subTest(cache=name),
+                tempfile.TemporaryDirectory() as directory,
+                patch(
+                    "toolforge.collect.quality.collect_video_game_quality",
+                    side_effect=RuntimeError("Source unavailable."),
+                ),
+            ):
+                cache = Path(directory)
+                raw_path = cache / "quality-video-games-all.parquet"
+                if frame is not None:
+                    frame.write_parquet(raw_path)
+                elif name == "corrupt":
+                    raw_path.write_bytes(b"not parquet")
+                if name == "future":
+                    future = dt.datetime.now(dt.UTC) + dt.timedelta(hours=1)
+                    os.utime(
+                        raw_path,
+                        (future.timestamp(), future.timestamp()),
+                    )
+                with self.assertRaisesRegex(RuntimeError, "unavailable"):
+                    quality_snapshot(cache)
+                assert not (
+                    cache / "recognition-observations.parquet"
+                ).exists()
+
+    def test_successful_refresh_replaces_stale_cache_and_clears_flag(
+        self,
+    ) -> None:
+        """Recover from fallback without inventing badge dates."""
+        observed = dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)
+        records = self._single_record()
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "toolforge.collect.quality.collect_video_game_quality",
+                side_effect=[
+                    RuntimeError("Source unavailable."),
+                    {"records": records},
+                ],
+            ) as collect,
+        ):
+            cache = Path(directory)
+            raw_path = cache / "quality-video-games-all.parquet"
+            state_path = cache / "recognition-observations.parquet"
+            records.clear().write_parquet(raw_path)
+            os.utime(raw_path, (observed.timestamp(), observed.timestamp()))
+            with self.assertLogs("toolforge.collect", level="ERROR"):
+                stale = quality_snapshot(cache)
+            assert stale["stale"] is True
+            assert not state_path.exists()
+            refreshed = quality_snapshot(cache)
+            reused = quality_snapshot(cache)
+            assert pl.read_parquet(raw_path).equals(records)
+            assert raw_path.stat().st_mtime > observed.timestamp()
+            assert state_path.is_file()
+        expected_attempts = 2
+        assert collect.call_count == expected_attempts
+        assert refreshed == reused
+        assert refreshed["stale"] is False
+        assert refreshed["total"] == 1
+        assert refreshed["recent_items"] == []
+        assert dt.datetime.fromisoformat(refreshed["observed_at"]) > observed
+
+    def test_failed_refresh_rejects_corrupt_article_fields(self) -> None:
+        """Reject malformed rows without changing cached files."""
+        records = self._single_record()
+        invalid = [
+            (field, value)
+            for field in ("item", "site", "language", "title", "url", "status")
+            for value in (None, "")
+        ]
+        invalid.extend([
+            ("item", "Q0"),
+            ("status", "unsupported"),
+            ("url", "http://en.wikipedia.org/wiki/Game"),
+            ("url", "https://example.org/wiki/Game"),
+            ("url", "https://user@en.wikipedia.org/wiki/Game"),
+            ("url", "https://en.wikipedia.org:443/wiki/Game"),
+            ("url", "https://en.wikipedia.org/Game"),
+            ("url", "https://en.wikipedia.org/wiki/Game\\bad"),
+            ("url", "https://en.wikipedia.org/wiki/Game\n"),
+            ("url", "https://en.wikipedia.org/wiki/" + "x" * 4096),
+            ("url", "https://zh.wikipedia.org/wiki/Game"),
+            ("site", "zhwiki"),
+            ("language", "zh"),
+            ("zh_title", None),
+            ("zh_title", ""),
+            ("zh_url", None),
+            ("zh_url", "https://en.wikipedia.org/wiki/Game"),
+            ("zh_url", "https://zh.wikipedia.org/not-a-wiki-page"),
+            ("zh_class", ""),
+            ("zh_class", "bad\nclass"),
+            ("zh_class", "x" * 65),
+            ("zh_class", "字" * 22),
+        ])
+        observed = dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)
+        for field, value in invalid:
+            with (
+                self.subTest(field=field, value=value),
+                tempfile.TemporaryDirectory() as directory,
+                patch(
+                    "toolforge.collect.quality.collect_video_game_quality",
+                    side_effect=RuntimeError("Source unavailable."),
+                ),
+                self.assertLogs("toolforge.collect", level="WARNING"),
+            ):
+                cache = Path(directory)
+                raw_path = cache / "quality-video-games-all.parquet"
+                state_path = cache / "recognition-observations.parquet"
+                quality.observe_quality(
+                    records,
+                    state_path,
+                    observed_at=observed,
+                )
+                records.with_columns(
+                    pl.lit(value, dtype=pl.String).alias(field),
+                ).write_parquet(raw_path)
+                os.utime(
+                    raw_path,
+                    (observed.timestamp(), observed.timestamp()),
+                )
+                before = {
+                    path: (path.read_bytes(), path.stat().st_mtime_ns)
+                    for path in (raw_path, state_path)
+                }
+                with self.assertRaisesRegex(RuntimeError, "unavailable"):
+                    quality_snapshot(cache)
+                assert all(
+                    (path.read_bytes(), path.stat().st_mtime_ns) == metadata
+                    for path, metadata in before.items()
+                )
+
+    def test_valid_cached_article_variants_still_fallback(self) -> None:
+        """Retain valid URLs, absent companions, and raw grades."""
+        original = self._single_record()
+        records = [
+            original,
+            original.with_columns(
+                pl.lit(
+                    "https://en.wikipedia.org/w/index.php?title=Game#A",
+                ).alias("url"),
+                pl.lit(None, dtype=pl.String).alias("zh_title"),
+                pl.lit(None, dtype=pl.String).alias("zh_url"),
+                pl.lit(None, dtype=pl.String).alias("zh_class"),
+            ),
+            original.with_columns(
+                pl.lit("zhwiki").alias("site"),
+                pl.lit("zh").alias("language"),
+                pl.lit("https://zh.wikipedia.org/wiki/游戏?oldid=123#A").alias(
+                    "url",
+                ),
+                pl.lit("Future grade").alias("zh_class"),
+            ),
+        ]
+        observed = dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)
+        for frame in records:
+            with (
+                self.subTest(record=frame.to_dicts()),
+                tempfile.TemporaryDirectory() as directory,
+                patch(
+                    "toolforge.collect.quality.collect_video_game_quality",
+                    side_effect=RuntimeError("Source unavailable."),
+                ),
+                self.assertLogs("toolforge.collect", level="ERROR"),
+            ):
+                cache = Path(directory)
+                path = cache / "quality-video-games-all.parquet"
+                frame.write_parquet(path)
+                os.utime(path, (observed.timestamp(), observed.timestamp()))
+                result = quality_snapshot(cache)
+                assert result["stale"] is True
+                assert result["items"] == frame.to_dicts()
+                assert not (
+                    cache / "recognition-observations.parquet"
+                ).exists()
 
     @staticmethod
     def test_concurrent_refresh_reuses_one_successful_baseline() -> None:
@@ -679,7 +1104,7 @@ class TestSnapshotPublication(TestCase):
     """Preserve readable snapshots when replacement data is invalid."""
 
     def setUp(self) -> None:
-        """Keep daily pageviews offline during orchestration checks."""
+        """Keep pageviews and maintenance offline."""
         daily = patch(
             "toolforge.collect.pageviews.collect_pageviews",
             return_value={
@@ -695,10 +1120,70 @@ class TestSnapshotPublication(TestCase):
         )
         self.pageviews = daily.start()
         self.addCleanup(daily.stop)
+        maintenance = patch(
+            "toolforge.collect.backlog.collect_backlog",
+            return_value={
+                "observed_at": "2026-10-18T00:00:00Z",
+                "total": 0,
+                "groups": [],
+            },
+        )
+        self.backlog = maintenance.start()
+        self.addCleanup(maintenance.stop)
+
+    @staticmethod
+    def test_stale_quality_marks_partial_snapshot_and_keeps_data() -> None:
+        """Publish cached quality while reporting its failed refresh."""
+        reader = Mock()
+        reader.sources = {}
+        functions = {
+            "collect_" + name: Mock(return_value=[])
+            for name in (
+                "featured",
+                "dyk",
+                "good",
+                "news",
+                "history",
+                "upcoming",
+            )
+        }
+        badges = {
+            "total": 1,
+            "items": [{"title": "Cached game"}],
+            "observed_at": "2026-10-17T00:00:00+00:00",
+            "stale": True,
+        }
+        published = []
+        with (
+            patch("toolforge.collect.pywikibot.Site"),
+            patch("toolforge.collect.WikiReader", return_value=reader),
+            patch(
+                "toolforge.collect.query_pages_by_wikiproject",
+                return_value=pl.DataFrame({
+                    "page_namespace": [0],
+                    "full_title": ["Game"],
+                }),
+            ),
+            patch("toolforge.collect.quality_snapshot", return_value=badges),
+            patch.multiple("toolforge.homepage", **functions),
+        ):
+            result = collect_dashboard(
+                dt.date(2026, 10, 18),
+                publish=published.append,
+            )
+        assert result["quality"] == badges
+        assert result["errors"] == [
+            {
+                "section": "quality",
+                "message": "Source refresh failed; cached data retained.",
+            },
+        ]
+        assert published[-1] == result
 
     def test_failed_sources_keep_past_sections_available(self) -> None:
         """Keep unavailable sources distinct from empty history."""
         self.pageviews.side_effect = RuntimeError("Daily views unavailable.")
+        self.backlog.side_effect = RuntimeError("Maintenance unavailable.")
         reader = Mock()
         reader.sources = {}
         functions = {
@@ -725,6 +1210,7 @@ class TestSnapshotPublication(TestCase):
             result = collect_dashboard(dt.date(2026, 10, 18))
         assert result["homepage"]["upcoming"] is None
         assert result["pageviews"] is None
+        assert result["backlog"] is None
         assert all(
             result["homepage"][name] == []
             for name in ("featured", "dyk", "good", "news", "history")
@@ -735,6 +1221,10 @@ class TestSnapshotPublication(TestCase):
                 "message": "Source temporarily unavailable.",
             },
             {
+                "section": "backlog",
+                "message": "Source temporarily unavailable.",
+            },
+            {
                 "section": "upcoming",
                 "message": "Source temporarily unavailable.",
             },
@@ -742,6 +1232,7 @@ class TestSnapshotPublication(TestCase):
 
     def test_pageviews_only_success_keeps_dashboard_available(self) -> None:
         """Publish observed views even if every other source fails."""
+        self.backlog.side_effect = RuntimeError("Maintenance unavailable.")
         reader = Mock()
         reader.sources = {}
         functions = {
@@ -781,6 +1272,165 @@ class TestSnapshotPublication(TestCase):
             )
             with self.assertRaisesRegex(RuntimeError, "No dashboard source"):
                 collect_dashboard(dt.date(2026, 10, 18))
+
+    def test_backlog_only_success_publishes_before_expensive_sources(
+        self,
+    ) -> None:
+        """Keep maintenance available when all other sources fail."""
+        self.pageviews.side_effect = RuntimeError("Daily views unavailable.")
+        reader = Mock()
+        reader.sources = {}
+        membership = pl.DataFrame({
+            "page_namespace": [0],
+            "full_title": ["Game"],
+        })
+        functions = {
+            "collect_" + name: Mock(side_effect=RuntimeError("Unavailable."))
+            for name in (
+                "featured",
+                "dyk",
+                "good",
+                "news",
+                "history",
+                "upcoming",
+            )
+        }
+        category_url = "https://zh.wikipedia.org/wiki/Category:Maintenance"
+        self.backlog.return_value["groups"] = [
+            {
+                "key": "cleanup",
+                "category": "Maintenance",
+                "source_url": category_url,
+                "count": 0,
+                "items": [],
+            },
+        ]
+        published = []
+        with (
+            patch("toolforge.collect.pywikibot.Site"),
+            patch("toolforge.collect.WikiReader", return_value=reader),
+            patch(
+                "toolforge.collect.query_pages_by_wikiproject",
+                return_value=membership,
+            ) as read_membership,
+            patch(
+                "toolforge.collect.quality_snapshot",
+                side_effect=RuntimeError("Quality unavailable."),
+            ),
+            patch.multiple("toolforge.homepage", **functions),
+            self.assertLogs("toolforge.collect", level="ERROR"),
+        ):
+            result = collect_dashboard(
+                dt.date(2026, 10, 18),
+                publish=published.append,
+            )
+        read_membership.assert_called_once_with(reader.site, "电子游戏")
+        assert self.backlog.call_args.args == (reader.site, membership)
+        assert result["backlog"] == self.backlog.return_value
+        assert result["quality"] is None
+        assert result["pageviews"] is None
+        assert all(value is None for value in result["homepage"].values())
+        assert published[0]["backlog"] == result["backlog"]
+        assert published[0]["quality"] is None
+        assert all(
+            value is None for value in published[0]["homepage"].values()
+        )
+        assert {
+            "label": "Category:Maintenance",
+            "url": category_url,
+        } in result["sources"]
+        assert all(error["section"] != "backlog" for error in result["errors"])
+
+    def test_missing_membership_keeps_backlog_unknown(self) -> None:
+        """Keep unavailable membership distinct from no matches."""
+        reader = Mock()
+        reader.sources = {}
+        with (
+            patch("toolforge.collect.pywikibot.Site"),
+            patch("toolforge.collect.WikiReader", return_value=reader),
+            patch(
+                "toolforge.collect.query_pages_by_wikiproject",
+                side_effect=RuntimeError("Membership unavailable."),
+            ),
+            patch("toolforge.collect.quality_snapshot", return_value={}),
+            self.assertLogs("toolforge.collect", level="ERROR"),
+        ):
+            result = collect_dashboard(dt.date(2026, 10, 18))
+        assert result["backlog"] is None
+        assert [error["section"] for error in result["errors"]] == [
+            "membership",
+        ]
+        self.backlog.assert_not_called()
+        self.pageviews.assert_not_called()
+
+    def test_pageviews_and_dyk_assessments_precede_progress_publication(
+        self,
+    ) -> None:
+        """Attach membership labels before exposing either list."""
+        membership = pl.DataFrame({
+            "page_namespace": [0],
+            "full_title": ["Game"],
+            "pa_class": ["乙级列表"],
+            "pa_importance": ["低"],
+        })
+        self.pageviews.return_value["items"] = [
+            {
+                "title": "Game",
+                "url": "https://zh.wikipedia.org/wiki/Game",
+                "views": 0,
+                "rank": 1,
+            },
+        ]
+        dyk = [
+            {
+                "title": "Game",
+                "url": "https://zh.wikipedia.org/wiki/Game",
+                "date": "2026-10-18",
+                "date_kind": "appearance",
+            },
+        ]
+        functions = {
+            "collect_" + name: Mock(return_value=dyk if name == "dyk" else [])
+            for name in (
+                "featured",
+                "dyk",
+                "good",
+                "news",
+                "history",
+                "upcoming",
+            )
+        }
+        reader = Mock()
+        reader.sources = {}
+        published = []
+        with (
+            patch("toolforge.collect.pywikibot.Site"),
+            patch("toolforge.collect.WikiReader", return_value=reader),
+            patch(
+                "toolforge.collect.query_pages_by_wikiproject",
+                return_value=membership,
+            ) as read_membership,
+            patch("toolforge.collect.quality_snapshot", return_value={}),
+            patch.multiple("toolforge.homepage", **functions),
+        ):
+            result = collect_dashboard(
+                dt.date(2026, 10, 18),
+                publish=published.append,
+            )
+        read_membership.assert_called_once_with(reader.site, "电子游戏")
+        for snapshot in published:
+            for records in (
+                snapshot["pageviews"]["items"],
+                snapshot["homepage"]["dyk"] or [],
+            ):
+                assert all(
+                    record["assessment_class"] == "乙级列表"
+                    and record["assessment_importance"] == "低"
+                    for record in records
+                )
+        assert result["pageviews"]["items"][0]["views"] == 0
+        assert result["homepage"]["dyk"][0]["date"] == "2026-10-18"
+        assert "assessment_class" not in dyk[0]
 
     @staticmethod
     def test_progress_publishes_before_quality_and_preserves_nulls() -> None:
@@ -861,9 +1511,11 @@ class TestSnapshotPublication(TestCase):
                 assert entered.wait(1)
                 saved = json.loads(path.read_text())
                 assert saved["quality"] is None
+                assert saved["backlog"]["total"] == 0
                 assert saved["pageviews"]["date"] == "2026-10-17"
                 assert saved["homepage"]["featured"] == []
                 assert published[0]["homepage"]["dyk"] is None
+                assert published[0]["backlog"] is None
                 assert published[0]["homepage"]["history"] is None
                 assert published[0]["homepage"]["upcoming"] is None
                 assert saved["homepage"]["upcoming"] == []
@@ -872,6 +1524,7 @@ class TestSnapshotPublication(TestCase):
                     "updated_at",
                     "quality",
                     "pageviews",
+                    "backlog",
                     "homepage",
                     "sources",
                     "errors",

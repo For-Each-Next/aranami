@@ -10,6 +10,7 @@ import datetime as dt
 import logging
 import re
 import urllib.error
+from calendar import monthrange
 from dataclasses import dataclass, replace
 from http import HTTPStatus
 from typing import TYPE_CHECKING
@@ -111,7 +112,7 @@ class PageviewsUnavailableError(RuntimeError):
 
 
 class PageviewsDeferredError(PageviewsUnavailableError):
-    """Defer a report after transient HTTP failures exhaust retries."""
+    """Defer a report until required Pageviews inputs are available."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,7 +419,7 @@ def _ranked_data(
 
     Args:
         articles: Project titles, classes, and importance values.
-        views: Aggregated interval totals for the parent project.
+        views: Interval totals and optional site-wide article ranks.
         stop: Exclusive end date for the current period.
         delta: Calendar interval defining both comparison periods.
 
@@ -427,12 +428,15 @@ def _ranked_data(
     """
     start = stop - delta
     relevant = views.join(articles.select("title"), on="title", how="semi")
+    columns = ["title", "views"]
+    if "top" in relevant.columns:
+        columns.append("top")
     current = (
         relevant
         .filter(
             (pl.col("start") == start) & (pl.col("stop") == stop),
         )
-        .select("title", "views")
+        .select(columns)
         .with_columns(
             pl.col("views").rank("min", descending=True).alias("rank"),
         )
@@ -459,6 +463,33 @@ def _ranked_data(
     )
 
 
+def _site_top_parameter(
+    start: dt.date,
+    stop: dt.date,
+    rank: int,
+) -> str | None:
+    """Label a site rank for a day or complete calendar month.
+
+    Args:
+        start: Inclusive first date in the ranked interval.
+        stop: Exclusive end of the ranked interval.
+        rank: Observed site-wide article position.
+
+    Returns:
+        A ``daily/rank`` or ``monthly/rank`` template value, or none
+        for intervals without a supported site top list.
+    """
+    days = (stop - start).days
+    if days == 1:
+        return f"daily/{rank}"
+    if (
+        start.day == stop.day == 1
+        and days == monthrange(start.year, start.month)[1]
+    ):
+        return f"monthly/{rank}"
+    return None
+
+
 def _section(
     articles: pl.DataFrame,
     views: pl.DataFrame,
@@ -470,7 +501,8 @@ def _section(
 
     Args:
         articles: Selected titles, classes, and importance values.
-        views: Parent project totals covering comparison periods.
+        views: Project totals and optional site-wide article ranks
+            covering comparison periods.
         stop: Exclusive end of the current period.
         config: Ranking heading, interval, and display limit.
         tag: Identifier consumed by the report's header template.
@@ -505,6 +537,10 @@ def _section(
             "rank": row["rank"],
             "old_rank": row["old_rank"],
         }
+        if row.get("top") is not None:
+            site_top = _site_top_parameter(start, stop, row["top"])
+            if site_top is not None:
+                values["top"] = site_top
         for key, value in values.items():
             item.add(
                 key,
@@ -522,6 +558,61 @@ def _section(
     code.append(Template("PJ:VG/HOT/footer"))
     code.append("\n")
     return str(code), top, gain
+
+
+def _site_top_ranks(
+    site: BaseSite,
+    stop: dt.date,
+    configurations: Sequence[ReportPeriod],
+) -> pl.DataFrame:
+    """Fetch each current interval's site-wide article ranks once.
+
+    Unsupported intervals produce no request in the source adapter.
+    Missing, invalid, or failed applicable lists defer the complete
+    report until a later invocation can fetch them successfully.
+
+    Args:
+        site: Site whose top-pageviews lists are requested.
+        stop: Exclusive end shared by the current report sections.
+        configurations: Project and task-force ranking intervals.
+
+    Returns:
+        Article title, start, stop, and top values for supported lists.
+
+    Raises:
+        PageviewsDeferredError: A required top list is unavailable.
+    """
+    frames: list[pl.DataFrame] = []
+    data_date = stop - dt.timedelta(days=1)
+    intervals = dict.fromkeys(
+        (stop - config.delta, stop) for config in configurations
+    )
+    for start, end in intervals:
+        try:
+            ranks = pageviews.fetch_top_dataframe(site, start, end)
+        except (OSError, TypeError, ValueError) as error:
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
+            message = (
+                f"Pageviews deferred for report date {data_date}: "
+                f"site top data for {start} to {data_date} "
+                f"is unavailable ({error}); report date remains unchanged "
+                "for retry on the next invocation."
+            )
+            raise PageviewsDeferredError(message) from error
+        frames.append(
+            ranks.with_columns(
+                pl.lit(start).alias("start"),
+                pl.lit(end).alias("stop"),
+            ),
+        )
+    schema = {
+        "title": pl.String,
+        "top": pl.Int64,
+        "start": pl.Date,
+        "stop": pl.Date,
+    }
+    return pl.concat(frames) if frames else pl.DataFrame(schema=schema)
 
 
 def _project_articles(site: BaseSite, project: str) -> pl.DataFrame:
@@ -558,6 +649,8 @@ def build_report(
 
     Articles returning HTTP 504 are omitted from rankings and the daily
     availability check. Their cached coverage is retained.
+    Supported calendar intervals include site-wide article ranks for
+    pages appearing in Wikimedia's top list.
 
     Args:
         site: Chinese Wikipedia site and its replica identity.
@@ -570,8 +663,9 @@ def build_report(
         Report text, date marker, and summary metadata.
 
     Raises:
-        PageviewsDeferredError: Transient HTTP retries were exhausted;
-            completed requests are retained in a pending checkpoint.
+        PageviewsDeferredError: Article retries were exhausted or a
+            required top list is unavailable; completed article requests
+            are retained in a pending checkpoint for the next attempt.
         PageviewsUnavailableError: Target-day observations failed the
             availability guard; pending inputs are discarded for retry.
     """
@@ -581,14 +675,14 @@ def build_report(
     titles = articles.get_column("title").to_list()
     data_date = stop - dt.timedelta(days=1)
     cache = PageviewsCache.load(site.hostname(), data_date=data_date)
-    rankings = report_periods(
-        stop,
+    configurations = (
         (*settings.periods, settings.task_force_period)
         if settings.task_forces
-        else settings.periods,
+        else settings.periods
     )
+    intervals = report_periods(stop, configurations)
     # API health needs the target day independently of display periods.
-    intervals = tuple(dict.fromkeys((*rankings, (data_date, stop))))
+    intervals = tuple(dict.fromkeys((*intervals, (data_date, stop))))
     try:
         views = aggregate_views(
             site,
@@ -597,15 +691,21 @@ def build_report(
             cache=cache,
             history_days=history_days,
         )
-    except PageviewsDeferredError:
-        cache.save_pending()
-        raise
-    try:
         require_daily_observations(
             views,
             data_date,
             missing_percent=missing_percent,
         )
+        views = views.join(
+            _site_top_ranks(site, stop, configurations),
+            on=["title", "start", "stop"],
+            how="left",
+            validate="m:1",
+            maintain_order="left",
+        )
+    except PageviewsDeferredError:
+        cache.save_pending()
+        raise
     except PageviewsUnavailableError:
         cache.discard_pending()
         raise

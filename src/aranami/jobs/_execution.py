@@ -21,6 +21,7 @@ import pywikibot
 
 from aranami.support.edit_summary import EditSummary
 from aranami.support.logs import log_project_event, open_run_log
+from aranami.support.routine_status import write_routine_status
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -55,6 +56,7 @@ class _TaskResult:
         notes: Routine-specific delegated actions or diagnostic notes.
         updated: Successful saves, or unknown after delegated writes.
         started_monotonic: Clock start shared with publication timing.
+        run_id: Unique identity guarding the latest routine status.
     """
 
     name: str
@@ -70,6 +72,7 @@ class _TaskResult:
         init=False,
         repr=False,
     )
+    run_id: str = field(default_factory=lambda: uuid4().hex)
 
 
 def _routine_result(task: _TaskResult, *, dry: bool) -> dict[str, object]:
@@ -80,7 +83,7 @@ def _routine_result(task: _TaskResult, *, dry: bool) -> dict[str, object]:
         dry: Whether this execution suppressed intentional writes.
 
     Returns:
-        Versioned log record consumed by the maintenance dashboard.
+        Versioned diagnostic record of actual publication outcomes.
     """
     if task.status in {"failed", "deferred"}:
         status = task.status
@@ -96,6 +99,40 @@ def _routine_result(task: _TaskResult, *, dry: bool) -> dict[str, object]:
         "updated": task.updated,
         "duration_seconds": round(task.elapsed_seconds, 3),
     }
+
+
+def _save_task_status(task: _TaskResult, *, dry: bool) -> None:
+    """Persist a live lifecycle state without changing job execution.
+
+    Args:
+        task: Current routine state with its unique execution identity.
+        dry: Whether public status must omit this preview entirely.
+    """
+    if dry:
+        return
+    record = _routine_result(task, dry=False)
+    record.pop("schema")
+    record.update({
+        "started_at": task.started_at.isoformat(),
+        "finished_at": (
+            task.finished_at.isoformat() if task.finished_at else None
+        ),
+        "run_id": task.run_id,
+    })
+    if task.finished_at is None:
+        record.update({
+            "status": "running",
+            "updated": None,
+            "duration_seconds": None,
+        })
+    try:
+        write_routine_status(record)
+    except Exception as error:
+        _LOGGER.warning(
+            "Routine status persistence failed (%s).",
+            type(error).__name__,
+            exc_info=True,
+        )
 
 
 def _markdown_value(value: str) -> str:
@@ -415,6 +452,7 @@ def job_run(
             routine=name,
             dry=active.dry,
         )
+        _save_task_status(task, dry=active.dry)
         try:
             if active.dry:
                 print(  # ruff: ignore[print]
@@ -434,6 +472,7 @@ def job_run(
                 task.status = "success"
         finally:
             active.finish_task(perf_counter() - started)
+            _save_task_status(task, dry=active.dry)
             result = _routine_result(task, dry=active.dry)
             logger.log(
                 {

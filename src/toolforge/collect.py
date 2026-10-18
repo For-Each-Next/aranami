@@ -1,4 +1,4 @@
-"""Refresh quality, main-page history, schedules, and daily pageviews.
+"""Refresh quality, maintenance lists, main-page history, and pageviews.
 
 The background service calls this read-only collector. Chinese main-page
 appearances cover the latest one hundred UTC dates. Quality statistics
@@ -6,6 +6,7 @@ cover direct Wikidata video-game instances across all languages;
 consecutive successful queries establish new badge observations.
 Current featured and good schedules cover the next thirty UTC dates.
 Daily popularity filters Wikimedia's site top 1,000 by project.
+Maintenance lists identify Chinese project articles needing work.
 The collector never starts Aranami jobs or publishes wiki edits.
 """
 
@@ -28,7 +29,7 @@ import pywikibot
 from pywikibot.pagegenerators import PreloadingGenerator
 
 from aranami.sources.quarry.projects import query_pages_by_wikiproject
-from toolforge import homepage, pageviews, quality
+from toolforge import backlog, homepage, pageviews, quality
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -36,7 +37,12 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 _MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
 _QUALITY_TTL = dt.timedelta(hours=1)
+_QUALITY_URL_MAX_BYTES = 4096
 _MAX_DAYS = 365
+_QUALITY_URL = (
+    r"\Ahttps://([a-z0-9-]+\.wikipedia\.org)"
+    r"(?:/wiki/[^?#]*|/w/index\.php)(?:\?[^#]*)?(?:#.*)?\z"
+)
 
 
 def _revision_timestamp(value: dt.datetime) -> pywikibot.Timestamp:
@@ -308,6 +314,110 @@ class WikiReader:
         return rows
 
 
+def enrich_project_assessments(
+    records: list[dict[str, object]],
+    membership: pl.DataFrame | None,
+) -> list[dict[str, object]]:
+    """Attach current project assessments without changing article rows.
+
+    Args:
+        records: Article records with canonical Chinese titles.
+        membership: Shared project metadata, or none when unavailable.
+
+    Returns:
+        Records in their original order with nullable assessment fields.
+        Exact duplicate metadata is collapsed. Conflicting assessments
+        for a title are omitted, as are non-main namespace assessments.
+        Unknown nonempty labels remain raw values for presentation.
+        Original counts and dates retain their exact observed values.
+    """
+    if not records:
+        return []
+    schema = {
+        "title": pl.String,
+        "assessment_class": pl.String,
+        "assessment_importance": pl.String,
+    }
+    metadata = pl.DataFrame(schema=schema)
+    if membership is not None and {
+        "full_title",
+        "page_namespace",
+    }.issubset(membership.columns):
+        expressions = []
+        for source, target in (
+            ("pa_class", "assessment_class"),
+            ("pa_importance", "assessment_importance"),
+        ):
+            column = (
+                pl.col(source).cast(pl.String, strict=False)
+                if source in membership.columns
+                else pl.lit(None, dtype=pl.String)
+            )
+            expressions.append(
+                pl
+                .when(column.str.strip_chars().eq(""))
+                .then(None)
+                .otherwise(column)
+                .alias(target),
+            )
+        metadata = (
+            membership
+            .filter(pl.col("page_namespace") == 0)
+            .select(
+                pl.col("full_title").cast(pl.String).alias("title"),
+                *expressions,
+            )
+            .unique()
+            .unique(subset="title", keep="none")
+        )
+    assessments = (
+        pl
+        .DataFrame(
+            {"title": [record["title"] for record in records]},
+            schema={"title": pl.String},
+        )
+        .with_row_index("_order")
+        .join(metadata, on="title", how="left", validate="m:1")
+        .sort("_order")
+        .select("assessment_class", "assessment_importance")
+        .to_dicts()
+    )
+    return [
+        {**record, **assessment}
+        for record, assessment in zip(records, assessments, strict=True)
+    ]
+
+
+def _assessed_section(
+    section: str,
+    observation: object,
+    membership: pl.DataFrame | None,
+) -> object:
+    """Attach assessments to the two homepage lists that display them.
+
+    Args:
+        section: Dashboard source being collected.
+        observation: Original result, retaining none when unavailable.
+        membership: Shared current project assessment metadata.
+
+    Returns:
+        Enriched pageviews or DYK records; other sections pass through.
+    """
+    if observation is None:
+        return None
+    if section == "pageviews":
+        return {
+            **observation,
+            "items": enrich_project_assessments(
+                observation["items"],
+                membership,
+            ),
+        }
+    if section == "dyk":
+        return enrich_project_assessments(observation, membership)
+    return observation
+
+
 def quality_snapshot(
     cache_directory: Path,
     membership: pl.DataFrame | None = None,
@@ -315,7 +425,8 @@ def quality_snapshot(
     """Reuse recent quality data or refresh direct video-game instances.
 
     Serialize the complete cache transaction across concurrent callers.
-    Source errors propagate so unavailable observations are not cached.
+    Source errors reuse valid older raw data at its original timestamp;
+    otherwise they propagate. Fallback reads never change either cache.
     Project assessments enrich presentation after cache access, so
     changing a local grade needs no Wikidata refresh.
 
@@ -326,7 +437,8 @@ def quality_snapshot(
             Project classes replace badge fallbacks for matched pages.
 
     Returns:
-        Badge totals, all article records, and recent new observations.
+        Badge totals, all article records, recent new observations, and
+        a stale flag indicating a failed refresh served cached data.
 
     Raises:
         OSError: The lock or cache files cannot be used safely.
@@ -347,6 +459,139 @@ def quality_snapshot(
         os.close(descriptor)
 
 
+def _quality_link(column: str) -> pl.Expr:
+    """Validate a cached public Wikipedia article link natively.
+
+    Args:
+        column: String column holding the recorded article URL.
+
+    Returns:
+        A nullable Boolean expression matching the PHP reader's links.
+    """
+    value = pl.col(column)
+    return (
+        (value.str.len_bytes() <= _QUALITY_URL_MAX_BYTES)
+        & ~value.str.contains(r"[\x00-\x20\\]")
+        & value.str.contains(_QUALITY_URL)
+    )
+
+
+def _valid_quality_cache_records(records: pl.DataFrame) -> bool:
+    """Check cached article fields against the PHP reader contract.
+
+    Args:
+        records: Raw quality rows with the current exact string schema.
+
+    Returns:
+        Whether every row has supported badges, valid article links,
+        and paired Chinese companions acceptable to the dashboard.
+    """
+    chinese = (pl.col("site") == "zhwiki") | (pl.col("language") == "zh")
+    host = pl.col("url").str.extract(_QUALITY_URL, 1)
+    companion_host = pl.col("zh_url").str.extract(_QUALITY_URL, 1)
+    companion = (pl.col("zh_title").is_null() & pl.col("zh_url").is_null()) | (
+        (pl.col("zh_title").str.len_bytes() > 0)
+        & _quality_link("zh_url")
+        & (companion_host == "zh.wikipedia.org")
+    )
+    grade = pl.col("zh_class")
+    valid = pl.all_horizontal(
+        pl.col("item").str.contains(r"\AQ[1-9][0-9]*\z"),
+        pl.col("site").str.len_bytes() > 0,
+        pl.col("language").str.len_bytes() > 0,
+        pl.col("title").str.len_bytes() > 0,
+        pl.col("status").is_in(["FA", "FL", "GA", "recommended"]),
+        _quality_link("url"),
+        pl
+        .when(chinese)
+        .then(
+            (pl.col("site") == "zhwiki")
+            & (pl.col("language") == "zh")
+            & (host == "zh.wikipedia.org"),
+        )
+        .otherwise(host != "zh.wikipedia.org"),
+        companion,
+        grade.is_null()
+        | (
+            grade.str.len_bytes().is_between(1, 64)
+            & ~grade.str.contains(r"[\x00-\x1f\x7f]")
+        ),
+    )
+    return records.select(valid.fill_null(value=False).all()).item()
+
+
+def _read_quality_cache(
+    path: Path,
+    now: dt.datetime,
+) -> tuple[pl.DataFrame, dt.datetime] | None:
+    """Read valid past raw quality data regardless of its age.
+
+    Args:
+        path: Exact-schema raw quality Parquet cache.
+        now: Current aware UTC time; future file timestamps are invalid.
+
+    Returns:
+        Complete cached records and original source time, or none when
+        the file is missing, unsafe, unreadable, or invalid.
+    """
+    if not path.is_file() or path.is_symlink():
+        return None
+    stamp = dt.datetime.fromtimestamp(path.stat().st_mtime, dt.UTC)
+    if stamp > now:
+        return None
+    try:
+        records = pl.read_parquet(path)
+    except (OSError, pl.exceptions.PolarsError):
+        _LOGGER.warning("Ignoring unreadable quality cache.")
+        return None
+    if records.schema != quality.RECORD_SCHEMA:
+        _LOGGER.warning("Ignoring an obsolete quality cache.")
+        return None
+    if records.select(
+        "item",
+        "site",
+        "status",
+    ).is_duplicated().any() or not _valid_quality_cache_records(records):
+        _LOGGER.warning("Ignoring an invalid quality cache.")
+        return None
+    return records, stamp
+
+
+def _raw_quality_snapshot(
+    path: Path,
+) -> tuple[pl.DataFrame, dt.datetime, bool]:
+    """Refresh expired raw data and retain a cache on source failure.
+
+    Args:
+        path: Exact-schema raw quality cache inside the refresh lock.
+
+    Returns:
+        Raw records, original source observation time, and stale flag.
+        A stale result never changes the cache file.
+    """
+    now = dt.datetime.now(dt.UTC)
+    cached = _read_quality_cache(path, now)
+    if cached is not None and now - cached[1] < _QUALITY_TTL:
+        return *cached, False
+    try:
+        records = quality.collect_video_game_quality()["records"]
+    except Exception:
+        if cached is None:
+            raise
+        _LOGGER.exception("Quality refresh failed; using cached data.")
+        return *cached, True
+    observed = dt.datetime.now(dt.UTC)
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+    try:
+        records.write_parquet(temporary)
+        os.utime(temporary, (observed.timestamp(), observed.timestamp()))
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return records, observed, False
+
+
 def _quality_snapshot(
     cache_directory: Path,
     membership: pl.DataFrame | None,
@@ -360,42 +605,18 @@ def _quality_snapshot(
     Returns:
         Complete quality section with current project-grade enrichment.
     """
-    path = cache_directory / "quality-video-games-all.parquet"
-    now = dt.datetime.now(dt.UTC)
-    records = None
-    observed = now
-    if path.is_file() and not path.is_symlink():
-        stamp = dt.datetime.fromtimestamp(path.stat().st_mtime, dt.UTC)
-        if dt.timedelta() <= now - stamp < _QUALITY_TTL:
-            try:
-                records = pl.read_parquet(path)
-            except (OSError, pl.exceptions.PolarsError):
-                _LOGGER.warning("Ignoring unreadable quality cache.")
-            else:
-                if records.schema != quality.RECORD_SCHEMA:
-                    records = None
-                    _LOGGER.warning("Ignoring an obsolete quality cache.")
-                else:
-                    observed = stamp
-    if records is None:
-        records = quality.collect_video_game_quality()["records"]
-        observed = dt.datetime.now(dt.UTC)
-        cache_directory.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            dir=cache_directory,
-            delete=False,
-        ) as stream:
-            temporary = Path(stream.name)
-        try:
-            records.write_parquet(temporary)
-            os.utime(temporary, (observed.timestamp(), observed.timestamp()))
-            temporary.replace(path)
-        finally:
-            temporary.unlink(missing_ok=True)
-    records = quality.observe_quality(
-        records,
-        cache_directory / "recognition-observations.parquet",
-        observed_at=observed,
+    records, observed, stale = _raw_quality_snapshot(
+        cache_directory / "quality-video-games-all.parquet",
+    )
+    observation_path = cache_directory / "recognition-observations.parquet"
+    records = (
+        quality.cached_observations(records, observation_path)
+        if stale
+        else quality.observe_quality(
+            records,
+            observation_path,
+            observed_at=observed,
+        )
     )
     if membership is not None:
         required = {"full_title", "page_namespace", "pa_class"}
@@ -485,6 +706,7 @@ def _quality_snapshot(
             "Recent dates record query observations, not promotions."
         ),
         "observed_at": observed.isoformat(timespec="seconds"),
+        "stale": stale,
     }
 
 
@@ -515,15 +737,16 @@ def collect_dashboard(
     upcoming_end = end + dt.timedelta(days=30)
     read = WikiReader(pywikibot.Site("zh", "wikipedia"))
     errors: list[dict[str, str]] = []
+    membership = None
 
     def attempt(section: str, action: Callable[[], object]) -> object:
-        """Collect a section or return an unavailable observation.
+        """Collect and enrich a section, preserving unavailable results.
 
         Returns:
             Collected section, or none if its source failed.
         """
         try:
-            return action()
+            return _assessed_section(section, action(), membership)
         except Exception:
             _LOGGER.exception("Dashboard source failed: %s", section)
             errors.append({
@@ -542,6 +765,7 @@ def collect_dashboard(
     ))
     badges = None
     popular_pages = None
+    maintenance = None
 
     def build_snapshot() -> dict[str, object]:
         """Build a complete snapshot from available observations.
@@ -560,6 +784,7 @@ def collect_dashboard(
             ),
             "quality": badges,
             "pageviews": popular_pages,
+            "backlog": maintenance,
             "homepage": displays.copy(),
             "sources": [
                 *read.sources.values(),
@@ -571,6 +796,17 @@ def collect_dashboard(
                         },
                     ]
                     if popular_pages is not None
+                    else []
+                ),
+                *(
+                    [
+                        {
+                            "label": "Category:" + group["category"],
+                            "url": group["source_url"],
+                        }
+                        for group in maintenance["groups"]
+                    ]
+                    if maintenance is not None
                     else []
                 ),
                 {
@@ -614,6 +850,11 @@ def collect_dashboard(
             partial(pageviews.collect_pageviews, today, members),
         )
         publish_available(popular_pages)
+        maintenance = attempt(
+            "backlog",
+            partial(backlog.collect_backlog, read.site, membership),
+        )
+        publish_available(maintenance)
         try:
             read.preload([
                 title
@@ -657,9 +898,20 @@ def collect_dashboard(
             ),
         ),
     )
+    errors.extend(
+        [
+            {
+                "section": "quality",
+                "message": "Source refresh failed; cached data retained.",
+            },
+        ]
+        if badges is not None and badges.get("stale", False)
+        else [],
+    )
     if (
         badges is None
         and popular_pages is None
+        and maintenance is None
         and all(value is None for value in displays.values())
     ):
         message = "No dashboard source could be refreshed."

@@ -1,4 +1,4 @@
-"""Test Wikimedia Pageviews requests and daily Polars frames."""
+"""Test Wikimedia pageview observations and site-wide ranks."""
 
 # These focused unit tests exercise private transport seams.
 # ruff: file-ignore[private-member-access, pytest-unittest-raises-assertion]
@@ -20,6 +20,7 @@ from aranami.sources.pageviews import (
     DailyPageviews,
     fetch_data,
     fetch_data_dataframe,
+    fetch_top_dataframe,
     massive,
 )
 
@@ -75,6 +76,7 @@ class TestPageviewValues(TestCase):
             "DailyPageviews",
             "fetch_data",
             "fetch_data_dataframe",
+            "fetch_top_dataframe",
             "massive",
         )
 
@@ -195,6 +197,363 @@ class TestPageviewTransport(TestCase):
 
         assert caught.exception is error
         urlopen.assert_called_once_with(request)
+
+
+class TestTopPageviewFrames(TestCase):
+    """Test top-list periods, article ranks, and unavailable data."""
+
+    @staticmethod
+    def _site_pages(
+        mainpage: str = "Wikipedia:首页",
+    ) -> tuple[MagicMock, dict[str, MagicMock]]:
+        """Build offline site metadata and resolved page identities.
+
+        Args:
+            mainpage: Canonical title identified by site information.
+
+        Returns:
+            Site and page objects resolving each fixture's namespace.
+        """
+        site = MagicMock()
+        site.hostname.return_value = " ZH.WIKIPEDIA.ORG "
+        site.siteinfo = {"mainpage": mainpage}
+        pages = {}
+        for title, namespace in {
+            "Wikipedia:首页": 4,
+            "Special:Search": -1,
+            "User:Example": 2,
+            "Main Page": 0,
+            "Video game": 0,
+            "Star Trek: Discovery": 0,
+            "Other article": 0,
+        }.items():
+            page = MagicMock()
+            page.namespace.return_value = namespace
+            page.title.return_value = title
+            pages[title] = page
+        return site, pages
+
+    @staticmethod
+    def _payload(day: str = "30") -> dict[str, list[dict[str, object]]]:
+        """Build the actual top endpoint's response structure.
+
+        Args:
+            day: Requested day or the all-days monthly selector.
+
+        Returns:
+            A response with metadata and two official ranks.
+        """
+        return {
+            "items": [
+                {
+                    "project": "zh.wikipedia",
+                    "access": "all-access",
+                    "year": "2026",
+                    "month": "09",
+                    "day": day,
+                    "articles": [
+                        {"article": "Wikipedia:首页", "views": 100, "rank": 1},
+                        {"article": "Video_game", "views": 12, "rank": 37},
+                    ],
+                },
+            ],
+        }
+
+    def test_exact_daily_and_calendar_month_requests(self) -> None:
+        """Request the exact endpoint and count only article ranks."""
+        site, pages = self._site_pages()
+        for start, day in (
+            (date(2026, 9, 30), "30"),
+            (date(2026, 9, 1), "all-days"),
+        ):
+            with self.subTest(day=day):
+                response = BytesIO(json.dumps(self._payload(day)).encode())
+                with (
+                    patch(
+                        "aranami.sources.pageviews.urllib.request.urlopen",
+                        return_value=response,
+                    ) as urlopen,
+                    patch.object(
+                        pageviews.pywikibot,
+                        "Page",
+                        side_effect=lambda _site, title: pages[title],
+                    ),
+                ):
+                    frame = fetch_top_dataframe(site, start, date(2026, 10, 1))
+                request = urlopen.call_args.args[0]
+                assert request.full_url == (
+                    "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/"
+                    f"zh.wikipedia.org/all-access/2026/09/{day}"
+                )
+                assert request.get_header("Accept") == "application/json"
+                assert (
+                    request.get_header("User-agent") == pageviews._USER_AGENT
+                )
+                assert frame.schema == {"title": pl.String, "top": pl.Int64}
+                assert frame.to_dict(as_series=False) == {
+                    "title": ["Video game"],
+                    "top": [1],
+                }
+                assert response.closed
+
+    def test_article_ranks_use_namespace_and_original_rank_order(self) -> None:
+        """Exclude non-articles before ranking colon titles."""
+        site, pages = self._site_pages()
+        payload = self._payload()
+        payload["items"][0]["articles"] = [
+            {"article": "Other_article", "rank": 8},
+            {"article": "Wikipedia:首页", "rank": 1},
+            {"article": "User:Example", "rank": 5},
+            {"article": "Star_Trek:_Discovery", "rank": 6},
+            {"article": "Special:Search", "rank": 2},
+            {"article": "Video_game", "rank": 3},
+        ]
+        response = BytesIO(json.dumps(payload).encode())
+        with (
+            patch(
+                "aranami.sources.pageviews.urllib.request.urlopen",
+                return_value=response,
+            ),
+            patch.object(
+                pageviews.pywikibot,
+                "Page",
+                side_effect=lambda _site, title: pages[title],
+            ) as page,
+        ):
+            frame = fetch_top_dataframe(
+                site,
+                date(2026, 9, 30),
+                date(2026, 10, 1),
+            )
+        assert frame.to_dict(as_series=False) == {
+            "title": ["Video game", "Star Trek: Discovery", "Other article"],
+            "top": [1, 2, 3],
+        }
+        assert frame.schema == {"title": pl.String, "top": pl.Int64}
+        assert page.call_args_list == [
+            call(site, "Wikipedia:首页"),
+            call(site, "Other article"),
+            call(site, "Wikipedia:首页"),
+            call(site, "User:Example"),
+            call(site, "Star Trek: Discovery"),
+            call(site, "Special:Search"),
+            call(site, "Video game"),
+        ]
+
+    def test_main_namespace_homepage_is_excluded(self) -> None:
+        """Exclude the main page even from namespace zero."""
+        site, pages = self._site_pages(mainpage="Main Page")
+        ranks = pl.DataFrame({
+            "title": ["Main Page", "Video game"],
+            "top": [1, 2],
+        })
+        with patch.object(
+            pageviews.pywikibot,
+            "Page",
+            side_effect=lambda _site, title: pages[title],
+        ):
+            frame = pageviews._article_top_ranks(site, ranks)
+        assert frame.to_dict(as_series=False) == {
+            "title": ["Video game"],
+            "top": [1],
+        }
+
+    def test_valid_nonarticle_list_returns_typed_empty(self) -> None:
+        """Return typed empty when only non-articles are observed."""
+        site, pages = self._site_pages()
+        payload = self._payload()
+        payload["items"][0]["articles"] = [
+            {"article": "Wikipedia:首页", "rank": 1},
+            {"article": "Special:Search", "rank": 2},
+            {"article": "User:Example", "rank": 3},
+        ]
+        response = BytesIO(json.dumps(payload).encode())
+        with (
+            patch(
+                "aranami.sources.pageviews.urllib.request.urlopen",
+                return_value=response,
+            ) as urlopen,
+            patch.object(
+                pageviews.pywikibot,
+                "Page",
+                side_effect=lambda _site, title: pages[title],
+            ),
+        ):
+            frame = fetch_top_dataframe(
+                site,
+                date(2026, 9, 30),
+                date(2026, 10, 1),
+            )
+        assert frame.is_empty()
+        assert frame.schema == {"title": pl.String, "top": pl.Int64}
+        assert response.closed
+        urlopen.assert_called_once()
+
+    def test_validate_raw_metadata_before_article_classification(self) -> None:
+        """Validate the response before resolving namespaces."""
+        site, _ = self._site_pages()
+        payload = self._payload()
+        payload["items"][0]["day"] = "29"
+        response = BytesIO(json.dumps(payload).encode())
+        with (
+            patch(
+                "aranami.sources.pageviews.urllib.request.urlopen",
+                return_value=response,
+            ),
+            patch.object(pageviews.pywikibot, "Page") as page,
+            self.assertRaisesRegex(ValueError, "does not match request"),
+        ):
+            fetch_top_dataframe(site, date(2026, 9, 30), date(2026, 10, 1))
+        page.assert_not_called()
+
+    def test_calendar_month_leap_day_and_december(self) -> None:
+        """Recognize leap-year February and December boundaries."""
+        for start, stop, expected in (
+            (date(2024, 2, 1), date(2024, 3, 1), ("2024", "02", "all-days")),
+            (date(2025, 2, 1), date(2025, 3, 1), ("2025", "02", "all-days")),
+            (date(2025, 12, 1), date(2026, 1, 1), ("2025", "12", "all-days")),
+        ):
+            with self.subTest(start=start):
+                assert pageviews._top_period(start, stop) == expected
+
+    def test_calendar_years_skip_requests_and_return_typed_empty(self) -> None:
+        """Skip calendar years without resolving the site."""
+        site = MagicMock()
+        for year in (2024, 2025):
+            start, stop = date(year, 1, 1), date(year + 1, 1, 1)
+            with (
+                self.subTest(year=year),
+                patch(
+                    "aranami.sources.pageviews.urllib.request.urlopen",
+                ) as urlopen,
+            ):
+                frame = fetch_top_dataframe(site, start, stop)
+                assert frame.is_empty()
+                assert frame.schema == {"title": pl.String, "top": pl.Int64}
+                assert pageviews._top_period(start, stop) is None
+                urlopen.assert_not_called()
+        site.hostname.assert_not_called()
+
+    def test_unsupported_intervals_skip_requests(self) -> None:
+        """Skip unsupported periods and invalid bounds."""
+        site = MagicMock()
+        for start, stop in (
+            (date(2026, 9, 2), date(2026, 10, 2)),
+            (date(2026, 9, 1), date(2026, 9, 8)),
+            (date(2026, 7, 1), date(2026, 10, 1)),
+            (date(2025, 1, 2), date(2026, 1, 2)),
+            (date(2026, 9, 1), date(2026, 9, 1)),
+            (date(2026, 9, 2), date(2026, 9, 1)),
+        ):
+            with (
+                self.subTest(start=start, stop=stop),
+                patch(
+                    "aranami.sources.pageviews.urllib.request.urlopen",
+                ) as urlopen,
+            ):
+                frame = fetch_top_dataframe(site, start, stop)
+                assert frame.is_empty()
+                assert frame.schema == {"title": pl.String, "top": pl.Int64}
+                urlopen.assert_not_called()
+        site.hostname.assert_not_called()
+
+    def test_not_found_closes_body_and_propagates(self) -> None:
+        """Keep unavailable daily and calendar-month lists pending."""
+        site = MagicMock()
+        site.hostname.return_value = "zh.wikipedia.org"
+        for start, stop in (
+            (date(2026, 9, 30), date(2026, 10, 1)),
+            (date(2026, 9, 1), date(2026, 10, 1)),
+        ):
+            response = BytesIO(b"not found")
+            error = urllib.error.HTTPError(
+                "https://wikimedia.org/example",
+                404,
+                "not found",
+                Message(),
+                response,
+            )
+            with (
+                self.subTest(start=start),
+                patch(
+                    "aranami.sources.pageviews.urllib.request.urlopen",
+                    side_effect=error,
+                ) as urlopen,
+                self.assertRaises(urllib.error.HTTPError) as caught,
+            ):
+                fetch_top_dataframe(site, start, stop)
+            assert caught.exception is error
+            assert response.closed
+            urlopen.assert_called_once()
+
+    def test_transport_failure_propagates_after_one_attempt(self) -> None:
+        """Propagate transport failures without retrying."""
+        site = MagicMock()
+        site.hostname.return_value = "zh.wikipedia.org"
+        error = urllib.error.URLError("unavailable")
+        with (
+            patch(
+                "aranami.sources.pageviews.urllib.request.urlopen",
+                side_effect=error,
+            ) as urlopen,
+            self.assertRaises(urllib.error.URLError) as caught,
+        ):
+            fetch_top_dataframe(site, date(2026, 9, 30), date(2026, 10, 1))
+        assert caught.exception is error
+        urlopen.assert_called_once()
+
+    def test_unexpected_period_is_rejected(self) -> None:
+        """Reject ranks for another site, access mode, or date."""
+        for key, value in (
+            ("project", "en.wikipedia"),
+            ("access", "desktop"),
+            ("year", "2025"),
+            ("month", "08"),
+            ("day", "all-days"),
+        ):
+            with self.subTest(key=key):
+                payload = self._payload()
+                payload["items"][0][key] = value
+                with self.assertRaises(ValueError):
+                    pageviews._parse_top_dataframe(
+                        payload,
+                        "zh.wikipedia.org",
+                        ("2026", "09", "30"),
+                    )
+
+    def test_invalid_records_and_duplicate_titles_are_rejected(self) -> None:
+        """Reject invalid ranks and normalized title collisions."""
+        for articles in (
+            [{"article": "A", "rank": 0}],
+            [{"article": "A", "rank": -2}],
+            [{"article": "A", "rank": True}],
+            [{"article": "A", "rank": "1"}],
+            [{"article": "_", "rank": 1}],
+            [{"article": None, "rank": 1}],
+            [{"article": "A_B", "rank": 1}, {"article": "A B", "rank": 2}],
+        ):
+            with self.subTest(articles=articles):
+                payload = self._payload()
+                payload["items"][0]["articles"] = articles
+                with self.assertRaises(ValueError):
+                    pageviews._parse_top_dataframe(
+                        payload,
+                        "zh.wikipedia.org",
+                        ("2026", "09", "30"),
+                    )
+
+    def test_empty_article_list_is_unavailable(self) -> None:
+        """Reject empty lists so a report can wait for complete data."""
+        payload = self._payload()
+        payload["items"][0]["articles"] = []
+        with self.assertRaisesRegex(ValueError, "not available yet"):
+            pageviews._parse_top_dataframe(
+                payload,
+                "zh.wikipedia.org",
+                ("2026", "09", "30"),
+            )
+        with self.assertRaisesRegex(ValueError, "not available yet"):
+            pageviews._parse_top_articles([])
 
 
 class TestPageviewFrames(TestCase):

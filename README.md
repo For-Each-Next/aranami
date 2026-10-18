@@ -14,7 +14,8 @@ runs. Both support immediate report updates and previews of proposed changes.
 The separate [Toolforge dashboard](https://aranami.toolforge.org/) shows
 100 days of Chinese main-page appearances, 30 days of upcoming quality
 content, daily pageviews, and recognized video-game articles across
-Wikipedia languages. Its Python updater refreshes saved data hourly.
+Wikipedia languages, together with Chinese project article maintenance
+lists. Its Python updater refreshes saved data hourly.
 
 ## Scheduled tasks
 

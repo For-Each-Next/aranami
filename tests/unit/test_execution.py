@@ -6,6 +6,8 @@
 # ruff: file-ignore[ambiguous-unicode-character-string]
 
 import datetime as dt
+import json
+from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -538,6 +540,7 @@ class TestRoutineOutput(TestCase):
                     page.save.assert_called_once_with(
                         summary=context.edits[0].summary,
                     )
+
                     assert not (Path(directory) / "dry-run").exists()
 
     def test_shared_context_overrides_conflicting_dry_keyword(self) -> None:
@@ -576,3 +579,175 @@ class TestRoutineOutput(TestCase):
                     page.save.assert_called_once_with(
                         summary=context.edits[0].summary,
                     )
+
+
+class TestRoutineStatusLifecycle(TestCase):
+    """Persist live lifecycle state independently from logs."""
+
+    def setUp(self) -> None:
+        """Give each lifecycle test its own runtime directory."""
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        working_directory = patch("pathlib.Path.cwd", return_value=self.root)
+        working_directory.start()
+        self.addCleanup(working_directory.stop)
+
+    def _record(self, name: str = "dyks") -> dict[str, object]:
+        """Read one directly reported routine status.
+
+        Args:
+            name: Stable routine identifier in this test's snapshot.
+
+        Returns:
+            Most recently persisted lifecycle fields for the routine.
+        """
+        snapshot = json.loads(
+            (self.root / "logs" / "aranami-status.json").read_text(),
+        )
+        assert snapshot["schema"] == 1
+        assert snapshot["updated_at"].endswith("Z")
+        return snapshot["routines"][name]
+
+    def test_running_state_and_confirmed_save_share_one_run_identity(
+        self,
+    ) -> None:
+        """Report a running routine and its confirmed save."""
+        context = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+        page = Mock(text="old")
+        with (
+            patch(
+                "aranami.jobs._execution.pywikibot.Page",
+                return_value=page,
+            ),
+            job_run("dyks", context=context),
+        ):
+            running = self._record()
+            assert running["status"] == "running"
+            assert running["dry"] is False
+            assert running["updated"] is None
+            assert running["duration_seconds"] is None
+            assert running["finished_at"] is None
+            context.publish(
+                ProposedEdit(
+                    context.site,
+                    "Target",
+                    "new",
+                    "summary",
+                    original_text="old",
+                ),
+            )
+        completed = self._record()
+        assert completed["status"] == "updated"
+        assert completed["updated"] == 1
+        assert completed["run_id"] == running["run_id"]
+        assert completed["started_at"] == running["started_at"]
+        assert completed["finished_at"] >= running["started_at"]
+        assert completed["duration_seconds"] >= 0
+        page.save.assert_called_once()
+
+    def test_terminal_states_preserve_confirmed_and_unknown_counts(
+        self,
+    ) -> None:
+        """Keep terminal outcomes and uncertain counts distinct."""
+        cases = (
+            ("no_update", False, 0),
+            ("unknown", True, None),
+            ("deferred", False, 0),
+            ("deferred", True, None),
+            ("failed", False, 0),
+            ("failed", True, None),
+        )
+        for expected_status, delegated, count in cases:
+            context = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+            with (
+                self.subTest(status=expected_status, delegated=delegated),
+                self.assertRaisesRegex(RuntimeError, "Primary source failed")
+                if expected_status == "failed"
+                else nullcontext(),
+                job_run("dyks", context=context),
+            ):
+                if delegated:
+                    context.mark_updates_unknown()
+                if expected_status == "deferred":
+                    context.defer("Source data is not available yet.")
+                elif expected_status == "failed":
+                    _fail("Primary source failed.")
+            record = self._record()
+            assert record["status"] == expected_status
+            assert record["updated"] == count
+            assert record["finished_at"] is not None
+            assert record["duration_seconds"] >= 0
+
+    def test_preview_does_not_replace_public_live_state(self) -> None:
+        """Omit previews despite conflicting invocation keywords."""
+        live = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+        with job_run("dyks", context=live):
+            pass
+        path = self.root / "logs" / "aranami-status.json"
+        before = path.read_bytes(), path.stat().st_mtime_ns
+        preview = JobContext(Mock(), dt.date(2026, 10, 18), dry=True)
+        with (
+            patch("aranami.jobs._execution.write_routine_status") as writer,
+            job_run("dyks", dry=False, context=preview),
+        ):
+            preview.mark_updates_unknown()
+        writer.assert_not_called()
+        assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+        assert self._record()["run_id"] == live.tasks[0].run_id
+
+    def test_older_context_cannot_overwrite_a_newer_run(self) -> None:
+        """Retain the newer state when an older context finishes."""
+        older = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+        newer = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+        with job_run("dyks", context=older):
+            older.defer("The older attempt is still waiting.")
+            with job_run("dyks", context=newer):
+                assert self._record()["run_id"] == newer.tasks[0].run_id
+            completed = self._record()
+            assert completed["status"] == "no_update"
+        assert self._record() == completed
+        assert older.tasks[0].status == "deferred"
+
+    def test_status_failures_preserve_saves_and_primary_exceptions(
+        self,
+    ) -> None:
+        """Keep status failures outside the wiki result path."""
+        for fail in (False, True):
+            context = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+            page = Mock(text="old")
+            primary = RuntimeError("The original wiki failure.")
+            action = Mock(side_effect=primary if fail else None)
+            with (
+                self.subTest(fail=fail),
+                patch(
+                    "aranami.jobs._execution.write_routine_status",
+                    side_effect=OSError("Status storage unavailable."),
+                ) as writer,
+                patch(
+                    "aranami.jobs._execution.pywikibot.Page",
+                    return_value=page,
+                ),
+                self.assertLogs("aranami.jobs._execution", level="WARNING"),
+            ):
+                observed_error = None
+                try:
+                    with job_run("dyks", context=context):
+                        context.publish(
+                            ProposedEdit(
+                                context.site,
+                                "Target",
+                                "new",
+                                "summary",
+                                original_text="old",
+                            ),
+                        )
+                        action()
+                except RuntimeError as caught:
+                    observed_error = caught
+                assert observed_error is (primary if fail else None)
+            page.save.assert_called_once()
+            expected_writes = 2
+            assert writer.call_count == expected_writes
+            assert context.tasks[0].updated == 1
+            assert context.tasks[0].status == ("failed" if fail else "success")

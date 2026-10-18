@@ -77,18 +77,21 @@ class TestDailyPageviews(TestCase):
                 "url": "https://zh.wikipedia.org/wiki/Game_1",
                 "views": 200,
                 "rank": 1,
+                "site_rank": 20,
             },
             {
                 "title": "Game 2",
                 "url": "https://zh.wikipedia.org/wiki/Game_2",
                 "views": 100,
                 "rank": 2,
+                "site_rank": 40,
             },
             {
                 "title": "Game 3",
                 "url": "https://zh.wikipedia.org/wiki/Game_3",
                 "views": 0,
                 "rank": 3,
+                "site_rank": 1000,
             },
         ]
         assert result["source_url"] == (
@@ -124,6 +127,9 @@ class TestDailyPageviews(TestCase):
             f"Game {index}" for index in range(11, 1, -1)
         ]
         assert [item["rank"] for item in result["items"]] == list(range(1, 11))
+        assert [item["site_rank"] for item in result["items"]] == list(
+            range(9, 19),
+        )
 
     @staticmethod
     def test_only_absent_daily_results_fall_back_to_older_dates() -> None:

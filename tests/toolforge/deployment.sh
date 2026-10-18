@@ -76,6 +76,7 @@ cmp expected-calls calls
 tar -tf upload.tar > manifest
 LC_ALL=C sort manifest > sorted-manifest
 cat > expected-manifest <<'FILES'
+assessment.php
 i18n.php
 log-viewer.lighttpd.conf
 logs.php
@@ -85,13 +86,17 @@ public_html/dashboard.js
 public_html/index.php
 public_html/logs/aranami/index.php
 public_html/logs/index.php
+public_html/maintenance/index.php
 run-dashboard.sh
 setup-web.sh
 status.php
 toolforge/__init__.py
 toolforge/__main__.py
+toolforge/backlog.py
+toolforge/backlog_config.py
 toolforge/collect.py
 toolforge/homepage.py
+toolforge/maintenance.json
 toolforge/pageviews.py
 toolforge/quality.py
 toolforge/server.py
@@ -114,7 +119,7 @@ IFS= read -r summary < override.txt
 test "$summary" = 'Target: for-each-next@dev.toolforge.org (tool aranami)'
 
 # A missing private PHP helper or linked source module must fail before SSH.
-mkdir -p incomplete/public_html/logs/aranami
+mkdir -p incomplete/public_html/logs/aranami incomplete/public_html/maintenance
 cp "$uploader" incomplete/upload-web.sh
 while IFS= read -r file; do
     case "$file" in toolforge/*) source_file=${file#toolforge/} ;; *) source_file=$file ;; esac
@@ -126,6 +131,30 @@ if sh incomplete/upload-web.sh --dry-run > invalid.txt 2>&1; then
     exit 1
 fi
 cp "$deployment_dir/project.php" incomplete/project.php
+rm incomplete/assessment.php
+if sh incomplete/upload-web.sh --dry-run > invalid.txt 2>&1; then
+    printf '%s\n' 'The uploader accepted a deployment without assessment.php.' >&2
+    exit 1
+fi
+cp "$deployment_dir/assessment.php" incomplete/assessment.php
+rm incomplete/public_html/maintenance/index.php
+if sh incomplete/upload-web.sh --dry-run > invalid.txt 2>&1; then
+    printf '%s\n' 'The uploader accepted a deployment without the maintenance route.' >&2
+    exit 1
+fi
+cp "$deployment_dir/public_html/maintenance/index.php" incomplete/public_html/maintenance/index.php
+rm incomplete/backlog.py
+if sh incomplete/upload-web.sh --dry-run > invalid.txt 2>&1; then
+    printf '%s\n' 'The uploader accepted a deployment without backlog.py.' >&2
+    exit 1
+fi
+cp "$deployment_dir/backlog.py" incomplete/backlog.py
+rm incomplete/maintenance.json
+if sh incomplete/upload-web.sh --dry-run > invalid.txt 2>&1; then
+    printf '%s\n' 'The uploader accepted a deployment without maintenance.json.' >&2
+    exit 1
+fi
+cp "$deployment_dir/maintenance.json" incomplete/maintenance.json
 rm incomplete/quality.py
 ln -s "$deployment_dir/quality.py" incomplete/quality.py
 if sh incomplete/upload-web.sh --dry-run > invalid.txt 2>&1; then

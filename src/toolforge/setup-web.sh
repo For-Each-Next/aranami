@@ -3,11 +3,13 @@
 set -eu
 
 cd /data/project/aranami
-for file in public_html/index.php public_html/logs/index.php public_html/logs/aranami/index.php \
+for file in public_html/index.php public_html/maintenance/index.php \
+    public_html/logs/index.php public_html/logs/aranami/index.php \
     public_html/dashboard.js public_html/aranami.svg status.php \
-    project.php i18n.php logs.php log-viewer.lighttpd.conf run-dashboard.sh \
+    project.php assessment.php i18n.php logs.php log-viewer.lighttpd.conf run-dashboard.sh \
     toolforge/__init__.py toolforge/__main__.py toolforge/server.py \
-    toolforge/collect.py toolforge/homepage.py toolforge/quality.py toolforge/pageviews.py; do
+    toolforge/collect.py toolforge/homepage.py toolforge/quality.py toolforge/pageviews.py \
+    toolforge/backlog.py toolforge/backlog_config.py toolforge/maintenance.json; do
     test -f "$file"
     test ! -L "$file"
 done

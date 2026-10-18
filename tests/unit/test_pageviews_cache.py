@@ -11,13 +11,13 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 from urllib.error import HTTPError
 
 import mwparserfromhell
 import polars as pl
 
-from aranami.jobs import pageviews as job
+from aranami.jobs import JobContext, pageviews as job
 from aranami.services.zhwiki import pageviews
 from aranami.support.pageviews_cache import SCHEMA, PageviewsCache
 
@@ -27,6 +27,7 @@ _REQUIRED = _STOP - dt.timedelta(days=730)
 _DAY = _STOP - dt.timedelta(days=1)
 _PERIODS = ((_REQUIRED, _STOP), (_DAY, _STOP))
 _OBSERVATIONS = {"date": pl.Date, "pageview": pl.Int64}
+_TOP_SCHEMA = {"title": pl.String, "top": pl.Int64}
 
 
 def _observations(*rows: tuple[dt.date, int]) -> pl.DataFrame:
@@ -224,6 +225,10 @@ class TestTransientPageviews(TestCase):
                         _http_error(HTTPStatus.GATEWAY_TIMEOUT),
                     ],
                 ) as fetch,
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_top_dataframe",
+                ) as fetch_top,
                 self.assertRaises(pageviews.PageviewsUnavailableError),
             ):
                 pageviews.build_report(
@@ -235,6 +240,7 @@ class TestTransientPageviews(TestCase):
                 "A",
                 "B",
             ]
+            fetch_top.assert_not_called()
             cache = PageviewsCache.load("zh.wikipedia.org", data_date=_DAY)
             assert not cache.path.exists()
             assert cache.pending_path is not None
@@ -279,6 +285,14 @@ class TestTransientPageviews(TestCase):
                             _http_error(HTTPStatus.GATEWAY_TIMEOUT),
                         ],
                     ) as fetch,
+                    patch.object(
+                        pageviews.pageviews,
+                        "fetch_top_dataframe",
+                        return_value=pl.DataFrame(
+                            {"title": ["Healthy"], "top": [42]},
+                            schema=_TOP_SCHEMA,
+                        ),
+                    ),
                 ):
                     report = pageviews.build_report(
                         site,
@@ -578,6 +592,151 @@ class TestParquetSnapshot(TestCase):
 class TestPendingSnapshot(TestCase):
     """Resume completed requests before validating report inputs."""
 
+    def test_monthly_top_deferral_logs_reason_and_resumes_same_date(
+        self,
+    ) -> None:
+        """Wait for September's top list without losing article work."""
+        settings = replace(
+            job.REPORT_SETTINGS,
+            periods=(job.PROJECT_PERIODS[0], job.PROJECT_PERIODS[2]),
+            task_forces=(),
+        )
+        original = (
+            'Before<!-- aranami begin="page_views" -->'
+            "<!-- report date 2026-09-29 -->"
+            '<!-- aranami end="page_views" -->After'
+        )
+        with TemporaryDirectory() as directory, chdir(directory):
+            primary = PageviewsCache.load("zh.wikipedia.org")
+            primary.replace(
+                "A",
+                _OLDEST,
+                _DAY,
+                _observations((_REQUIRED, 7)),
+            )
+            primary.save(["A"])
+            before = primary.path.read_bytes()
+            site = MagicMock()
+            site.hostname.return_value = "zh.wikipedia.org"
+            page = MagicMock(text=original)
+            started_at = dt.datetime(2026, 10, 1, 18, tzinfo=dt.UTC)
+            deferred = JobContext(
+                site,
+                _STOP,
+                dry=True,
+                started_at=started_at,
+            )
+            with (
+                patch.object(job, "read_pages", return_value=[page]),
+                patch.object(
+                    pageviews,
+                    "_project_articles",
+                    return_value=_articles("A"),
+                ),
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_data_dataframe",
+                    return_value=_observations((_DAY, 0)),
+                ) as article_fetch,
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_top_dataframe",
+                    side_effect=(
+                        pl.DataFrame(
+                            {"title": ["A"], "top": [701]},
+                            schema=_TOP_SCHEMA,
+                        ),
+                        _http_error(HTTPStatus.NOT_FOUND),
+                    ),
+                ) as unavailable_top,
+                self.assertLogs(job.logger, level="WARNING") as logged,
+            ):
+                job.run(context=deferred, settings=settings)
+            article_fetch.assert_called_once_with(site, "A", _DAY, _STOP)
+            expected_top_calls = [
+                call(site, _DAY, _STOP),
+                call(site, dt.date(2026, 9, 1), _STOP),
+            ]
+            assert unavailable_top.call_args_list == expected_top_calls
+            assert deferred.tasks[0].status == "deferred"
+            assert not deferred.edits
+            reason = deferred.notes[0]
+            assert "report date 2026-09-30" in reason
+            assert "2026-09-01 to 2026-09-30" in reason
+            assert "HTTP Error 404: Not Found" in reason
+            assert "retry on the next invocation" in reason
+            assert reason in [record.getMessage() for record in logged.records]
+            assert page.text == original
+            assert primary.path.read_bytes() == before
+            pending = PageviewsCache.load("zh.wikipedia.org", data_date=_DAY)
+            assert pending.pending_path is not None
+            assert pending.pending_path.exists()
+
+            resumed = JobContext(
+                site,
+                _STOP,
+                dry=True,
+                started_at=started_at + dt.timedelta(hours=1),
+            )
+            with (
+                patch.object(job, "read_pages", return_value=[page]),
+                patch.object(
+                    pageviews,
+                    "_project_articles",
+                    return_value=_articles("A"),
+                ),
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_data_dataframe",
+                ) as reused_articles,
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_top_dataframe",
+                    side_effect=(
+                        pl.DataFrame(
+                            {"title": ["A"], "top": [701]},
+                            schema=_TOP_SCHEMA,
+                        ),
+                        pl.DataFrame(
+                            {"title": ["A"], "top": [42]},
+                            schema=_TOP_SCHEMA,
+                        ),
+                    ),
+                ) as available_top,
+            ):
+                job.run(context=resumed, settings=settings)
+            reused_articles.assert_not_called()
+            assert available_top.call_args_list == expected_top_calls
+            assert resumed.tasks[0].status == "success"
+            assert len(resumed.edits) == 1
+            proposal = resumed.edits[0]
+            assert proposal.original_text == original
+            assert pageviews.current_data_date(proposal.text) == _DAY
+            items = [
+                template
+                for template in mwparserfromhell.parse(
+                    proposal.text,
+                ).filter_templates()
+                if str(template.name) == "PJ:VG/HOT/item"
+            ]
+            assert [str(item.get("top").value) for item in items] == [
+                "daily/701",
+                "monthly/42",
+            ]
+            assert not pending.pending_path.exists()
+            assert primary.path.read_bytes() != before
+            healthy = PageviewsCache.load("zh.wikipedia.org").get("A")
+            assert healthy is not None
+            assert healthy.item(0, "coverage_stop") == _STOP
+            assert (
+                healthy.filter(pl.col("date") == _DAY).item(
+                    0,
+                    "pageview",
+                )
+                == 0
+            )
+            page.save.assert_not_called()
+
     def test_interrupted_report_resumes_only_unfinished_articles(self) -> None:
         """Commit completed requests after a healthy retry."""
         with TemporaryDirectory() as directory, chdir(directory):
@@ -607,6 +766,10 @@ class TestPendingSnapshot(TestCase):
                         *[_http_error() for _ in range(3)],
                     ],
                 ) as failed_fetch,
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_top_dataframe",
+                ) as fetch_top,
                 self.assertRaises(pageviews.PageviewsDeferredError),
             ):
                 pageviews.build_report(
@@ -615,6 +778,7 @@ class TestPendingSnapshot(TestCase):
                     settings=job.REPORT_SETTINGS,
                 )
             assert failed_fetch.call_count == 4
+            fetch_top.assert_not_called()
             assert [call.args[1] for call in failed_fetch.call_args_list] == [
                 "A",
                 "B",
@@ -641,6 +805,14 @@ class TestPendingSnapshot(TestCase):
                     "fetch_data_dataframe",
                     return_value=_observations((_DAY, 1)),
                 ) as successful_fetch,
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_top_dataframe",
+                    return_value=pl.DataFrame(
+                        {"title": ["A"], "top": [42]},
+                        schema=_TOP_SCHEMA,
+                    ),
+                ),
             ):
                 report = pageviews.build_report(
                     site,
