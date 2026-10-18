@@ -57,44 +57,78 @@ for job status, lifecycle, and log commands.
 
 ### Read the dashboard and logs
 
-The [homepage](https://aranami.toolforge.org/) displays recognized quality
-content across Wikipedia languages. Its first section, 动态热门, combines
-100 UTC dates of Chinese main-page appearances, the next 30 days of
-scheduled featured and good content, and daily video-game pageviews.
-Featured and good content share one panel; news and anniversaries share
-another. DYK occupies its own right column on desktop. Its light palette
-follows the Chinese
-video-game project, with a maximum width of 960 px and a mobile layout.
+The [homepage](https://aranami.toolforge.org/) displays Chinese project
+highlights, recognized video-game content across Wikipedia languages, and
+article maintenance lists. Its flat, top-level sections are 动态热门,
+条目维护, and 他山之石, in that order. 动态热门 combines 100 UTC dates of
+Chinese main-page appearances,
+the next 30 days of scheduled featured and good content, and daily
+video-game pageviews. On desktop, featured and good content share the left
+column with DYK; popular articles and 旧事新闻, the combined news and
+anniversaries panel, occupy the right. Quality content and DYK use compact,
+numbered rows like the popular-article list. DYK uses a scrollable
+list containing every collected entry, with dates on the right and space
+reserved between the rows and the scrollbar. Popular and DYK article titles are
+followed by available current project grade and importance chips, such as
+乙级列表 and 高; importance uses the short 极高/高/中/低 labels. Chinese
+assessment names use the project's labels, including 初 and 丙, in chips
+and counterpart grades. Recognition, assessment, and importance chips share
+one appearance throughout the dashboard and maintenance lists.
+Larger serif section headings and full-width bottom
+rules distinguish the main sections.
+All appearance lists place dates on the right, including lists without a
+scroll container; observation and carry-in details remain in labelled
+tooltip markers.
+Upcoming content appears alongside past appearances, with its scheduled
+date marked inline. Quality content
+always shows every appearance without collapsing or a scrolling limit.
+The page uses a light green background, black text, and blue links without
+underlines, with a maximum width of 960 px and a mobile layout.
 The interface selects Simplified Chinese, Traditional Chinese, or English
 from the browser's language preferences. Article titles and links retain
 their original language.
-An expandable panel shows Aranami's on-wiki report updates: the installed
-version, routine outcomes, durations, UTC timestamps, and daily-log links.
+An always-visible table shows Aranami's on-wiki report updates: routine
+outcomes, durations, and plain UTC timestamps. Its footer shows
+the installed version and log link once. Tables use row rules without
+alternating row colors. Article text uses the normal 16 px size, module
+headings use 20 px, and chips use a smaller shared size.
 Confirmed saves show as updated; successful runs without saves show as
-no update needed. Older logs and delegated refreshes without confirmed
-edit counts remain unconfirmed. Preview activity is omitted.
+no update needed. Aranami publishes each live start and outcome to
+`logs/aranami-status.json`; the table reads that snapshot without parsing
+diagnostic logs. Delegated refreshes without confirmed edit counts remain
+unconfirmed. Preview activity is omitted. An interrupted process retains
+its last reported state and time until the next run reports another state.
 
 The multilingual section, 他山之石, directly queries Wikidata items with
 `P31=Q7889` and reads their quality badges across other Wikipedia languages.
 It applies the same FA, FL, GA, and recommended badge definitions to every
-language. The default view shows recently observed badge additions across
-all languages. Dates indicate when the dashboard detected a new item,
+language, with FL labelled 特色列表 in Chinese. The default view shows ten
+entries across all languages, placing
+recently observed badge additions first and filling remaining places with
+other currently recognized content. Each row has three columns: language
+name with its code, the foreign article with a recognition chip, and the
+Chinese counterpart with an assessment chip. Rows stay on one line;
+long titles have full-title tooltips and narrow screens can scroll the
+table horizontally. Recorded additions include their observation time in
+the recognition chip's tooltip, indicating when the dashboard detected an item,
 language, and badge combination, rather than a local promotion date.
-The right-hand
-matrix filters by language and recognition; a random-language action
-offers another entry point. Languages are ordered by distinct article
-count, from most to least.
+Language and recognition query parameters filter the full collection; a
+random-language action offers another entry point.
 Chinese articles appear as counterpart links recorded on the same item,
-with their known Chinese project assessment, including B or C; missing
-counterparts are marked explicitly. Chinese is included in the statistics
-and the all-language view. Filters, random switching, and browser history update the
-section in place. Language lists initially show 25 records and can expand
-to every collected record without another request.
+with their known Chinese project assessment, including 乙 or 丙, shown
+outside the title link; missing counterparts are marked explicitly.
+Chinese is included in the all-language
+view. Filters, random switching, and browser history update the section in
+place. Language lists initially show 25 records and can expand to every
+collected record without another request.
 The updater compares successful badge results against a disposable
 Parquet observation cache and retains additions for 30 days. The first
 result establishes a baseline without marking existing badges as new;
 deleting this cache resets the baseline and observation history. Failed
-queries leave the previous comparison result intact.
+queries reuse a valid cached badge collection with a visible cache notice
+and its original update time. Cached results never create observations or
+change the comparison baseline. Without a valid cache, the section is
+unavailable.
 This exact type scope excludes game subclasses,
 lists, and broader project topics unless they also carry `P31=Q7889`.
 Badge data can lag local status changes and does not establish nomination
@@ -103,14 +137,94 @@ separately from recognized quality badges.
 
 Daily pageviews use the [official Wikimedia all-access top-1,000 list](https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/examples/project-metrics.html) for
 Chinese Wikipedia, filtered to current project members. This coverage may
-produce fewer than ten video-game entries. The card shows the measured UTC
-date; missing daily results may fall back within the last seven completed
+produce fewer than ten video-game entries. The card includes its measured
+date in the description and links “top 1,000” to the readable Topviews list;
+missing daily results may fall back within the last seven completed
 dates. Unavailable data is never presented as zero views or assigned a
-newer date.
+newer date. Hovering over an article's view count shows its original sitewide
+rank for that observation, rather than its position within the filtered list.
+
+The 条目维护 section provides Chinese project worklists, following the
+grouped issue lists in the [English project backlog](https://en.wikipedia.org/wiki/Wikipedia:WikiProject_Video_games/Backlog)
+and [cleanup report](https://bambots.brucemyers.com/cwb/bycat/Video_games.html).
+Its 37 tasks are organized in eight equal-height cards, each at least
+240 px wide when space permits, under notability, references, accuracy, content,
+links, layout, style, and other maintenance. The categories are checked
+against Chinese Wikipedia's actual templates, including expansion from
+English and Japanese Wikipedia and translation proofreading.
+The server selects current main-namespace project members and reads their
+maintenance categories from the read-only Chinese Wikipedia replica. It
+matches verified undated roots, monthly forms, and explicit aggregates.
+The homepage shows grouped task categories and their article counts as links.
+Maintenance counts use plain numbers without circular borders.
+Opening a task loads a dedicated maintenance page, such as
+`/maintenance/?task=unreferenced&page=1`, with 50 articles per page and
+previous/next navigation. Each article row shows available project grade
+and importance, all matching issues, and the earliest month found in its
+current dated maintenance categories. A dash means no month is recorded;
+this month does not establish when the issue began. The saved snapshot
+contains every matching article; the maintenance page reads only the
+requested slice without collecting source data. The overall article count
+deduplicates articles with multiple issues.
+Worklists default to the earliest tagged month first, with missing months
+last. Click the article or month heading to change the sort and direction;
+mobile pages expose the same links above the list. Pagination retains the
+chosen order. Sorting uses only the saved snapshot and adds no database
+requests.
+
+Edit [maintenance.json](../src/toolforge/maintenance.json) locally to change
+the maintenance catalogue. The file defines the section order and labels,
+the task order and labels, and each task's matching rules. Labels may be a
+plain string or a map using `en`, `zh-hans`, and `zh-hant` language keys.
+The default configuration contains the 37 verified Chinese tasks.
+For example, a task can match a template on an article:
+
+```json
+{
+  "schema": 1,
+  "sections": [
+    {
+      "key": "references",
+      "label": "参考来源",
+      "tasks": [
+        {
+          "key": "citation_help",
+          "label": "补充引用",
+          "rules": [
+            {
+              "kind": "template",
+              "name": "Citation needed",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Use `kind: "category"` for a category rule or `kind: "template"` for a
+template inclusion rule. Set `talk_page` to `true` to inspect the associated
+discussion page; matching records still link to the subject article.
+Rules within one task are alternatives. Category rules with `monthly: true`
+also recognize the exact `自YYYY年M月` form of the specified root; this
+option is not used for template rules. Verify the actual Chinese template
+or category before adding a rule. Arbitrary descendants are not included.
+Keep stable task and section keys when renaming labels so existing links
+continue to work. The file supports up to 12 sections, 64 tasks, and 16
+rules per task. Invalid configurations fail validation instead of silently
+changing the catalogue.
+
+Upload the edited file with `sh src/toolforge/upload-web.sh`. The deployed
+copy is `/data/project/aranami/toolforge/maintenance.json`; the next
+background refresh reads it. Restart `aranami-dashboard` to refresh
+immediately. The website has no configuration editor.
 
 The separate `aranami-dashboard` background job refreshes data immediately
-and then hourly. Badge data is reused for up to one
-hour. The homepage reads the saved snapshot when the visitor loads it;
+and then hourly, including the maintenance lists. Badge data is reused for
+up to one hour. The homepage reads the saved snapshot when the visitor loads it;
 the browser does not refresh automatically.
 It distinguishes an unavailable source from a measured empty result.
 
@@ -201,6 +315,7 @@ In the Toolforge terminal:
 toolforge jobs list
 toolforge jobs delete aranami
 toolforge jobs delete aranami-dashboard
+toolforge jobs delete aranami-logs
 ```
 
 Stop the dashboard updater and every live or preview monitor using
@@ -212,8 +327,9 @@ toolforge jobs delete aranami-preview
 ```
 
 Wait for all monitor processes to terminate before changing their shared
-environment. An already absent job needs no action. The independent
-`aranami-logs` webservice can remain running.
+environment. An already absent job needs no action. Stop `aranami-logs`
+for a coordinated wheel and dashboard deployment; it can remain running
+when only the wheel changes.
 
 #### 3. Upload and install
 
@@ -221,10 +337,12 @@ In the local terminal, upload the checked wheel and setup script:
 
 ```shell
 uv run python scripts/upload_toolforge.py
+sh src/toolforge/upload-web.sh
 ```
 
-The uploader sends only the wheel, setup script, and selected-wheel manifest.
-It does not start the monitor.
+The wheel uploader sends only the wheel, setup script, and selected-wheel
+manifest. The web uploader sends the dashboard, collector scripts, and
+maintenance configuration. Neither command starts the monitor.
 
 Back in the Toolforge terminal, install the uploaded wheel in a Python job:
 
@@ -259,6 +377,7 @@ toolforge jobs run aranami \
   --command 'cd /data/project/aranami && umask 077 && exec env LC_ALL=C.UTF-8 LANG=C.UTF-8 LC_CTYPE=C.UTF-8 PYWIKIBOT_DIR=/data/project/aranami /data/project/aranami/pyvenv/bin/python -m aranami'
 toolforge jobs show aranami
 toolforge jobs run aranami-dashboard --image python3.13 --continuous --mount=all --command '/bin/sh /data/project/aranami/run-dashboard.sh'
+toolforge jobs run aranami-logs --image php8.4 --webservice --mount all
 ```
 
 This starts live wiki edits immediately, then follows the internal UTC
@@ -295,6 +414,7 @@ the working directory, and runtime output goes under the same directory.
 |---|---|
 | `logs/project.YYYY-MM-DD.log` | Read high-level Aranami and dashboard events here. Retains today and the latest 90 completed UTC dates. |
 | `logs/aranami.YYYY-MM-DD.log` | Read routine starts, results, and failures here. Aranami retains today and the latest 90 completed UTC dates. |
+| `logs/aranami-status.json` and `.lock` | Latest directly reported live routine states and their writer lock. The dashboard reads the JSON file; retain both during routine upgrades. |
 | `cache/` | Reused data and recoverable checkpoints. Keep it during ordinary upgrades; remove it only with the monitor stopped when a rebuild is needed. |
 | `dry-run/` | Preview summaries and linked `.wikitext` proposals for review. |
 | `aranami-setup-*.out` and `.err` | Installation output and errors from each setup job. |
@@ -568,6 +688,31 @@ cutoff. A scheduled attempt may start up to 3,500 seconds late.
 Assessment grades refresh when a new daily popularity report is built.
 Pass `title` to choose another destination and `settings=REPORT_SETTINGS`
 to choose project membership and ranking periods.
+
+Daily and complete calendar-month sections fetch Wikimedia's site-wide
+top-1,000 list. Listed articles receive `|top=daily/<rank>` or
+`|top=monthly/<rank>` in
+`PJ:VG/HOT/item`, separately from their project rank. The same monthly list
+is reused for task forces. Site ranks count main-namespace articles only:
+non-article pages such as `Wikipedia:首页` and the site's main page are
+excluded before numbering articles from one. For example, September 1–30
+qualifies, whereas
+September 2–October 1 does not. Weekly, quarterly, yearly, and rolling
+monthly sections omit `top`. Yearly rankings continue to use article
+observations without fetching or waiting for annual site ranks.
+Articles outside a successfully fetched list omit `top`. If an applicable
+list is missing, empty, invalid, or cannot be fetched, the entire report
+waits: its published date and healthy cache remain unchanged. Completed
+article requests are retained for the next scheduled attempt. The log
+identifies the report date, required period, failure reason, and retry.
+For September 1–30, Aranami waits for September's monthly list before
+updating that report, even when its daily observations are already ready.
+The companion [Lua module source](../wiki/zhwiki/PJ_VG_HOT.lua) renders
+`top=daily/55` as a “全站日间第55名” tooltip, or uses 月间 for monthly.
+It uses the explicit period and the supplied `YYYY-MM-DD` dates without
+inferring the tooltip period. The report owns each leading `#`; the module
+returns inline content. Install the companion module on-wiki before
+expecting the typed values to display there.
 
 ### English comparisons
 

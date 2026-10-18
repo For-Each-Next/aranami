@@ -172,6 +172,110 @@ def category_members(
     )
 
 
+def page_categories(
+    site: BaseSite,
+    page_ids: Iterable[int],
+) -> pl.DataFrame:
+    """Read direct category membership for supplied page identities.
+
+    Args:
+        site: Site whose category links are requested.
+        page_ids: Exact page identifiers permitted in the result.
+
+    Returns:
+        Typed page IDs and category database titles in ``name``.
+        Empty inputs return an empty frame without querying replicas.
+        Requests are deduplicated and bounded to five hundred IDs.
+    """
+    schema = {"page_id": pl.Int64, "name": pl.String}
+    links, target = tables.Categorylinks, tables.Linktarget
+    statement = (
+        select(links.cl_from.label("page_id"), target.lt_title.label("name"))
+        .select_from(links)
+        .join(target, links.cl_target_id == target.lt_id)
+        .where(target.lt_namespace == Namespace.CATEGORY)
+        .order_by(links.cl_from, target.lt_title)
+    )
+    frames = [
+        _replica(site.dbName())
+        .query(
+            statement.where(links.cl_from.in_(batch)),
+            schema_overrides=schema,
+        )
+        .collect()
+        for batch in batched(dict.fromkeys(page_ids), _BATCH_SIZE)
+    ]
+    return pl.concat(frames) if frames else pl.DataFrame(schema=schema)
+
+
+def maintenance_tags(
+    site: BaseSite,
+    page_ids: Iterable[int],
+    *,
+    kind: Literal["category", "template"],
+    talk_page: bool = False,
+) -> pl.DataFrame:
+    """Read maintenance tags on articles or their current talk pages.
+
+    Args:
+        site: Site whose category or template memberships are requested.
+        page_ids: Exact main-namespace article identities in scope.
+        kind: Whether to read category membership or template inclusion.
+        talk_page: Read each article's associated talk page when true.
+
+    Returns:
+        Subject article IDs in ``page_id`` and tag database titles in
+        ``name``. Talk-page matches map back to the requested article.
+        Empty inputs retain the schema without opening a replica.
+        Each request contains at most five hundred distinct subject IDs.
+
+    Raises:
+        ValueError: The membership kind is unsupported.
+    """
+    if kind not in {"category", "template"}:
+        message = "Maintenance tags must be categories or templates."
+        raise ValueError(message)
+    schema = {"page_id": pl.Int64, "name": pl.String}
+    article = tables.Page.__table__
+    source = article.alias("talk") if talk_page else article
+    category = kind == "category"
+    links = tables.Categorylinks if category else tables.Templatelinks
+    origin = links.cl_from if category else links.tl_from
+    target_id = links.cl_target_id if category else links.tl_target_id
+    target = tables.Linktarget
+    namespace = Namespace.CATEGORY if category else Namespace.TEMPLATE
+    relation = article
+    if talk_page:
+        relation = relation.join(
+            source,
+            and_(
+                source.c.page_namespace == Namespace.TALK,
+                source.c.page_title == article.c.page_title,
+            ),
+        )
+    statement = (
+        select(article.c.page_id, target.lt_title.label("name"))
+        .select_from(relation)
+        .join(links, origin == source.c.page_id)
+        .join(target, target_id == target.lt_id)
+        .where(
+            article.c.page_namespace == Namespace.MAIN,
+            target.lt_namespace == namespace,
+        )
+        .order_by(article.c.page_id, target.lt_title)
+    )
+    frames = [
+        _replica(site.dbName())
+        .query(
+            statement.where(article.c.page_id.in_(batch)),
+            schema_overrides=schema,
+        )
+        .collect()
+        for batch in batched(dict.fromkeys(page_ids), _BATCH_SIZE)
+    ]
+    return pl.concat(frames) if frames else pl.DataFrame(schema=schema)
+
+
 def latest_revisions(site: BaseSite, page_ids: Iterable[int]) -> pl.DataFrame:
     """Read latest replica revision identifiers in bounded batches.
 

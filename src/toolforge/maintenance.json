@@ -1,0 +1,713 @@
+{
+  "schema": 1,
+  "sections": [
+    {
+      "key": "notability",
+      "label": {
+        "en": "Notability",
+        "zh-hans": "收录标准",
+        "zh-hant": "收錄標準"
+      },
+      "tasks": [
+        {
+          "key": "notability",
+          "label": {
+            "en": "Notability concerns",
+            "zh-hans": "收录标准",
+            "zh-hant": "收錄標準"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "主題不滿足收錄標準的條目",
+              "talk_page": false,
+              "monthly": true
+            },
+            {
+              "kind": "category",
+              "name": "所有主題不滿足收錄標準的條目",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "references",
+      "label": {
+        "en": "References",
+        "zh-hans": "参考来源",
+        "zh-hant": "參考來源"
+      },
+      "tasks": [
+        {
+          "key": "unreferenced",
+          "label": {
+            "en": "No references",
+            "zh-hans": "缺少来源",
+            "zh-hant": "缺少來源"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "缺少来源的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "references",
+          "label": {
+            "en": "More references needed",
+            "zh-hans": "补充来源",
+            "zh-hant": "補充來源"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需补充来源的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "footnotes",
+          "label": {
+            "en": "Inline citations needed",
+            "zh-hans": "缺少脚注",
+            "zh-hant": "缺少註腳"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "缺少注脚的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "unreliable",
+          "label": {
+            "en": "Unreliable sources",
+            "zh-hans": "来源可靠性",
+            "zh-hant": "來源可靠性"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "可能有不可靠來源的條目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "unsourced",
+          "label": {
+            "en": "Unsourced statements",
+            "zh-hans": "未列明来源的语句",
+            "zh-hant": "未列明來源的語句"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "有未列明来源语句的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "blp_sources",
+          "label": {
+            "en": "Living-person sources",
+            "zh-hans": "在世人物来源",
+            "zh-hant": "在世人物來源"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "缺少可靠来源的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "accuracy",
+      "label": {
+        "en": "Accuracy",
+        "zh-hans": "准确性",
+        "zh-hant": "準確性"
+      },
+      "tasks": [
+        {
+          "key": "verify",
+          "label": {
+            "en": "Verification needed",
+            "zh-hans": "需要查证",
+            "zh-hant": "需要查證"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要查證來源的維基百科條目",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        },
+        {
+          "key": "accuracy",
+          "label": {
+            "en": "Accuracy disputed",
+            "zh-hans": "准确性争议",
+            "zh-hant": "準確性爭議"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "准确性有争议的作品",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "neutrality",
+          "label": {
+            "en": "Neutrality disputed",
+            "zh-hans": "中立性争议",
+            "zh-hant": "中立性爭議"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "中立性有争议的作品",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "update",
+          "label": {
+            "en": "Update needed",
+            "zh-hans": "需要更新",
+            "zh-hant": "需要更新"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "待更新条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "original_research",
+          "label": {
+            "en": "Original research",
+            "zh-hans": "原创研究",
+            "zh-hant": "原創研究"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "可能带有原创研究的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "content",
+      "label": {
+        "en": "Content",
+        "zh-hans": "内容",
+        "zh-hant": "內容"
+      },
+      "tasks": [
+        {
+          "key": "fiction",
+          "label": {
+            "en": "Real-world perspective",
+            "zh-hans": "现实世界视角",
+            "zh-hant": "現實世界視角"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要區分事實與虛構的條目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "globalize",
+          "label": {
+            "en": "Global perspective",
+            "zh-hans": "地域观点",
+            "zh-hant": "地域觀點"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "部分地区的观点",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "trivia",
+          "label": {
+            "en": "Trivia sections",
+            "zh-hans": "琐碎内容",
+            "zh-hant": "瑣碎內容"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要清理的內容瑣碎條目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "links",
+      "label": {
+        "en": "Links",
+        "zh-hans": "链接",
+        "zh-hant": "連結"
+      },
+      "tasks": [
+        {
+          "key": "dead_links",
+          "label": {
+            "en": "Dead links",
+            "zh-hans": "失效链接",
+            "zh-hant": "失效連結"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "带有失效链接的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "orphan",
+          "label": {
+            "en": "Orphaned articles",
+            "zh-hans": "孤立条目",
+            "zh-hant": "孤立條目"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "缺少链入页面的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "underlinked",
+          "label": {
+            "en": "More internal links",
+            "zh-hans": "内部链接不足",
+            "zh-hant": "內部連結不足"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要更多内部链接的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "layout",
+      "label": {
+        "en": "Layout",
+        "zh-hans": "版式",
+        "zh-hant": "版式"
+      },
+      "tasks": [
+        {
+          "key": "expand",
+          "label": {
+            "en": "Expansion",
+            "zh-hans": "需要扩充",
+            "zh-hant": "需要擴充"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "扩充中的条目",
+              "talk_page": false,
+              "monthly": true
+            },
+            {
+              "kind": "category",
+              "name": "所有扩充中的条目",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        },
+        {
+          "key": "expand_english",
+          "label": {
+            "en": "Expand from English Wikipedia",
+            "zh-hans": "从英语维基百科扩充",
+            "zh-hant": "從英語維基百科擴充"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要從英語維基百科翻譯的條目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "expand_japanese",
+          "label": {
+            "en": "Expand from Japanese Wikipedia",
+            "zh-hans": "从日语维基百科扩充",
+            "zh-hant": "從日語維基百科擴充"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要從日語維基百科翻譯的條目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "lead",
+          "label": {
+            "en": "Lead improvement",
+            "zh-hans": "导言改善",
+            "zh-hant": "導言改善"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要清理導言的頁面",
+              "talk_page": false,
+              "monthly": true
+            },
+            {
+              "kind": "category",
+              "name": "缺失序言章节的条目",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        },
+        {
+          "key": "merge",
+          "label": {
+            "en": "Merging",
+            "zh-hans": "需要合并",
+            "zh-hant": "需要合併"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要合併的條目",
+              "talk_page": false,
+              "monthly": true
+            },
+            {
+              "kind": "category",
+              "name": "全部需要合併的條目頁面",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        },
+        {
+          "key": "split",
+          "label": {
+            "en": "Splitting",
+            "zh-hans": "需要拆分",
+            "zh-hant": "需要拆分"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要拆分的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "style",
+      "label": {
+        "en": "Style",
+        "zh-hans": "文风",
+        "zh-hant": "文風"
+      },
+      "tasks": [
+        {
+          "key": "copyedit",
+          "label": {
+            "en": "Copy editing",
+            "zh-hans": "语句修饰",
+            "zh-hant": "語句修飾"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要校對的頁面",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "rewrite",
+          "label": {
+            "en": "Rewriting",
+            "zh-hans": "需要重写",
+            "zh-hant": "需要重寫"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "维基百科需要重写的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "style",
+          "label": {
+            "en": "Style issues",
+            "zh-hans": "格式改善",
+            "zh-hant": "格式改善"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "维基百科需要风格编辑的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "weasel",
+          "label": {
+            "en": "Weasel wording",
+            "zh-hans": "模棱两可的语句",
+            "zh-hant": "模稜兩可的語句"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "有非常模棱两可或者十分空泛语句的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "advert",
+          "label": {
+            "en": "Promotional tone",
+            "zh-hans": "疑似广告",
+            "zh-hant": "疑似廣告"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要清理的疑似广告条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "selfpromotion",
+          "label": {
+            "en": "Self-promotion",
+            "zh-hans": "自我宣传",
+            "zh-hant": "自我宣傳"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "含有自我宣傳內容的作品",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        },
+        {
+          "key": "coi",
+          "label": {
+            "en": "Conflict of interest",
+            "zh-hans": "利益冲突",
+            "zh-hant": "利益衝突"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "可能存在利益衝突的維基百科條目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "other",
+      "label": {
+        "en": "Other",
+        "zh-hans": "其他维护",
+        "zh-hant": "其他維護"
+      },
+      "tasks": [
+        {
+          "key": "cleanup",
+          "label": {
+            "en": "Cleanup needed",
+            "zh-hans": "需要清理",
+            "zh-hant": "需要清理"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要清理的条目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "wikify",
+          "label": {
+            "en": "Wikification needed",
+            "zh-hans": "需要维基化",
+            "zh-hant": "需要維基化"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要维基化的页面",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "translation",
+          "label": {
+            "en": "Translation cleanup",
+            "zh-hans": "改善翻译",
+            "zh-hant": "改善翻譯"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "粗劣翻译",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "proofread_translation",
+          "label": {
+            "en": "Proofread translations",
+            "zh-hans": "翻译校对",
+            "zh-hant": "翻譯校對"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要校對的翻譯頁面",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        },
+        {
+          "key": "uncategorized",
+          "label": {
+            "en": "Uncategorized",
+            "zh-hans": "未分类",
+            "zh-hant": "未分類"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "缺少頁面分類的頁面",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "expert",
+          "label": {
+            "en": "Expert attention",
+            "zh-hans": "需要专家关注",
+            "zh-hant": "需要專家關注"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "所有需要專家關注的頁面",
+              "talk_page": false,
+              "monthly": false
+            },
+            {
+              "kind": "category",
+              "name": "其他需要專家關注的頁面",
+              "talk_page": false,
+              "monthly": false
+            },
+            {
+              "kind": "category",
+              "name": "需要专业人士关注的页面",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -189,7 +189,8 @@ def collect_pageviews(today: dt.date, members: set[str]) -> dict[str, object]:
 
     Returns:
         Date, coverage, source URL, and up to ten ranked articles.
-        Ranks identify this filtered list; views keep original counts.
+        Ranks identify this filtered list; ``site_rank`` retains the
+        original all-site rank and views keep their original counts.
 
     Raises:
         RuntimeError: No daily observation exists in the bounded window.
@@ -221,7 +222,13 @@ def collect_pageviews(today: dt.date, members: set[str]) -> dict[str, object]:
             )
             .head(_ITEM_LIMIT)
             .with_row_index("rank", offset=1)
-            .select("title", "url", "views", "rank")
+            .select(
+                "title",
+                "url",
+                "views",
+                "rank",
+                pl.col("_source_rank").alias("site_rank"),
+            )
         )
         return {
             "date": day.isoformat(),

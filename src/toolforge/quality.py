@@ -127,6 +127,69 @@ def _save_observations(path: Path, records: pl.DataFrame) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def cached_observations(
+    records: pl.DataFrame,
+    path: Path,
+    *,
+    now: dt.datetime | None = None,
+) -> pl.DataFrame:
+    """Attach recorded observation dates without changing cached state.
+
+    Use this read-only projection after a source failure. It retains
+    existing active observation dates for matching identities within
+    thirty days, without inferring additions, removals, or fresh dates.
+    Missing or invalid comparison data leaves every date null.
+
+    Args:
+        records: Valid raw quality records from an earlier source read.
+        path: Parquet comparison cache to read without writing.
+        now: Optional aware clock for the thirty-day retention boundary.
+
+    Returns:
+        Supplied records with nullable ISO UTC ``badge_observed_at``.
+
+    Raises:
+        ValueError: Records or the supplied clock are invalid.
+    """
+    clock = now or dt.datetime.now(dt.UTC)
+    if clock.tzinfo is None:
+        message = "Quality observations require timezone-aware timestamps."
+        raise ValueError(message)
+    if (
+        records.schema != RECORD_SCHEMA
+        or records.select(_IDENTITY).is_duplicated().any()
+        or records.filter(
+            pl.any_horizontal(pl.col(_IDENTITY).is_null()),
+        ).height
+    ):
+        message = "Cached quality observation identities are invalid."
+        raise ValueError(message)
+    clock = clock.astimezone(dt.UTC).replace(microsecond=0)
+    previous = _observation_cache(path)
+    if previous is None:
+        return records.with_columns(
+            pl.lit(None, dtype=pl.String).alias("badge_observed_at"),
+        )
+    cutoff = clock - dt.timedelta(days=_OBSERVATION_DAYS)
+    observations = previous.filter(pl.col("_active")).select(
+        *_IDENTITY,
+        pl
+        .when(pl.col("badge_observed_at").is_between(cutoff, clock))
+        .then(pl.col("badge_observed_at"))
+        .otherwise(None)
+        .alias("badge_observed_at"),
+    )
+    return records.join(
+        observations,
+        on=_IDENTITY,
+        how="left",
+        validate="1:1",
+        maintain_order="left",
+    ).with_columns(
+        pl.col("badge_observed_at").dt.to_string("%Y-%m-%dT%H:%M:%SZ"),
+    )
+
+
 def observe_quality(
     records: pl.DataFrame,
     path: Path,

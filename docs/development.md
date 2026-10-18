@@ -28,7 +28,8 @@ Maintain documentation in `docs/` in English.
 The standalone Toolforge dashboard lives under `src/toolforge/` and is
 deployed separately from the Aranami wheel. Its background server collects
 read-only quality badges, 100 days of Chinese main-page appearances,
-30 days of upcoming quality content, and measured daily pageviews.
+30 days of upcoming quality content, measured daily pageviews, and Chinese
+project maintenance lists.
 The PHP webservice renders a validated, atomically replaced snapshot.
 Keep it independent of Aranami's monitor, jobs, and publication APIs.
 It may reuse the existing read-only Wiki Replica adapters. Track dates
@@ -36,6 +37,7 @@ according to their meaning: historical display revisions establish
 main-page appearances, whereas Wikidata badges establish current status.
 A subject already displayed at the retention boundary is labelled as
 carried in rather than given an invented first-appearance date.
+
 Only direct `P31=Q7889` instances establish multilingual video-game scope.
 Count each distinct article once in language totals. Preserve all collected
 records for in-place filters and incremental display. Enrich Chinese counterpart
@@ -45,10 +47,88 @@ Compare successful raw badge results with the previous query by
 new badge. Keep the first observation time of additions for 30 days; the
 initial query or a reset disposable cache establishes a baseline without
 inventing past recognition dates. Cached reads retain observation times.
+If a live badge query fails, reuse only a validated raw cache, retain its
+original timestamp, and mark the section stale. This read-only path must
+not write the query cache or recognition baseline, nor infer additions
+from missing or expired observations. Report the failed source alongside
+the usable cached section.
+The default multilingual selection prioritizes recent additions and fills
+its ten places with currently recognized content, deduplicating the selected
+records. Do not assign observation dates to the fallback content. Retain
+the complete collection for language queries and incremental display. Use
+the Chinese label 特色列表 for FL, and display Chinese counterpart grades
+outside the linked article title.
+
 The pageviews source filters the official daily site top-1,000 list against
 current project membership with a native Polars join. Preserve the source
 date, measured zeros, and the distinction between empty and unavailable
-results. Python writers, local HTTP reads, and PHP reads share an 8 MiB
+results. Retain the original site rank for the view-count tooltip; the
+filtered project's position cannot establish a site rank.
+
+The maintenance collector reads current main-namespace project membership
+and the actual categories of those page IDs from the read-only replica.
+Match the verified Chinese maintenance roots and their dated monthly forms
+with native Polars expressions; a root's direct membership alone does not
+include its monthly backlog. Keep template and message-box revision
+evidence with the collector's category definitions, and verify live source
+contracts before changing those definitions. Emit complete, deduplicated
+lists for each of the 37 tasks and a distinct overall article count in the
+hourly snapshot. Organize these tasks under eight headings adapted from the
+[English project backlog](https://en.wikipedia.org/wiki/Wikipedia:WikiProject_Video_games/Backlog).
+Use verified Chinese categories rather than translating English category
+names, including Chinese translation expansion and proofreading tasks.
+On the homepage, show task categories and counts as links to
+`/maintenance/?task=...&page=1`. The dedicated page reads the requested
+50-record slice from the snapshot and provides previous/next navigation.
+Each row retains current assessments, all matching task keys, and the
+earliest existing dated-category month. Missing months remain null; a
+category month never establishes when the issue began. Accept older
+snapshots without these fields. Page requests never start source collection.
+Sort worklists by the earliest known month by default, keeping missing
+months last in both directions. Article-title and month sorting operate on
+the saved group before its 50-record slice, with stable article-ID ties;
+carry the selected ordering through pagination links.
+Keep the catalogue in the deployed, locally edited `maintenance.json`, with
+strict schema validation. Sections and tasks own their stable keys and
+localized labels. Each rule selects category membership or template
+inclusion and whether to inspect an article or its associated talk page.
+Match any rule within a task. Use the read-only source adapter to map talk
+matches back to the supplied main-namespace article IDs; never query all
+wiki pages or add request-time collection. Explicit monthly matching applies
+only to verified category roots. Deploy the JSON alongside its loader and
+collector, and retain complete configuration metadata in each saved group
+so PHP can render custom keys without its fixed translation catalogue.
+
+Keep dashboard sections flat and ordered as 动态热门, 条目维护, and 他山之石.
+Use larger serif headings with a bottom rule to distinguish these sections.
+Use a light green background, black text, and blue links without underlines.
+Featured/good appearances and the full,
+scrollable DYK list occupy the left desktop column; popular articles and
+the combined news/anniversaries panel occupy the right. Merge scheduled
+appearances into their content lists and mark their dates inline.
+Keep every quality-content appearance visible without collapsing or a
+bounded scroll container. Use compact numbered rows for quality content
+and DYK, matching the popular-article list. Put each recognition chip next
+to its title, and keep dates on the same row.
+Place DYK dates after article titles with padding, and reserve space for
+the scrollbar. Preserve carry-in and observation notes in labelled markers.
+Join current membership's `pa_class` and `pa_importance` onto popular and
+DYK records with native Polars expressions and no additional source query.
+Render available values as chips after the title, using short importance
+labels 极高/高/中/低; omit missing chips and accept older snapshots without
+these fields.
+Use Chinese project class names for the Chinese interface, including 初
+and 丙, both in chips and in counterpart assessment labels.
+Share one chip appearance across recognition, assessment, and importance.
+Use normal 16 px article text and 20 px third-level headings, with smaller
+chips. Show the report-status table without a disclosure control, keep its
+version and log link only in the footer, and avoid alternating row colors.
+Render multilingual content in single-line rows ordered as language and
+code, foreign title and recognition, then local title and grade. Preserve
+full titles in tooltips and keep horizontal table overflow inside its
+container. Keep recorded badge observation times in the recognition
+tooltip so they do not add another text line.
+Python writers, local HTTP reads, and PHP reads share an 8 MiB
 snapshot bound. Browser filters never trigger source collection, and the
 page does not refresh automatically.
 
@@ -56,18 +136,34 @@ Run its offline Python suite with `PYTHONPATH=src uv run python -m unittest
 discover -s tests/toolforge -p 'test_*.py'`; native PHP fixtures use
 `php tests/toolforge/status.php`, `php tests/toolforge/project.php`, and
 `php tests/toolforge/i18n.php`.
+`php tests/toolforge/assessment.php` verifies maintenance sorting and
+unknown-date placement.
 `sh tests/toolforge/deployment.sh` verifies the exact upload payload with
 fake SSH and never contacts Toolforge.
 
-Each report routine emits one `Routine result: <JSON>` terminal record
+Each report routine publishes a live start and terminal state through
+`support.routine_status`, separately from diagnostic logging. The schema-1
+snapshot at `logs/aranami-status.json` contains `updated_at` and a
+`routines` mapping. Each record contains `routine`, `status`, `dry`,
+`updated`, `duration_seconds`, `started_at`, `finished_at`, and `run_id`.
+Timestamps are UTC ISO strings with microseconds. Running records have
+null counts, duration, and finish time; terminal records use measured
+results. Skip previews before filesystem access. Lock the complete merge
+and atomically replace the bounded 1 MiB file; older runs cannot overwrite
+newer starts or regress a terminal state to running. Persistence failures
+must not change the actual report result. PHP reads this contract directly
+and never derives task states from log text or elapsed wall time.
+
+Each report routine also emits one `Routine result: <JSON>` terminal record
 from its `aranami.jobs.<routine>.job_run` logger. Schema 1 contains `routine`,
 `dry`, `status`, `updated`, and `duration_seconds`. Count `updated` only
 after a successful direct save; unchanged content and preview proposals
 do not count. Preserve null for unconfirmed delegated writes. The status
 is `updated`, `no_update`, `failed`, `deferred`, or `unknown`; failures and
 deferrals take precedence over any partial save count. Keep the routine
-start record and failure traceback. The dashboard hides preview activity
-and treats older unstructured successful completions as unconfirmed.
+start record and failure traceback for diagnostics. Keep orchestration in
+jobs and persistence in support; source and service layers do not depend
+on the dashboard or its presentation.
 
 The main project log, `logs/project.YYYY-MM-DD.log`, combines high-level
 Aranami and dashboard events in one append-only JSONL series with explicit
@@ -264,6 +360,40 @@ coverage, fetches only missing tails, and rebuilds histories that do not
 cover the required report intervals. New articles receive their own history
 fetch. Coverage metadata distinguishes an observed empty interval from an
 interval that was never queried.
+
+Fetch site ranks from the official all-access [Pageviews top endpoint][pageviews-top]
+for single UTC dates and complete calendar months. Fetch each distinct
+current interval once, then join its titles onto
+project and task-force rankings with Polars. Preserve the returned site
+article order after resolving each title with the site's Pywikibot
+namespace rules. Exclude non-main namespaces and the site's main page,
+then number the remaining articles from one with Polars. Emit that
+article-only rank in `PJ:VG/HOT/item`'s `top` parameter as `daily/<rank>`
+or `monthly/<rank>`. These ranks cover
+articles present in the API's top-1,000 pages; do not imply coverage of
+articles outside that source list.
+Omit `top` for yearly and all other unsupported intervals and for unlisted
+titles. Do not request annual datasets from other sources or estimate
+annual rankings from truncated monthly lists.
+An applicable list must be fetched successfully before publication or
+healthy-cache replacement. HTTP 404, empty or malformed results, and
+transport failures defer the complete report. Log its date, required
+period, and source failure reason through the job's existing deferral
+handler; retry the same report date at the next invocation. Save completed
+article requests in the pending checkpoint so retries reuse that work.
+An available raw list containing only non-articles is a valid empty
+article result and does not defer publication.
+Keep the existing daily availability guard ahead of the top-list lookup.
+The Chinese item wrapper ([revision 91242270][hot-item]) invokes the report
+module. Its [checked source revision 95139258][hot-module] consumes a bare
+numeric `top` and infers the period from dates. The replacement source is
+maintained in `wiki/zhwiki/PJ_VG_HOT.lua`: read `daily/<rank>` or
+`monthly/<rank>` directly and use the supplied `YYYY-MM-DD` dates. Aranami
+owns the leading list marker; the item module returns inline content.
+Do not infer the tooltip period from dates or support annual ranks.
+Verify rendered output with Lua 5.1:
+`TZ=UTC lua tests/wiki/test_pj_vg_hot.lua`. Publishing this source to the
+on-wiki module is separate from deploying the Aranami wheel.
 
 Keep the source adapter's one-attempt contract. The Pageviews routine skips
 an article immediately after HTTP 504, excluding it from the current rankings
@@ -481,3 +611,6 @@ wheel as a GitHub Release asset with notes from its changelog section.
 [2]: https://docs.pola.rs/user-guide/migration/pandas/
 [3]: https://zh.wikipedia.org/wiki/Module:Article_history/config
 [4]: https://en.wikipedia.org/wiki/Module:Article_history/config
+[hot-item]: https://zh.wikipedia.org/w/index.php?title=WikiProject:VG/HOT/item&oldid=91242270
+[hot-module]: https://zh.wikipedia.org/w/index.php?title=Module:PJ:VG/HOT&oldid=95139258
+[pageviews-top]: https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/examples/project-metrics.html#most-viewed-pages

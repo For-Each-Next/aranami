@@ -4,11 +4,12 @@
 # ruff: file-ignore[private-member-access, pytest-unittest-raises-assertion]
 
 import datetime as dt
+import urllib.error
 from contextlib import chdir, nullcontext
 from dataclasses import replace
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import mwparserfromhell
 import polars as pl
@@ -25,6 +26,7 @@ _TEXT = (
     "<!-- report date 2026-01-09 -->"
     '<!-- aranami end="page_views" -->After'
 )
+_TOP_SCHEMA = {"title": pl.String, "top": pl.Int64}
 
 
 def _report(stop: dt.date) -> pageviews.PageviewReport:
@@ -150,6 +152,276 @@ class TestPeriodAggregation(TestCase):
         )
 
 
+class TestSiteTopRanks(TestCase):
+    """Keep official site ranks distinct from project rankings."""
+
+    def test_top_parameter_labels_only_supported_intervals(self) -> None:
+        """Label daily and calendar-month ranks explicitly."""
+        for start, stop, expected in (
+            (dt.date(2026, 9, 30), dt.date(2026, 10, 1), "daily/55"),
+            (dt.date(2026, 9, 1), dt.date(2026, 10, 1), "monthly/55"),
+            (dt.date(2024, 2, 1), dt.date(2024, 3, 1), "monthly/55"),
+            (dt.date(2026, 12, 1), dt.date(2027, 1, 1), "monthly/55"),
+            (dt.date(2026, 1, 1), dt.date(2027, 1, 1), None),
+            (dt.date(2026, 9, 2), dt.date(2026, 10, 2), None),
+        ):
+            with self.subTest(start=start, stop=stop):
+                result = pageviews._site_top_parameter(start, stop, 55)
+                assert result == expected
+
+    @staticmethod
+    def test_calendar_month_reuses_site_ranks_for_task_forces() -> None:
+        """Reuse interval lookups and omit unmatched titles."""
+        site = MagicMock()
+        stop = dt.date(2026, 10, 1)
+        periods = (job.PROJECT_PERIODS[0], job.PROJECT_PERIODS[2])
+        articles = pl.DataFrame({
+            "title": ["A", "B"],
+            "class": ["A", "B"],
+            "importance": ["高", "低"],
+        })
+        views = pl.DataFrame(
+            [
+                (title, start, end, value)
+                for title, value in (("A", 10), ("B", 3))
+                for start, end in pageviews.report_periods(stop, periods)
+            ],
+            schema=pageviews._VIEWS_SCHEMA,
+            orient="row",
+        )
+        settings = replace(
+            job.REPORT_SETTINGS,
+            periods=periods,
+            task_forces=(job.TASK_FORCES[0],),
+        )
+        with (
+            patch.object(
+                pageviews,
+                "_project_articles",
+                side_effect=(articles, articles.tail(1)),
+            ),
+            patch.object(pageviews, "aggregate_views", return_value=views),
+            patch.object(pageviews.PageviewsCache, "load"),
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                side_effect=(
+                    pl.DataFrame({"title": ["A"], "top": [701]}),
+                    pl.DataFrame({"title": ["B"], "top": [42]}),
+                ),
+            ) as fetch_top,
+        ):
+            report = pageviews.build_report(site, stop, settings=settings)
+        assert fetch_top.call_args_list == [
+            call(site, dt.date(2026, 9, 30), stop),
+            call(site, dt.date(2026, 9, 1), stop),
+        ]
+        items = [
+            template
+            for template in mwparserfromhell.parse(
+                report.text,
+            ).filter_templates()
+            if str(template.name) == "PJ:VG/HOT/item"
+        ]
+        assert [str(item.get("rank").value) for item in items] == [
+            "1",
+            "2",
+            "1",
+            "2",
+            "1",
+        ]
+        assert [
+            str(item.get("top").value) if item.has("top") else None
+            for item in items
+        ] == ["daily/701", None, None, "monthly/42", "monthly/42"]
+
+    @staticmethod
+    def test_rolling_month_omits_top_without_requesting_site_ranks() -> None:
+        """Omit top for unsupported rolling intervals."""
+        stop = dt.date(2026, 10, 2)
+        period = job.PROJECT_PERIODS[2]
+        articles = pl.DataFrame({
+            "title": ["A"],
+            "class": ["B"],
+            "importance": ["低"],
+        })
+        intervals = (
+            *pageviews.report_periods(stop, (period,)),
+            (stop - dt.timedelta(days=1), stop),
+        )
+        views = pl.DataFrame(
+            [("A", start, end, 1) for start, end in intervals],
+            schema=pageviews._VIEWS_SCHEMA,
+            orient="row",
+        )
+        with (
+            patch.object(
+                pageviews,
+                "_project_articles",
+                return_value=articles,
+            ),
+            patch.object(pageviews, "aggregate_views", return_value=views),
+            patch.object(pageviews.PageviewsCache, "load"),
+            patch(
+                "aranami.sources.pageviews.urllib.request.urlopen",
+            ) as urlopen,
+        ):
+            report = pageviews.build_report(
+                MagicMock(),
+                stop,
+                settings=replace(
+                    job.REPORT_SETTINGS,
+                    periods=(period,),
+                    task_forces=(),
+                ),
+            )
+        urlopen.assert_not_called()
+        items = [
+            template
+            for template in mwparserfromhell.parse(
+                report.text,
+            ).filter_templates()
+            if str(template.name) == "PJ:VG/HOT/item"
+        ]
+        assert str(items[0].get("start").value) == "2026-09-02"
+        assert str(items[0].get("end").value) == "2026-10-01"
+        assert not items[0].has("top")
+
+    def test_unavailable_site_top_defers_complete_report(self) -> None:
+        """Defer reports after required top-list requests fail."""
+        site = MagicMock()
+        stop = dt.date(2026, 10, 1)
+        periods = (job.PROJECT_PERIODS[0], job.PROJECT_PERIODS[2])
+        for error in (
+            urllib.error.URLError("connection unavailable"),
+            ValueError("top list is empty"),
+            TypeError("invalid top response"),
+        ):
+            with (
+                self.subTest(error=type(error).__name__),
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_top_dataframe",
+                    side_effect=error,
+                ) as fetch_top,
+                self.assertRaises(pageviews.PageviewsDeferredError) as raised,
+            ):
+                pageviews._site_top_ranks(site, stop, periods)
+            fetch_top.assert_called_once_with(
+                site,
+                dt.date(2026, 9, 30),
+                stop,
+            )
+            message = str(raised.exception)
+            assert "report date 2026-09-30" in message
+            assert "2026-09-30 to 2026-09-30" in message
+            assert str(error) in message
+            assert "retry on the next invocation" in message
+            assert raised.exception.__cause__ is error
+
+    def test_monthly_http_failure_closes_response_and_defers(self) -> None:
+        """Defer reports when the calendar-month list is absent."""
+        site = MagicMock()
+        stop = dt.date(2026, 10, 1)
+        error = urllib.error.HTTPError(
+            "https://example.test/top",
+            404,
+            "Not Found",
+            {},
+            None,
+        )
+        periods = (
+            job.PROJECT_PERIODS[0],
+            job.PROJECT_PERIODS[2],
+            job.PROJECT_PERIODS[4],
+        )
+        with (
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                side_effect=(
+                    pl.DataFrame(
+                        {"title": ["A"], "top": [42]},
+                        schema=_TOP_SCHEMA,
+                    ),
+                    error,
+                ),
+            ) as fetch_top,
+            patch.object(error, "close") as close,
+            self.assertRaises(pageviews.PageviewsDeferredError) as raised,
+        ):
+            pageviews._site_top_ranks(site, stop, periods)
+        assert fetch_top.call_args_list == [
+            call(site, dt.date(2026, 9, 30), stop),
+            call(site, dt.date(2026, 9, 1), stop),
+        ]
+        close.assert_called_once()
+        message = str(raised.exception)
+        assert "report date 2026-09-30" in message
+        assert "2026-09-01 to 2026-09-30" in message
+        assert "HTTP Error 404: Not Found" in message
+        assert "report date remains unchanged" in message
+
+    @staticmethod
+    def test_calendar_year_report_omits_site_ranks_without_deferral() -> None:
+        """Publish yearly rankings without site ranks or deferral."""
+        site = MagicMock()
+        stop = dt.date(2026, 1, 1)
+        period = job.PROJECT_PERIODS[4]
+        articles = pl.DataFrame({
+            "title": ["A"],
+            "class": ["B"],
+            "importance": ["低"],
+        })
+        intervals = (
+            *pageviews.report_periods(stop, (period,)),
+            (stop - dt.timedelta(days=1), stop),
+        )
+        views = pl.DataFrame(
+            [("A", start, end, 12) for start, end in intervals],
+            schema=pageviews._VIEWS_SCHEMA,
+            orient="row",
+        )
+        with (
+            patch.object(
+                pageviews,
+                "_project_articles",
+                return_value=articles,
+            ),
+            patch.object(pageviews, "aggregate_views", return_value=views),
+            patch.object(pageviews.PageviewsCache, "load") as load_cache,
+            patch(
+                "aranami.sources.pageviews.urllib.request.urlopen",
+            ) as urlopen,
+        ):
+            report = pageviews.build_report(
+                site,
+                stop,
+                settings=replace(
+                    job.REPORT_SETTINGS,
+                    periods=(period,),
+                    task_forces=(),
+                ),
+            )
+        urlopen.assert_not_called()
+        load_cache.return_value.save_pending.assert_not_called()
+        load_cache.return_value.save.assert_called_once()
+        assert report.data_date == dt.date(2025, 12, 31)
+        assert report.yearly_top == "A"
+        items = [
+            template
+            for template in mwparserfromhell.parse(
+                report.text,
+            ).filter_templates()
+            if str(template.name) == "PJ:VG/HOT/item"
+        ]
+        assert len(items) == 1
+        assert str(items[0].get("start").value) == "2025-01-01"
+        assert str(items[0].get("end").value) == "2025-12-31"
+        assert str(items[0].get("views").value) == "12"
+        assert not items[0].has("top")
+
+
 class TestReportState(TestCase):
     """Verify persistent wiki state and managed-block preservation."""
 
@@ -190,6 +462,14 @@ class TestReportState(TestCase):
                 return_value=views,
             ) as fetch,
             patch.object(pageviews.PageviewsCache, "load") as load_cache,
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=pl.DataFrame(
+                    {"title": ["A"], "top": [42]},
+                    schema=_TOP_SCHEMA,
+                ),
+            ),
         ):
             report = pageviews.build_report(
                 MagicMock(),
@@ -305,6 +585,14 @@ class TestReportState(TestCase):
             ),
             patch.object(pageviews, "aggregate_views", return_value=views),
             patch.object(pageviews.PageviewsCache, "load"),
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=pl.DataFrame(
+                    {"title": ["A"], "top": [42]},
+                    schema=_TOP_SCHEMA,
+                ),
+            ),
         ):
             report = pageviews.build_report(
                 MagicMock(),
@@ -388,6 +676,14 @@ class TestReportState(TestCase):
             ) as members,
             patch.object(pageviews, "aggregate_views", return_value=views),
             patch.object(pageviews.PageviewsCache, "load"),
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=pl.DataFrame(
+                    {"title": ["A"], "top": [42]},
+                    schema=_TOP_SCHEMA,
+                ),
+            ),
         ):
             report = pageviews.build_report(
                 MagicMock(),
@@ -474,6 +770,14 @@ class TestReportState(TestCase):
                 return_value=views,
             ) as aggregate,
             patch.object(pageviews.PageviewsCache, "load") as load_cache,
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=pl.DataFrame(
+                    {"title": ["A"], "top": [42]},
+                    schema=_TOP_SCHEMA,
+                ),
+            ),
         ):
             report = pageviews.build_report(
                 MagicMock(),

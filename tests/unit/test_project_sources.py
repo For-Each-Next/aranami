@@ -73,6 +73,13 @@ class TestProjectTags(TestCase):
                 [],
                 category=True,
             )
+            categories = projects.page_categories(site, [])
+            maintenance = projects.maintenance_tags(
+                site,
+                [],
+                kind="template",
+                talk_page=True,
+            )
         replica.assert_not_called()
         assert tagged.schema["tags"] == pl.List(pl.String)
         assert revisions.schema == {
@@ -80,10 +87,292 @@ class TestProjectTags(TestCase):
             "page_latest": pl.Int64,
         }
         assert memberships.schema == {"page_id": pl.Int64, "name": pl.String}
+        assert categories.schema == {"page_id": pl.Int64, "name": pl.String}
+        assert maintenance.schema == categories.schema
 
 
 class TestProjectStatements(TestCase):
     """Verify actual QueryFrame bindings and metadata restrictions."""
+
+    @staticmethod
+    def test_maintenance_tags_bound_subject_ids_in_every_scope() -> None:
+        """Use current talk titles and modern tag link targets."""
+        site = OfflineSite("zh", "wikipedia")
+        identifiers = [*range(1, 1002), 1, 2]
+        for kind in ("category", "template"):
+            for talk_page in (False, True):
+                with patch(
+                    "aranami.sources.quarry.query._fetch",
+                    return_value=(("page_id", "name"), []),
+                ) as fetch:
+                    result = projects.maintenance_tags(
+                        site,
+                        identifiers,
+                        kind=kind,
+                        talk_page=talk_page,
+                    )
+                batches = []
+                for call in fetch.call_args_list:
+                    replica, statement, _ = call.args
+                    compiled = statement.compile()
+                    query = str(compiled)
+                    assert replica.project == "zhwiki"
+                    assert statement.is_select
+                    assert tuple(statement.selected_columns.keys()) == (
+                        "page_id",
+                        "name",
+                    )
+                    assert "page.page_namespace =" in query
+                    assert compiled.params["lt_namespace_1"] == (
+                        14 if kind == "category" else 10
+                    )
+                    table = (
+                        "categorylinks"
+                        if kind == "category"
+                        else "templatelinks"
+                    )
+                    prefix = "cl" if kind == "category" else "tl"
+                    assert (
+                        f"{table}.{prefix}_target_id = linktarget.lt_id"
+                        in query
+                    )
+                    source = "talk" if talk_page else "page"
+                    assert f"{table}.{prefix}_from = {source}.page_id" in query
+                    if talk_page:
+                        assert "talk.page_title = page.page_title" in query
+                        assert "talk.page_namespace =" in query
+                        assert "JOIN page AS talk" in query
+                    else:
+                        assert "page AS talk" not in query
+                    batches.append(compiled.params["page_id_1"])
+                assert [len(batch) for batch in batches] == [500, 500, 1]
+                assert [value for batch in batches for value in batch] == list(
+                    range(1, 1002),
+                )
+                assert result.schema == {
+                    "page_id": pl.Int64,
+                    "name": pl.String,
+                }
+
+    @staticmethod
+    def test_maintenance_talk_tags_map_to_current_subject_identity() -> None:
+        """Exclude unrelated namespaces and tags outside project IDs."""
+        metadata = MetaData()
+        page = Table(
+            "page",
+            metadata,
+            Column("page_id", Integer),
+            Column("page_namespace", Integer),
+            Column("page_title", LargeBinary),
+        )
+        target = Table(
+            "linktarget",
+            metadata,
+            Column("lt_id", Integer),
+            Column("lt_namespace", Integer),
+            Column("lt_title", LargeBinary),
+        )
+        category = Table(
+            "categorylinks",
+            metadata,
+            Column("cl_from", Integer),
+            Column("cl_target_id", Integer),
+        )
+        template = Table(
+            "templatelinks",
+            metadata,
+            Column("tl_from", Integer),
+            Column("tl_target_id", Integer),
+        )
+        engine = create_engine("sqlite://")
+        replica = Replica("zhwiki")
+        replica._engine = engine  # ruff: ignore[private-member-access]
+        try:
+            with engine.begin() as connection:
+                metadata.create_all(connection)
+                connection.execute(
+                    page.insert(),
+                    [
+                        {
+                            "page_id": number,
+                            "page_namespace": namespace,
+                            "page_title": title,
+                        }
+                        for number, namespace, title in (
+                            (1, 0, b"First"),
+                            (101, 1, b"First"),
+                            (2, 0, b"Second"),
+                            (102, 1, b"Second"),
+                            (3, 2, b"First"),
+                            (103, 3, b"First"),
+                            (4, 0, b"No_talk"),
+                        )
+                    ],
+                )
+                connection.execute(
+                    target.insert(),
+                    [
+                        {
+                            "lt_id": number,
+                            "lt_namespace": namespace,
+                            "lt_title": title,
+                        }
+                        for number, namespace, title in (
+                            (1, 14, b"Needs_sources"),
+                            (2, 10, b"Review"),
+                            (3, 0, b"Unrelated"),
+                        )
+                    ],
+                )
+                connection.execute(
+                    category.insert(),
+                    [
+                        {"cl_from": source, "cl_target_id": destination}
+                        for source, destination in (
+                            (1, 1),
+                            (101, 1),
+                            (102, 1),
+                            (103, 1),
+                            (101, 3),
+                        )
+                    ],
+                )
+                connection.execute(
+                    template.insert(),
+                    [
+                        {"tl_from": source, "tl_target_id": destination}
+                        for source, destination in (
+                            (1, 2),
+                            (101, 2),
+                            (102, 2),
+                            (103, 2),
+                            (101, 3),
+                        )
+                    ],
+                )
+            with patch(
+                "aranami.sources.quarry.projects._replica",
+                return_value=replica,
+            ):
+                site = OfflineSite("zh", "wikipedia")
+                for kind, name in (
+                    ("category", "Needs_sources"),
+                    ("template", "Review"),
+                ):
+                    main = projects.maintenance_tags(
+                        site,
+                        [1, 3, 4],
+                        kind=kind,
+                    )
+                    talk = projects.maintenance_tags(
+                        site,
+                        [1, 3, 4],
+                        kind=kind,
+                        talk_page=True,
+                    )
+                    assert main.to_dicts() == [{"page_id": 1, "name": name}]
+                    assert talk.to_dicts() == [{"page_id": 1, "name": name}]
+        finally:
+            engine.dispose()
+
+    @staticmethod
+    def test_page_categories_bind_deduplicate_and_batch_exact_ids() -> None:
+        """Read category names only for bounded requested identities."""
+        site = OfflineSite("zh", "wikipedia")
+        identifiers = [*range(1, 1002), 1, 2]
+        with patch(
+            "aranami.sources.quarry.query._fetch",
+            return_value=(("page_id", "name"), []),
+        ) as fetch:
+            result = projects.page_categories(site, identifiers)
+        batches = []
+        for call in fetch.call_args_list:
+            replica, statement, _ = call.args
+            compiled = statement.compile()
+            assert replica.project == "zhwiki"
+            assert statement.is_select
+            assert tuple(statement.selected_columns.keys()) == (
+                "page_id",
+                "name",
+            )
+            assert compiled.params["lt_namespace_1"] == 14  # ruff: ignore[magic-value-comparison]
+            assert "categorylinks.cl_target_id = linktarget.lt_id" in str(
+                compiled,
+            )
+            assert "lt_title_1" not in compiled.params
+            batches.append(compiled.params["cl_from_1"])
+        assert [len(batch) for batch in batches] == [500, 500, 1]
+        assert [value for batch in batches for value in batch] == list(
+            range(1, 1002),
+        )
+        assert result.schema == {"page_id": pl.Int64, "name": pl.String}
+
+    @staticmethod
+    def test_page_categories_filter_ids_and_target_namespace() -> None:
+        """Exclude unrelated page IDs and link namespaces."""
+        metadata = MetaData()
+        links = Table(
+            "categorylinks",
+            metadata,
+            Column("cl_from", Integer),
+            Column("cl_target_id", Integer),
+        )
+        target = Table(
+            "linktarget",
+            metadata,
+            Column("lt_id", Integer),
+            Column("lt_namespace", Integer),
+            Column("lt_title", LargeBinary),
+        )
+        engine = create_engine("sqlite://")
+        replica = Replica("zhwiki")
+        replica._engine = engine  # ruff: ignore[private-member-access]
+        category = "自2026年10月缺少来源的条目"
+        try:
+            with engine.begin() as connection:
+                metadata.create_all(connection)
+                connection.execute(
+                    target.insert(),
+                    [
+                        {
+                            "lt_id": identifier,
+                            "lt_namespace": namespace,
+                            "lt_title": title.encode(),
+                        }
+                        for identifier, namespace, title in (
+                            (11, 14, category),
+                            (12, 10, "Maintenance template"),
+                            (13, 14, "Needs_attention"),
+                        )
+                    ],
+                )
+                connection.execute(
+                    links.insert(),
+                    [
+                        {"cl_from": page_id, "cl_target_id": target_id}
+                        for page_id, target_id in (
+                            (1, 11),
+                            (1, 12),
+                            (2, 11),
+                            (3, 13),
+                            (99, 11),
+                        )
+                    ],
+                )
+            with patch(
+                "aranami.sources.quarry.projects._replica",
+                return_value=replica,
+            ):
+                result = projects.page_categories(
+                    OfflineSite("zh", "wikipedia"),
+                    [1, 3],
+                )
+            assert result.to_dicts() == [
+                {"page_id": 1, "name": category},
+                {"page_id": 3, "name": "Needs_attention"},
+            ]
+        finally:
+            engine.dispose()
 
     @staticmethod
     def test_category_members_apply_explicit_main_namespace_filter() -> None:

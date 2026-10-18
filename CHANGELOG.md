@@ -4,6 +4,41 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.6
 
+### 0.5.3 (2026-10-18 08:16 UTC)
+
+Overview: Added configurable Chinese video-game maintenance worklists and
+simplified the Toolforge dashboard, with compact article lists, cached
+multilingual comparisons, direct routine states, and typed pageview ranks.
+
+- Added 37 verified Chinese maintenance tasks in eight equal-height cards, with
+  sortable fifty-article pages showing assessments, issues, and tag months.
+- Defined maintenance groups and labels in a local configuration file,
+  supporting category or template rules on articles or discussion pages.
+- Flattened the dashboard, placed quality content and DYK on the left and
+  popular articles and news history on the right, and added DYK scrolling.
+- Kept every past and scheduled quality appearance visible and placed
+  dates on the right of all compact article lists.
+- Prioritized recent cross-wiki recognitions and filled the default ten
+  records from existing articles without inventing observation dates.
+- Reused valid cached recognitions after source failures, preserving
+  observation times and displaying a cache notice.
+- Used numbered recommendations, Chinese grade names, short importance
+  labels, and one chip style for recognition and project assessments.
+- Displayed multilingual comparisons in language, foreign-article, and
+  local-article columns, and removed language statistics.
+- Used normal article text, serif section headings, green backgrounds,
+  blue links, and a single page heading without repeated navigation.
+- Replaced status-log parsing with atomic live routine snapshots, guarded
+  against stale writes and omitted previews without changing edit outcomes.
+- Kept plain report states and times visible, with one version footer;
+  showed site ranks in view-count tooltips and linked the dated Topviews list.
+- Added site ranks from Wikimedia's daily and calendar-month API lists,
+  counting only articles and omitting homepages and unsupported intervals.
+- Added explicit daily/monthly slash rank parameters and inline Lua
+  rendering, keeping report numbering outside the item module.
+- Deferred reports until applicable top lists became available, logged
+  the reason, and retained completed article requests for later retries.
+
 ### 0.5.2 (2026-10-18 06:35 UTC)
 
 Overview: Added an independent Toolforge dashboard for Chinese main-page

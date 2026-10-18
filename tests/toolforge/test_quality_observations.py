@@ -13,7 +13,11 @@ from unittest.mock import patch
 
 import polars as pl
 
-from toolforge.quality import RECORD_SCHEMA, observe_quality
+from toolforge.quality import (
+    RECORD_SCHEMA,
+    cached_observations,
+    observe_quality,
+)
 
 _START = dt.datetime(2026, 10, 1, 12, tzinfo=dt.UTC)
 
@@ -231,3 +235,184 @@ class TestQualityObservations(TestCase):
                     now=_START,
                 )
             assert path.read_bytes() == original
+
+
+class TestCachedQualityObservations(TestCase):
+    """Verify read-only observation enrichment for cached query rows."""
+
+    @staticmethod
+    def test_retains_only_active_matching_dates_within_inclusive_window() -> (
+        None
+    ):
+        """Keep raw titles and valid active observation dates."""
+        clock = _START + dt.timedelta(days=40)
+        previous = _records(
+            ("Q1", "en", "GA"),
+            ("Q2", "en", "FA"),
+            ("Q3", "fr", "GA"),
+            ("Q4", "en", "GA"),
+            ("Q5", "en", "GA"),
+            ("Q6", "en", "GA"),
+            ("Q7", "de", "GA"),
+            ("Q8", "en", "GA"),
+            ("Q9", "en", "GA"),
+        ).with_columns(
+            pl.Series(
+                "badge_observed_at",
+                [
+                    None,
+                    clock - dt.timedelta(days=30),
+                    clock,
+                    clock - dt.timedelta(days=30, seconds=1),
+                    clock + dt.timedelta(seconds=1),
+                    clock - dt.timedelta(days=1),
+                    clock - dt.timedelta(days=1),
+                    clock - dt.timedelta(days=1),
+                    clock - dt.timedelta(days=1),
+                ],
+                dtype=pl.Datetime("us", "UTC"),
+            ),
+            pl.Series(
+                "_active",
+                [True, True, True, True, True, False, True, True, True],
+            ),
+        )
+        records = _records(
+            ("Q3", "fr", "GA"),
+            ("Q2", "en", "FA"),
+            ("Q1", "en", "GA"),
+            ("Q4", "en", "GA"),
+            ("Q5", "en", "GA"),
+            ("Q6", "en", "GA"),
+            ("Q7", "fr", "GA"),
+            ("Q8", "en", "FA"),
+            ("Q10", "en", "GA"),
+        ).with_columns(
+            pl.concat_str(pl.lit("Renamed "), pl.col("item")).alias("title"),
+            pl.lit("中文条目").alias("zh_title"),
+            pl.lit("https://zh.wikipedia.org/wiki/中文条目").alias("zh_url"),
+            pl.lit("B").alias("zh_class"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "observations.parquet"
+            previous.write_parquet(path)
+            original = path.read_bytes()
+            modified_at = path.stat().st_mtime_ns
+            result = cached_observations(
+                records,
+                path,
+                now=clock.astimezone(dt.timezone(dt.timedelta(hours=8))),
+            )
+            empty = cached_observations(_records(), path, now=clock)
+            assert path.read_bytes() == original
+            assert path.stat().st_mtime_ns == modified_at
+            assert list(Path(directory).iterdir()) == [path]
+        assert result.drop("badge_observed_at").equals(records)
+        assert result.schema == pl.Schema({
+            **dict(RECORD_SCHEMA),
+            "badge_observed_at": pl.String,
+        })
+        assert result["badge_observed_at"].to_list() == [
+            "2026-11-10T12:00:00Z",
+            "2026-10-11T12:00:00Z",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]
+        assert empty.is_empty()
+        assert empty.schema == result.schema
+
+    @staticmethod
+    def test_missing_cache_does_not_establish_a_baseline() -> None:
+        """Return null dates without creating files or directories."""
+        records = _records(("Q1", "en", "GA"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing" / "observations.parquet"
+            result = cached_observations(records, path, now=_START)
+            assert list(Path(directory).iterdir()) == []
+        assert result.drop("badge_observed_at").equals(records)
+        assert result["badge_observed_at"].to_list() == [None]
+        assert result.schema["badge_observed_at"] == pl.String
+
+    def test_invalid_cache_is_ignored_without_replacement(self) -> None:
+        """Preserve corrupt, obsolete, and invalid cache files."""
+        records = _records(("Q1", "en", "GA"))
+        valid = records.with_columns(
+            pl.lit(_START, dtype=pl.Datetime("us", "UTC")).alias(
+                "badge_observed_at",
+            ),
+            pl.lit(value=True).alias("_active"),
+        )
+        invalid = {
+            "unreadable": None,
+            "obsolete schema": records,
+            "duplicate identities": pl.concat([valid, valid]),
+            "null identity": valid.with_columns(
+                pl.lit(None, dtype=pl.String).alias("site"),
+            ),
+            "null activity": valid.with_columns(
+                pl.lit(None, dtype=pl.Boolean).alias("_active"),
+            ),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "observations.parquet"
+            for name, cache in invalid.items():
+                with self.subTest(cache=name):
+                    if cache is None:
+                        path.write_bytes(b"invalid parquet")
+                    else:
+                        cache.write_parquet(path)
+                    original = path.read_bytes()
+                    modified_at = path.stat().st_mtime_ns
+                    with self.assertLogs("toolforge.quality", level="WARNING"):
+                        result = cached_observations(
+                            records,
+                            path,
+                            now=_START,
+                        )
+                    assert result.drop("badge_observed_at").equals(records)
+                    assert result["badge_observed_at"].to_list() == [None]
+                    assert result.schema["badge_observed_at"] == pl.String
+                    assert path.read_bytes() == original
+                    assert path.stat().st_mtime_ns == modified_at
+                    assert list(Path(directory).iterdir()) == [path]
+
+    def test_invalid_records_and_naive_clock_leave_cache_unchanged(
+        self,
+    ) -> None:
+        """Reject invalid records and timezone-naive clocks."""
+        records = _records(("Q1", "en", "GA"))
+        invalid = {
+            "missing column": records.drop("title"),
+            "wrong column type": records.with_columns(
+                pl.lit(1).alias("language"),
+            ),
+            "duplicate identities": pl.concat([records, records]),
+            **{
+                f"null {column}": records.with_columns(
+                    pl.lit(None, dtype=pl.String).alias(column),
+                )
+                for column in ("item", "site", "status")
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "observations.parquet"
+            _observe(records, path, 0)
+            original = path.read_bytes()
+            modified_at = path.stat().st_mtime_ns
+            for name, current in invalid.items():
+                with self.subTest(records=name), self.assertRaises(ValueError):
+                    cached_observations(current, path, now=_START)
+            with self.assertRaises(ValueError):
+                cached_observations(
+                    records,
+                    path,
+                    now=_START.replace(tzinfo=None),
+                )
+            assert path.read_bytes() == original
+            assert path.stat().st_mtime_ns == modified_at
+            assert list(Path(directory).iterdir()) == [path]
