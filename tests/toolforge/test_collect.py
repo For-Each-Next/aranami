@@ -1567,6 +1567,7 @@ class TestSnapshotPublication(TestCase):
                 assert set(saved) == {
                     "period",
                     "updated_at",
+                    "highlights_updated_at",
                     "quality",
                     "pageviews",
                     "backlog",
@@ -1636,6 +1637,7 @@ class TestSnapshotPublication(TestCase):
         self.pageviews.assert_called_once_with(
             dt.date(2026, 10, 18),
             {"Game"},
+            site=reader.site,
         )
         upcoming = functions["collect_upcoming"]
         assert upcoming.call_args.args[:2] == (

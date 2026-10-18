@@ -35,16 +35,19 @@ function uiCatalog(): array
         'assessment.class.BL' => ['en' => 'B-Class list', 'zh-hans' => '乙级列表', 'zh-hant' => '乙級列表'],
         'assessment.class.C' => ['en' => 'C-Class', 'zh-hans' => '丙', 'zh-hant' => '丙'],
         'assessment.class.CL' => ['en' => 'C-Class list', 'zh-hans' => '丙级列表', 'zh-hant' => '丙級列表'],
+        'assessment.class.D' => ['en' => 'D-Class', 'zh-hans' => '丁', 'zh-hant' => '丁'],
         'assessment.class.Start' => ['en' => 'Start-Class', 'zh-hans' => '初', 'zh-hant' => '初'],
-        'assessment.class.SL' => ['en' => 'Start-Class list', 'zh-hans' => '初级列表', 'zh-hant' => '初級列表'],
+        'assessment.class.SL' => ['en' => 'Stub-Class list', 'zh-hans' => '小列表', 'zh-hant' => '小列表'],
         'assessment.class.Stub' => ['en' => 'Stub-Class', 'zh-hans' => '小作品', 'zh-hant' => '小作品'],
         'assessment.class.List' => ['en' => 'List-Class', 'zh-hans' => '列表', 'zh-hant' => '列表'],
+        'assessment.class.Substub' => ['en' => 'Substub-Class', 'zh-hans' => '小小作品', 'zh-hant' => '小小作品'],
         'assessment.class.Disambig' => ['en' => 'Disambiguation', 'zh-hans' => '消歧义', 'zh-hant' => '消歧義'],
         'assessment.class.Unassessed' => ['en' => 'Unassessed', 'zh-hans' => '未评级', 'zh-hant' => '未評級'],
         'assessment.importance.Top' => ['en' => 'Top', 'zh-hans' => '极高', 'zh-hant' => '極高'],
         'assessment.importance.High' => ['en' => 'High', 'zh-hans' => '高', 'zh-hant' => '高'],
         'assessment.importance.Mid' => ['en' => 'Mid', 'zh-hans' => '中', 'zh-hant' => '中'],
         'assessment.importance.Low' => ['en' => 'Low', 'zh-hans' => '低', 'zh-hant' => '低'],
+        'assessment.importance.Bottom' => ['en' => 'Bottom', 'zh-hans' => '极低', 'zh-hant' => '極低'],
         'assessment.importance.NA' => ['en' => 'Not applicable', 'zh-hans' => '不适用', 'zh-hant' => '不適用'],
         'assessment.importance.Unknown' => ['en' => 'Unassessed', 'zh-hans' => '未评级', 'zh-hant' => '未評級'],
         'snapshot.none' => ['en' => 'No data snapshot is available yet', 'zh-hans' => '尚未获取数据快照', 'zh-hant' => '尚未取得資料快照'],
@@ -56,8 +59,12 @@ function uiCatalog(): array
         'quality.cached' => ['en' => 'Showing cached data.', 'zh-hans' => '当前显示缓存数据。', 'zh-hant' => '目前顯示快取資料。'],
         'quality.empty' => ['en' => 'No recognized content is currently recorded.', 'zh-hans' => '目前没有已记录的认证内容。', 'zh-hant' => '目前沒有已記錄的認證內容。'],
         'quality.language' => ['en' => 'Project language', 'zh-hans' => '计划语言', 'zh-hant' => '計畫語言'],
-        'quality.random' => ['en' => 'Random 10', 'zh-hans' => '随机筛选10条', 'zh-hant' => '隨機篩選10條'],
+        'quality.filter' => ['en' => 'Filter', 'zh-hans' => '筛选', 'zh-hant' => '篩選'],
         'quality.all_languages' => ['en' => 'All languages', 'zh-hans' => '所有语言', 'zh-hant' => '所有語言'],
+        'quality.show_all' => ['en' => 'Display all', 'zh-hans' => '显示全部', 'zh-hant' => '顯示全部'],
+        'quality.local_any' => ['en' => 'Any', 'zh-hans' => '不限', 'zh-hant' => '不限'],
+        'quality.local_exists' => ['en' => 'Exists', 'zh-hans' => '已存在', 'zh-hant' => '已存在'],
+        'quality.local_missing' => ['en' => 'Missing', 'zh-hans' => '未存在', 'zh-hant' => '未存在'],
         'quality.all_aria' => ['en' => 'Recognized articles across all languages', 'zh-hans' => '各语言现有认证条目', 'zh-hant' => '各語言目前認證條目'],
         'quality.sample' => ['en' => '{language} · {count} recognition records', 'zh-hans' => '{language} · {count}条认证记录', 'zh-hant' => '{language} · {count}筆認證記錄'],
         'quality.sample_status' => ['en' => '{language} · {status} · {count} recognition records', 'zh-hans' => '{language} · {status} · {count}条认证记录', 'zh-hant' => '{language} · {status} · {count}筆認證記錄'],
@@ -68,6 +75,7 @@ function uiCatalog(): array
         'column.article' => ['en' => 'Article', 'zh-hans' => '条目', 'zh-hant' => '條目'],
         'column.language' => ['en' => 'Language', 'zh-hans' => '语言', 'zh-hant' => '語言'],
         'column.local_article' => ['en' => 'Local article', 'zh-hans' => '本地条目', 'zh-hant' => '本地條目'],
+        'column.wikidata_item' => ['en' => 'Wikidata item', 'zh-hans' => '维基数据项', 'zh-hant' => '維基資料項'],
         'quality.language_label' => ['en' => '{language} ({code})', 'zh-hans' => '{language}（{code}）', 'zh-hant' => '{language}（{code}）'],
         'quality.companion_missing' => ['en' => 'No Chinese article linked', 'zh-hans' => '未链接中文条目', 'zh-hant' => '未連結中文條目'],
         'quality.observed' => ['en' => 'Updated:', 'zh-hans' => '更新时间：', 'zh-hant' => '更新時間：'],
@@ -75,14 +83,12 @@ function uiCatalog(): array
         'pageviews.heading' => ['en' => 'Popular articles', 'zh-hans' => '热门条目', 'zh-hant' => '熱門條目'],
         'pageviews.description' => ['en' => 'Pages in the site-wide daily {top}', 'zh-hans' => '全站日访问量{top}的页面', 'zh-hant' => '全站日瀏覽量{top}的頁面'],
         'pageviews.top' => ['en' => 'top 1,000', 'zh-hans' => '前1,000名', 'zh-hant' => '前1,000名'],
-        'pageviews.count' => ['en' => 'Matching project articles: {count}', 'zh-hans' => '{count}篇符合条件的专题条目', 'zh-hant' => '{count}篇符合條件的專題條目'],
         'pageviews.views' => ['en' => '{count} views', 'zh-hans' => '{count}次浏览', 'zh-hant' => '{count}次瀏覽'],
         'pageviews.site_rank' => ['en' => 'Sitewide rank {rank}', 'zh-hans' => '全站{rank}名', 'zh-hant' => '全站{rank}名'],
         'pageviews.unavailable' => ['en' => 'Daily pageview data is temporarily unavailable.', 'zh-hans' => '每日浏览量数据暂时无法获取。', 'zh-hant' => '每日瀏覽量資料暫時無法取得。'],
         'pageviews.empty' => ['en' => 'No video-game project articles appeared in this day’s site top 1,000.', 'zh-hans' => '这天全站前1,000名中没有电子游戏专题条目。', 'zh-hant' => '這天全站前1,000名中沒有電子遊戲專題條目。'],
         'homepage.recognized' => ['en' => 'Quality content', 'zh-hans' => '优质内容', 'zh-hant' => '優質內容'],
         'homepage.recognized_description' => ['en' => 'Featured and good content recently shown on the main page', 'zh-hans' => '近期登上首页展示的典范、优良内容', 'zh-hant' => '近期登上首頁展示的典範、優良內容'],
-        'homepage.recognized_count' => ['en' => 'Available appearances and scheduled records: {count}', 'zh-hans' => '{count}条已获取的展示与预定记录', 'zh-hant' => '{count}筆已取得的展示與預定記錄'],
         'homepage.dyk' => ['en' => 'New article highlights', 'zh-hans' => '新篇推荐', 'zh-hant' => '新篇推薦'],
         'homepage.dyk_description' => ['en' => '“Did you know?” (DYK) on the Chinese main page', 'zh-hans' => '中文首页的“你知道吗？”（DYK）', 'zh-hant' => '中文首頁的「你知道嗎？」（DYK）'],
         'homepage.news' => ['en' => 'In the news', 'zh-hans' => '新闻动态', 'zh-hant' => '新聞動態'],
@@ -90,14 +96,14 @@ function uiCatalog(): array
         'homepage.news_history' => ['en' => 'News and history', 'zh-hans' => '旧事新闻', 'zh-hant' => '舊事新聞'],
         'homepage.news_history_description' => ['en' => 'On this day · In the news', 'zh-hans' => '历史上的今天·新闻动态', 'zh-hant' => '歷史上的今天·新聞動態'],
         'homepage.partial' => ['en' => 'Source temporarily unavailable: {sections}.', 'zh-hans' => '{sections}的数据暂时无法获取。', 'zh-hant' => '{sections}的資料暫時無法取得。'],
-        'homepage.count' => ['en' => 'Recorded appearances: {count}', 'zh-hans' => '{count}条展示记录', 'zh-hant' => '{count}筆展示記錄'],
         'backlog.heading' => ['en' => 'Article maintenance', 'zh-hans' => '条目维护', 'zh-hant' => '條目維護'],
-        'backlog.total' => ['en' => '{count} articles need attention', 'zh-hans' => '{count}篇条目待维护', 'zh-hant' => '{count}篇條目待維護'],
         'backlog.count' => ['en' => '{count} articles', 'zh-hans' => '{count}篇', 'zh-hant' => '{count}篇'],
         'backlog.empty' => ['en' => 'No articles currently match this task.', 'zh-hans' => '目前没有这类待维护条目。', 'zh-hant' => '目前沒有這類待維護條目。'],
         'backlog.unavailable' => ['en' => 'The maintenance lists are temporarily unavailable.', 'zh-hans' => '维护列表暂时无法获取。', 'zh-hant' => '維護列表暫時無法取得。'],
         'backlog.source' => ['en' => 'Maintenance tag', 'zh-hans' => '维护标签', 'zh-hant' => '維護標籤'],
         'backlog.column.assessment' => ['en' => 'Assessment', 'zh-hans' => '评级·重要度', 'zh-hant' => '評級·重要度'],
+        'backlog.column.class' => ['en' => 'Class', 'zh-hans' => '评级', 'zh-hant' => '評級'],
+        'backlog.column.importance' => ['en' => 'Importance', 'zh-hans' => '重要度', 'zh-hant' => '重要度'],
         'backlog.column.issues' => ['en' => 'Maintenance issues', 'zh-hans' => '维护问题', 'zh-hant' => '維護問題'],
         'backlog.column.oldest' => ['en' => 'Earliest tagged month', 'zh-hans' => '最早标记月份', 'zh-hant' => '最早標記月份'],
         'backlog.sort' => ['en' => 'Sort maintenance articles', 'zh-hans' => '维护条目排序', 'zh-hant' => '維護條目排序'],
@@ -116,7 +122,7 @@ function uiCatalog(): array
         'ops.column_task' => ['en' => 'Job', 'zh-hans' => '作业', 'zh-hant' => '作業'],
         'ops.column_state' => ['en' => 'Current status', 'zh-hans' => '当前状态', 'zh-hant' => '當前狀態'],
         'ops.column_duration' => ['en' => 'Execution time', 'zh-hans' => '执行时间', 'zh-hant' => '執行時間'],
-        'ops.column_time' => ['en' => 'Time (UTC)', 'zh-hans' => '时间（UTC）', 'zh-hant' => '時間（UTC）'],
+        'ops.column_time' => ['en' => 'Status updated', 'zh-hans' => '状态更新时间', 'zh-hant' => '狀態更新時間'],
         'ops.no_record' => ['en' => 'No record', 'zh-hans' => '没有记录', 'zh-hant' => '沒有紀錄'],
         'routine.dyks' => ['en' => 'Did-you-know report', 'zh-hans' => '新条目推荐', 'zh-hant' => '新條目推薦'],
         'routine.new_pages' => ['en' => 'New-page report', 'zh-hans' => '新进条目', 'zh-hant' => '新進條目'],
@@ -330,4 +336,13 @@ function uiDuration(?string $duration): string
         return uiText('duration.seconds', ['seconds' => $parts[1]]);
     }
     return $duration;
+}
+
+/** Show a running job's measured elapsed time with an unfinished marker. */
+function uiRunningDuration(string $startedAt, ?int $now = null): string
+{
+    $seconds = max(0, ($now ?? time()) - (new DateTimeImmutable($startedAt))->getTimestamp());
+    return ($seconds >= 60
+        ? uiText('duration.minutes', ['minutes' => intdiv($seconds, 60), 'seconds' => $seconds % 60])
+        : uiText('duration.seconds', ['seconds' => $seconds])) . '…';
 }

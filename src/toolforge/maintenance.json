@@ -288,6 +288,80 @@
       ]
     },
     {
+      "key": "translation",
+      "label": {
+        "en": "Translation",
+        "zh-hans": "翻译",
+        "zh-hant": "翻譯"
+      },
+      "tasks": [
+        {
+          "key": "expand_english",
+          "label": {
+            "en": "Expand from English Wikipedia",
+            "zh-hans": "从英语维基百科扩充",
+            "zh-hant": "從英語維基百科擴充"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要從英語維基百科翻譯的條目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "expand_japanese",
+          "label": {
+            "en": "Expand from Japanese Wikipedia",
+            "zh-hans": "从日语维基百科扩充",
+            "zh-hant": "從日語維基百科擴充"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要從日語維基百科翻譯的條目",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "translation",
+          "label": {
+            "en": "Translation cleanup",
+            "zh-hans": "改善翻译",
+            "zh-hant": "改善翻譯"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "粗劣翻译",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "proofread_translation",
+          "label": {
+            "en": "Proofread translations",
+            "zh-hans": "翻译校对",
+            "zh-hant": "翻譯校對"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "需要校對的翻譯頁面",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        }
+      ]
+    },
+    {
       "key": "links",
       "label": {
         "en": "Links",
@@ -372,38 +446,6 @@
               "name": "所有扩充中的条目",
               "talk_page": false,
               "monthly": false
-            }
-          ]
-        },
-        {
-          "key": "expand_english",
-          "label": {
-            "en": "Expand from English Wikipedia",
-            "zh-hans": "从英语维基百科扩充",
-            "zh-hant": "從英語維基百科擴充"
-          },
-          "rules": [
-            {
-              "kind": "category",
-              "name": "需要從英語維基百科翻譯的條目",
-              "talk_page": false,
-              "monthly": true
-            }
-          ]
-        },
-        {
-          "key": "expand_japanese",
-          "label": {
-            "en": "Expand from Japanese Wikipedia",
-            "zh-hans": "从日语维基百科扩充",
-            "zh-hant": "從日語維基百科擴充"
-          },
-          "rules": [
-            {
-              "kind": "category",
-              "name": "需要從日語維基百科翻譯的條目",
-              "talk_page": false,
-              "monthly": true
             }
           ]
         },
@@ -628,38 +670,6 @@
               "name": "需要维基化的页面",
               "talk_page": false,
               "monthly": true
-            }
-          ]
-        },
-        {
-          "key": "translation",
-          "label": {
-            "en": "Translation cleanup",
-            "zh-hans": "改善翻译",
-            "zh-hant": "改善翻譯"
-          },
-          "rules": [
-            {
-              "kind": "category",
-              "name": "粗劣翻译",
-              "talk_page": false,
-              "monthly": true
-            }
-          ]
-        },
-        {
-          "key": "proofread_translation",
-          "label": {
-            "en": "Proofread translations",
-            "zh-hans": "翻译校对",
-            "zh-hant": "翻譯校對"
-          },
-          "rules": [
-            {
-              "kind": "category",
-              "name": "需要校對的翻譯頁面",
-              "talk_page": false,
-              "monthly": false
             }
           ]
         },

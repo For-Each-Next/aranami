@@ -25,10 +25,14 @@ if TYPE_CHECKING:
 MAX_EDIT_SUMMARY_BYTES = 255
 _SECONDS_PER_MINUTE = 60
 _HUNDREDTHS_PER_SECOND = 100
+_EXECUTION_DURATION = r"(?:\d+′)?\d{1,2}(?:\.\d{2})?″"
+_EXECUTION_ATTRIBUTION = r"\[\[toolforge:aranami\|Aranami [0-9a-z.!+-]+\]\]"
 _EXECUTION_SUFFIX = re.compile(
-    r"\s*(?:(?:By |\()\[\[toolforge:aranami\|Aranami [0-9a-z.!+-]+\]\]"
+    rf"\s*(?:\(in {_EXECUTION_DURATION} by "
+    rf"(?:{_EXECUTION_ATTRIBUTION}|Aranami [0-9a-z.!+-]+)\)"
+    rf"|(?:(?:By |\(){_EXECUTION_ATTRIBUTION}"
     r"|[Ee]xecuted(?: by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒(?: [𝟶-𝟿𝚊-𝚣0-9a-z.!+-]+)?)?)"
-    r" in (?:\d+′)?\d{1,2}(?:\.\d{2})?″(?:\)|\.)$",
+    rf" in {_EXECUTION_DURATION}(?:\)|\.))$",
 )
 _MONTHS = (
     "Jan",
@@ -349,7 +353,7 @@ class EditSummary:
 
     @classmethod
     def with_execution_time(cls, summary: str, elapsed_seconds: float) -> str:
-        """End a summary with package version and time within 255 bytes.
+        """End a summary with elapsed time and package attribution.
 
         Args:
             summary: Rendered report summary or caller-supplied text.
@@ -357,7 +361,7 @@ class EditSummary:
 
         Returns:
             Summary ending with
-            ``([[toolforge:aranami|Aranami 0.5.1]] in 7.12″)``
+            ``(in 7.12″ by [[toolforge:aranami|Aranami 0.5.5]])``
             using the installed version and measured duration. Durations
             below one minute keep hundredths, such as ``7.12″``; longer
             durations round to whole seconds, such as ``21′54″``.
@@ -376,7 +380,8 @@ class EditSummary:
             duration = f"{minutes}′{seconds:02d}"
         package_version = version("aranami")
         suffix = (
-            f"([[toolforge:aranami|Aranami {package_version}]] in {duration}″)"
+            f"(in {duration}″ by "
+            f"[[toolforge:aranami|Aranami {package_version}]])"
         )
         budget = MAX_EDIT_SUMMARY_BYTES - len(suffix.encode("utf-8")) - 1
         if isinstance(summary, _RenderedSummary):

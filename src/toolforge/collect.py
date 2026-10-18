@@ -15,14 +15,17 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import fcntl
+import hashlib
 import json
 import logging
 import os
+import re
 import stat
 import tempfile
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import unquote, urlsplit
 
 import polars as pl
 import pywikibot
@@ -37,6 +40,15 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 _MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
 _QUALITY_TTL = dt.timedelta(hours=24)
+_HIGHLIGHTS_TTL = dt.timedelta(hours=12)
+_BACKLOG_TTL = dt.timedelta(hours=24)
+_SECTION_RECORD_LIMIT = 10_000
+_SECTION_GROUP_LIMIT = 64
+_SECTION_HEADING_LIMIT = 12
+_SECTION_LABEL_MAX_BYTES = 800
+_ASSESSMENT_MAX_BYTES = 192
+_PAGEVIEWS_LIMIT = 10
+_PAGEVIEWS_SITE_LIMIT = 1000
 _QUALITY_URL_MAX_BYTES = 4096
 _MAX_DAYS = 365
 _QUALITY_URL = (
@@ -711,11 +723,423 @@ def _quality_snapshot(
     }
 
 
-def collect_dashboard(
+def _cache_timestamp(value: object) -> dt.datetime | None:
+    """Read an exact UTC seconds timestamp from a section cache.
+
+    Args:
+        value: Untrusted JSON field.
+
+    Returns:
+        UTC timestamp, or none for invalid values.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        stamp = dt.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return (
+        stamp
+        if stamp.utcoffset() == dt.timedelta()
+        and (
+            stamp.isoformat(timespec="seconds") == value.replace("Z", "+00:00")
+        )
+        else None
+    )
+
+
+def _cache_wiki_url(value: object) -> bool:
+    """Validate a bounded public Chinese Wikipedia URL.
+
+    Args:
+        value: Untrusted cached link.
+
+    Returns:
+        Whether the URL satisfies the presentation contract.
+    """
+    if (
+        not isinstance(value, str)
+        or len(value.encode()) > _QUALITY_URL_MAX_BYTES
+        or re.search(
+            r"[\x00-\x20\\]",
+            value,
+        )
+    ):
+        return False
+    url = urlsplit(value)
+    return (
+        url.scheme == "https"
+        and url.netloc == "zh.wikipedia.org"
+        and (url.path.startswith("/wiki/") or url.path == "/w/index.php")
+    )
+
+
+def _cache_article(value: object) -> bool:
+    """Validate a cached article identity and optional assessments.
+
+    Args:
+        value: Untrusted JSON record.
+
+    Returns:
+        Whether the article can safely be reused.
+    """
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("title"), str)
+        and (
+            bool(value["title"].strip())
+            and _cache_wiki_url(value.get("url"))
+            and all(
+                value.get(field) is None
+                or (
+                    isinstance(value[field], str)
+                    and bool(value[field].strip())
+                    and len(value[field].encode()) <= _ASSESSMENT_MAX_BYTES
+                    and re.search(r"[\x00-\x1f\x7f]", value[field]) is None
+                )
+                for field in ("assessment_class", "assessment_importance")
+            )
+        )
+    )
+
+
+def _valid_highlights_cache(value: object, days: int, today: dt.date) -> bool:  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches]
+    """Validate complete highlights and their original date window.
+
+    Args:
+        value: Untrusted composite JSON observation.
+        days: Requested historical window length.
+        today: Latest allowed historical date.
+
+    Returns:
+        Whether all highlights remain usable together.
+    """
+    if not isinstance(value, dict):
+        return False
+    try:  # ruff: ignore[too-many-statements-in-try-clause] - Invalid nested cache fields are an ordinary miss.
+        period = value["period"]
+        start, end = (
+            dt.date.fromisoformat(period[key]) for key in ("start", "end")
+        )
+        if (
+            end - start != dt.timedelta(days=days)
+            or end > today + dt.timedelta(days=1)
+            or start.isoformat() != period["start"]
+            or end.isoformat() != period["end"]
+        ):
+            return False
+        if not isinstance(period["label"], str):
+            return False
+        for name in ("featured", "dyk", "good", "news", "history", "upcoming"):
+            records = value["homepage"][name]
+            if (
+                not isinstance(records, list)
+                or len(records) > _SECTION_RECORD_LIMIT
+            ):
+                return False
+            for row in records:
+                if not _cache_article(row) or "date" not in row:
+                    return False
+                date = (
+                    dt.date.fromisoformat(row["date"])
+                    if row["date"] is not None
+                    else None
+                )
+                if date is not None and date.isoformat() != row["date"]:
+                    return False
+                if row.get("date_kind") not in {
+                    None,
+                    "appearance",
+                    "window_start",
+                    "observed",
+                    "scheduled",
+                }:
+                    return False
+                if name == "upcoming" and (
+                    date is None
+                    or not end <= date < end + dt.timedelta(days=30)
+                    or row.get("date_kind") != "scheduled"
+                    or row.get("kind") not in {"fa", "fl", "ga"}
+                ):
+                    return False
+        popular = value["pageviews"]
+        day = dt.date.fromisoformat(popular["date"])
+        if day.isoformat() != popular["date"] or not end - dt.timedelta(
+            days=8,
+        ) <= day < end - dt.timedelta(days=1):
+            return False
+        if (
+            popular.get("limit") != _PAGEVIEWS_LIMIT
+            or popular.get("scope") != "site_top_1000"
+            or popular.get("source_url")
+            != (
+                "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/"
+                f"zh.wikipedia.org/all-access/{day:%Y/%m/%d}"
+            )
+        ):
+            return False
+        rows = popular["items"]
+        if not isinstance(rows, list) or len(rows) > _PAGEVIEWS_LIMIT:
+            return False
+        titles = set()
+        previous = 2**64 - 1
+        for index, row in enumerate(rows, start=1):
+            if (
+                not _cache_article(row)
+                or row["title"] in titles
+                or type(row.get("views")) is not int
+                or not 0 <= row["views"] <= previous
+            ):
+                return False
+            if (
+                type(row.get("rank")) is not int
+                or row["rank"] != index
+                or type(row.get("site_rank")) is not int
+                or not 1 <= row["site_rank"] <= _PAGEVIEWS_SITE_LIMIT
+            ):
+                return False
+            titles.add(row["title"])
+            previous = row["views"]
+        return (
+            isinstance(value["sources"], list)
+            and len(value["sources"]) <= _SECTION_RECORD_LIMIT
+            and all(
+                isinstance(source, dict)
+                and isinstance(source.get("label"), str)
+                and _cache_wiki_url(source.get("url"))
+                for source in value["sources"]
+            )
+        )
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
+
+
+def _valid_backlog_cache(value: object) -> bool:  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches]
+    """Validate complete maintenance groups and distinct article counts.
+
+    Args:
+        value: Untrusted cached backlog observation.
+
+    Returns:
+        Whether every group and referenced issue is consistent.
+    """
+    if (
+        not isinstance(value, dict)
+        or _cache_timestamp(value.get("observed_at")) is None
+        or type(value.get("total")) is not int
+        or value["total"] < 0
+    ):
+        return False
+    groups = value.get("groups")
+    if not isinstance(groups, list) or len(groups) > _SECTION_GROUP_LIMIT:
+        return False
+    keys, articles, references = set(), set(), set()
+    sections = {}
+    issues = 0
+    try:  # ruff: ignore[too-many-statements-in-try-clause] - Validate the complete bounded nested contract together.
+        for group in groups:
+            key = group["key"]
+            if (
+                not isinstance(key, str)
+                or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", key) is None
+                or key in keys
+            ):
+                return False
+            if (
+                not isinstance(group["category"], str)
+                or not group["category"].strip()
+                or not _cache_wiki_url(group["source_url"])
+                or re.fullmatch(
+                    r"/wiki/(?:Category|Template):.+",
+                    unquote(urlsplit(group["source_url"]).path),
+                )
+                is None
+            ):
+                return False
+            rows = group["items"]
+            if (
+                not isinstance(rows, list)
+                or len(rows) > _SECTION_RECORD_LIMIT
+                or type(group["count"]) is not int
+                or group["count"] != len(rows)
+            ):
+                return False
+            for field in ("label", "section_label"):
+                label = group.get(field)
+                labels = (
+                    label.values()
+                    if isinstance(label, dict)
+                    and label
+                    and set(label) <= {"en", "zh-hans", "zh-hant"}
+                    else [label]
+                )
+                if not all(
+                    isinstance(text, str)
+                    and text.strip()
+                    and len(text.encode()) <= _SECTION_LABEL_MAX_BYTES
+                    for text in labels
+                ):
+                    return False
+            if (
+                not isinstance(group.get("section_key"), str)
+                or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", group["section_key"])
+                is None
+            ):
+                return False
+            section = group["section_key"]
+            if (
+                section in sections
+                and sections[section] != group["section_label"]
+            ):
+                return False
+            sections[section] = group["section_label"]
+            if len(sections) > _SECTION_HEADING_LIMIT:
+                return False
+            seen = set()
+            for row in rows:
+                if (
+                    not _cache_article(row)
+                    or type(row.get("page_id")) is not int
+                    or row["page_id"] <= 0
+                    or row["page_id"] in seen
+                ):
+                    return False
+                month = row.get("oldest_issue_month")
+                if month is not None and (
+                    dt.date.fromisoformat(month + "-01").isoformat()[:-3]
+                    != month
+                ):
+                    return False
+                tags = row["issues"]
+                if (
+                    not isinstance(tags, list)
+                    or len(tags) > _SECTION_GROUP_LIMIT
+                    or key not in tags
+                    or any(not isinstance(tag, str) for tag in tags)
+                    or len(set(tags)) != len(tags)
+                ):
+                    return False
+                seen.add(row["page_id"])
+                references.update(tags)
+            keys.add(key)
+            articles.update(seen)
+            issues += len(rows)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
+    return (
+        value["total"] == len(articles)
+        and references <= keys
+        and (
+            "issue_total" not in value
+            or (
+                type(value["issue_total"]) is int
+                and value["issue_total"] == issues
+            )
+        )
+    )
+
+
+def _read_section_cache(  # ruff: ignore[too-many-return-statements]
+    path: Path | None,
+    key: str | None,
+    validate: Callable[[object], bool],
+    now: dt.datetime,
+) -> dict[str, object] | None:
+    """Read one bounded regular composite cache without following links.
+
+    Args:
+        path: Optional cache file outside the public directory.
+        key: Current source configuration identity, or none to bypass.
+        validate: Complete section contract validator.
+        now: Current UTC clock used to reject future observations.
+
+    Returns:
+        Validated envelope with original timestamp, or none on any miss.
+    """
+    if path is None or key is None:
+        return None
+    try:  # ruff: ignore[too-many-statements-in-try-clause] - Every filesystem or decoding failure is a cache miss.
+        if path.parent.is_symlink():
+            return None
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                return None
+            content = stream.read(_MAX_SNAPSHOT_BYTES + 1)
+        if len(content) > _MAX_SNAPSHOT_BYTES:
+            return None
+        cached = json.loads(content)
+        stamp = _cache_timestamp(cached.get("observed_at"))
+        if type(cached.get("version")) is not int or cached["version"] != 1:
+            return None
+        if (
+            cached.get("key") != key
+            or stamp is None
+            or stamp > now
+            or not validate(cached.get("data"))
+        ):
+            return None
+    except (OSError, ValueError, TypeError, AttributeError, RecursionError):
+        return None
+    else:
+        return cached
+
+
+def _write_section_cache(
+    path: Path | None,
+    key: str | None,
+    data: object,
+    stamp: str,
+) -> None:
+    """Save a completed group while making cache failures nonfatal.
+
+    Args:
+        path: Optional private cache destination.
+        key: Current configuration identity.
+        data: Validated complete source observation.
+        stamp: Actual UTC observation time preserved during cache reuse.
+    """
+    if path is None or key is None:
+        return
+    try:
+        if (
+            path.parent.is_symlink()
+            or path.is_symlink()
+            or (path.exists() and not path.is_file())
+        ):
+            return
+        save_snapshot(
+            path,
+            {"version": 1, "key": key, "observed_at": stamp, "data": data},
+        )
+    except (OSError, ValueError):
+        _LOGGER.warning(
+            "Dashboard section cache could not be saved: %s",
+            path.name,
+        )
+
+
+def _maintenance_cache_key() -> str | None:
+    """Fingerprint the maintenance catalogue for cache invalidation.
+
+    Returns:
+        Catalogue hash, or none when the source must be read directly.
+    """
+    try:
+        return hashlib.sha256(
+            Path(backlog.__file__).with_name("maintenance.json").read_bytes(),
+        ).hexdigest()
+    except OSError:
+        return None
+
+
+def collect_dashboard(  # ruff: ignore[complex-structure, too-many-branches, too-many-statements, too-many-locals]
     today: dt.date,
     days: int = 100,
     *,
     publish: Callable[[dict[str, object]], None] | None = None,
+    cache_directory: Path | None = None,
+    now: dt.datetime | None = None,
 ) -> dict[str, object]:
     """Collect dashboard sections and mark unavailable sources.
 
@@ -724,18 +1148,76 @@ def collect_dashboard(
         days: UTC dates retained for Chinese main-page appearances.
         publish: Optional writer for each successful section.
             Pending or failed sections remain null in these snapshots.
+        cache_directory: Optional private composite cache directory.
+            Highlights reuse twelve hours and maintenance twenty-four.
+        now: Optional aware UTC clock for cache boundaries.
 
     Returns:
         JSON-compatible snapshot with explicit null failed observations.
 
     Raises:
         RuntimeError: Every independent dashboard source failed.
+        ValueError: The supplied clock has no timezone.
     """
     start, end = (
         today - dt.timedelta(days=days - 1),
         today + dt.timedelta(days=1),
     )
     upcoming_end = end + dt.timedelta(days=30)
+    clock = now or dt.datetime.now(dt.UTC)
+    if clock.tzinfo is None:
+        message = "Dashboard section caches require an aware UTC clock."
+        raise ValueError(message)
+    clock = clock.astimezone(dt.UTC).replace(microsecond=0)
+    highlights_path = (
+        cache_directory / "highlights-v1.json"
+        if cache_directory is not None
+        else None
+    )
+    maintenance_path = (
+        cache_directory / "backlog-v1.json"
+        if cache_directory is not None
+        else None
+    )
+    highlights_key = f"days:{days}"
+    maintenance_key = (
+        _maintenance_cache_key() if cache_directory is not None else None
+    )
+    cached_highlights = _read_section_cache(
+        highlights_path,
+        highlights_key,
+        lambda value: _valid_highlights_cache(value, days, today),
+        clock,
+    )
+    cached_maintenance = _read_section_cache(
+        maintenance_path,
+        maintenance_key,
+        _valid_backlog_cache,
+        clock,
+    )
+    if (
+        cached_maintenance is not None
+        and cached_maintenance["observed_at"]
+        != cached_maintenance["data"]["observed_at"]
+    ):
+        cached_maintenance = None
+    refresh_highlights = (
+        cached_highlights is None
+        or clock - _cache_timestamp(cached_highlights["observed_at"])
+        >= _HIGHLIGHTS_TTL
+    )
+    refresh_maintenance = (
+        cached_maintenance is None
+        or clock - _cache_timestamp(cached_maintenance["observed_at"])
+        >= _BACKLOG_TTL
+    )
+    period = {
+        "label": f"{start.isoformat()} - {today.isoformat()}",
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+    }
+    highlights_updated_at = None
+    highlight_sources = None
     read = WikiReader(pywikibot.Site("zh", "wikipedia"))
     errors: list[dict[str, str]] = []
     membership = None
@@ -767,6 +1249,14 @@ def collect_dashboard(
     badges = None
     popular_pages = None
     maintenance = None
+    if not refresh_highlights:
+        displays = cached_highlights["data"]["homepage"].copy()
+        popular_pages = cached_highlights["data"]["pageviews"]
+        period = cached_highlights["data"]["period"]
+        highlight_sources = cached_highlights["data"]["sources"]
+        highlights_updated_at = cached_highlights["observed_at"]
+    if not refresh_maintenance:
+        maintenance = cached_maintenance["data"]
 
     def build_snapshot() -> dict[str, object]:
         """Build a complete snapshot from available observations.
@@ -775,20 +1265,21 @@ def collect_dashboard(
             An independent snapshot with UTC metadata and null gaps.
         """
         return {
-            "period": {
-                "label": f"{start.isoformat()} - {today.isoformat()}",
-                "start": start.isoformat(),
-                "end": end.isoformat(),
-            },
+            "period": period.copy(),
             "updated_at": dt.datetime.now(dt.UTC).isoformat(
                 timespec="seconds",
             ),
             "quality": badges,
+            "highlights_updated_at": highlights_updated_at,
             "pageviews": popular_pages,
             "backlog": maintenance,
             "homepage": displays.copy(),
             "sources": [
-                *read.sources.values(),
+                *(
+                    highlight_sources
+                    if highlight_sources is not None
+                    else read.sources.values()
+                ),
                 *(
                     [
                         {
@@ -845,17 +1336,24 @@ def collect_dashboard(
         if isinstance(membership, pl.DataFrame)
         else None
     )
-    if members is not None:
+    if members is not None and refresh_highlights:
         popular_pages = attempt(
             "pageviews",
-            partial(pageviews.collect_pageviews, today, members),
+            partial(
+                pageviews.collect_pageviews,
+                today,
+                members,
+                site=read.site,
+            ),
         )
         publish_available(popular_pages)
+    if members is not None and refresh_maintenance:
         maintenance = attempt(
             "backlog",
             partial(backlog.collect_backlog, read.site, membership),
         )
         publish_available(maintenance)
+    if members is not None and refresh_highlights:
         try:
             read.preload([
                 title
@@ -869,7 +1367,7 @@ def collect_dashboard(
             _LOGGER.exception(
                 "Archive preloading failed; using individual revision reads.",
             )
-    for name in displays if members is not None else ():
+    for name in displays if members is not None and refresh_highlights else ():
         collector = getattr(homepage, "collect_" + name)
         options = {
             "dyk": {"history": read.history},
@@ -890,6 +1388,44 @@ def collect_dashboard(
             ),
         )
         publish_available(displays[name])
+    if refresh_highlights:
+        if popular_pages is not None and all(
+            value is not None for value in displays.values()
+        ):
+            highlights_updated_at = (
+                (now or dt.datetime.now(dt.UTC))
+                .astimezone(dt.UTC)
+                .isoformat(timespec="seconds")
+            )
+            data = {
+                "period": period,
+                "homepage": displays.copy(),
+                "pageviews": popular_pages,
+                "sources": list(read.sources.values()),
+            }
+            if _valid_highlights_cache(data, days, today):
+                _write_section_cache(
+                    highlights_path,
+                    highlights_key,
+                    data,
+                    highlights_updated_at,
+                )
+        elif cached_highlights is not None:
+            displays = cached_highlights["data"]["homepage"].copy()
+            popular_pages = cached_highlights["data"]["pageviews"]
+            period = cached_highlights["data"]["period"]
+            highlight_sources = cached_highlights["data"]["sources"]
+            highlights_updated_at = cached_highlights["observed_at"]
+    if refresh_maintenance:
+        if maintenance is not None and _valid_backlog_cache(maintenance):
+            _write_section_cache(
+                maintenance_path,
+                maintenance_key,
+                maintenance,
+                maintenance["observed_at"],
+            )
+        elif maintenance is None and cached_maintenance is not None:
+            maintenance = cached_maintenance["data"]
     badges = attempt(
         "quality",
         lambda: quality_snapshot(
@@ -967,7 +1503,11 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     save_snapshot(
         args.output,
-        collect_dashboard(dt.datetime.now(dt.UTC).date(), args.days),
+        collect_dashboard(
+            dt.datetime.now(dt.UTC).date(),
+            args.days,
+            cache_directory=args.output.parent,
+        ),
     )
 
 

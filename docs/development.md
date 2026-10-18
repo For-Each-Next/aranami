@@ -43,7 +43,10 @@ Count each distinct article once in language totals. Preserve all collected
 records for in-place filters and incremental display. Enrich Chinese counterpart
 grades from current project assessments after reading the badge cache.
 Reuse successful raw Wikidata badge queries for 24 hours while refreshing
-the dashboard's other sources hourly.
+the updater hourly. Reuse the complete highlights and popularity group for
+12 hours and maintenance lists for 24 hours, preserving each source timestamp.
+Invalidate maintenance reuse when its catalogue changes. Failed refreshes
+retain validated previous groups without advancing their timestamps.
 Compare successful raw badge results with the previous query by
 `item`, `site`, and `status`. Title or assessment edits do not establish a
 new badge. Keep the first observation time of additions for 30 days; the
@@ -64,8 +67,15 @@ outside the linked article title.
 The pageviews source filters the official daily site top-1,000 list against
 current project membership with a native Polars join. Preserve the source
 date, measured zeros, and the distinction between empty and unavailable
-results. Retain the original site rank for the view-count tooltip; the
-filtered project's position cannot establish a site rank.
+results. Use Topviews' default article-only site rank for the view-count
+tooltip: remove namespace pages, the main page and its namespace-stripped
+title, and the verified global false-positive exclusion, then number the
+full retained list before filtering project membership. Preserve raw API
+ranks as sorting tie breakers and leave measured view counts unchanged.
+The filtered project's position cannot establish a site rank. Follow
+Topviews' [namespace filter](https://gitlab.wikimedia.org/repos/data-engineering/pageviews/-/blob/main/assets/vue/lib/mainspace.js),
+[rank numbering](https://gitlab.wikimedia.org/repos/data-engineering/pageviews/-/blob/main/assets/vue/stores/topviews.js),
+and [curated exclusions](https://gitlab.wikimedia.org/repos/data-engineering/pageviews/-/blob/main/config/topviews_excludes.yaml).
 
 The maintenance collector reads current main-namespace project membership
 and the actual categories of those page IDs from the read-only replica.
@@ -75,10 +85,12 @@ include its monthly backlog. Keep template and message-box revision
 evidence with the collector's category definitions, and verify live source
 contracts before changing those definitions. Emit complete, deduplicated
 lists for each of the 37 tasks and a distinct overall article count in the
-hourly snapshot. Organize these tasks under eight headings adapted from the
+saved snapshot. Organize these tasks under nine headings adapted from the
 [English project backlog](https://en.wikipedia.org/wiki/Wikipedia:WikiProject_Video_games/Backlog).
 Use verified Chinese categories rather than translating English category
 names, including Chinese translation expansion and proofreading tasks.
+Keep English and Japanese expansion, translation improvement, and translation
+proofreading together under Translation.
 On the homepage, show task categories and counts as links to
 `/maintenance/?task=...&page=1`. The dedicated page reads the requested
 50-record slice from the snapshot and provides previous/next navigation.
@@ -90,6 +102,9 @@ Sort worklists by the earliest known month by default, keeping missing
 months last in both directions. Article-title and month sorting operate on
 the saved group before its 50-record slice, with stable article-ID ties;
 carry the selected ordering through pagination links.
+Rating and importance links initially sort highest first, using verified
+WP:ASSESS tiers with equivalent article/list grades. Keep unknown,
+unassessed, and non-applicable values last in both directions.
 Keep the catalogue in the deployed, locally edited `maintenance.json`, with
 strict schema validation. Sections and tasks own their stable keys and
 localized labels. Each rule selects category membership or template
@@ -116,6 +131,7 @@ to its title, and keep dates on the same row.
 Place DYK dates after article titles with padding and no internal scrolling.
 Reserve the same gutter and right padding in every homepage panel's heading
 and list so their right edges align.
+Keep the four panel headings and the maintenance heading free of total counts.
 Preserve carry-in and observation notes in labelled markers.
 Join current membership's `pa_class` and `pa_importance` onto popular and
 DYK records with native Polars expressions and no additional source query.
@@ -128,9 +144,11 @@ Share one chip appearance across recognition, assessment, and importance.
 Use normal 16 px article text and 20 px third-level headings, with smaller
 chips. Show the report-status table without a disclosure control, keep its
 version and log link only in the footer, and avoid alternating row colors.
+Render routine states as emoji with translated hover and accessible labels.
 Render multilingual content in single-line rows ordered as language and
-code, foreign title and recognition, then local title and grade. Preserve
-full titles in tooltips and keep horizontal table overflow inside its
+code, foreign title and recognition, local title and grade, then a linked
+Wikidata item ID. Filter by language and whether a Chinese counterpart exists.
+Preserve full titles in tooltips and keep horizontal table overflow inside its
 container. Keep recorded badge observation times in the recognition
 tooltip so they do not add another text line.
 Python writers, local HTTP reads, and PHP reads share an 8 MiB
@@ -142,9 +160,12 @@ for up to 60 seconds, using three bounded files under
 `cache/toolforge/pages/`. Snapshot, routine-status, and PHP source changes
 invalidate the cached HTML. Filtered and random requests bypass it.
 Cache failures render normally; browser responses still use `no-store`.
+Negotiate compressed HTML with the browser while retaining uncompressed
+content in the shared page cache, and vary responses by language and encoding.
 Keep a bounded complete quality collection available to the browser so
-language changes and random samples of ten records update in place without
-network requests. Preserve server-rendered results and the GET form fallback.
+language changes and complete-list browsing update in place without network
+requests. Order language choices by distinct badged-article totals. Preserve
+server-rendered results and the GET form fallback.
 
 Link each job name in the report-status table to its configured on-wiki
 report, using numbered links for multiple targets. Keep these targets
@@ -387,9 +408,11 @@ Fetch site ranks from the official all-access [Pageviews top endpoint][pageviews
 for single UTC dates and complete calendar months. Fetch each distinct
 current interval once, then join its titles onto
 project and task-force rankings with Polars. Preserve the returned site
-article order after resolving each title with the site's Pywikibot
-namespace rules. Exclude non-main namespaces and the site's main page,
-then number the remaining articles from one with Polars. Emit that
+article order using the same Topviews title filter as the dashboard.
+Exclude namespace pages, the full and namespace-stripped main-page
+titles, and verified global false positives, then number the remaining
+articles from one with Polars. Classify titles from shared site metadata
+without reading individual pages. Emit that
 article-only rank in `PJ:VG/HOT/item`'s `top` parameter as `daily/<rank>`
 or `monthly/<rank>`. These ranks cover
 articles present in the API's top-1,000 pages; do not imply coverage of
@@ -501,14 +524,14 @@ Use bracket character entities around its wikilink so both article links
 remain valid. Preserve complete delimiter pairs and entities when
 shortening a summary.
 At publication, end every live edit and dry-run proposal summary with
-`([[toolforge:aranami|Aranami 0.5.1]] in 21′54″)` using the installed
+`(in 21′54″ by [[toolforge:aranami|Aranami 0.5.5]])` using the installed
 package version and measured duration. Keep this attribution in parentheses,
 without a trailing full stop. The short linked attribution leaves more of
 the byte budget for report changes. Durations of at least one minute
 use minutes and whole seconds rounded to the nearest second, with two-digit
 seconds, such as `1′07″`. For durations below one minute, retain two decimal
 places, omit zero minutes and the leading seconds zero, for example
-`([[toolforge:aranami|Aranami 0.5.1]] in 7.12″)`.
+`(in 7.12″ by [[toolforge:aranami|Aranami 0.5.5]])`.
 Measure from the current routine's start until each proposal is ready,
 before checking or saving its target. Direct publications use context
 creation time. Reserve space for the complete suffix within the same

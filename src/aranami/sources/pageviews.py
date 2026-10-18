@@ -11,12 +11,15 @@ or calendar-month top-1,000 list, excluding non-article pages.
 The verified source references are in ``docs/development.md``.
 Unavailable supported lists raise an error so callers can defer updates;
 unsupported intervals have no ranks.
+Use :func:`article_rank_filter` to apply the same Topviews article
+classification to another title column without fetching page contents.
 """
 
 from __future__ import annotations
 
 __all__ = (
     "DailyPageviews",
+    "article_rank_filter",
     "fetch_data",
     "fetch_data_dataframe",
     "fetch_top_dataframe",
@@ -58,6 +61,8 @@ _DATA_FRAME_SCHEMA: Final[pl.Schema] = pl.Schema(
 _TOP_FRAME_SCHEMA: Final[pl.Schema] = pl.Schema(
     {"title": pl.String, "top": pl.Int64},
 )
+# Topviews' config/topviews_excludes.yaml was verified on 2026-10-18.
+_TOPVIEWS_EXCLUDED_TITLES: Final[frozenset[str]] = frozenset({"XHamster"})
 
 
 class _ViewItem(TypedDict):
@@ -186,8 +191,8 @@ def fetch_top_dataframe(
 ) -> pl.DataFrame:
     """Fetch site-wide article ranks for a day or calendar month.
 
-    Filter Wikimedia's top-1,000 list to main-namespace articles,
-    excluding the site's main page, then number the retained articles
+    Apply Topviews' namespace, main-page, and false-positive exclusions
+    to Wikimedia's top-1,000 list, then number the retained articles
     from one in their original rank order. Normalize underscores to
     spaces in titles. Unsupported intervals, including complete years,
     produce a typed empty frame; missing
@@ -233,12 +238,46 @@ def fetch_top_dataframe(
     return _article_top_ranks(site, ranks)
 
 
+def article_rank_filter(
+    title: pl.Expr,
+    namespaces: Iterable[str],
+    mainpage: str,
+) -> pl.Expr:
+    """Keep articles using Topviews' default title exclusions.
+
+    Exclude known namespace prefixes, the main page and its short title,
+    and Topviews' verified global false-positive titles. Other article
+    redirects retain their separate counts. This classification needs
+    only site metadata and never reads individual page contents.
+
+    Args:
+        title: Expression containing normalized titles with spaces.
+        namespaces: Namespace names from the site's metadata.
+        mainpage: Configured main-page title with spaces.
+
+    Returns:
+        Boolean expression selecting titles eligible for article ranks.
+    """
+    prefixes = {name for name in namespaces if name} | {
+        "Wikipedia",
+        "Special",
+        "Sp?cial",
+    }
+    excluded = _TOPVIEWS_EXCLUDED_TITLES | {mainpage}
+    if ":" in mainpage:
+        excluded |= {mainpage.split(":")[1]}
+    namespace_page = title.str.contains(":", literal=True) & (
+        title.str.split(":").list.first().is_in(sorted(prefixes))
+    )
+    return ~namespace_page & ~title.is_in(sorted(excluded))
+
+
 def _article_top_ranks(site: BaseSite, ranks: pl.DataFrame) -> pl.DataFrame:
     """Exclude non-articles before numbering the site's article ranks.
 
-    Resolve namespaces and the main page through the site's title rules,
-    retaining main-namespace titles with colons that are not namespace
-    prefixes. Classification does not fetch individual page contents.
+    Apply Topviews' namespace and main-page exclusions, retaining
+    article titles with colons that are not namespace prefixes.
+    Classification does not fetch individual page contents.
 
     Args:
         site: Site whose namespace and main-page metadata apply.
@@ -249,15 +288,12 @@ def _article_top_ranks(site: BaseSite, ranks: pl.DataFrame) -> pl.DataFrame:
         numbered contiguously from one with the public top-list schema.
     """
     mainpage = pywikibot.Page(site, site.siteinfo["mainpage"]).title()
-    article_flags: list[bool] = []
-    for title in ranks.get_column("title"):
-        page = pywikibot.Page(site, title)
-        article_flags.append(
-            page.namespace() == 0 and page.title() != mainpage,
-        )
+    namespaces = (
+        namespace["*"] for namespace in site.siteinfo["namespaces"].values()
+    )
     return (
         ranks
-        .filter(pl.Series("is_article", article_flags, dtype=pl.Boolean))
+        .filter(article_rank_filter(pl.col("title"), namespaces, mainpage))
         .sort("top", maintain_order=True)
         .drop("top")
         .with_row_index("top", offset=1)

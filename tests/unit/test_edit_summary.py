@@ -14,7 +14,7 @@ from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
 
 _CHINESE_CHARACTER_BYTES = 3
 _EXAMPLE_DURATION = 1313.95
-_EXAMPLE_SUFFIX = "([[toolforge:aranami|Aranami 0.3.5]] in 21′54″)"
+_EXAMPLE_SUFFIX = "(in 21′54″ by [[toolforge:aranami|Aranami 0.3.5]])"
 
 
 class TestEditSummary(TestCase):
@@ -126,31 +126,31 @@ class TestEditSummary(TestCase):
             == f"1 item total. {_EXAMPLE_SUFFIX}"
         )
         assert EditSummary.with_execution_time("summary", 0) == (
-            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 0.00″)"
+            "summary (in 0.00″ by [[toolforge:aranami|Aranami 0.3.5]])"
         )
         assert EditSummary.with_execution_time("summary", 5.2) == (
-            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 5.20″)"
+            "summary (in 5.20″ by [[toolforge:aranami|Aranami 0.3.5]])"
         )
         assert EditSummary.with_execution_time("summary", 7.12) == (
-            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 7.12″)"
+            "summary (in 7.12″ by [[toolforge:aranami|Aranami 0.3.5]])"
         )
         assert EditSummary.with_execution_time("summary", 59.99) == (
-            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 59.99″)"
+            "summary (in 59.99″ by [[toolforge:aranami|Aranami 0.3.5]])"
         )
         assert EditSummary.with_execution_time("summary", 59.999) == (
-            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 1′00″)"
+            "summary (in 1′00″ by [[toolforge:aranami|Aranami 0.3.5]])"
         )
         assert EditSummary.with_execution_time("summary", 60) == (
-            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 1′00″)"
+            "summary (in 1′00″ by [[toolforge:aranami|Aranami 0.3.5]])"
         )
         assert EditSummary.with_execution_time("summary", 67.12) == (
-            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 1′07″)"
+            "summary (in 1′07″ by [[toolforge:aranami|Aranami 0.3.5]])"
         )
         assert EditSummary.with_execution_time("summary", 119.99) == (
-            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 2′00″)"
+            "summary (in 2′00″ by [[toolforge:aranami|Aranami 0.3.5]])"
         )
         assert EditSummary.with_execution_time("summary", 3600) == (
-            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 60′00″)"
+            "summary (in 60′00″ by [[toolforge:aranami|Aranami 0.3.5]])"
         )
 
     @staticmethod
@@ -163,8 +163,8 @@ class TestEditSummary(TestCase):
             ) as installed_version:
                 summary = EditSummary.with_execution_time("summary", 7.12)
                 assert summary == (
-                    f"summary ([[toolforge:aranami|Aranami {installed}]] "
-                    "in 7.12″)"
+                    "summary (in 7.12″ by "
+                    f"[[toolforge:aranami|Aranami {installed}]])"
                 )
                 installed_version.assert_called_once_with("aranami")
                 assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
@@ -281,6 +281,22 @@ class TestEditSummary(TestCase):
             first.replace("21′54″", "21′53.95″"),
             first.replace(
                 _EXAMPLE_SUFFIX,
+                "(in 21′54″ by Aranami 0.3.3.post1)",
+            ),
+            first.replace(
+                _EXAMPLE_SUFFIX,
+                "(in 7.12″ by Aranami 0.3.5.dev12)",
+            ),
+            first.replace(
+                _EXAMPLE_SUFFIX,
+                "([[toolforge:aranami|Aranami 0.3.5]] in 21′54″)",
+            ),
+            first.replace(
+                _EXAMPLE_SUFFIX,
+                "([[toolforge:aranami|Aranami 0.3.5]] in 5.20″)",
+            ),
+            first.replace(
+                _EXAMPLE_SUFFIX,
                 "By [[toolforge:aranami|Aranami 0.3.5]] in 21′54″.",
             ),
             first.replace(
@@ -304,7 +320,7 @@ class TestEditSummary(TestCase):
             second = EditSummary.with_execution_time(previous, 5.2)
             assert second == (
                 "2 items total. Added «[[Short]]». "
-                "([[toolforge:aranami|Aranami 0.3.5]] in 5.20″)"
+                "(in 5.20″ by [[toolforge:aranami|Aranami 0.3.5]])"
             )
             assert second.count("[[toolforge:aranami|") == 1
             assert len(second.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES

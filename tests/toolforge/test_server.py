@@ -255,12 +255,14 @@ class DashboardUpdaterTests(unittest.TestCase):
             _days: int,
             *,
             publish: Callable[[dict[str, object]], None] | None,
+            cache_directory: Path,
         ) -> dict[str, object]:
             """Publish initial data before the final result.
 
             Returns:
                 The final observed quality result.
             """
+            assert cache_directory == self.output.parent.resolve()
             assert publish is not None
             publish({"phase": "homepage", "quality": None})
             entered.set()
@@ -306,12 +308,14 @@ class DashboardUpdaterTests(unittest.TestCase):
             _days: int,
             *,
             publish: Callable[[dict[str, object]], None] | None,
+            cache_directory: Path,
         ) -> dict[str, object]:
             """Hold a failed refresh without permitting progress writes.
 
             Raises:
                 RuntimeError: The later source intentionally fails.
             """
+            assert cache_directory == self.output.parent.resolve()
             assert publish is None
             entered.set()
             release.wait(3)

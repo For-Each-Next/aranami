@@ -70,7 +70,7 @@ foreach (uiCatalog() as $key => $translations) {
 expectUiSame('他山之石', uiTextFor('zh-hans', 'quality.heading'), 'Simplified interface text');
 expectUiSame('他山之石', uiTextFor('zh-hant', 'quality.heading'), 'Traditional interface text');
 expectUiSame('Across the wikis', uiTextFor('en', 'quality.heading'), 'English interface text');
-expectUiSame('Recorded appearances: 12', uiTextFor('en', 'homepage.count', ['count' => 12]), 'Plain text interpolation');
+expectUiSame('12 articles', uiTextFor('en', 'backlog.count', ['count' => 12]), 'Plain text interpolation');
 expectUiSame('Not completed yet', uiTextFor('en', 'state.Deferred'), 'Deferred is described as an incomplete run');
 expectUiSame('暂未完成', uiTextFor('zh-hans', 'state.Deferred'), 'Simplified incomplete state');
 expectUiSame('暫未完成', uiTextFor('zh-hant', 'state.Deferred'), 'Traditional incomplete state');
@@ -79,6 +79,9 @@ $_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'zh-TW';
 expectUiSame('1分3秒', uiDuration('1 min 3 sec'), 'Localized whole-second long duration');
 expectUiSame('0.25秒', uiDuration('0.25 sec'), 'Localized short duration retains precision');
 expectUiSame('—', uiDuration(null), 'Missing duration remains unknown');
+expectUiSame('6分15秒…', uiRunningDuration('2026-10-18T00:00:00.000000Z', 1792281975), 'Running durations show elapsed whole minutes and seconds with an ellipsis');
+expectUiSame('15秒…', uiRunningDuration('2026-10-18T00:00:00.000000Z', 1792281615), 'Short running durations use whole seconds');
+expectUiSame('0秒…', uiRunningDuration('2026-10-18T00:00:00.000000Z', 1792281599), 'Clock skew never produces a negative running duration');
 expectUiSame('?language=ru', uiUrl('', ['language' => 'ru']), 'Article filters leave interface selection to the browser');
 expectUiSame('/logs/', uiUrl('/logs/'), 'Log links leave interface selection to the browser');
 expectUiSame('unlisted-code', uiLanguageName('unlisted-code'), 'Unknown language codes remain source data');

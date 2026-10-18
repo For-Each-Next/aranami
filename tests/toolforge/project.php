@@ -26,6 +26,15 @@ $data = [
 ];
 file_put_contents($snapshotPath, json_encode($data));
 expectSame($data, projectDashboard($snapshotPath), 'Known empty and unknown observations remain distinct');
+foreach ([null, '2026-10-17T12:00:00Z'] as $highlightTime) {
+    $timedData = $data + ['highlights_updated_at' => $highlightTime];
+    file_put_contents($snapshotPath, json_encode($timedData));
+    expectSame($timedData, projectDashboard($snapshotPath), 'Highlights retain an independent source timestamp or an unavailable observation');
+}
+foreach (['2026-02-30T12:00:00Z', '2026-10-18T12:00:00+08:00', 123] as $highlightTime) {
+    file_put_contents($snapshotPath, json_encode($data + ['highlights_updated_at' => $highlightTime]));
+    expectSame(null, projectDashboard($snapshotPath), 'Invalid highlights timestamps cannot reach the heading');
+}
 $dailyViews = [
     'date' => '2026-10-17', 'limit' => 10, 'scope' => 'site_top_1000',
     'items' => [
