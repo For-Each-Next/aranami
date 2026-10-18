@@ -8,6 +8,7 @@ plain wikitext files for the proposed edits.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -19,7 +20,7 @@ from uuid import uuid4
 import pywikibot
 
 from aranami.support.edit_summary import EditSummary
-from aranami.support.logs import open_run_log
+from aranami.support.logs import log_project_event, open_run_log
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -52,6 +53,7 @@ class _TaskResult:
         elapsed_seconds: Duration measured with the monotonic clock.
         edit_indices: Positions of proposals in the parent edit list.
         notes: Routine-specific delegated actions or diagnostic notes.
+        updated: Successful saves, or unknown after delegated writes.
         started_monotonic: Clock start shared with publication timing.
     """
 
@@ -62,11 +64,38 @@ class _TaskResult:
     elapsed_seconds: float = 0
     edit_indices: list[int] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    updated: int | None = 0
     started_monotonic: float = field(
         default_factory=_monotonic_time,
         init=False,
         repr=False,
     )
+
+
+def _routine_result(task: _TaskResult, *, dry: bool) -> dict[str, object]:
+    """Describe publication outcomes without counting proposals.
+
+    Args:
+        task: Completed routine with its confirmed save count.
+        dry: Whether this execution suppressed intentional writes.
+
+    Returns:
+        Versioned log record consumed by the maintenance dashboard.
+    """
+    if task.status in {"failed", "deferred"}:
+        status = task.status
+    elif task.status != "success" or task.updated is None:
+        status = "unknown"
+    else:
+        status = "updated" if task.updated else "no_update"
+    return {
+        "schema": 1,
+        "routine": task.name,
+        "dry": dry,
+        "status": status,
+        "updated": task.updated,
+        "duration_seconds": round(task.elapsed_seconds, 3),
+    }
 
 
 def _markdown_value(value: str) -> str:
@@ -186,6 +215,17 @@ class JobContext:
         self._active_task.status = "deferred"
         self.notes.append(reason)
 
+    def mark_updates_unknown(self) -> None:
+        """Mark delegated writes whose actual edit count is unconfirmed.
+
+        Call before a delegated request that may write even if its
+        response fails. Outside an active routine there is no lifecycle
+        result to change. Confirmed direct saves cannot establish a
+        complete count once delegated writes make the total unknown.
+        """
+        if self._active_task is not None:
+            self._active_task.updated = None
+
     def publish(self, edit: ProposedEdit) -> None:
         """Record a proposal and save changed text during live runs.
 
@@ -231,6 +271,11 @@ class JobContext:
             return
         page.text = edit.text
         page.save(summary=edit.summary)
+        if (
+            self._active_task is not None
+            and self._active_task.updated is not None
+        ):
+            self._active_task.updated += 1
         _LOGGER.info("Saved: %s.", edit.title)
 
     def _proposal_lines(self, index: int, path: Path) -> list[str]:
@@ -364,6 +409,12 @@ def job_run(
         task = active.start_task(name)
         started = task.started_monotonic
         logger.info("Routine started (dry=%s).", active.dry)
+        log_project_event(
+            "aranami",
+            "routine.started",
+            routine=name,
+            dry=active.dry,
+        )
         try:
             if active.dry:
                 print(  # ruff: ignore[print]
@@ -373,10 +424,6 @@ def job_run(
             yield active
         except Exception as error:
             task.status = "failed"
-            logger.exception(
-                "Routine failed after %.3f seconds.",
-                perf_counter() - started,
-            )
             active.notes.append(
                 f"Routine {name} failed: {type(error).__name__}: {error}. "
                 "See the daily log.",
@@ -385,16 +432,29 @@ def job_run(
         else:
             if task.status == "running":
                 task.status = "success"
-                logger.info(
-                    "Routine finished in %.3f seconds.",
-                    perf_counter() - started,
-                )
-            else:
-                logger.warning(
-                    "Routine deferred after %.3f seconds.",
-                    perf_counter() - started,
-                )
         finally:
             active.finish_task(perf_counter() - started)
+            result = _routine_result(task, dry=active.dry)
+            logger.log(
+                {
+                    "failed": logging.ERROR,
+                    "deferred": logging.WARNING,
+                }.get(task.status, logging.INFO),
+                "Routine result: %s",
+                json.dumps(
+                    result,
+                    allow_nan=False,
+                ),
+                exc_info=task.status == "failed",
+            )
+            log_project_event(
+                "aranami",
+                "routine.result",
+                **{
+                    key: value
+                    for key, value in result.items()
+                    if key != "schema"
+                },
+            )
             if context is None:
                 active.write_report()

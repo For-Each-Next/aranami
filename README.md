@@ -1,4 +1,4 @@
-# Aranami
+# <img src="src/toolforge/public_html/aranami.svg" width="40" height="40" alt=""> Aranami
 
 [English][1] · [繁體中文][2] · [简体中文][3]
 
@@ -10,6 +10,11 @@ and comparisons with English Wikipedia.
 [Toolforge][4] is Aranami's primary runtime for continuous scheduled report
 maintenance. [Wikimedia PAWS][22] remains available for notebooks and manual
 runs. Both support immediate report updates and previews of proposed changes.
+
+The separate [Toolforge dashboard](https://aranami.toolforge.org/) shows
+100 days of Chinese main-page appearances, 30 days of upcoming quality
+content, daily pageviews, and recognized video-game articles across
+Wikipedia languages. Its Python updater refreshes saved data hourly.
 
 ## Scheduled tasks
 
