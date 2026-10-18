@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
-_QUALITY_TTL = dt.timedelta(hours=1)
+_QUALITY_TTL = dt.timedelta(hours=24)
 _QUALITY_URL_MAX_BYTES = 4096
 _MAX_DAYS = 365
 _QUALITY_URL = (
@@ -424,6 +424,7 @@ def quality_snapshot(
 ) -> dict[str, object]:
     """Reuse recent quality data or refresh direct video-game instances.
 
+    Reuse successful raw Wikidata results for twenty-four hours.
     Serialize the complete cache transaction across concurrent callers.
     Source errors reuse valid older raw data at its original timestamp;
     otherwise they propagate. Fallback reads never change either cache.

@@ -20,6 +20,28 @@ if (!in_array($method, ['GET', 'HEAD'], true)) {
 }
 header('Content-Type: text/html; charset=UTF-8');
 require dirname(__DIR__) . '/status.php';
+require dirname(__DIR__) . '/page-cache.php';
+
+$snapshotPath = '/data/project/aranami/cache/toolforge/dashboard.json';
+$pageCacheDirectory = '/data/project/aranami/cache/toolforge/pages';
+$pageCacheInputs = [$snapshotPath, __FILE__, dirname(__DIR__) . '/page-cache.php',
+    dirname(__DIR__) . '/i18n.php', dirname(__DIR__) . '/status.php',
+    dirname(__DIR__) . '/project.php', dirname(__DIR__) . '/assessment.php',
+    __DIR__ . '/dashboard.js'];
+$pageCacheInputs = array_merge($pageCacheInputs,
+    glob('/data/project/aranami/pyvenv/lib/python*/site-packages/aranami-*.dist-info/METADATA') ?: []);
+$pageCacheOptionalInputs = ['/data/project/aranami/logs/aranami-status.json'];
+$pageCacheKey = homepageCacheRequest($method, $_GET, $_SERVER['QUERY_STRING'] ?? '')
+    ? homepageCacheKey($pageCacheInputs, $pageCacheOptionalInputs) : null;
+if ($pageCacheKey !== null) {
+    header('X-Aranami-Cache: MISS');
+    $cachedPage = readHomepageCache($pageCacheDirectory, uiLocale(), $pageCacheKey);
+    if ($cachedPage !== null) {
+        header('X-Aranami-Cache: HIT');
+        echo $cachedPage;
+        exit;
+    }
+}
 require dirname(__DIR__) . '/project.php';
 require dirname(__DIR__) . '/assessment.php';
 
@@ -75,6 +97,26 @@ function dashboardQualityCompanion(array $item): void
     }
 }
 
+/** Prepare the same translated article fields for safe client-side rendering. */
+function dashboardQualityRecord(array $item): array
+{
+    $local = $item['language'] === 'zh';
+    $label = dashboardStatus($item['status']);
+    $note = $label;
+    if (isset($item['badge_observed_at'])) {
+        $note .= ' · ' . uiText('date.observed') . ': ' . str_replace('T', ' ', substr($item['badge_observed_at'], 0, 16)) . ' UTC';
+    }
+    $grade = $item['zh_class'] ?? ($local ? $item['status'] : null);
+    return [
+        'item' => $item['item'], 'site' => $item['site'],
+        'language' => $item['language'], 'title' => $item['title'], 'url' => $item['url'],
+        'status' => $item['status'], 'label' => $label, 'note' => $note,
+        'zh_title' => $item['zh_title'] ?? ($local ? $item['title'] : null),
+        'zh_url' => $item['zh_url'] ?? ($local ? $item['url'] : null),
+        'grade' => $grade === null ? null : dashboardAssessmentLabel($grade, 'class'),
+    ];
+}
+
 /** Show an appearance kind using the same chip style as assessments. */
 function dashboardEntryKind(array $item): void
 {
@@ -95,11 +137,11 @@ function dashboardEntryMeta(array $item): void
 {
     echo '<span class="entry-meta">';
     if (($item['date'] ?? null) !== null) {
-        echo '<span class="entry-date"><time datetime="' . html($item['date']) . '">' . html($item['date']) . '</time>';
+        echo '<span class="entry-date">';
         if (($item['date_kind'] ?? '') === 'scheduled') {
-            echo html(uiText('date.scheduled'));
+            echo html(uiText('date.scheduled')) . (uiLocale() === 'en' ? ' ' : '');
         }
-        echo '</span>';
+        echo '<time datetime="' . html($item['date']) . '">' . html($item['date']) . '</time></span>';
     }
     $noteKey = ['window_start' => 'date.window_start', 'observed' => 'date.observed'][$item['date_kind'] ?? ''] ?? null;
     if ($noteKey !== null) {
@@ -223,7 +265,7 @@ function dashboardPageviews(?array $observation): void
     }
 }
 
-$project = projectDashboard('/data/project/aranami/cache/toolforge/dashboard.json');
+$project = projectDashboard($snapshotPath);
 $updatedAt = $project['updated_at'] ?? null;
 $updatedLabel = $updatedAt === null ? null : (new DateTimeImmutable($updatedAt))->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i');
 $quality = $project['quality'] ?? null;
@@ -252,28 +294,62 @@ if ($upcomingItems !== null) {
 $homepageItems['recognized'] = $recognizedPastItems === null && $upcomingItems === null
     ? null : array_merge($upcomingItems ?? [], $recognizedPastItems ?? []);
 $errors = $project['errors'] ?? [];
-$languages = array_fill_keys(array_column($quality['counts'] ?? [], 'language'), true);
+$languages = array_fill_keys(array_merge(array_column($quality['counts'] ?? [], 'language'),
+    array_column($quality['items'] ?? [], 'language')), true);
+ksort($languages, SORT_STRING);
 $requestedLanguage = $_GET['language'] ?? '';
 $selectedLanguage = is_string($requestedLanguage) && isset($languages[$requestedLanguage]) ? $requestedLanguage : '';
 $requestedStatus = $_GET['status'] ?? '';
 $selectedStatus = is_string($requestedStatus) && in_array($requestedStatus, ['FA', 'FL', 'GA', 'recommended'], true) ? $requestedStatus : '';
-if (($_GET['random'] ?? null) === '1') {
-    $candidates = array_values(array_filter(array_keys($languages), static fn (string $language): bool =>
-        $language !== 'zh' && $language !== $selectedLanguage));
-    if ($candidates === [] && $selectedLanguage !== '' && $selectedLanguage !== 'zh') {
-        $candidates = [$selectedLanguage];
-    }
-    if ($candidates !== []) {
-        $language = $candidates[random_int(0, count($candidates) - 1)];
-        header('Location: ' . uiUrl('', ['language' => $language]) . '#quality', true, 303);
-        exit;
-    }
-}
+$randomQuality = ($_GET['random'] ?? null) === '1';
 if ($method === 'HEAD') {
     exit;
 }
 $qualityItems = $selectedLanguage === '' ? selectQualityArticles($quality, $selectedStatus) : array_values(array_filter($quality['items'] ?? [], static fn (array $item): bool =>
     $item['language'] === $selectedLanguage && ($selectedStatus === '' || $item['status'] === $selectedStatus)));
+if ($randomQuality && $quality !== null) {
+    $pool = [];
+    foreach ($quality['items'] as $item) {
+        if (($selectedLanguage === '' || $item['language'] === $selectedLanguage)
+            && ($selectedStatus === '' || $item['status'] === $selectedStatus)) {
+            $identity = json_encode([$item['item'], $item['site'], $item['status']], JSON_THROW_ON_ERROR);
+            $pool[$identity] = $item;
+        }
+    }
+    $qualityItems = array_values($pool);
+    shuffle($qualityItems);
+    $qualityItems = array_slice($qualityItems, 0, 10);
+}
+$qualityClientData = null;
+if ($quality !== null && $languages !== []) {
+    $defaults = [];
+    foreach (['', 'FA', 'FL', 'GA', 'recommended'] as $status) {
+        $defaults[$status] = array_map('dashboardQualityRecord', selectQualityArticles($quality, $status));
+    }
+    $languageNames = [];
+    foreach (array_keys($languages) as $language) {
+        $languageNames[$language] = dashboardLanguage($language);
+    }
+    $messages = [];
+    foreach (['quality.sample', 'quality.sample_status', 'quality.table_aria', 'quality.all_aria',
+        'quality.language_label', 'quality.companion_missing', 'quality.sample_empty'] as $key) {
+        $messages[$key] = uiText($key);
+    }
+    $statusLabels = [];
+    foreach (['FA', 'FL', 'GA', 'recommended'] as $status) {
+        $statusLabels[$status] = dashboardStatus($status);
+    }
+    $data = json_encode([
+        'items' => array_map('dashboardQualityRecord', $quality['items']),
+        'defaults' => $defaults, 'languages' => $languageNames,
+        'messages' => $messages, 'statusLabels' => $statusLabels,
+        'sample' => $randomQuality ? array_map('dashboardQualityRecord', $qualityItems) : [],
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+        | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    if (strlen($data) <= SNAPSHOT_READ_LIMIT) {
+        $qualityClientData = $data;
+    }
+}
 $homepageSections = [
     'pageviews' => [uiText('pageviews.heading'), ''],
     'recognized' => [uiText('homepage.recognized'), uiText('homepage.recognized_description')],
@@ -288,6 +364,11 @@ $routineNames = [];
 foreach (ROUTINES as $id => $name) {
     $routineNames[$id] = uiText('routine.' . $id);
 }
+if ($pageCacheKey !== null && $project !== null) {
+    ob_start();
+} else {
+    $pageCacheKey = null;
+}
 ?>
 <!doctype html>
 <html lang="<?= html(uiLanguageTag()) ?>">
@@ -298,7 +379,7 @@ foreach (ROUTINES as $id => $name) {
   <link rel="icon" href="/aranami.svg" type="image/svg+xml">
   <meta name="description" content="<?= html(uiText('page.description')) ?>">
   <title><?= html(uiText('page.title')) ?></title>
-  <script src="/dashboard.js" defer></script>
+  <script src="/dashboard.js?v=<?= html((string) @filemtime(__DIR__ . '/dashboard.js')) ?>" defer></script>
   <style>
     :root { color-scheme: light; font-family: system-ui, -apple-system, "Noto Sans TC", "Microsoft JhengHei", sans-serif; --green: #a8d9cb; --mint: #edf9f4; --paper: #ffffff; --pale: #edf9f4; --ink: #202122; --muted: #54595d; --line: #c1d1cc; --link: #3366cc; }
     * { box-sizing: border-box; }
@@ -327,9 +408,11 @@ foreach (ROUTINES as $id => $name) {
     h2 { margin: 0; font-family: "Linux Libertine", "Noto Serif SC", "Noto Serif TC", "Songti SC", "Songti TC", SimSun, Georgia, "Times New Roman", serif; font-size: 1.8rem; font-weight: 400; line-height: 1.4; }
     .section-aside { font-size: .69rem; color: var(--muted); }
     .empty { margin: 0; padding: 12px 0; font-size: .79rem; color: var(--muted); }
-    .section-intro { margin: 0 0 14px; font-size: 1rem; color: var(--muted); }
     .quality-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; padding: 6px 0; font-size: 1rem; }
     .quality-actions a { display: inline-block; padding: 4px 0; }
+    .quality-actions select { max-width: 100%; padding: 4px 6px; }
+    .quality-actions button { padding: 4px 10px; border: 1px solid var(--green); border-radius: 5px; background: var(--mint); color: var(--link); cursor: pointer; }
+    .quality-actions [hidden], .quality-pagination[hidden] { display: none; }
     .sample-label { padding: 8px 0; font-size: .875rem; color: var(--muted); margin: 0; }
     table { width: 100%; border-collapse: collapse; font-size: 1rem; }
     th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
@@ -342,7 +425,6 @@ foreach (ROUTINES as $id => $name) {
     .quality-table thead th:nth-child(2), .quality-table thead th:nth-child(3) { width: 39%; }
     .quality-table th, .quality-table td { white-space: nowrap; vertical-align: middle; }
     .quality-language { overflow: hidden; text-overflow: ellipsis; }
-    .quality-filter-status { margin: 0 0 14px; font-size: .77rem; padding: 9px 13px; border: 1px solid var(--green); border-radius: 6px; background: var(--mint); }
     .quality-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 0; color: var(--muted); font-size: .875rem; border-top: 1px solid var(--line); }
     .quality-pagination p { margin: 0; }
     .quality-pagination button { padding: 7px 11px; border: 1px solid var(--green); border-radius: 5px; color: var(--ink); background: var(--mint); font: inherit; cursor: pointer; }
@@ -354,34 +436,31 @@ foreach (ROUTINES as $id => $name) {
     .homepage-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
     .homepage-column { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
     .homepage-card { min-width: 0; }
+    .homepage-gutter { overflow: hidden; scrollbar-gutter: stable; padding-inline-end: 12px; }
     .homepage-card-header { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: 8px 0; border-bottom: 1px solid var(--line); }
     .homepage-card h3 { margin: 0; }
     .homepage-card-header p { margin: 1px 0 0; color: var(--muted); font-size: .875rem; }
     .count { min-width: 27px; min-height: 27px; padding: 1px 7px; display: inline-grid; place-items: center; background: var(--mint); border: 1px solid var(--green); border-radius: 20px; font-size: .7rem; font-variant-numeric: tabular-nums; }
     .homepage-card-body { padding: 2px 0 0; }
-    .homepage-card-body > .empty { padding: 11px 0 3px; }
+    .homepage-card-body .empty { padding: 11px 0 3px; }
     .homepage-card-note { margin: 8px 0 2px; color: var(--muted); font-size: .67rem; }
     .pageviews-list { margin: 0; padding: 0; list-style: none; }
-    .pageviews-list li { display: grid; grid-template-columns: 1.25rem minmax(0, 1fr) auto; gap: 5px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 1rem; }
-    .pageviews-list li:last-child { border-bottom: 0; }
+    .pageviews-list li { display: grid; grid-template-columns: 1.25rem minmax(0, 1fr) auto; gap: 5px; align-items: baseline; padding: 8px 0; font-size: 1rem; }
     .article-summary { display: flex; align-items: baseline; gap: 5px; min-width: 0; overflow: hidden; }
-    .article-summary > a { display: block; flex: 1 1 0; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .article-summary > a { display: block; flex: 0 1 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .assessment-chips { display: inline-flex; flex: 0 0 auto; gap: 3px; }
     <?php dashboardChipStyles(); ?>
     .article-summary > .assessment-chip, .article-summary .assessment-chips > .assessment-chip { flex: 0 1 auto; min-width: 1.75em; }
     .article-summary > .assessment-chips { flex: 0 1 auto; min-width: 2.8125rem; }
     .pageviews-rank, .pageviews-number { color: var(--muted); font-size: .875rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .entry-list { margin: 0; padding: 0; list-style: none; }
-    .entry-list li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 1rem; }
-    .entry-list li:last-child { border-bottom: 0; }
+    .entry-list li { padding: 8px 0; font-size: 1rem; }
     .entry-compact li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; align-items: baseline; }
     .entry-numbered li { grid-template-columns: 1.25rem minmax(0, 1fr) auto; }
     .entry-compact .entry-meta { flex-wrap: nowrap; white-space: nowrap; }
     .entry-rank { color: var(--muted); font-size: .875rem; font-variant-numeric: tabular-nums; }
     .entry-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; color: var(--muted); font-size: .875rem; }
     .entry-date { white-space: nowrap; }
-    .entries-scroll { max-height: 360px; overflow-y: auto; scrollbar-gutter: stable; padding-inline-end: 12px; }
-    .entries-scroll .entry-meta { flex-wrap: nowrap; white-space: nowrap; padding-inline-end: 12px; }
     .date-note-marker { text-decoration: none; cursor: help; }
     .more { margin-top: 7px; font-size: .72rem; }
     .more summary { cursor: pointer; color: var(--link); padding: 6px 0; }
@@ -394,9 +473,6 @@ foreach (ROUTINES as $id => $name) {
     .backlog-task:last-child { border-bottom: 0; }
     .backlog-count { flex: 0 0 auto; color: var(--muted); font-size: .875rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .ops { margin-bottom: 14px; }
-    .ops-intro { margin: 0 0 14px; font-size: 1rem; }
-    .ops-intro p { margin: 0 0 4px; }
-    .ops-intro p:last-child { margin-bottom: 0; }
     .table-scroll { overflow-x: auto; }
     .ops table { min-width: 680px; }
     .ops table small { display: block; color: var(--muted); font-size: .875rem; }
@@ -442,10 +518,10 @@ foreach (ROUTINES as $id => $name) {
 <?php foreach ($homepageColumns as $column): ?>
         <div class="homepage-column">
 <?php foreach ($column as $key): [$title, $description] = $homepageSections[$key]; $items = $homepageItems[$key] ?? null; ?>
-        <section class="homepage-card" aria-labelledby="homepage-<?= html($key) ?>"><div class="homepage-card-header"><div><h3 id="homepage-<?= html($key) ?>"><?= html($title) ?></h3><p><?php if ($key === 'pageviews'): dashboardPageviewsDescription($pageviews); else: ?><?= html($description) ?><?php endif; ?></p></div><span class="count" aria-label="<?= html($items === null ? uiText('ops.unavailable') : uiText(match ($key) { 'recognized' => 'homepage.recognized_count', 'pageviews' => 'pageviews.count', default => 'homepage.count' }, ['count' => dashboardNumber(count($items))])) ?>"><?= $items === null ? '—' : dashboardNumber(count($items)) ?></span></div><div class="homepage-card-body">
-<?php if ($key === 'pageviews'): dashboardPageviews($pageviews); elseif ($key === 'dyk'): ?>
-          <div class="entries-scroll" role="region" aria-labelledby="homepage-dyk" tabindex="0"><?php dashboardEntries($items, true, true); ?></div>
-<?php else: dashboardEntries($items, $key === 'recognized', $key === 'recognized'); endif; ?>
+        <section class="homepage-card" aria-labelledby="homepage-<?= html($key) ?>"><div class="homepage-gutter"><div class="homepage-card-header"><div><h3 id="homepage-<?= html($key) ?>"><?= html($title) ?></h3><p><?php if ($key === 'pageviews'): dashboardPageviewsDescription($pageviews); else: ?><?= html($description) ?><?php endif; ?></p></div><span class="count" aria-label="<?= html($items === null ? uiText('ops.unavailable') : uiText(match ($key) { 'recognized' => 'homepage.recognized_count', 'pageviews' => 'pageviews.count', default => 'homepage.count' }, ['count' => dashboardNumber(count($items))])) ?>"><?= $items === null ? '—' : dashboardNumber(count($items)) ?></span></div></div><div class="homepage-card-body">
+          <div class="homepage-gutter">
+<?php if ($key === 'pageviews'): dashboardPageviews($pageviews); elseif ($key === 'dyk'): dashboardEntries($items === null ? null : array_slice($items, 0, 10), true, true); else: dashboardEntries($items, $key === 'recognized', $key === 'recognized'); endif; ?>
+          </div>
 <?php if ($items !== null && ($homepageMissing[$key] ?? []) !== []): ?><p class="homepage-card-note"><?= html(uiText('homepage.partial', ['sections' => implode(uiText('format.list_separator'), $homepageMissing[$key])])) ?></p><?php endif; ?></div></section>
 <?php endforeach; ?>
         </div>
@@ -454,7 +530,6 @@ foreach (ROUTINES as $id => $name) {
     </section>
     <section class="section-flat" id="backlog" aria-labelledby="backlog-heading">
       <div class="section-header"><h2 id="backlog-heading"><?= html(uiText('backlog.heading')) ?></h2><?php if ($backlog !== null): ?><span class="section-aside"><?= html(uiText('backlog.total', ['count' => dashboardNumber($backlog['total'])])) ?></span><?php endif; ?></div>
-      <p class="section-intro"><?= html(uiText('backlog.intro')) ?></p>
 <?php if ($backlog === null): ?>
       <p class="empty"><?= html(uiText('backlog.unavailable')) ?></p>
 <?php else: ?>
@@ -474,11 +549,9 @@ foreach (ROUTINES as $id => $name) {
       <p class="quality-updated"><?= html(uiText('quality.observed')) ?> <time datetime="<?= html($backlog['observed_at']) ?>"><?= html((new DateTimeImmutable($backlog['observed_at']))->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i')) ?> UTC</time></p>
 <?php endif; ?>
     </section>
-    <p class="quality-filter-status" data-quality-status data-error="<?= html(uiText('quality.filter_error')) ?>" role="status" aria-live="polite" hidden></p>
     <div class="project-layout">
         <section class="section-flat" id="quality" aria-labelledby="quality-heading">
-          <div class="section-header"><h2 id="quality-heading"><?= html(uiText('quality.heading')) ?></h2><span class="section-aside"><?= html(uiText('quality.current')) ?></span></div>
-          <p class="section-intro"><?= html(uiText('quality.intro')) ?></p>
+          <div class="section-header"><h2 id="quality-heading"><?= html(uiText('quality.heading')) ?></h2></div>
 <?php if ($quality !== null && ($quality['stale'] ?? false)): ?>
           <p class="cache-notice" role="status"><?= html(uiText('quality.cached')) ?></p>
 <?php endif; ?>
@@ -487,24 +560,16 @@ foreach (ROUTINES as $id => $name) {
 <?php elseif ($languages === []): ?>
           <p class="empty"><?= html(uiText('quality.empty')) ?></p>
 <?php else: ?>
-          <div class="quality-actions"><a data-quality-filter href="<?= html(uiUrl('', ['random' => '1', 'language' => $selectedLanguage]) . '#quality') ?>"><?= html(uiText('quality.random')) ?></a><?php if ($selectedLanguage !== ''): ?><a data-quality-filter href="<?= html(uiUrl('/') . '#quality') ?>"><?= html(uiText('quality.all_languages')) ?></a><?php endif; ?></div>
-<?php if ($selectedLanguage !== ''): ?>
-          <p class="sample-label"><?= html(uiText($selectedStatus === '' ? 'quality.sample' : 'quality.sample_status', ['language' => dashboardLanguage($selectedLanguage), 'status' => $selectedStatus === '' ? '' : dashboardStatus($selectedStatus), 'count' => dashboardNumber(count($qualityItems))])) ?></p>
-<?php endif; ?>
-<?php if ($qualityItems === null): ?>
-          <p class="empty"><?= html(uiText('quality.unavailable')) ?></p>
-<?php elseif ($qualityItems === []): ?>
-          <p class="empty"><?= html(uiText('quality.sample_empty')) ?></p>
-<?php else: ?>
-          <div class="quality-scroll" role="region" aria-label="<?= html(uiText('quality.all_aria')) ?>" tabindex="0"><table class="quality-table" id="quality-articles" data-quality-table aria-label="<?= html($selectedLanguage === '' ? uiText('quality.all_aria') : uiText('quality.table_aria', ['language' => dashboardLanguage($selectedLanguage)])) ?>"><thead><tr><th scope="col"><?= html(uiText('column.language')) ?></th><th scope="col"><?= html(uiText('column.article')) ?></th><th scope="col"><?= html(uiText('column.local_article')) ?></th></tr></thead><tbody>
+          <form class="quality-actions" data-quality-actions action="<?= html(uiUrl('/') . '#quality') ?>" method="get"><label for="quality-language"><?= html(uiText('quality.language')) ?></label><select id="quality-language" name="language"><option value=""><?= html(uiText('quality.all_languages')) ?></option><?php foreach (array_keys($languages) as $language): ?><option value="<?= html($language) ?>"<?= $selectedLanguage === $language ? ' selected' : '' ?>><?= html(dashboardLanguage($language) . ' (' . $language . ')') ?></option><?php endforeach; ?></select><?php if ($selectedStatus !== ''): ?><input type="hidden" name="status" value="<?= html($selectedStatus) ?>"><?php endif; ?><button type="submit" name="random" value="1"><?= html(uiText('quality.random')) ?></button><a data-quality-all href="<?= html(uiUrl('/') . '#quality') ?>"<?= $selectedLanguage === '' && !$randomQuality ? ' hidden' : '' ?>><?= html(uiText('quality.all_languages')) ?></a></form>
+          <p class="sample-label" data-quality-label<?= $selectedLanguage === '' ? ' hidden' : '' ?>><?= html(uiText($selectedStatus === '' ? 'quality.sample' : 'quality.sample_status', ['language' => dashboardLanguage($selectedLanguage), 'status' => $selectedStatus === '' ? '' : dashboardStatus($selectedStatus), 'count' => dashboardNumber(count($qualityItems))])) ?></p>
+          <p class="empty" data-quality-empty<?= $qualityItems === [] ? '' : ' hidden' ?>><?= html(uiText('quality.sample_empty')) ?></p>
+          <div class="quality-scroll" data-quality-scroll role="region" aria-label="<?= html(uiText('quality.all_aria')) ?>" tabindex="0"<?= $qualityItems === [] ? ' hidden' : '' ?>><table class="quality-table" id="quality-articles" data-quality-table aria-label="<?= html($selectedLanguage === '' ? uiText('quality.all_aria') : uiText('quality.table_aria', ['language' => dashboardLanguage($selectedLanguage)])) ?>"><thead><tr><th scope="col"><?= html(uiText('column.language')) ?></th><th scope="col"><?= html(uiText('column.article')) ?></th><th scope="col"><?= html(uiText('column.local_article')) ?></th></tr></thead><tbody>
 <?php foreach ($qualityItems as $item): ?>
             <tr><td class="quality-language" title="<?= html(uiText('quality.language_label', ['language' => dashboardLanguage($item['language']), 'code' => $item['language']])) ?>"><?= html(dashboardLanguage($item['language'])) ?><span class="language-code"><?= html(uiLocale() === 'en' ? ' (' . $item['language'] . ')' : '（' . $item['language'] . '）') ?></span></td><th scope="row"><?php dashboardQualityTitle($item); ?></th><td><?php dashboardQualityCompanion($item); ?></td></tr>
 <?php endforeach; ?>
           </tbody></table></div>
-<?php if ($selectedLanguage !== ''): ?>
-          <div class="quality-pagination"><p data-quality-progress data-template="<?= html(uiText('quality.progress')) ?>" aria-live="polite"><?= html(uiText('quality.progress', ['shown' => dashboardNumber(count($qualityItems)), 'total' => dashboardNumber(count($qualityItems))])) ?></p><button type="button" data-quality-show-more data-template="<?= html(uiText('quality.show_more')) ?>" aria-controls="quality-articles" hidden><?= html(uiText('quality.show_more', ['count' => '25'])) ?></button></div>
-<?php endif; ?>
-<?php endif; ?>
+          <div class="quality-pagination" data-quality-pagination<?= $selectedLanguage === '' || $randomQuality ? ' hidden' : '' ?>><p data-quality-progress data-template="<?= html(uiText('quality.progress')) ?>" aria-live="polite"><?= html(uiText('quality.progress', ['shown' => dashboardNumber(count($qualityItems)), 'total' => dashboardNumber(count($qualityItems))])) ?></p><button type="button" data-quality-show-more data-template="<?= html(uiText('quality.show_more')) ?>" aria-controls="quality-articles" hidden><?= html(uiText('quality.show_more', ['count' => '25'])) ?></button></div>
+<?php if ($qualityClientData !== null): ?><script type="application/json" id="quality-data"><?= $qualityClientData ?></script><?php endif; ?>
 <?php if ($qualityObservedAt !== null): ?>
           <p class="quality-updated"><?= html(uiText('quality.observed')) ?> <time datetime="<?= html($qualityObservedAt) ?>"><?= html($qualityObservedLabel) ?> UTC</time></p>
 <?php endif; ?>
@@ -512,12 +577,9 @@ foreach (ROUTINES as $id => $name) {
         </section>
     </div>
     <section class="ops" id="tool-status" aria-labelledby="tool-status-heading"><div class="section-header"><h2 id="tool-status-heading"><?= html(uiText('ops.heading')) ?></h2></div>
-      <div class="ops-intro"><p><?= html(uiText('ops.purpose')) ?></p>
-
-      </div>
       <div class="table-scroll" role="region" aria-label="<?= html(uiText('ops.aria')) ?>" tabindex="0"><table><thead><tr><th scope="col"><?= html(uiText('ops.column_task')) ?></th><th scope="col"><?= html(uiText('ops.column_state')) ?></th><th scope="col"><?= html(uiText('ops.column_duration')) ?></th><th scope="col"><?= html(uiText('ops.column_time')) ?></th></tr></thead><tbody>
 <?php foreach (ROUTINES as $id => $name): $event = $activity['latest'][$id] ?? null; ?>
-        <tr><th scope="row"><?= html($routineNames[$id]) ?></th><?php if ($event === null): ?><td><?= html(uiText('ops.no_record')) ?></td><td>—</td><td>—</td><?php else: ?><td><span aria-hidden="true"><?= ['Running' => '⏳', 'Updated' => '✓', 'NoUpdate' => '—', 'Failed' => '⚠', 'Deferred' => '↷', 'Result unavailable' => '?'][$event['status']] ?></span> <?= html(uiText('state.' . $event['status'])) ?></td><td><?= html(uiDuration($event['duration'])) ?></td><td class="timestamp"><time datetime="<?= html($event['timestamp']) ?>"><?= html((new DateTimeImmutable($event['timestamp']))->format('Y-m-d H:i:s')) ?></time></td><?php endif; ?></tr>
+        <tr><th scope="row"><?php dashboardRoutineLinks($id, $routineNames[$id]); ?></th><?php if ($event === null): ?><td><?= html(uiText('ops.no_record')) ?></td><td>—</td><td>—</td><?php else: ?><td><span aria-hidden="true"><?= ['Running' => '⏳', 'Updated' => '✓', 'NoUpdate' => '—', 'Failed' => '⚠', 'Deferred' => '↷', 'Result unavailable' => '?'][$event['status']] ?></span> <?= html(uiText('state.' . $event['status'])) ?></td><td><?= html(uiDuration($event['duration'])) ?></td><td class="timestamp"><time datetime="<?= html($event['timestamp']) ?>"><?= html((new DateTimeImmutable($event['timestamp']))->format('Y-m-d H:i:s')) ?></time></td><?php endif; ?></tr>
 <?php endforeach; ?>
       </tbody><tfoot><tr><td colspan="4"><?= html(uiText('ops.installed')) ?> <strong><?= html($versionLabel) ?></strong> · <a href="<?= html(uiUrl('/logs/aranami/')) ?>"><?= html(uiText('ops.browse_logs')) ?></a></td></tr></tfoot></table></div>
     </section>
@@ -525,3 +587,15 @@ foreach (ROUTINES as $id => $name) {
   <footer><div class="shell footer-inner"><p><?= html(uiText('footer.title')) ?></p><p><a href="<?= html(uiUrl('/logs/')) ?>"><?= html(uiText('nav.logs')) ?></a> · <a href="https://zh.wikipedia.org/wiki/WikiProject:电子游戏"><?= html(uiText('nav.project')) ?> ↗</a></p></div></footer>
 </body>
 </html>
+<?php
+if ($pageCacheKey !== null) {
+    $renderedPage = ob_get_clean();
+    if ($renderedPage !== false) {
+        $responseCode = http_response_code();
+        if (($responseCode === false || $responseCode === 200)
+            && homepageCacheKey($pageCacheInputs, $pageCacheOptionalInputs) === $pageCacheKey) {
+            writeHomepageCache($pageCacheDirectory, uiLocale(), $pageCacheKey, $renderedPage);
+        }
+        echo $renderedPage;
+    }
+}

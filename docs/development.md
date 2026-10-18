@@ -42,6 +42,8 @@ Only direct `P31=Q7889` instances establish multilingual video-game scope.
 Count each distinct article once in language totals. Preserve all collected
 records for in-place filters and incremental display. Enrich Chinese counterpart
 grades from current project assessments after reading the badge cache.
+Reuse successful raw Wikidata badge queries for 24 hours while refreshing
+the dashboard's other sources hourly.
 Compare successful raw badge results with the previous query by
 `item`, `site`, and `status`. Title or assessment edits do not establish a
 new badge. Keep the first observation time of additions for 30 days; the
@@ -102,16 +104,19 @@ so PHP can render custom keys without its fixed translation catalogue.
 Keep dashboard sections flat and ordered as 动态热门, 条目维护, and 他山之石.
 Use larger serif headings with a bottom rule to distinguish these sections.
 Use a light green background, black text, and blue links without underlines.
-Featured/good appearances and the full,
-scrollable DYK list occupy the left desktop column; popular articles and
+Featured/good appearances and the first ten
+DYK entries occupy the left desktop column; popular articles and
 the combined news/anniversaries panel occupy the right. Merge scheduled
 appearances into their content lists and mark their dates inline.
 Keep every quality-content appearance visible without collapsing or a
 bounded scroll container. Use compact numbered rows for quality content
-and DYK, matching the popular-article list. Put each recognition chip next
+and DYK, matching the popular-article list, without separators between rows.
+Put each recognition chip next
 to its title, and keep dates on the same row.
-Place DYK dates after article titles with padding, and reserve space for
-the scrollbar. Preserve carry-in and observation notes in labelled markers.
+Place DYK dates after article titles with padding and no internal scrolling.
+Reserve the same gutter and right padding in every homepage panel's heading
+and list so their right edges align.
+Preserve carry-in and observation notes in labelled markers.
 Join current membership's `pa_class` and `pa_importance` onto popular and
 DYK records with native Polars expressions and no additional source query.
 Render available values as chips after the title, using short importance
@@ -132,12 +137,29 @@ Python writers, local HTTP reads, and PHP reads share an 8 MiB
 snapshot bound. Browser filters never trigger source collection, and the
 page does not refresh automatically.
 
+Cache the default rendered homepage separately for each interface locale
+for up to 60 seconds, using three bounded files under
+`cache/toolforge/pages/`. Snapshot, routine-status, and PHP source changes
+invalidate the cached HTML. Filtered and random requests bypass it.
+Cache failures render normally; browser responses still use `no-store`.
+Keep a bounded complete quality collection available to the browser so
+language changes and random samples of ten records update in place without
+network requests. Preserve server-rendered results and the GET form fallback.
+
+Link each job name in the report-status table to its configured on-wiki
+report, using numbered links for multiple targets. Keep these targets
+synchronized with `TASK_DEFINITIONS`; PexBot links to its subscription root.
+
 Run its offline Python suite with `PYTHONPATH=src uv run python -m unittest
 discover -s tests/toolforge -p 'test_*.py'`; native PHP fixtures use
 `php tests/toolforge/status.php`, `php tests/toolforge/project.php`, and
 `php tests/toolforge/i18n.php`.
 `php tests/toolforge/assessment.php` verifies maintenance sorting and
 unknown-date placement.
+`php tests/toolforge/page-cache.php` verifies expiration, locale separation,
+input invalidation, bounded reads, and filesystem failure handling.
+`node --test tests/toolforge/dashboard.cjs` verifies language filtering and
+duplicate-free random samples of ten records.
 `sh tests/toolforge/deployment.sh` verifies the exact upload payload with
 fake SSH and never contacts Toolforge.
 

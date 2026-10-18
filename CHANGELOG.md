@@ -4,6 +4,29 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.6
 
+### 0.5.4 (2026-10-18 08:58 UTC)
+
+Overview: Simplified dashboard pages, made multilingual sampling immediate,
+and added cached rendering, report links, and UTC log modification times.
+
+- Removed the expanding gap between article titles and their chips while
+  preserving title truncation and trailing date or view-count alignment.
+- Added UTC modification timestamps to project and detailed Aranami log
+  listings, using each file's actual metadata.
+- Removed repeated section descriptions and article-row separators, and
+  aligned homepage heading rules with a shared scrollbar gutter.
+- Linked job names in the report-status table to their Wikipedia targets,
+  numbered multiple destinations, and clarified run-log and job-status labels.
+- Reused default homepage HTML for sixty seconds per locale, invalidated
+  changed inputs, and kept filtered and random requests uncached.
+- Reused Wikidata recognition data for 24 hours while refreshing other
+  dashboard sources hourly and retaining safe stale-cache fallback.
+- Added language selection and instant random samples of ten multilingual
+  records, retaining complete language lists and server-rendered fallbacks.
+- Limited the homepage's DYK preview to ten entries without an internal
+  scrollbar while retaining the collected history.
+- Prefixed future homepage appearance dates with a localized scheduled marker.
+
 ### 0.5.3 (2026-10-18 08:16 UTC)
 
 Overview: Added configurable Chinese video-game maintenance worklists and
