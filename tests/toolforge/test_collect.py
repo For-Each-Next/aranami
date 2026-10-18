@@ -6,9 +6,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import json
+import os
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
@@ -28,6 +31,149 @@ from toolforge.collect import (
 
 class TestQualityCache(TestCase):
     """Keep exact-type quality caches separate from old project data."""
+
+    @staticmethod
+    def test_concurrent_refresh_reuses_one_successful_baseline() -> None:
+        """Lock the query and both cache commits as one transaction."""
+        first_query = threading.Event()
+        second_lock = threading.Event()
+        release_query = threading.Event()
+        attempts = threading.Lock()
+        lock_count = 0
+        caller_count = 2
+        original_flock = fcntl.flock
+        records = pl.DataFrame(schema=quality.RECORD_SCHEMA)
+
+        def wait_for_query() -> dict[str, pl.DataFrame]:
+            """Hold the request until the second caller is waiting.
+
+            Returns:
+                Complete successful empty source data.
+
+            Raises:
+                TimeoutError: The synchronization fixture failed.
+            """
+            first_query.set()
+            if not release_query.wait(timeout=10):
+                message = "The test did not release the source request."
+                raise TimeoutError(message)
+            return {"records": records}
+
+        def record_lock(descriptor: int, operation: int) -> None:
+            """Signal the second lock attempt before it blocks."""
+            nonlocal lock_count
+            with attempts:
+                lock_count += 1
+                if lock_count == caller_count:
+                    second_lock.set()
+            original_flock(descriptor, operation)
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "toolforge.collect.quality.collect_video_game_quality",
+                side_effect=wait_for_query,
+            ) as collect,
+            patch("toolforge.collect.fcntl.flock", side_effect=record_lock),
+            ThreadPoolExecutor(max_workers=caller_count) as executor,
+        ):
+            cache = Path(directory)
+            first = executor.submit(quality_snapshot, cache)
+            try:
+                assert first_query.wait(timeout=10)
+                second = executor.submit(quality_snapshot, cache)
+                assert second_lock.wait(timeout=10)
+            finally:
+                release_query.set()
+            assert first.result(timeout=10)["recent_items"] == []
+            assert second.result(timeout=10)["recent_items"] == []
+            collect.assert_called_once_with()
+
+    @staticmethod
+    def test_new_observations_reuse_query_time_and_current_project_grade() -> (
+        None
+    ):
+        """Enrich all-language additions without changing raw data."""
+        records = pl.DataFrame(
+            [
+                {
+                    "item": "Q1",
+                    "site": language + "wiki",
+                    "language": language,
+                    "title": "Game",
+                    "url": f"https://{language}.wikipedia.org/wiki/Game",
+                    "status": "GA",
+                    "zh_title": "游戏",
+                    "zh_url": "https://zh.wikipedia.org/wiki/游戏",
+                    "zh_class": "GA",
+                }
+                for language in ("en", "zh")
+            ],
+            schema=quality.RECORD_SCHEMA,
+        )
+        membership = pl.DataFrame({
+            "full_title": ["游戏"],
+            "page_namespace": [0],
+            "pa_class": ["乙"],
+        })
+        observed = dt.datetime.now(dt.UTC).replace(microsecond=0)
+        observed -= dt.timedelta(minutes=1)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "toolforge.collect.quality.collect_video_game_quality",
+                return_value={
+                    "records": pl.DataFrame(schema=quality.RECORD_SCHEMA),
+                },
+            ) as collect,
+        ):
+            cache = Path(directory)
+            assert quality_snapshot(cache)["recent_items"] == []
+            raw_path = cache / "quality-video-games-all.parquet"
+            records.write_parquet(raw_path)
+            os.utime(raw_path, (observed.timestamp(), observed.timestamp()))
+            first = quality_snapshot(cache, membership=membership)
+            changed = membership.with_columns(pl.lit("丙").alias("pa_class"))
+            repeated = quality_snapshot(cache, membership=changed)
+            raw = pl.read_parquet(raw_path)
+            state = pl.read_parquet(
+                cache / "recognition-observations.parquet",
+            )
+        collect.assert_called_once_with()
+        recent = pl.DataFrame(first["recent_items"])
+        assert recent["site"].to_list() == ["enwiki", "zhwiki"]
+        assert recent["zh_class"].to_list() == ["B", "B"]
+        expected = observed.strftime("%Y-%m-%dT%H:%M:%SZ")
+        assert recent["badge_observed_at"].to_list() == [expected, expected]
+        repeated_items = pl.DataFrame(repeated["recent_items"])
+        assert repeated_items["zh_class"].to_list() == ["C", "C"]
+        assert repeated_items["badge_observed_at"].to_list() == [
+            expected,
+            expected,
+        ]
+        assert raw["zh_class"].to_list() == ["GA", "GA"]
+        assert state["zh_class"].to_list() == ["GA", "GA"]
+
+    def test_failed_source_does_not_replace_comparison_baseline(self) -> None:
+        """Keep a successful comparison when the next source fails."""
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "toolforge.collect.quality.collect_video_game_quality",
+                side_effect=[
+                    {"records": pl.DataFrame(schema=quality.RECORD_SCHEMA)},
+                    RuntimeError("source unavailable"),
+                ],
+            ),
+        ):
+            cache = Path(directory)
+            quality_snapshot(cache)
+            state = cache / "recognition-observations.parquet"
+            original = state.read_bytes()
+            (cache / "quality-video-games-all.parquet").unlink()
+            with self.assertRaises(RuntimeError):
+                quality_snapshot(cache)
+            assert state.read_bytes() == original
 
     @staticmethod
     def test_chinese_project_classes_refresh_without_changing_cache() -> None:
@@ -52,6 +198,7 @@ class TestQualityCache(TestCase):
                     ("Q3", "en", "未评级", "GA"),
                     ("Q4", "en", "歧义评级", "FL"),
                     ("Q5", "en", "非条目", "recommended"),
+                    ("Q6", "en", "未知评级", None),
                 )
             ],
             schema=quality.RECORD_SCHEMA,
@@ -64,9 +211,10 @@ class TestQualityCache(TestCase):
                 "歧义评级",
                 "歧义评级",
                 "非条目",
+                "未知评级",
             ],
-            "page_namespace": [0, 0, 0, 0, 0, 14],
-            "pa_class": ["B", "C", "", "B", "C", "B"],
+            "page_namespace": [0, 0, 0, 0, 0, 14, 0],
+            "pa_class": ["乙", "丙", "", "乙", "丙", "乙", "Future"],
         })
         with (
             tempfile.TemporaryDirectory() as directory,
@@ -80,7 +228,7 @@ class TestQualityCache(TestCase):
             changed = membership.with_columns(
                 pl
                 .when(pl.col("full_title") == "心灵杀手")
-                .then(pl.lit("C"))
+                .then(pl.lit("丙"))
                 .otherwise(pl.col("pa_class"))
                 .alias("pa_class"),
             )
@@ -104,11 +252,11 @@ class TestQualityCache(TestCase):
         assert first_items.filter(pl.col("item") == "Q5")[
             "zh_class"
         ].to_list() == ["recommended"]
-        assert first["popular_items"][0]["zh_class"] == "B"
-        assert all(
-            row["zh_class"] == "B"
-            for row in first["popular_items"][0]["articles"]
-        )
+        assert first_items.filter(pl.col("item") == "Q6")[
+            "zh_class"
+        ].to_list() == ["Future"]
+        assert first["recent_items"] == []
+        assert refreshed["recent_items"] == []
         assert pl.DataFrame(refreshed["items"]).filter(
             pl.col("item") == "Q1",
         )["zh_class"].to_list() == ["C", "C"]
@@ -202,7 +350,7 @@ class TestQualityCache(TestCase):
             assert first["counts"] == second["counts"] == []
             assert first["language_totals"] == second["language_totals"] == []
             assert first["items"] == second["items"] == []
-            assert first["popular_items"] == second["popular_items"] == []
+            assert first["recent_items"] == second["recent_items"] == []
             assert (cache / "quality-video-games-all.parquet").is_file()
 
     @staticmethod
@@ -273,95 +421,9 @@ class TestQualityCache(TestCase):
                 {"site": "zhwiki", "language": "zh", "count": 2},
             ]
         )
-        popular = first["popular_items"]
-        assert popular == cached["popular_items"]
-        assert [row["item"] for row in popular] == ["Q1", "Q2", "Q3"]
-        assert [row["language_count"] for row in popular] == [2, 1, 1]
         expected_languages = 4
         assert first["languages"] == expected_languages
-        assert all(
-            article["site"] != "zhwiki"
-            for row in popular
-            for article in row["articles"]
-        )
-        assert popular[0]["language"] == "en"
-        assert popular[0]["status"] == "FA"
-        assert [row["site"] for row in popular[0]["articles"]] == [
-            "enwiki",
-            "frwiki",
-        ]
-
-    @staticmethod
-    def test_popular_ranking_caps_items_and_breaks_ties() -> None:
-        """Rank distinct editions and retain stable primary titles."""
-        rows = [
-            {
-                "item": item,
-                "site": language + "wiki",
-                "language": language,
-                "title": f"{language} {item}",
-                "url": f"https://{language}.wikipedia.org/wiki/{item}",
-                "status": (
-                    "recommended"
-                    if language == "ja"
-                    else "GA"
-                    if item == "Q98"
-                    else "FL"
-                    if item == "Q97"
-                    else "FA"
-                ),
-                "zh_title": f"中文 {item}",
-                "zh_url": f"https://zh.wikipedia.org/wiki/{item}",
-            }
-            for item, language in (
-                *((f"Q{number}", "en") for number in range(1, 13)),
-                ("Q99", "ja"),
-                ("Q99", "fr"),
-                ("Q99", "de"),
-                ("Q98", "en"),
-                ("Q97", "en"),
-            )
-        ]
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            patch(
-                "toolforge.collect.quality.collect_video_game_quality",
-                return_value={
-                    "records": pl.DataFrame(
-                        rows,
-                        schema=quality.RECORD_SCHEMA,
-                    ),
-                },
-            ),
-        ):
-            observed = quality_snapshot(Path(directory))
-        popular = observed["popular_items"]
-        assert [row["item"] for row in popular] == [
-            "Q99",
-            "Q1",
-            "Q10",
-            "Q11",
-            "Q12",
-            "Q2",
-            "Q3",
-            "Q4",
-            "Q5",
-            "Q6",
-        ]
-        assert popular[0]["title"] == "de Q99"
-        assert popular[0]["zh_title"] == "中文 Q99"
-        assert popular[0]["articles"][-1]["status"] == "recommended"
-        assert [row["site"] for row in popular[0]["articles"]] == [
-            "dewiki",
-            "frwiki",
-            "jawiki",
-        ]
-        english_statuses = [
-            row["status"]
-            for row in observed["items"]
-            if row["language"] == "en"
-        ]
-        assert english_statuses == ["FA"] * 12 + ["FL", "GA"]
+        assert first["recent_items"] == cached["recent_items"] == []
 
 
 class TestRevisionBoundaries(TestCase):

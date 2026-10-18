@@ -85,6 +85,18 @@ $data['quality'] = [
 ];
 file_put_contents($snapshotPath, json_encode($data));
 expectSame($data, projectDashboard($snapshotPath), 'Foreign content retains its Chinese companion link');
+$recent = $data['quality']['items'][0] + ['badge_observed_at' => '2026-10-18T00:00:00Z'];
+foreach ([[], [$recent], [array_replace($recent, ['badge_observed_at' => '2026-10-18T00:00:00+00:00'])]] as $observations) {
+    $data['quality']['recent_items'] = $observations;
+    file_put_contents($snapshotPath, json_encode($data));
+    expectSame($data, projectDashboard($snapshotPath), 'Recent badge observations preserve empty baselines and explicit UTC times');
+}
+foreach ([null, '2026-02-30T00:00:00Z', '2026-10-18', '2026-10-18T08:00:00+08:00', 1] as $timestamp) {
+    $invalid = $data;
+    $invalid['quality']['recent_items'][0]['badge_observed_at'] = $timestamp;
+    file_put_contents($snapshotPath, json_encode($invalid));
+    expectSame(null, projectDashboard($snapshotPath), 'Badge observation times must be actual explicit UTC timestamps');
+}
 foreach ([null, 'GA', 'B', 'C'] as $grade) {
     $data['quality']['items'][0]['zh_class'] = $grade;
     file_put_contents($snapshotPath, json_encode($data));
@@ -100,6 +112,10 @@ $chinese = array_replace($data['quality']['items'][0], [
     'site' => 'zhwiki', 'language' => 'zh', 'title' => '中文條目', 'url' => 'https://zh.wikipedia.org/wiki/Example',
 ]);
 expectSame(true, validQualityArticle($chinese), 'Chinese quality records use a consistent Chinese identity and domain');
+$allLanguages = $data;
+$allLanguages['quality']['recent_items'][] = $chinese + ['badge_observed_at' => '2026-10-18T00:00:01Z'];
+file_put_contents($snapshotPath, json_encode($allLanguages));
+expectSame($allLanguages, projectDashboard($snapshotPath), 'All-language observations can include Chinese recognized articles');
 expectSame(false, validQualityArticle(array_replace($chinese, ['site' => 'enwiki'])),
     'Chinese quality records require the Chinese site identity');
 expectSame(false, validPopularArticle($chinese + ['language_count' => 1, 'articles' => [$chinese]]),

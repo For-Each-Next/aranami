@@ -77,18 +77,24 @@ edit counts remain unconfirmed. Preview activity is omitted.
 The multilingual section, 他山之石, directly queries Wikidata items with
 `P31=Q7889` and reads their quality badges across other Wikipedia languages.
 It applies the same FA, FL, GA, and recommended badge definitions to every
-language. The default view ranks articles by the number of language
-editions recognizing them, counting each edition once. The right-hand
+language. The default view shows recently observed badge additions across
+all languages. Dates indicate when the dashboard detected a new item,
+language, and badge combination, rather than a local promotion date.
+The right-hand
 matrix filters by language and recognition; a random-language action
 offers another entry point. Languages are ordered by distinct article
 count, from most to least.
 Chinese articles appear as counterpart links recorded on the same item,
 with their known Chinese project assessment, including B or C; missing
-counterparts are marked explicitly. The statistics include Chinese, which
-is also available through the matrix; default rankings count foreign
-editions only. Filters, random switching, and browser history update the
+counterparts are marked explicitly. Chinese is included in the statistics
+and the all-language view. Filters, random switching, and browser history update the
 section in place. Language lists initially show 25 records and can expand
 to every collected record without another request.
+The updater compares successful badge results against a disposable
+Parquet observation cache and retains additions for 30 days. The first
+result establishes a baseline without marking existing badges as new;
+deleting this cache resets the baseline and observation history. Failed
+queries leave the previous comparison result intact.
 This exact type scope excludes game subclasses,
 lists, and broader project topics unless they also carry `P31=Q7889`.
 Badge data can lag local status changes and does not establish nomination

@@ -58,19 +58,6 @@ function dashboardQualityTitle(array $item): void
     }
 }
 
-/** Render one compact recognition link per foreign Wikipedia edition. */
-function dashboardQualityLanguages(array $articles): void
-{
-    echo '<ul class="quality-languages">';
-    foreach ($articles as $article) {
-        echo '<li><a class="recognition recognition-' . html($article['status']) . '" href="'
-            . html($article['url']) . '" title="' . html(dashboardLanguage($article['language'])
-                . ' · ' . $article['title'] . ' · ' . dashboardStatus($article['status'])) . '">'
-            . html($article['language']) . ' · ' . html(uiText('quality.short.' . $article['status'])) . '</a></li>';
-    }
-    echo '</ul>';
-}
-
 /** Render primary homepage subjects with their observed display dates. */
 function dashboardEntryRows(array $items): void
 {
@@ -232,8 +219,15 @@ if (($_GET['random'] ?? null) === '1') {
 if ($method === 'HEAD') {
     exit;
 }
-$popularItems = $quality['popular_items'] ?? null;
-$qualityItems = array_values(array_filter($quality['items'] ?? [], static fn (array $item): bool =>
+$recentItems = $quality['recent_items'] ?? null;
+if ($recentItems !== null) {
+    $recentItems = array_values(array_filter($recentItems, static fn (array $item): bool =>
+        $selectedStatus === '' || $item['status'] === $selectedStatus));
+    usort($recentItems, static fn (array $left, array $right): int =>
+        strcmp(substr($right['badge_observed_at'], 0, 19), substr($left['badge_observed_at'], 0, 19))
+        ?: strcmp($left['item'], $right['item']) ?: strcmp($left['site'], $right['site']) ?: strcmp($left['status'], $right['status']));
+}
+$qualityItems = $selectedLanguage === '' ? $recentItems : array_values(array_filter($quality['items'] ?? [], static fn (array $item): bool =>
     $item['language'] === $selectedLanguage && ($selectedStatus === '' || $item['status'] === $selectedStatus)));
 $homepageSections = [
     'pageviews' => [uiText('pageviews.heading'), uiText('pageviews.description')],
@@ -311,11 +305,8 @@ foreach (ROUTINES as $id => $name) {
     .quality-table th:first-child { width: 48%; }
     .quality-table th:nth-child(2) { width: 18%; }
     .quality-table th:nth-child(3) { width: 34%; }
-    .popular-table th:first-child { width: 44%; }
-    .popular-table th:nth-child(2) { width: 56%; }
-    .quality-languages { display: flex; flex-wrap: wrap; gap: 5px; padding: 0; margin: 6px 0; list-style: none; }
-    .quality-languages a { white-space: nowrap; }
-    .recognized-total { color: var(--muted); font-size: .71rem; }
+    .badge-observed { display: block; margin-top: 5px; color: var(--muted); font-size: .64rem; }
+    .observation-note { display: block; margin-top: 4px; font-size: .67rem; }
     .quality-filter-status { margin: 0 0 14px; font-size: .77rem; padding: 9px 13px; border: 1px solid var(--green); border-radius: 6px; background: var(--mint); }
     .quality-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 16px; color: var(--muted); font-size: .7rem; border-top: 1px solid var(--line); }
     .quality-pagination p { margin: 0; }
@@ -336,7 +327,6 @@ foreach (ROUTINES as $id => $name) {
     .counts-table th:first-child { width: 36%; padding-left: 11px; }
     .counts-table .selected { background: var(--mint); }
     .numeric { text-align: right; font-variant-numeric: tabular-nums; }
-    .count-note { margin: 0; padding: 11px 13px; font-size: .65rem; color: var(--muted); border-top: 1px solid var(--line); }
     h3 { margin: 0 0 9px; font-size: .82rem; }
     .homepage-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
     .homepage-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -462,30 +452,21 @@ foreach (ROUTINES as $id => $name) {
 <?php else: ?>
           <div class="quality-actions"><a data-quality-filter href="<?= html(uiUrl('', ['random' => '1', 'language' => $selectedLanguage]) . '#quality') ?>"><?= html(uiText('quality.random')) ?></a><?php if ($selectedLanguage !== ''): ?><a data-quality-filter href="<?= html(uiUrl('/') . '#quality') ?>"><?= html(uiText('quality.all_languages')) ?></a><?php endif; ?></div>
 <?php if ($selectedLanguage === ''): ?>
-          <p class="sample-label"><?= html(uiText('quality.popular_intro')) ?></p>
-<?php if ($popularItems === null): ?>
-          <p class="empty"><?= html(uiText('quality.popular_pending')) ?></p>
-<?php elseif ($popularItems === []): ?>
-          <p class="empty"><?= html(uiText('quality.empty')) ?></p>
-<?php else: ?>
-          <table class="quality-table popular-table" aria-label="<?= html(uiText('quality.popular_aria')) ?>"><thead><tr><th scope="col"><?= html(uiText('column.article')) ?></th><th scope="col"><?= html(uiText('quality.recognized_languages')) ?></th></tr></thead><tbody>
-<?php foreach ($popularItems as $item): ?>
-            <tr><th scope="row"><?php dashboardQualityTitle($item); ?></th><td><strong class="recognized-total"><?= html(uiText('quality.language_count', ['count' => dashboardNumber($item['language_count'])])) ?></strong><?php dashboardQualityLanguages(array_slice($item['articles'], 0, 6)); ?><?php if (count($item['articles']) > 6): ?><details class="more"><summary><?= html(uiText('quality.more_languages', ['count' => dashboardNumber(count($item['articles']) - 6)])) ?></summary><?php dashboardQualityLanguages(array_slice($item['articles'], 6)); ?></details><?php endif; ?></td></tr>
-<?php endforeach; ?>
-          </tbody></table>
-<?php endif; ?>
+          <p class="sample-label"><?= html(uiText('quality.recent_intro')) ?><span class="observation-note"><?= html(uiText('quality.recent_dates')) ?></span></p>
 <?php else: ?>
           <p class="sample-label"><?= html(uiText($selectedStatus === '' ? 'quality.sample' : 'quality.sample_status', ['language' => dashboardLanguage($selectedLanguage), 'status' => $selectedStatus === '' ? '' : dashboardStatus($selectedStatus), 'count' => dashboardNumber(count($qualityItems))])) ?></p>
-<?php if ($qualityItems === []): ?>
-          <p class="empty"><?= html(uiText('quality.sample_empty')) ?></p>
+<?php endif; ?>
+<?php if ($qualityItems === null): ?>
+          <p class="empty"><?= html(uiText('quality.recent_pending')) ?></p>
+<?php elseif ($qualityItems === []): ?>
+          <p class="empty"><?= html(uiText($selectedLanguage === '' ? 'quality.recent_empty' : 'quality.sample_empty')) ?></p>
 <?php else: ?>
-          <table class="quality-table" id="quality-articles" data-quality-table aria-label="<?= html(uiText('quality.table_aria', ['language' => dashboardLanguage($selectedLanguage)])) ?>"><thead><tr><th scope="col"><?= html(uiText('column.article')) ?></th><th scope="col"><?= html(uiText('column.language')) ?></th><th scope="col"><?= html(uiText('column.recognition')) ?></th></tr></thead><tbody>
+          <table class="quality-table" id="quality-articles" data-quality-table aria-label="<?= html($selectedLanguage === '' ? uiText('quality.recent_aria') : uiText('quality.table_aria', ['language' => dashboardLanguage($selectedLanguage)])) ?>"><thead><tr><th scope="col"><?= html(uiText('column.article')) ?></th><th scope="col"><?= html(uiText('column.language')) ?></th><th scope="col"><?= html(uiText('column.recognition')) ?></th></tr></thead><tbody>
 <?php foreach ($qualityItems as $item): ?>
-            <tr><th scope="row"><?php dashboardQualityTitle($item); ?></th><td><?= html(dashboardLanguage($item['language'])) ?><span class="language-code"><?= html($item['language']) ?></span></td><td><span class="recognition recognition-<?= html($item['status']) ?>"><?= html(dashboardStatus($item['status'])) ?></span></td></tr>
+            <tr><th scope="row"><?php dashboardQualityTitle($item); ?></th><td><?= html(dashboardLanguage($item['language'])) ?><span class="language-code"><?= html($item['language']) ?></span></td><td><span class="recognition recognition-<?= html($item['status']) ?>"><?= html(dashboardStatus($item['status'])) ?></span><?php if ($selectedLanguage === ''): ?><time class="badge-observed" datetime="<?= html($item['badge_observed_at']) ?>"><?= html(str_replace('T', ' ', substr($item['badge_observed_at'], 0, 16))) ?> UTC</time><?php endif; ?></td></tr>
 <?php endforeach; ?>
           </tbody></table>
           <div class="quality-pagination"><p data-quality-progress data-template="<?= html(uiText('quality.progress')) ?>" aria-live="polite"><?= html(uiText('quality.progress', ['shown' => dashboardNumber(count($qualityItems)), 'total' => dashboardNumber(count($qualityItems))])) ?></p><button type="button" data-quality-show-more data-template="<?= html(uiText('quality.show_more')) ?>" aria-controls="quality-articles" hidden><?= html(uiText('quality.show_more', ['count' => '25'])) ?></button></div>
-<?php endif; ?>
 <?php endif; ?>
           <p class="quality-note"><?= html(uiText('quality.note')) ?><?php if ($qualityObservedAt !== null): ?><br><?= html(uiText('quality.observed')) ?> <time datetime="<?= html($qualityObservedAt) ?>"><?= html($qualityObservedLabel) ?> UTC</time><?php endif; ?></p>
 <?php endif; ?>
@@ -503,7 +484,6 @@ foreach (ROUTINES as $id => $name) {
 <?php endforeach; ?>
           </tbody></table></div>
 <?php endif; ?>
-          <p class="count-note"><?= html(uiText('counts.note')) ?></p>
 <?php endif; ?>
         </section>
       </aside>

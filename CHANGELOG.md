@@ -4,7 +4,7 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.6
 
-### 0.5.1.post4 (2026-10-18 06:22 UTC)
+### 0.5.2 (2026-10-18 06:35 UTC)
 
 Overview: Added an independent Toolforge dashboard for Chinese main-page
 highlights, daily pageviews, and multilingual quality content, with a
@@ -14,8 +14,10 @@ background updater and structured on-wiki report results.
   Chinese, Traditional Chinese, and English interfaces.
 - Created a shared wave logo and SVG favicon for the project.
 - Queried direct Wikidata video-game instances with uniform recognition
-  badges and Chinese counterpart links carrying known project assessments.
-- Added recognition rankings, language statistics, in-place filters,
+  badges and Chinese counterpart links with standard project grade codes.
+- Compared successful badge queries to show 30 days of new observations
+  across all languages without inventing promotion dates.
+- Added language statistics, in-place filters,
   random switching, and expandable complete article lists.
 - Retained 100 days of Chinese main-page displays and 30 days of upcoming
   quality content, using verified source dates and explicit carry-in labels.

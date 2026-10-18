@@ -224,6 +224,9 @@ function projectDashboard(string $path): ?array
                 && is_string($row['language'] ?? null) && $row['language'] !== ''
                 && validCount($row['count'] ?? null))))
         || !is_array($quality['items'] ?? null) || !validRecords($quality['items'], 'validQualityArticle')
+        || (array_key_exists('recent_items', $quality) && (!is_array($quality['recent_items'])
+            || !validRecords($quality['recent_items'], static fn (array $row): bool =>
+                validQualityArticle($row) && validUtcTime($row['badge_observed_at'] ?? null))))
         || (array_key_exists('popular_items', $quality) && (!is_array($quality['popular_items'])
             || count($quality['popular_items']) > 10 || !validRecords($quality['popular_items'], 'validPopularArticle'))))) {
         return null;

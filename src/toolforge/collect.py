@@ -2,8 +2,8 @@
 
 The background service calls this read-only collector. Chinese main-page
 appearances cover the latest one hundred UTC dates. Quality statistics
-cover direct Wikidata video-game instances; rankings compare foreign
-editions.
+cover direct Wikidata video-game instances across all languages;
+consecutive successful queries establish new badge observations.
 Current featured and good schedules cover the next thirty UTC dates.
 Daily popularity filters Wikimedia's site top 1,000 by project.
 The collector never starts Aranami jobs or publishes wiki edits.
@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import json
 import logging
 import os
+import stat
 import tempfile
 from functools import partial
 from pathlib import Path
@@ -312,6 +314,11 @@ def quality_snapshot(
 ) -> dict[str, object]:
     """Reuse recent quality data or refresh direct video-game instances.
 
+    Serialize the complete cache transaction across concurrent callers.
+    Source errors propagate so unavailable observations are not cached.
+    Project assessments enrich presentation after cache access, so
+    changing a local grade needs no Wikidata refresh.
+
     Args:
         cache_directory: Disposable cache outside the public directory.
         membership: Current Chinese project rows with canonical
@@ -319,11 +326,39 @@ def quality_snapshot(
             Project classes replace badge fallbacks for matched pages.
 
     Returns:
-        Global badge totals, all article records, and a top-ten ranking.
+        Badge totals, all article records, and recent new observations.
 
-    Source errors propagate so unavailable observations are not cached.
-    Project assessments enrich presentation after cache access, so
-    changing a local grade needs no Wikidata refresh.
+    Raises:
+        OSError: The lock or cache files cannot be used safely.
+    """
+    cache_directory.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(
+        cache_directory / "quality-refresh.lock",
+        os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+        0o600,
+    )
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            message = "The quality cache lock must be a regular file."
+            raise OSError(message)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        return _quality_snapshot(cache_directory, membership)
+    finally:
+        os.close(descriptor)
+
+
+def _quality_snapshot(
+    cache_directory: Path,
+    membership: pl.DataFrame | None,
+) -> dict[str, object]:
+    """Refresh raw records and observations inside the cache lock.
+
+    Args:
+        cache_directory: Disposable cache outside the public directory.
+        membership: Current Chinese project assessments, if available.
+
+    Returns:
+        Complete quality section with current project-grade enrichment.
     """
     path = cache_directory / "quality-video-games-all.parquet"
     now = dt.datetime.now(dt.UTC)
@@ -353,9 +388,15 @@ def quality_snapshot(
             temporary = Path(stream.name)
         try:
             records.write_parquet(temporary)
+            os.utime(temporary, (observed.timestamp(), observed.timestamp()))
             temporary.replace(path)
         finally:
             temporary.unlink(missing_ok=True)
+    records = quality.observe_quality(
+        records,
+        cache_directory / "recognition-observations.parquet",
+        observed_at=observed,
+    )
     if membership is not None:
         required = {"full_title", "page_namespace", "pa_class"}
         if not required.issubset(membership.columns):
@@ -366,7 +407,21 @@ def quality_snapshot(
                 .filter(pl.col("page_namespace") == 0)
                 .select(
                     pl.col("full_title").alias("zh_title"),
-                    pl.col("pa_class").alias("_project_class"),
+                    pl
+                    .col("pa_class")
+                    .replace({
+                        "典范": "FA",
+                        "典範": "FA",
+                        "特色列表": "FL",
+                        "优良": "GA",
+                        "優良": "GA",
+                        "乙上": "Bplus",
+                        "乙": "B",
+                        "丙": "C",
+                        "初": "Start",
+                        "小作品": "Stub",
+                    })
+                    .alias("_project_class"),
                 )
                 .filter(
                     pl.col("_project_class").is_not_null()
@@ -405,34 +460,18 @@ def quality_snapshot(
         .len(name="count")
         .sort("language", "site")
     )
-    items = records.sort("site", "status", "title", "item")
-    popular = (
-        records
-        .filter(pl.col("site") != "zhwiki")
-        .with_columns(
-            pl
-            .col("status")
-            .replace_strict(
-                {"FA": 0, "FL": 1, "GA": 2, "recommended": 3},
-                return_dtype=pl.UInt8,
-            )
-            .alias("_priority"),
-            (pl.col("language") != "en").alias("_other_language"),
-        )
-        .sort("item", "_other_language", "site", "_priority", "title")
-        .unique(subset=["item", "site"], keep="first", maintain_order=True)
-        .drop("_priority", "_other_language")
-        .group_by("item", maintain_order=True)
-        .agg(
-            pl.len().alias("language_count"),
-            pl.all().first(),
-            pl
-            .struct(quality.RECORD_SCHEMA.names())
-            .head(500)
-            .alias("articles"),
-        )
-        .sort("language_count", "item", descending=[True, False])
-        .head(10)
+    items = records.select(quality.RECORD_SCHEMA.names()).sort(
+        "site",
+        "status",
+        "title",
+        "item",
+    )
+    recent = records.filter(pl.col("badge_observed_at").is_not_null()).sort(
+        "badge_observed_at",
+        "item",
+        "site",
+        "status",
+        descending=[True, False, False, False],
     )
     return {
         "total": records.select("item", "site").unique().height,
@@ -440,10 +479,10 @@ def quality_snapshot(
         "counts": counts.to_dicts(),
         "language_totals": language_totals.to_dicts(),
         "items": items.to_dicts(),
-        "popular_items": popular.to_dicts(),
+        "recent_items": recent.to_dicts(),
         "scope": (
-            "Wikidata P31=Q7889 quality badges, including Chinese statistics; "
-            "popular rankings count foreign editions only."
+            "Wikidata P31=Q7889 quality badges across all language editions. "
+            "Recent dates record query observations, not promotions."
         ),
         "observed_at": observed.isoformat(timespec="seconds"),
     }

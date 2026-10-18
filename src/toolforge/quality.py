@@ -19,8 +19,12 @@ https://www.mediawiki.org/wiki/Extension:SiteMatrix#API.
 
 from __future__ import annotations
 
+import datetime as dt
+import logging
 import re
+import tempfile
 from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -33,6 +37,10 @@ if TYPE_CHECKING:
 _API_URL = "https://www.wikidata.org/w/api.php"
 _QUERY_URL = "https://query.wikidata.org/sparql"
 _BATCH_SIZE = 50
+_OBSERVATION_DAYS = 30
+_IDENTITY = ["item", "site", "status"]
+_OBSERVED_TIME = pl.Datetime("us", "UTC")
+_LOGGER = logging.getLogger(__name__)
 _ITEM_ID = re.compile(r"Q[1-9][0-9]*")
 _USER_AGENT = (
     "Aranami-Toolforge-Dashboard/1.0 "
@@ -64,6 +72,170 @@ RECORD_SCHEMA = pl.Schema({
     "zh_url": pl.String,
     "zh_class": pl.String,
 })
+_OBSERVATION_SCHEMA = pl.Schema({
+    **dict(RECORD_SCHEMA),
+    "badge_observed_at": _OBSERVED_TIME,
+    "_active": pl.Boolean,
+})
+
+
+def _observation_cache(path: Path) -> pl.DataFrame | None:
+    """Read a usable comparison baseline or reset an unusable cache.
+
+    Args:
+        path: Disposable Parquet baseline and recent observation file.
+
+    Returns:
+        Complete prior state, or none when a new baseline is required.
+    """
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file():
+        _LOGGER.warning("Ignoring a nonregular recognition comparison cache.")
+        return None
+    try:
+        previous = pl.read_parquet(path)
+    except (OSError, pl.exceptions.PolarsError):
+        _LOGGER.warning("Ignoring an unreadable recognition comparison cache.")
+        return None
+    if (
+        previous.schema != _OBSERVATION_SCHEMA
+        or previous.select(_IDENTITY).is_duplicated().any()
+        or previous.filter(
+            pl.any_horizontal(pl.col([*_IDENTITY, "_active"]).is_null()),
+        ).height
+    ):
+        _LOGGER.warning("Ignoring an obsolete recognition comparison cache.")
+        return None
+    return previous
+
+
+def _save_observations(path: Path, records: pl.DataFrame) -> None:
+    """Atomically commit the complete next comparison state.
+
+    Args:
+        path: Disposable comparison cache destination.
+        records: Current identities and retained recent observations.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+    try:
+        records.write_parquet(temporary)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def observe_quality(
+    records: pl.DataFrame,
+    path: Path,
+    *,
+    observed_at: dt.datetime,
+    now: dt.datetime | None = None,
+) -> pl.DataFrame:
+    """Compare badge results without inferring promotion dates.
+
+    First use establishes a baseline with no new observations, including
+    when the baseline is empty. Later additions use the source query's
+    UTC observation time. Identity is item, site, and badge status, so
+    title or assessment changes do not create additions. A removed badge
+    that returns receives a new observation time.
+
+    Retain current identities and thirty days of observation dates in an
+    atomically replaced disposable cache. Missing or invalid cache data
+    establishes a new baseline; deleting it resets this history. Failed
+    writes propagate and preserve the previous cache. Call only after a
+    complete successful source read, before project-grade enrichment.
+
+    Args:
+        records: Complete successful raw Wikidata quality records.
+        path: Disposable Parquet comparison cache destination.
+        observed_at: Successful source query time, reused with TTL.
+        now: Optional aware clock for the thirty-day retention boundary.
+
+    Returns:
+        Current records with nullable ISO UTC ``badge_observed_at``.
+        A null date denotes baseline data or an expired observation.
+
+    Raises:
+        ValueError: Records or observation timestamps are invalid.
+    """
+    clock = now or dt.datetime.now(dt.UTC)
+    if observed_at.tzinfo is None or clock.tzinfo is None:
+        message = "Quality observations require timezone-aware timestamps."
+        raise ValueError(message)
+    observed_at = observed_at.astimezone(dt.UTC).replace(microsecond=0)
+    clock = clock.astimezone(dt.UTC).replace(microsecond=0)
+    if (
+        records.schema != RECORD_SCHEMA
+        or records.select(_IDENTITY).is_duplicated().any()
+        or records.filter(
+            pl.any_horizontal(pl.col(_IDENTITY).is_null()),
+        ).height
+        or observed_at > clock
+    ):
+        message = "Quality observation identities or timestamps are invalid."
+        raise ValueError(message)
+    previous = _observation_cache(path)
+    if previous is None:
+        current = records.with_columns(
+            pl.lit(None, dtype=_OBSERVED_TIME).alias("badge_observed_at"),
+            pl.lit(value=True).alias("_active"),
+        )
+        combined = current
+    else:
+        current = (
+            records
+            .join(
+                previous.select(
+                    *_IDENTITY,
+                    "badge_observed_at",
+                    pl.col("_active").alias("_was_active"),
+                ),
+                on=_IDENTITY,
+                how="left",
+                validate="1:1",
+            )
+            .with_columns(
+                pl
+                .when(pl.col("_was_active").fill_null(value=False))
+                .then(pl.col("badge_observed_at"))
+                .otherwise(pl.lit(observed_at, dtype=_OBSERVED_TIME))
+                .alias("badge_observed_at"),
+                pl.lit(value=True).alias("_active"),
+            )
+            .drop("_was_active")
+        )
+        removed = previous.join(
+            records.select(_IDENTITY),
+            on=_IDENTITY,
+            how="anti",
+        ).with_columns(pl.lit(value=False).alias("_active"))
+        combined = pl.concat([current, removed])
+    cutoff = clock - dt.timedelta(days=_OBSERVATION_DAYS)
+    combined = (
+        combined
+        .with_columns(
+            pl
+            .when(pl.col("badge_observed_at") >= cutoff)
+            .then(pl.col("badge_observed_at"))
+            .otherwise(None)
+            .alias("badge_observed_at"),
+        )
+        .filter(pl.col("_active") | pl.col("badge_observed_at").is_not_null())
+        .select(_OBSERVATION_SCHEMA.names())
+        .sort(_IDENTITY)
+    )
+    _save_observations(path, combined)
+    return (
+        combined
+        .filter(pl.col("_active"))
+        .drop("_active")
+        .with_columns(
+            pl.col("badge_observed_at").dt.to_string("%Y-%m-%dT%H:%M:%SZ"),
+        )
+    )
 
 
 def _request(parameters: Mapping[str, str]) -> Mapping[str, object]:

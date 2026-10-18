@@ -37,10 +37,14 @@ main-page appearances, whereas Wikidata badges establish current status.
 A subject already displayed at the retention boundary is labelled as
 carried in rather than given an invented first-appearance date.
 Only direct `P31=Q7889` instances establish multilingual video-game scope.
-Count each recognized language edition once in article rankings, and each
-distinct article once in language totals. Preserve all collected records
-for in-place filters and incremental display. Enrich Chinese counterpart
+Count each distinct article once in language totals. Preserve all collected
+records for in-place filters and incremental display. Enrich Chinese counterpart
 grades from current project assessments after reading the badge cache.
+Compare successful raw badge results with the previous query by
+`item`, `site`, and `status`. Title or assessment edits do not establish a
+new badge. Keep the first observation time of additions for 30 days; the
+initial query or a reset disposable cache establishes a baseline without
+inventing past recognition dates. Cached reads retain observation times.
 The pageviews source filters the official daily site top-1,000 list against
 current project membership with a native Polars join. Preserve the source
 date, measured zeros, and the distinction between empty and unavailable
