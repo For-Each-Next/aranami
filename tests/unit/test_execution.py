@@ -213,7 +213,7 @@ class TestRoutineOutput(TestCase):
                 ),
             )
         page.save.assert_called_once_with(
-            summary="summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 0.00″.",
+            summary="summary ([[toolforge:aranami|Aranami 0.3.5]] in 0.00″)",
         )
         assert page.text == "new"
 
@@ -253,7 +253,7 @@ class TestRoutineOutput(TestCase):
                 context.publish(proposal)
                 expected = (
                     "Updated for 5 May 2025. "
-                    "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 21′53.95″."
+                    "([[toolforge:aranami|Aranami 0.3.5]] in 21′54″)"
                 )
                 assert context.edits[0].summary == expected
                 assert proposal.summary == "Updated for 5 May 2025."
@@ -268,7 +268,11 @@ class TestRoutineOutput(TestCase):
                     ):
                         report = context.write_report()
                         assert report is not None
-                        assert expected in report.read_text(encoding="utf-8")
+                        assert (
+                            "Updated for 5 May 2025. "
+                            r"(\[\[toolforge:aranami|Aranami 0.3.5\]\] "
+                            "in 21′54″)"
+                        ) in report.read_text(encoding="utf-8")
                 else:
                     page.save.assert_called_once_with(summary=expected)
 
@@ -309,10 +313,10 @@ class TestRoutineOutput(TestCase):
                 ProposedEdit(context.site, "Direct", "four", "summary"),
             )
         assert [edit.summary for edit in context.edits] == [
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 1′00.50″.",
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 1′10.00″.",
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 11.25″.",
-            "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 8′20.00″.",
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 1′00″)",
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 1′10″)",
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 11.25″)",
+            "summary ([[toolforge:aranami|Aranami 0.3.5]] in 8′20″)",
         ]
         assert [task.elapsed_seconds for task in context.tasks] == [70, 11.25]
 
@@ -338,11 +342,11 @@ class TestRoutineOutput(TestCase):
             context.publish(context.edits[0])
         assert (
             context.edits[0].summary
-            == "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 1.00″."
+            == "summary ([[toolforge:aranami|Aranami 0.3.5]] in 1.00″)"
         )
         assert (
             context.edits[1].summary
-            == "summary Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 2.00″."
+            == "summary ([[toolforge:aranami|Aranami 0.3.5]] in 2.00″)"
         )
 
     @staticmethod

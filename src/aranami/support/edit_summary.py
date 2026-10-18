@@ -26,12 +26,9 @@ MAX_EDIT_SUMMARY_BYTES = 255
 _SECONDS_PER_MINUTE = 60
 _HUNDREDTHS_PER_SECOND = 100
 _EXECUTION_SUFFIX = re.compile(
-    r"\s*[Ee]xecuted(?: by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒(?: [𝟶-𝟿𝚊-𝚣0-9a-z.!+-]+)?)?"
-    r" in (?:\d+′)?\d{1,2}\.\d{2}″\.$",
-)
-_VERSION_GLYPHS = str.maketrans(
-    "0123456789abcdefghijklmnopqrstuvwxyz",
-    "𝟶𝟷𝟸𝟹𝟺𝟻𝟼𝟽𝟾𝟿𝚊𝚋𝚌𝚍𝚎𝚏𝚐𝚑𝚒𝚓𝚔𝚕𝚖𝚗𝚘𝚙𝚚𝚛𝚜𝚝𝚞𝚟𝚠𝚡𝚢𝚣",
+    r"\s*(?:(?:By |\()\[\[toolforge:aranami\|Aranami [0-9a-z.!+-]+\]\]"
+    r"|[Ee]xecuted(?: by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒(?: [𝟶-𝟿𝚊-𝚣0-9a-z.!+-]+)?)?)"
+    r" in (?:\d+′)?\d{1,2}(?:\.\d{2})?″(?:\)|\.)$",
 )
 _MONTHS = (
     "Jan",
@@ -360,24 +357,26 @@ class EditSummary:
 
         Returns:
             Summary ending with
-            ``Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 <version> in <duration>.``
-            using the installed version in mathematical monospace and
-            the measured duration, such as ``21′53.95″`` or
-            ``7.12″`` for times below one minute.
+            ``([[toolforge:aranami|Aranami 0.5.1]] in 7.12″)``
+            using the installed version and measured duration. Durations
+            below one minute keep hundredths, such as ``7.12″``; longer
+            durations round to whole seconds, such as ``21′54″``.
             Complete clauses are rebudgeted when
             available; caller-supplied text is shortened at safe bounds.
         """
         hundredths = round(max(0, elapsed_seconds) * _HUNDREDTHS_PER_SECOND)
-        minutes, remainder = divmod(
-            hundredths,
-            _SECONDS_PER_MINUTE * _HUNDREDTHS_PER_SECOND,
-        )
-        seconds, fraction = divmod(remainder, _HUNDREDTHS_PER_SECOND)
-        duration = f"{minutes}′{seconds:02d}" if minutes else str(seconds)
-        package_version = version("aranami").translate(_VERSION_GLYPHS)
+        if hundredths < _SECONDS_PER_MINUTE * _HUNDREDTHS_PER_SECOND:
+            seconds, fraction = divmod(hundredths, _HUNDREDTHS_PER_SECOND)
+            duration = f"{seconds}.{fraction:02d}"
+        else:
+            minutes, seconds = divmod(
+                round(elapsed_seconds),
+                _SECONDS_PER_MINUTE,
+            )
+            duration = f"{minutes}′{seconds:02d}"
+        package_version = version("aranami")
         suffix = (
-            f"Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 {package_version} "
-            f"in {duration}.{fraction:02d}″."
+            f"([[toolforge:aranami|Aranami {package_version}]] in {duration}″)"
         )
         budget = MAX_EDIT_SUMMARY_BYTES - len(suffix.encode("utf-8")) - 1
         if isinstance(summary, _RenderedSummary):

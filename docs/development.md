@@ -297,11 +297,14 @@ Use bracket character entities around its wikilink so both article links
 remain valid. Preserve complete delimiter pairs and entities when
 shortening a summary.
 At publication, end every live edit and dry-run proposal summary with
-`Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟺.𝟶 in 21′53.95″.` using the installed package
-version in mathematical monospace and measured minutes, seconds,
-and hundredths.
-For durations below one minute, omit zero minutes and the leading seconds
-zero, for example `Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟺.𝟶 in 7.12″.`.
+`([[toolforge:aranami|Aranami 0.5.1]] in 21′54″)` using the installed
+package version and measured duration. Keep this attribution in parentheses,
+without a trailing full stop. The short linked attribution leaves more of
+the byte budget for report changes. Durations of at least one minute
+use minutes and whole seconds rounded to the nearest second, with two-digit
+seconds, such as `1′07″`. For durations below one minute, retain two decimal
+places, omit zero minutes and the leading seconds zero, for example
+`([[toolforge:aranami|Aranami 0.5.1]] in 7.12″)`.
 Measure from the current routine's start until each proposal is ready,
 before checking or saving its target. Direct publications use context
 creation time. Reserve space for the complete suffix within the same

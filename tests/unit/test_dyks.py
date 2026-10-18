@@ -2,8 +2,6 @@
 
 # Keep calls to internal routines available to focused offline tests.
 # ruff: file-ignore[private-member-access]
-# Verify the exact mathematical monospace version glyphs.
-# ruff: file-ignore[ambiguous-unicode-character-string]
 
 from contextlib import nullcontext
 from datetime import date
@@ -414,7 +412,7 @@ class TestDykEdit(TestCase):
         assert edit.text == updated
         assert (
             edit.summary == "1 article, 0 nominees. "
-            "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 0.00\u2033."
+            "([[toolforge:aranami|Aranami 0.3.5]] in 0.00\u2033)"
         )
         assert "aranami-member" not in edit.text
         save.assert_called_once_with(site, title, original, {"Old": 1})
@@ -779,14 +777,22 @@ class TestDykEdit(TestCase):
             )
         assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
         assert summary.startswith("1 article, 2 nominees.")
-        assert summary.endswith("Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟻 in 7.12\u2033.")
+        assert summary.endswith(
+            "([[toolforge:aranami|Aranami 0.3.5]] in 7.12\u2033)",
+        )
         assert f"«[[{short_title}]]»" in summary
         assert summary.count("«") == summary.count("»")
         assert summary.count("[[") == summary.count("]]")
         assert {
             str(link.title)
             for link in mwparserfromhell.parse(summary).filter_wikilinks()
-        } <= {short_title, new_title, passed_title, failed_title}
+        } <= {
+            short_title,
+            new_title,
+            passed_title,
+            failed_title,
+            "toolforge:aranami",
+        }
 
     @staticmethod
     def test_uncached_title_membership_and_grade_only_changes() -> None:
