@@ -7,8 +7,9 @@ reports, primarily for WikiProject Video games on Chinese Wikipedia.
 It brings together article discovery, project assessments, traffic rankings,
 and comparisons with English Wikipedia.
 
-Aranami runs on [Wikimedia PAWS][4]. It supports scheduled and immediate
-report updates and previews of proposed changes.
+[Toolforge][4] is Aranami's primary runtime for continuous scheduled report
+maintenance. [Wikimedia PAWS][22] remains available for notebooks and manual
+runs. Both support immediate report updates and previews of proposed changes.
 
 ## Scheduled tasks
 
@@ -24,16 +25,15 @@ The times indicate recurring triggers; `HH` means every hour.
 | English comparisons | Daily at `23:24` | Updates reports on [Top-importance and High-importance English articles][14] and [featured and good English content][15], listing their corresponding Chinese articles. |
 | PexBot reports | Daily at `00:00` | Requests refreshes of subscribed [database reports][16] within the project's configured scope. |
 
-For reports updated daily, rerunning the script attempts to complete earlier
-report pages.
+Reports with missing daily records attempt to catch up on later runs.
 
 ## Documentation
 
 [Documentation index][17] brings together usage instructions and
 development resources:
 
-- [Usage guide][18]: PAWS installation and execution, report settings, and
-  the public API.
+- [Usage guide][18]: Toolforge operation and maintenance, optional PAWS
+  installation and execution, report settings, and the public API.
 - [Design and development guide][19]: component responsibilities, data
   contracts, tests, and build procedures.
 - [Change history][20]: feature, behavior, and documentation changes.
@@ -45,7 +45,7 @@ Aranami is released under [CC0 1.0 Universal][21].
 [1]: README.md
 [2]: README.zh-Hant.md
 [3]: README.zh-Hans.md
-[4]: https://wikitech.wikimedia.org/wiki/PAWS
+[4]: https://wikitech.wikimedia.org/wiki/Portal:Toolforge
 [5]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新条目推荐
 [6]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新进条目/关键词筛选
 [7]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/A
@@ -63,3 +63,4 @@ Aranami is released under [CC0 1.0 Universal][21].
 [19]: docs/development.md
 [20]: CHANGELOG.md
 [21]: LICENSE
+[22]: https://wikitech.wikimedia.org/wiki/PAWS

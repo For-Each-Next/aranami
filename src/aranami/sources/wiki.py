@@ -1,11 +1,13 @@
 """Read current wiki text and template aliases with Pywikibot.
 
 Use replica queries for metadata and these batched fallbacks for content
-that is unavailable from replicas. Authentication remains owned by PAWS.
+that is unavailable from replicas. The runtime supplies wiki
+authentication.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 from functools import cache
 from typing import TYPE_CHECKING
 
@@ -86,6 +88,41 @@ def read_page_ids(
         for identifier in identifiers
         if identifier in loaded
     ]
+
+
+def edited_by_on_date(
+    site: BaseSite,
+    title: str,
+    *,
+    user: str,
+    day: dt.date,
+) -> bool:
+    """Check current page history for an author's edit on one UTC date.
+
+    Read metadata from the live wiki so replica lag cannot cause a
+    duplicate refresh. Search the whole date even when another author
+    made a newer revision. Revision content is not requested.
+
+    Args:
+        site: Existing authenticated site to read.
+        title: Full page title whose history is checked.
+        user: Exact registered username to match.
+        day: UTC date to search, including its midnight boundary.
+
+    Returns:
+        Whether the requested author made any revision on that date.
+    """
+    midnight = pywikibot.Timestamp(day.year, day.month, day.day)
+    last_second = midnight + dt.timedelta(days=1, seconds=-1)
+    page = pywikibot.Page(site, title)
+    return any(
+        revision.user == user and revision.timestamp.date() == day
+        for revision in page.revisions(
+            content=False,
+            starttime=last_second,
+            endtime=midnight,
+        )
+    )
 
 
 def template_aliases(site: BaseSite, title: str) -> tuple[str, ...]:

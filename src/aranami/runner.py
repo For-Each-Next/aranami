@@ -40,7 +40,7 @@ def run(
     clear_cache: bool = False,
     run_immediately: bool = True,
 ) -> BackgroundScheduler:
-    """Start recurring routine schedules using PAWS authentication.
+    """Start recurring routines using configured wiki authentication.
 
     Return immediately while the monitor keeps dispatching each routine
     at its configured UTC time. By default, a fresh monitor also checks

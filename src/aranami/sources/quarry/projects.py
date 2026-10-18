@@ -1,6 +1,7 @@
 """Read WikiProject membership, page metadata, and maintenance tags.
 
-These queries reuse the Quarry adapter and PAWS replica credentials.
+These queries reuse the Quarry adapter and configured Wiki Replica
+credentials.
 Callers receive eager Polars frames without handling SQL or connections.
 """
 

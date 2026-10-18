@@ -105,7 +105,7 @@ def listing_dates(
 
     Args:
         pages: English rows with ``page_id`` and ``en_class`` columns.
-        site: English Wikipedia site, or use PAWS's usual English site.
+        site: English Wikipedia site, defaulting to the configured site.
 
     Returns:
         Unique article IDs and their complete quality listing dates.

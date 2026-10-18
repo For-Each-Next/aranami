@@ -6,6 +6,7 @@ Dry runs list the delegated actions and never contact these endpoints.
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import time
 import urllib.parse
@@ -20,6 +21,7 @@ from aranami.services.zhwiki.pexbot import (
     require_zhwiki,
     subscribed_titles,
 )
+from aranami.sources.wiki import edited_by_on_date
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -29,6 +31,15 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 _ENDPOINT = "https://pexbot.toolforge.org/database-report/stream"
 _COOLDOWN_SECONDS = 15
+
+
+def _utc_today() -> dt.date:
+    """Read the execution date independently of the report anchor.
+
+    Returns:
+        The current UTC date, refreshed before each report check.
+    """
+    return dt.datetime.now(dt.UTC).date()
 
 
 def _refresh(site: BaseSite, title: str) -> None:
@@ -56,7 +67,13 @@ def _refresh(site: BaseSite, title: str) -> None:
             event = parse_event(raw_line.decode("utf-8").strip())
             if event is None:
                 continue
-            details = f" {event.args}" if event.args else ""
+            details = ""
+            if event.args:
+                details = (
+                    " (...)"
+                    if event.code == "query-executing"
+                    else f" {event.args}"
+                )
             _LOGGER.info("PexBot %s: %s%s.", title, event.code, details)
             if (
                 "error" in event.code.casefold()
@@ -78,8 +95,10 @@ def run(
 ) -> None:
     """Refresh subscribed reports or describe delegated dry-run actions.
 
-    Live requests pause for 15 seconds after each completed attempt
-    before starting the next report. Dry runs do not pause.
+    Skip reports edited by PexBot on the current UTC date, even when
+    another editor has since changed them. Apply this check to dry-run
+    proposals too. Live requests pause for 15 seconds between attempted
+    refreshes; skipped reports and dry runs do not pause.
 
     Args:
         dry: Suppress external requests for a standalone run.
@@ -88,7 +107,7 @@ def run(
             An empty sequence disables delegated refreshes.
 
     Raises:
-        ExceptionGroup: At least one delegated refresh failed.
+        ExceptionGroup: At least one history check or refresh failed.
     """
     with job_run("pexbot", dry=dry, context=context) as active:
         require_zhwiki(active.site)
@@ -100,7 +119,28 @@ def run(
         titles = subscribed_titles(active.site, allowed)
         _LOGGER.info("Selected %d subscribed PexBot reports.", len(titles))
         failures: list[Exception] = []
-        for index, title in enumerate(titles):
+        attempted = False
+        for title in titles:
+            today = _utc_today()
+            try:
+                already_updated = edited_by_on_date(
+                    active.site,
+                    title,
+                    user="PexBot",
+                    day=today,
+                )
+            except Exception as error:
+                _LOGGER.exception("PexBot history check failed: %s.", title)
+                failures.append(error)
+                continue
+            if already_updated:
+                note = (
+                    f"Skipped PexBot refresh: {title}. PexBot already "
+                    f"edited this page on {today} UTC."
+                )
+                active.notes.append(note)
+                _LOGGER.info("%s", note)
+                continue
             if active.dry:
                 active.notes.append(
                     f"PexBot refresh proposed: {title}. External generation "
@@ -111,13 +151,14 @@ def run(
                     title,
                 )
                 continue
-            if index:
+            if attempted:
                 time.sleep(_COOLDOWN_SECONDS)
+            attempted = True
             try:
                 _refresh(active.site, title)
             except Exception as error:
                 _LOGGER.exception("Delegated refresh failed: %s.", title)
                 failures.append(error)
         if failures:
-            msg = "PexBot report refreshes failed."
+            msg = "PexBot report history checks or refreshes failed."
             raise ExceptionGroup(msg, failures)

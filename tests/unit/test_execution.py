@@ -367,14 +367,20 @@ class TestRoutineOutput(TestCase):
         """Group PexBot targets into one task without write requests."""
         context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
         context.site.dbName.return_value = "zhwiki"
+        targets = ["Target", "Second target"]
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
             patch.object(
                 pexbot,
                 "subscribed_titles",
-                return_value=["Target", "Second target"],
+                return_value=targets,
             ),
+            patch.object(
+                pexbot,
+                "edited_by_on_date",
+                return_value=False,
+            ) as history,
             patch.object(pexbot, "_refresh") as refresh,
         ):
             pexbot.run(context=context)
@@ -387,6 +393,7 @@ class TestRoutineOutput(TestCase):
             assert "Second target" in content
             assert not list(report.parent.glob("*.wikitext"))
         refresh.assert_not_called()
+        assert history.call_count == len(targets)
         assert "Target" in context.notes[0]
 
     @staticmethod

@@ -5,9 +5,12 @@ reports and data it produces.
 
 ## Using Aranami
 
-The [usage guide](usage.md) covers PAWS installation, launcher configuration,
-recurring schedules, immediate reports, previews, and the source and support
-APIs. Documentation in this directory is maintained in English.
+The [usage guide](usage.md) starts with Toolforge, Aranami's primary runtime.
+Its [maintenance workflow](usage.md#maintain-on-toolforge) covers status and
+logs, wheel upgrades, stopping and restarting the monitor, and recovery.
+The guide also covers optional PAWS notebooks, recurring schedules, immediate
+reports, previews, and the source and support APIs.
+Documentation in this directory is maintained in English.
 
 ## Design and development
 

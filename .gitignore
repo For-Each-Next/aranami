@@ -30,6 +30,8 @@ throttle.ctrl
 logs/
 cache/
 dry-run/
+!/scripts/toolforge/public_html/logs/
+!/scripts/toolforge/public_html/logs/index.php
 
 # Tests, coverage, and tool caches
 apicache/

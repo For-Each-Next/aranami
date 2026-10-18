@@ -4,24 +4,237 @@
 
 Aranami (<span lang="ja">荒波</span>, "rough waves") maintains Wikipedia
 reports, primarily for WikiProject Video games on Chinese Wikipedia.
-Run it on [Wikimedia PAWS][1]
-to publish reports, preview changes, or collect data for one-time analysis.
+[Toolforge][2] is the primary runtime for continuous scheduled report
+maintenance. Follow the Toolforge workflow below to operate and update it.
+[Wikimedia PAWS][1] is an optional environment for notebooks, manual reports,
+and one-time analysis.
 
-## Choose an interface
+## Maintain on Toolforge
 
-| What you want to do | Interface | What changes or comes back |
-|---|---|---|
-| Start the routine monitor | `aranami.run()` | Returns a running scheduler that checks each report immediately on a fresh start, then updates it at its scheduled UTC time. |
-| Start with the next scheduled run | `aranami.run(run_immediately=False)` | Returns a running scheduler that first runs each routine at its next UTC trigger. |
-| Keep previewing on the same schedule | `aranami.run(dry=True)` | Returns a running scheduler that writes proposals under `dry-run/` at each scheduled time, without wiki edits or PexBot refresh requests. |
-| Run reports immediately | `aranami.run_once(...)` | Runs all routines once, regardless of their schedule, and returns `None`. Use `dry=True` for a preview. |
-| Run selected reports immediately | `aranami.run_once(tasks=["new_pages", "pageviews"], ...)` | Runs only the selected routines once; `tasks="new_pages"` selects one routine. |
-| Run with a chosen date | `aranami.run_once(date=..., ...)` | Sets a UTC anchor for date-dependent routines; reads current source data. |
-| Customize one routine's destinations or settings | `aranami.jobs.<routine>.run(...)` | Updates that routine immediately, or writes a preview when `dry=True`. |
-| Get quality articles and listing dates | `analyze_quality_contents(site)` | Returns an article table; no wiki edits or automatic result export. |
-| Fetch data or process supplied text | The source and support interfaces below | Returns data, displays a preview, or transforms text; file-writing exceptions are identified below. |
+The `aranami` tool runs one continuous monitor. Aranami schedules all six
+report routines inside that process using the [UTC schedules](#routine-jobs-and-utc-schedule).
+Run a single monitor for these reports. Stop it before overlapping manual
+report updates through PAWS or the Python API.
 
-## Install and monitor on PAWS
+This workflow assumes an existing tool account, SSH access as a maintainer,
+and configured wiki OAuth and Wiki Replica access. The deployment uses:
+
+| Setting | Value |
+|---|---|
+| SSH login | `for-each-next@login.toolforge.org`, then `become aranami` |
+| Tool home and working directory | `/data/project/aranami` |
+| Job image and installed environment | `python3.13` and `/data/project/aranami/pyvenv` |
+| Wiki configuration | Existing files in the tool home, selected by `PYWIKIBOT_DIR=/data/project/aranami` |
+| Replica configuration | Readable `.my.cnf` in the working directory; the existing link to `replica.my.cnf` is supported |
+
+Develop, test, and build wheels on the development computer. Toolforge runs
+the installed wheel. The upload and setup scripts reuse existing credentials;
+setup checks package installation and imports but does not configure or
+validate authentication.
+
+### Log in and check operation
+
+In a local terminal:
+
+```shell
+ssh -t for-each-next@login.toolforge.org "become aranami"
+```
+
+On Toolforge, check the monitor and its recent output:
+
+```shell
+cd /data/project/aranami
+toolforge jobs show aranami
+toolforge jobs logs aranami
+tail -n 80 "logs/aranami.$(date -u +%F).log"
+```
+
+Use the daily application log for individual task results and Toolforge job
+logs for process startup and failures. The daily log uses UTC dates and
+appears after a routine starts. See the official [Toolforge jobs guide][10]
+for job status, lifecycle, and log commands.
+
+### Read logs in a browser
+
+The [homepage](https://aranami.toolforge.org/) shows the installed Aranami
+version and latest completed action, including its name, result, execution
+duration, and UTC time. The homepage refreshes every 30 seconds.
+
+Open [the public log viewer](https://aranami.toolforge.org/logs/) to list
+available daily logs, newest first. Read a day directly at
+`https://aranami.toolforge.org/logs/aranami.YYYY-MM-DD.log`, replacing
+`YYYY-MM-DD` with its UTC date. The viewer reads the current files on each
+request; refresh the page for new output. Aranami retains today and the
+latest 90 completed UTC dates. There is no authentication: task results
+and failures in these logs are public. PexBot's `query-executing` messages
+abbreviate query arguments to `...`; other progress and failure details
+remain available.
+
+To install or update the viewer, run this in a local terminal at the
+repository root:
+
+```shell
+sh scripts/toolforge/upload-web.sh
+```
+
+The uploader installs the PHP viewer in `/data/project/aranami/public_html/`
+and uploads `log-viewer.lighttpd.conf`.
+Its `setup-web.sh` adds the viewer's include to `.lighttpd.conf`,
+preserving existing configuration. Creating
+`public_html` and adding the configuration prepare the first webservice
+start. The upload does not install a wheel or restart the monitor.
+
+Then, in the Toolforge terminal, start the viewer for the first time:
+
+```shell
+toolforge jobs run aranami-logs --image php8.4 --webservice --mount=all
+```
+
+After subsequent viewer uploads, apply the update with
+`toolforge jobs restart aranami-logs`. Check its status and process output
+with `toolforge jobs show aranami-logs` and `toolforge jobs logs aranami-logs`.
+The separate `aranami-logs` name avoids a deployment-name conflict with the
+continuous `aranami` monitor; the viewer runs independently. See the official
+[Toolforge webservice job guide][11] for these commands.
+
+### Upgrade the installed wheel
+
+#### 1. Check the local wheel
+
+In a local terminal at the repository root, with Python, uv, and OpenSSH
+available:
+
+```shell
+uv run python scripts/upload_toolforge.py --dry-run
+```
+
+The uploader finds the single `dist/aranami-*.whl`, checks its filename
+against its package metadata, and prints its version. Keep only the intended
+wheel in `dist/`; zero or multiple wheels cause an error. Follow the
+[development and release guide](development.md#verification-and-releases)
+if a new wheel is needed. No filename or version edits are needed in the
+upload or setup scripts.
+
+#### 2. Stop the monitor
+
+In the Toolforge terminal:
+
+```shell
+toolforge jobs list
+toolforge jobs delete aranami
+```
+
+Stop every live or preview monitor using `/data/project/aranami/pyvenv`.
+If an `aranami-preview` job is present, stop it too:
+
+```shell
+toolforge jobs delete aranami-preview
+```
+
+Wait for all monitor processes to terminate before changing their shared
+environment. An already absent job needs no action. The independent
+`aranami-logs` webservice can remain running.
+
+#### 3. Upload and install
+
+In the local terminal, upload the checked wheel and setup script:
+
+```shell
+uv run python scripts/upload_toolforge.py
+```
+
+The uploader sends only the wheel, setup script, and selected-wheel manifest.
+It does not start the monitor.
+
+Back in the Toolforge terminal, install the uploaded wheel in a Python job:
+
+```shell
+(
+  set -eu
+  cd /data/project/aranami
+  setup_job="aranami-setup-$(date -u +%Y%m%d%H%M%S)"
+  printf 'Installation job: %s\n' "$setup_job"
+  toolforge jobs run "$setup_job" \
+    --image python3.13 --mount all --mem 1Gi --filelog --wait 1800 \
+    --command '/bin/sh /data/project/aranami/setup-env.sh'
+  tail -n 30 "$setup_job.out" "$setup_job.err"
+)
+```
+
+The setup script reuses `/data/project/aranami/pyvenv`, or creates it if absent,
+and installs the exact uploaded wheel and its dependencies, including OAuth
+support. It reinstalls Aranami even for a same-version wheel and checks
+dependencies and imports. Continue only after the job succeeds and prints
+the expected version and `Environment ready`. Keep the printed installation
+job name to find its `.out` and `.err` files if setup fails or times out.
+
+#### 4. Start and verify the monitor
+
+In the Toolforge terminal:
+
+```shell
+toolforge jobs run aranami \
+  --image python3.13 --mount all --mem 2Gi --cpu 1 \
+  --continuous --no-filelog \
+  --command 'cd /data/project/aranami && umask 077 && exec env LC_ALL=C.UTF-8 LANG=C.UTF-8 LC_CTYPE=C.UTF-8 PYWIKIBOT_DIR=/data/project/aranami /data/project/aranami/pyvenv/bin/python -m aranami'
+toolforge jobs show aranami
+```
+
+This starts live wiki edits immediately, then follows the internal UTC
+schedules. Toolforge restarts the continuous job if its process exits.
+Each fresh process checks all routines immediately by default. Append
+`--no-run-immediately` after `-m aranami` to begin at the next scheduled
+times instead. Check individual task results in the application log:
+
+```shell
+tail -n 80 "/data/project/aranami/logs/aranami.$(date -u +%F).log"
+```
+
+### Stop, restart, or preview
+
+To stop scheduled updates, use the [stop command](#2-stop-the-monitor).
+To restart without changing the installed wheel, stop the monitor and repeat
+the [start command](#4-start-and-verify-the-monitor); skip upload and setup.
+
+For scheduled previews, stop the live monitor and add `--dry` after
+`-m aranami` in the start command. This writes proposals under
+`/data/project/aranami/dry-run/` without wiki edits or PexBot refresh requests.
+It stays active and previews every routine immediately, then at its UTC
+schedule. To resume live updates, stop the preview monitor and recreate the
+job with the ordinary start command. Stop all live and preview monitors
+before overlapping manual report runs or cache maintenance.
+
+### Runtime files and recovery
+
+The start command sets the working directory and `PYWIKIBOT_DIR` explicitly.
+Keep these paths when changing job options: replica reads use `.my.cnf` in
+the working directory, and runtime output goes under the same directory.
+
+| Location in `/data/project/aranami/` | Maintenance |
+|---|---|
+| `logs/aranami.YYYY-MM-DD.log` | Read routine starts, results, and failures here. Aranami retains today and the latest 90 completed UTC dates. |
+| `cache/` | Reused data and recoverable checkpoints. Keep it during ordinary upgrades; remove it only with the monitor stopped when a rebuild is needed. |
+| `dry-run/` | Preview summaries and linked `.wikitext` proposals for review. |
+| `aranami-setup-*.out` and `.err` | Installation output and errors from each setup job. |
+| `user-config.py`, optional password files, `.my.cnf`, and `replica.my.cnf` | Existing runtime configuration; routine wheel uploads do not replace these files. |
+
+If setup fails, inspect the printed job's output and correct the reported
+installation problem before restarting. A permissions error may require
+transferring ownership with `take` as the tool account, as directed by the
+setup script. Toolforge manages `replica.my.cnf`; leave its ownership and
+permissions unchanged. Setup accepts an existing `.my.cnf` link to that file
+but does not create it.
+
+If the monitor fails to start, inspect `toolforge jobs logs aranami` and
+check the image, environment, working directory, and wiki configuration.
+If one routine fails, use the daily log to diagnose that task; other
+scheduled routines remain active. Pageviews may defer a report until source
+data is ready and retry later without requiring a restart.
+
+## Optional: install and monitor on PAWS
+
+Use PAWS for notebook work or manual execution. Stop the Toolforge monitor
+before running overlapping report updates or another monitor.
 
 Upload the wheel and [scripts/run_aranami.py](../scripts/run_aranami.py) to PAWS.
 Run this from a directory containing Aranami wheels:
@@ -79,6 +292,24 @@ install_wheel([])  # Discover and install the newest upload.
 run_schedule()
 ```
 
+## Choose a Python interface
+
+These interfaces work with the installed package on Toolforge or PAWS.
+Toolforge's continuous job uses `python -m aranami` to keep the monitor's
+process alive. The Python API below is useful for manual calls and notebooks.
+
+| What you want to do | Interface | What changes or comes back |
+|---|---|---|
+| Start the routine monitor | `aranami.run()` | Returns a running scheduler that checks each report immediately on a fresh start, then updates it at its scheduled UTC time. |
+| Start with the next scheduled run | `aranami.run(run_immediately=False)` | Returns a running scheduler that first runs each routine at its next UTC trigger. |
+| Keep previewing on the same schedule | `aranami.run(dry=True)` | Returns a running scheduler that writes proposals under `dry-run/` at each scheduled time, without wiki edits or PexBot refresh requests. |
+| Run reports immediately | `aranami.run_once(...)` | Runs all routines once, regardless of their schedule, and returns `None`. Use `dry=True` for a preview. |
+| Run selected reports immediately | `aranami.run_once(tasks=["new_pages", "pageviews"], ...)` | Runs only the selected routines once; `tasks="new_pages"` selects one routine. |
+| Run with a chosen date | `aranami.run_once(date=..., ...)` | Sets a UTC anchor for date-dependent routines; reads current source data. |
+| Customize one routine's destinations or settings | `aranami.jobs.<routine>.run(...)` | Updates that routine immediately, or writes a preview when `dry=True`. |
+| Get quality articles and listing dates | `analyze_quality_contents(site)` | Returns an article table; no wiki edits or automatic result export. |
+| Fetch data or process supplied text | The source and support interfaces below | Returns data, displays a preview, or transforms text; file-writing exceptions are identified below. |
+
 ## Start the routine monitor
 
 `aranami.run(*, dry=False, clear_cache=False, run_immediately=True)` starts
@@ -101,7 +332,8 @@ schedule, including an immediate first preview by default. It continues
 fetching current data, updating disposable caches, and writing proposals
 while making no wiki edits or PexBot refresh requests.
 APScheduler is installed with the wheel; no notebook setup cell is required.
-The monitor reuses PAWS authentication and Wiki Replica access.
+The monitor uses the runtime's existing wiki authentication and Wiki Replica
+configuration.
 
 The monitor remains active while its Python process or PAWS kernel stays
 alive. Restarting the kernel removes its schedule; call `aranami.run()`
@@ -180,7 +412,7 @@ Default pages and UTC cron schedules are defined in `TASK_DEFINITIONS` in
 replacement wheel to change those defaults. The job modules use the same
 definitions from which the monitor derives `SCHEDULES`.
 The schedule column gives trigger times, rather than execution duration;
-the notebook's local timezone has no effect. `aranami.run_once()` runs
+the host or notebook's local timezone has no effect. `aranami.run_once()` runs
 immediately regardless of these times. Each routine permits one active
 instance and combines missed triggers into one attempted run.
 
@@ -283,6 +515,15 @@ template aliases; unchanged discussions reuse the cache without content reads.
 PexBot refreshes subscribed report pages and controls its own generated
 content. Pass `prefixes` to override allowed page roots, or `prefixes=[]`
 to disable refreshes. Only Chinese Wikipedia is supported.
+
+For each report, Aranami checks its revision history for the current UTC
+day. If PexBot already edited it that day, Aranami skips the refresh even
+when a human edited it more recently. The check uses the actual date,
+independent of a supplied report date. Skips appear in the daily log and
+preview notes; previews propose refreshes only for eligible reports.
+If history cannot be read, that report is not refreshed and other reports
+continue. Actual live refresh attempts are separated by 15 seconds,
+including after failures; skipped reports do not add a delay.
 
 ### Use a chosen date
 
@@ -480,8 +721,9 @@ a replacement wheel to choose allowed subscription roots.
 Pass `prefixes` to the routine for a single-call override. An empty selection
 disables refreshes.
 
-Unless using the launcher, paths are relative to the caller's current
-directory:
+Paths are relative to the caller's current directory. On Toolforge, the
+documented job command uses `/data/project/aranami`; the PAWS launcher anchors
+output beside itself:
 
 | Location | What writes there and why |
 |---|---|
@@ -513,9 +755,12 @@ in [CHANGELOG.md][5].
 Aranami is released under [CC0 1.0 Universal][6].
 
 [1]: https://wikitech.wikimedia.org/wiki/PAWS
+[2]: https://wikitech.wikimedia.org/wiki/Portal:Toolforge
 [3]: https://wikitech.wikimedia.org/wiki/PAWS/Python_with_Pip
 [5]: ../CHANGELOG.md
 [6]: ../LICENSE
 [7]: ../tests/live/quarry_paws.py
 [8]: ../tests/live/pageviews_paws.py
 [9]: development.md
+[10]: https://wikitech.wikimedia.org/wiki/Help:Toolforge/Jobs_framework
+[11]: https://wikitech.wikimedia.org/wiki/Help:Toolforge/Running_jobs#Creating_webservice_jobs

@@ -6,9 +6,12 @@ Installation, routine configuration, and API examples are in the
 [usage guide](usage.md).
 
 Aranami is developed, tested, and built on a development computer. Its
-pure-Python wheel is installed on Wikimedia PAWS. PAWS supplies the existing
-Wikipedia OAuth session and Wiki Replica credentials; do not add credential
-prompts, a user/password interface, or secrets to the wheel.
+pure-Python wheel runs primarily on Toolforge in a continuous Python 3.13
+job. PAWS remains an optional consumer for notebooks and manual execution.
+Both use existing wiki authentication and Wiki Replica configuration; do
+not add credential prompts, a user/password interface, or secrets to the
+wheel. The [Toolforge maintenance workflow](usage.md#maintain-on-toolforge)
+covers deployment updates, status checks, and recovery.
 
 ## Documentation
 
@@ -106,10 +109,18 @@ pexbot.run(prefixes=["WikiProject:电子游戏/数据库报告"], dry=True)
 ```
 
 Other sites are rejected before category queries or refresh requests.
+Before each selected report, read its revision history for the actual
+current UTC day and skip it if any revision was made by `PexBot`, including
+when a later revision was made by a human. Do not use only the latest
+revision or the caller's report-date anchor. Apply the same guard to dry
+runs, recording skips as log entries and preview notes. If history cannot
+be read, report that failure without refreshing the page and continue
+with the remaining reports.
 Dry runs record selected actions without contacting the refresh endpoint;
 live refreshes require an explicit successful `end` stream event.
-Live refreshes wait 15 seconds after each request finishes before starting
-the next report, including after failed attempts.
+Wait 15 seconds between actual live refresh attempts, including after
+failed attempts. Skipped reports and history-read failures do not trigger
+a delay.
 
 ## Polars and Parquet
 
@@ -153,9 +164,10 @@ installed package or `site-packages`:
   to each proposal's flat `.wikitext` companion. Keep exact proposed text
   only in that companion, not embedded in the Markdown. Use the unique
   report stem and an edit number for filenames, never a wiki title as a
-  path. Failed or deferred tasks make a mixed run `partly success`. The
-  `scripts/run_aranami.py` launcher anchors output beside itself. External
-  PexBot generation cannot be previewed without triggering writes, so
+  path. Failed or deferred tasks make a mixed run `partly success`.
+  Toolforge job commands use `/data/project/aranami` as the working directory;
+  the PAWS `scripts/run_aranami.py` launcher anchors output beside itself.
+  External PexBot generation cannot be previewed without triggering writes, so
   record the proposed action and skip its endpoint.
 
 The new-page routine retains the latest 100 complete UTC dates by default,
@@ -369,7 +381,14 @@ uv run ruff format --check .
 uv build --wheel --clear
 ```
 
-The standalone `scripts/run_aranami.py` launcher installs the newest local
+Toolforge installs uploaded wheels through `scripts/toolforge/setup-env.sh`,
+run in the same `python3.13` image as the continuous monitor. Keep the
+uploader and environment setup in `scripts/`, outside the runtime wheel.
+The tool account supplies its existing Pywikibot configuration and readable
+`.my.cnf` in the working directory. Setup validates installation and imports;
+authentication remains the deployment's responsibility.
+
+The optional PAWS `scripts/run_aranami.py` launcher installs the newest local
 Aranami wheel by modification time from the current directory and `dist/`,
 then starts monitoring through `run_schedule()` in a fresh process using
 the installed package's ordinary Python `__main__` entry point. Keep

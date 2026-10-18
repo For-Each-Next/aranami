@@ -6,8 +6,9 @@ Aranami（<span lang="ja">荒波</span>，意為「狂瀾」）協助維護
 中文維基百科電子遊戲專題的報告，整理新進條目、條目評級、瀏覽量，
 以及英文與中文維基百科的條目對照，方便專題成員掌握內容變化。
 
-Aranami 在 [Wikimedia PAWS][4] 上
-定時或立即更新報告，也能預覽修改。
+Aranami 以 [Wikimedia Toolforge][4] 為主要執行環境，
+持續運行以定時維護報告，也能立即執行或預覽修改。
+[Wikimedia PAWS][22] 是使用筆記本或手動操作時的可選環境。
 
 ## 定時工作
 
@@ -22,13 +23,13 @@ Aranami 在 [Wikimedia PAWS][4] 上
 | 英文條目對照 | 每日 `23:24` | 更新[英文重要條目（極高、高重要度）][14]和[英文優質條目（典範、優良）][15]報告，列出對應的中文條目。 |
 | PexBot 報告 | 每日 `00:00` | 請求 PexBot 更新[資料庫報告][16]下已訂閱的頁面，報告內容由 PexBot 產生。 |
 
-對於按日更新的報告，重新執行腳本時，會嘗試補齊之前的頁面。
+若報告缺少按日記錄，後續執行時會嘗試補齊。
 
 ## 文件
 
 [文件目錄（英文）][17] 彙整使用說明與開發資料：
 
-- [使用指南][18]：安裝、執行、報告設定及程式介面。
+- [使用指南][18]：Toolforge 部署、更新與日常維護，以及 PAWS、報告設定及程式介面。
 - [開發指南][19]：設計、開發慣例、測試及 wheel 建置。
 - [變更記錄][20]：各版本的功能、行為及文件變更。
 
@@ -39,7 +40,7 @@ Aranami 以 [CC0 1.0 Universal][21] 釋出。
 [1]: README.md
 [2]: README.zh-Hant.md
 [3]: README.zh-Hans.md
-[4]: https://wikitech.wikimedia.org/wiki/PAWS
+[4]: https://wikitech.wikimedia.org/wiki/Portal:Toolforge
 [5]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新条目推荐
 [6]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新进条目/关键词筛选
 [7]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目/A
@@ -57,3 +58,4 @@ Aranami 以 [CC0 1.0 Universal][21] 釋出。
 [19]: docs/development.md
 [20]: CHANGELOG.md
 [21]: LICENSE
+[22]: https://wikitech.wikimedia.org/wiki/PAWS
