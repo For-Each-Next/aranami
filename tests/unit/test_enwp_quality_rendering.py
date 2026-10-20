@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 from unittest import TestCase
 
 import mwparserfromhell
 import polars as pl
 
-from aranami.jobs.enwp_key_articles import REPORT_SPECS
-from aranami.services.zhwiki import enwp_key_articles as reports
-from aranami.support.regions import managed_region, region_content
+from backend.services.enwiki import key_articles as data_service
+from shared.support.regions import managed_region, region_content
+from updater.jobs.enwp_key_articles import REPORT_SPECS
+from updater.services.zhwiki import enwp_key_articles as reports
 
 
 def _rows() -> pl.DataFrame:
@@ -96,7 +98,7 @@ class TestQualityRendering(TestCase):
     @staticmethod
     def test_quality_updates_counts_and_preserves_surroundings() -> None:
         """Count quality entries and preserve manual page content."""
-        quality = REPORT_SPECS[1]
+        quality = replace(REPORT_SPECS[1], name="dated")
         prefix = "Description " + " / ".join(
             f'<section begin="{name}"/>'
             + managed_region(name, "99", {"note": "keep"})
@@ -110,16 +112,16 @@ class TestQualityRendering(TestCase):
         original = prefix + begin + "Old body" + end + suffix
         rows = _rows()
         unrelated = rows.head(1).with_columns(pl.lit("B").alias("en_class"))
-        data = reports.ReportData(
+        data = data_service.ReportData(
             pl.concat([rows, unrelated]),
-            {"quality": {}},
+            {quality.name: {}},
             {},
         )
         updated = reports.build_reports(
-            {"quality": original},
+            {quality.name: original},
             data,
             (quality,),
-        )["quality"]
+        )[quality.name]
         expected_prefix = "Description " + " / ".join(
             f'<section begin="{name}"/>'
             + managed_region(name, str(count), {"note": "keep"})
@@ -149,7 +151,7 @@ class TestQualityRendering(TestCase):
         names = ("count_all", "count_fa", "count_fl", "count_ga")
         original = " / ".join(managed_region(name, "99") for name in names)
         original += managed_region("body", "Old body")
-        data = reports.ReportData(_rows().clear(), {"quality": {}}, {})
+        data = data_service.ReportData(_rows().clear(), {"quality": {}}, {})
         updated = reports.build_reports(
             {"quality": original},
             data,
@@ -174,7 +176,7 @@ class TestQualityRendering(TestCase):
                 try:
                     reports.build_reports(
                         {"quality": original},
-                        reports.ReportData(_rows(), {"quality": {}}, {}),
+                        data_service.ReportData(_rows(), {"quality": {}}, {}),
                         (quality,),
                     )
                 except ValueError as error:
@@ -185,19 +187,19 @@ class TestQualityRendering(TestCase):
     @staticmethod
     def test_importance_remains_alphabetical_without_date_comments() -> None:
         """Keep the importance layout even when rows contain dates."""
-        important = REPORT_SPECS[0]
+        important = replace(REPORT_SPECS[0], name="quality")
         counters = "".join(
             f'<!-- aranami begin="{name}" -->99<!-- aranami end="{name}" -->'
             for name in ("count_all", "count_top", "count_high")
         )
         original = counters + '<!-- aranami begin="body" -->old'
         original += '<!-- aranami end="body" -->'
-        data = reports.ReportData(_rows(), {"important": {}}, {})
+        data = data_service.ReportData(_rows(), {important.name: {}}, {})
         updated = reports.build_reports(
-            {"important": original},
+            {important.name: original},
             data,
             (important,),
-        )["important"]
+        )[important.name]
         expected_body = reports.render_body(_rows().drop("quality_date"))
         assert "\n" + expected_body + "\n" in updated
         assert "== A ==" in updated

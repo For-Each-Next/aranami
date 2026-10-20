@@ -12,10 +12,10 @@ import polars as pl
 from sqlalchemy.dialects import mysql
 from wiki_fixtures import OfflineSite
 
-from aranami.services.enwiki import quality_listing_dates as dates
-from aranami.sources.dyk import TalkPage
-from aranami.sources.quarry import enwp
-from aranami.support import quality_dates_cache as cache
+from backend.services.enwiki import quality_listing_dates as dates
+from backend.support import quality_dates_cache as cache
+from shared.sources.dyk import TalkPage
+from shared.sources.quarry import enwp
 
 
 def _pages(*classes: str) -> pl.DataFrame:

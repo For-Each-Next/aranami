@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 import pywikibot
 
-from aranami.sources import wiki
+from shared.sources import wiki
 
 
 class TestWikiHistory(TestCase):

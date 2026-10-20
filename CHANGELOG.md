@@ -2,12 +2,66 @@
 
 This file records major completed changes, grouped by package release line.
 
+## Until 0.7
+
+### 0.6.0 (2026-10-20 15:00 UTC)
+
+Overview: Centralized Aranami's Toolforge data updates in a Python 3.15
+backend hub, with wiki and web frontends, durable reusable results,
+completion-aware scheduling, readable logs, and a responsive project website.
+
+- Replaced wheel and PAWS deployment with validated source payloads,
+  isolated setup, coordinated process replacement, and recoverable backups.
+- Separated the backend hub, wiki formatting and publication in updater,
+  and web presentation, retiring old imports and separate worker launchers.
+- Moved source parsing, report comparisons, membership, and cache ownership
+  to backend services; updater read only its publication destinations.
+- Gave English importance and quality reports independent renderers for
+  their different layouts, using backend-prepared change metadata.
+- Shared exact successful membership and top-pageview reads within update
+  cycles, while preserving each output's independent successes and retries.
+- Targeted Python 3.15, used native lazy imports, and locked OAuth with
+  Pywikibot while adapting transformations to native Polars expressions.
+- Stored complete report tables, provenance, manifests, and generated text
+  before publication, retaining the latest generation and its predecessor.
+- Preserved calculated data after failed saves, isolated preview datasets,
+  and prevented older runs from advancing newer publication checkpoints.
+- Initialized retained New pages data without historical rediscovery and
+  kept PexBot outcomes as delegated metadata with unknown edit counts.
+- Skipped confirmed complete automatic daily work across restarts and
+  exposed actual postponed schedules through separate live observations.
+- Ran assessment lists hourly, kept the 18:00 UTC Pageviews daily boundary,
+  and refreshed English comparisons and database reports without backfill.
+- Replaced structured log events with standard natural-language terminal
+  and daily logs, with a single date-selectable, searchable web log viewer.
+- Recorded page targets, start/end times, durations, outcomes, and confirmed
+  saves separately from logs, and displayed them in website status details.
+- Refreshed five website reports independently with configurable intervals,
+  persisted successes, hourly failure retries, and preserved source dates.
+- Retired multilingual badge browsing while keeping Chinese highlights,
+  upcoming content, DYK, popularity, maintenance, logs, and three locales.
+- Replaced horizontal report rows with individual responsive cards and
+  linked measured views to correctly dated Pageviews Analysis queries.
+- Displayed plain site ranks and localized routine states with actual
+  status times, measured durations, and scheduler freshness.
+- Preserved known Pageviews observations across cache replacements and
+  retained missing previous ranks as unknown without claiming new entries.
+- Preserved complete dated and bilingual change details within 255 bytes,
+  using the compact `([[toolforge:Aranami|Aranami]])` edit attribution.
+- Replaced wheel verification and release artifacts with source checks,
+  offline Python/PHP suites, and reviewed upload manifests.
+- Added a reader-focused About page and rebuilt the English README with
+  current schedules, component responsibilities, and the Toolforge layout.
+- Organized English guides for terminal users, administrators, application
+  developers, and AI/system-level developers, including upload and restart.
+
 ## Until 0.6
 
-### 0.5.5 (2026-10-18 09:11 UTC)
+### 0.5.5 (2026-10-20 12:40 UTC)
 
 Overview: Matched Topviews article rankings, accelerated dashboard delivery,
-and clarified complete multilingual browsing and homepage headings.
+clarified multilingual browsing and homepage headings, and documented the
+planned source deployment and report redesign.
 
 - Matched dashboard and Aranami site ranks to Topviews' article-only list,
   excluding non-article pages before numbering and retaining measured views.
@@ -27,6 +81,8 @@ and clarified complete multilingual browsing and homepage headings.
 - Grouped the four translation maintenance tasks into a separate 翻译 block.
 - Reordered edit-summary attribution to `(in duration by Aranami version)`,
   preserving its Toolforge link and complete UTF-8 byte budget.
+- Consolidated TODO.md for source deployment, reusable reports, scheduling,
+  website cards, ranking fixes, and consistent edit summaries.
 
 ### 0.5.4 (2026-10-18 08:58 UTC)
 

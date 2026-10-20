@@ -9,8 +9,8 @@ from unittest.mock import patch
 import polars as pl
 from wiki_fixtures import OfflineSite
 
-from aranami.support import report_membership as cache
-from aranami.support.report_membership import membership_changes
+from backend.support import report_membership as cache
+from backend.support.report_membership import membership_changes
 
 
 class TestReportMembership(TestCase):

@@ -10,11 +10,11 @@ from threading import Barrier
 from unittest import TestCase
 from unittest.mock import patch
 
-from aranami.support.routine_status import write_routine_status
+from backend.support.routine_status import write_routine_status
 
 _START = "2026-10-18T06:00:00.123456Z"
 _FINISH = "2026-10-18T06:00:02.654321Z"
-_LOGGER = "aranami.support.routine_status"
+_LOGGER = "backend.support.routine_status"
 
 
 def _record(
@@ -76,7 +76,7 @@ class TestRoutineStatus(TestCase):
                     write_routine_status(record, directory=destination) is True
                 )
                 snapshot = json.loads(
-                    (destination / "aranami-status.json").read_text(),
+                    (destination / "routine-status.json").read_text(),
                 )
                 assert set(snapshot) == {"schema", "updated_at", "routines"}
                 assert snapshot["schema"] == 1
@@ -90,7 +90,7 @@ class TestRoutineStatus(TestCase):
 
     @staticmethod
     def test_default_directory_and_utc_microsecond_normalization() -> None:
-        """Write beneath caller logs and retain precise event times."""
+        """Write beneath caller state and retain precise event times."""
         record = {
             **_record(),
             "started_at": "2026-10-18T14:00:00.123456+08:00",
@@ -99,13 +99,15 @@ class TestRoutineStatus(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "aranami.support.routine_status.Path.cwd",
+                "backend.support.routine_status.Path.cwd",
                 return_value=Path(directory),
             ),
         ):
             assert write_routine_status(record) is True
             snapshot = json.loads(
-                (Path(directory) / "logs" / "aranami-status.json").read_text(),
+                (
+                    Path(directory) / "state" / "routine-status.json"
+                ).read_text(),
             )
         assert snapshot["routines"]["dyks"] == {
             **record,
@@ -118,7 +120,7 @@ class TestRoutineStatus(TestCase):
         """Guard replacement using parsed times and run IDs."""
         with TemporaryDirectory() as directory:
             destination = Path(directory)
-            path = destination / "aranami-status.json"
+            path = destination / "routine-status.json"
             assert write_routine_status(_record(), directory=destination)
             original, modified_at = path.read_bytes(), path.stat().st_mtime_ns
             stale = (
@@ -158,8 +160,8 @@ class TestRoutineStatus(TestCase):
         with TemporaryDirectory() as directory:
             destination = Path(directory) / "missing"
             with (
-                patch("aranami.support.routine_status.os.open") as opened,
-                patch("aranami.support.routine_status.Path.mkdir") as mkdir,
+                patch("backend.support.routine_status.os.open") as opened,
+                patch("backend.support.routine_status.Path.mkdir") as mkdir,
             ):
                 assert (
                     write_routine_status(
@@ -220,7 +222,7 @@ class TestRoutineStatus(TestCase):
         ]
         with TemporaryDirectory() as directory:
             destination = Path(directory)
-            path = destination / "aranami-status.json"
+            path = destination / "routine-status.json"
             assert write_routine_status(record, directory=destination)
             original, modified_at = path.read_bytes(), path.stat().st_mtime_ns
             for index, value in enumerate(invalid):
@@ -286,7 +288,7 @@ class TestRoutineStatus(TestCase):
         ]
         with TemporaryDirectory() as directory:
             destination = Path(directory)
-            path = destination / "aranami-status.json"
+            path = destination / "routine-status.json"
             for index, content in enumerate(invalid):
                 path.write_bytes(content)
                 modified_at = path.stat().st_mtime_ns
@@ -311,7 +313,7 @@ class TestRoutineStatus(TestCase):
             target = root / "target"
             target.write_bytes(b"unchanged target")
             modified_at = target.stat().st_mtime_ns
-            for filename in ("aranami-status.json", "aranami-status.lock"):
+            for filename in ("routine-status.json", "routine-status.lock"):
                 destination = root / filename.removesuffix(".json")
                 destination.mkdir()
                 link = destination / filename
@@ -331,13 +333,13 @@ class TestRoutineStatus(TestCase):
                 assert target.read_bytes() == b"unchanged target"
                 assert target.stat().st_mtime_ns == modified_at
                 if filename.endswith(".lock"):
-                    assert not (destination / "aranami-status.json").exists()
+                    assert not (destination / "routine-status.json").exists()
 
     def test_io_failures_preserve_the_last_snapshot(self) -> None:
         """Keep prior bytes and remove failed staging files."""
         with TemporaryDirectory() as directory:
             destination = Path(directory)
-            path = destination / "aranami-status.json"
+            path = destination / "routine-status.json"
             assert write_routine_status(_record(), directory=destination)
             original, modified_at = path.read_bytes(), path.stat().st_mtime_ns
             filenames = {entry.name for entry in destination.iterdir()}
@@ -345,7 +347,7 @@ class TestRoutineStatus(TestCase):
                 with (
                     self.subTest(operation=operation),
                     patch(
-                        f"aranami.support.routine_status.{operation}",
+                        f"backend.support.routine_status.{operation}",
                         side_effect=OSError("fixture write failure"),
                     ),
                     self.assertLogs(_LOGGER, level="WARNING"),
@@ -389,7 +391,7 @@ class TestRoutineStatus(TestCase):
 
             with (
                 patch(
-                    "aranami.support.routine_status.fcntl.flock",
+                    "backend.support.routine_status.fcntl.flock",
                     wraps=fcntl.flock,
                 ) as flock,
                 ThreadPoolExecutor(max_workers=len(routines)) as pool,
@@ -399,13 +401,13 @@ class TestRoutineStatus(TestCase):
                 call.args[1] & fcntl.LOCK_EX for call in flock.call_args_list
             )
             snapshot = json.loads(
-                (destination / "aranami-status.json").read_text(),
+                (destination / "routine-status.json").read_text(),
             )
             assert snapshot["routines"] == {
                 routine: _record(routine=routine, run_id=f"{11:032x}")
                 for routine in routines
             }
             assert {entry.name for entry in destination.iterdir()} == {
-                "aranami-status.json",
-                "aranami-status.lock",
+                "routine-status.json",
+                "routine-status.lock",
             }

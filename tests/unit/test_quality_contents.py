@@ -12,21 +12,21 @@ import polars as pl
 from sqlalchemy.dialects import mysql
 from wiki_fixtures import OfflineSite
 
-from aranami.services import quality_contents as contents
-from aranami.services.enwiki import (
+from backend.services import quality_contents as contents
+from backend.services.enwiki import (
     prose as en_prose,
     quality_contents as en_contents,
     quality_dates as en_dates,
 )
-from aranami.services.zhwiki import (
+from backend.services.zhwiki import (
     prose as zh_prose,
     quality_contents as zh_contents,
     quality_dates as zh_dates,
 )
-from aranami.sources.quarry import quality
-from aranami.support import words
-from aranami.support.dates import parse_complete_date
-from aranami.support.prose import extract_prose
+from shared.sources.quarry import quality
+from shared.support import words
+from shared.support.dates import parse_complete_date
+from shared.support.prose import extract_prose
 
 
 class TestQualityMilestones(TestCase):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -14,10 +13,10 @@ from typing import TYPE_CHECKING
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-import aranami
-from aranami import runner
-from aranami.jobs import JobContext, ProposedEdit, job_run
-from aranami.support import open_run_log
+import backend
+from backend import runner
+from backend.support.logs import open_run_log
+from updater.jobs import JobContext, ProposedEdit, job_run
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -32,20 +31,19 @@ _ROUTINES = (
 )
 
 
-def _routine_results(log: str) -> list[dict[str, object]]:
-    """Decode terminal routine records from the real daily log format.
+def _routine_results(calls: dict[str, Mock]) -> list[dict[str, object]]:
+    """Read backend outcomes independently of diagnostic log wording.
 
     Args:
-        log: Complete UTF-8 daily log contents.
+        calls: Recorded routine invocations carrying backend contexts.
 
     Returns:
-        Versioned routine outcomes without traceback continuation lines.
+        Versioned routine outcomes from each recorded execution context.
     """
-    marker = ": Routine result: "
     return [
-        json.loads(line.partition(marker)[2])
-        for line in log.splitlines()
-        if marker in line
+        result
+        for call in calls["dyks"].call_args_list
+        for result in call.kwargs["context"].routine_results()
     ]
 
 
@@ -57,7 +55,9 @@ def _routine(*, context: JobContext, name: str) -> None:
         name: Routine whose source log should be captured.
     """
     with job_run(name, context=context):
-        logging.getLogger(f"aranami.services.{name}").info("Report built.")
+        logging.getLogger(f"updater.services.{name}").info(
+            "Report built.",
+        )
 
 
 @contextmanager
@@ -72,13 +72,14 @@ def _offline_runner(root: Path) -> Iterator[dict[str, Mock]]:
     """
     with ExitStack() as stack:
         stack.enter_context(
-            patch("aranami.support.logs.Path.cwd", return_value=root),
+            patch("backend.support.logs.Path.cwd", return_value=root),
         )
-        stack.enter_context(patch("aranami.runner.pywikibot.Site"))
+        site = stack.enter_context(patch("backend.runner.pywikibot.Site"))
+        site.return_value.dbName.return_value = "zhwiki"
         yield {
             name: stack.enter_context(
                 patch.object(
-                    import_module(f"aranami.jobs.{name}"),
+                    import_module(f"updater.jobs.{name}"),
                     "run",
                     side_effect=partial(_routine, name=name),
                 ),
@@ -100,7 +101,7 @@ class TestRunnerLoggingIntegration(TestCase):
                     _offline_runner(root) as calls,
                     patch.object(runner.monitor, "start") as start,
                 ):
-                    result = aranami.run(dry=True) if dry else aranami.run()
+                    result = backend.run(dry=True) if dry else backend.run()
                     assert result is start.return_value
                     start.assert_called_once_with(
                         dry=dry,
@@ -120,7 +121,7 @@ class TestRunnerLoggingIntegration(TestCase):
                     self.subTest(dry=dry, run_immediately=run_immediately),
                     patch.object(runner.monitor, "start") as start,
                 ):
-                    result = aranami.run(
+                    result = backend.run(
                         dry=dry,
                         run_immediately=run_immediately,
                     )
@@ -139,31 +140,24 @@ class TestRunnerLoggingIntegration(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch("logging.time.time", return_value=now.timestamp()),
+            patch(
+                "logging.time.time_ns",
+                return_value=int(now.timestamp() * 1e9),
+            ),
         ):
             root = Path(directory)
             with _offline_runner(root) as calls:
-                results = [aranami.run_once(dry=True) for _ in range(runs)]
+                results = [backend.run_once(dry=True) for _ in range(runs)]
             files = list((root / "logs").glob("aranami.*.log"))
             assert [path.name for path in files] == ["aranami.2026-10-03.log"]
             content = files[0].read_text(encoding="utf-8")
-            major = (root / "logs/project.2026-10-03.log").read_text(
-                encoding="utf-8",
-            )
-            major_events = [json.loads(line) for line in major.splitlines()]
-            assert len(major_events) == runs * len(_ROUTINES) * 2
-            assert all(
-                event["component"] == "aranami" for event in major_events
-            )
-            assert {event["event"] for event in major_events} == {
-                "routine.started",
-                "routine.result",
-            }
-            assert "Report built" not in major
-            assert aranami.run_once is runner.run_once
+            assert not list((root / "logs").glob("project.*.log"))
+            assert "Routine result:" not in content
+            assert backend.run_once is runner.run_once
             assert results == [None, None]
-            assert content.count("Aranami run started") == runs
+            assert content.count("run started (dry=") == runs
             assert content.count("Aranami run finished") == runs
-            outcomes = _routine_results(content)
+            outcomes = _routine_results(calls)
             assert len(outcomes) == runs * len(_ROUTINES)
             assert all(
                 result["schema"] == 1
@@ -176,13 +170,14 @@ class TestRunnerLoggingIntegration(TestCase):
                 assert call.call_count == runs
                 assert (
                     content.count(
-                        f"[aranami.jobs.{name}.job_run]: Routine started",
+                        "[backend.support.execution.routine_run]: "
+                        f"Started {name}",
                     )
                     == runs
                 )
                 assert (
                     content.count(
-                        f"[aranami.services.{name}._routine]: Report built.",
+                        f"[updater.services.{name}._routine]: Report built.",
                     )
                     == runs
                 )
@@ -234,14 +229,14 @@ class TestRunnerLoggingIntegration(TestCase):
                 calls["dyks"].side_effect = fail
                 calls["new_pages"].side_effect = propose
                 with self.assertRaises(ExceptionGroup) as captured:  # ruff: ignore[pytest-unittest-raises-assertion]
-                    aranami.run_once(dry=True)
+                    backend.run_once(dry=True)
             assert len(captured.exception.exceptions) == 1
             for call in calls.values():
                 call.assert_called_once()
             content = next((root / "logs").glob("aranami.*.log")).read_text(
                 encoding="utf-8",
             )
-            outcomes = _routine_results(content)
+            outcomes = _routine_results(calls)
             assert len(outcomes) == len(_ROUTINES)
             assert outcomes[0]["routine"] == "dyks"
             assert outcomes[0]["status"] == "failed"
@@ -300,7 +295,7 @@ class TestRunnerLoggingIntegration(TestCase):
             with _offline_runner(root) as calls:
                 calls["pageviews"].side_effect = defer
                 calls["enwp_key_articles"].side_effect = propose
-                assert aranami.run_once(dry=True) is None
+                assert backend.run_once(dry=True) is None
             summary = next((root / "dry-run").glob("*.md")).read_text(
                 encoding="utf-8",
             )
@@ -316,7 +311,7 @@ class TestRunnerLoggingIntegration(TestCase):
             log = next((root / "logs").glob("aranami.*.log")).read_text(
                 encoding="utf-8",
             )
-            outcomes = _routine_results(log)
+            outcomes = _routine_results(calls)
             assert len(outcomes) == len(_ROUTINES)
             assert outcomes[3]["routine"] == "pageviews"
             assert outcomes[3]["status"] == "deferred"
@@ -334,7 +329,7 @@ class TestRunnerLoggingIntegration(TestCase):
                 _offline_runner(root) as calls,
                 patch.object(runner.monitor, "start") as start,
             ):
-                result = aranami.run_once(
+                result = backend.run_once(
                     date=anchor,
                     dry=True,
                     tasks=[selected],
@@ -366,7 +361,7 @@ class TestRunnerLoggingIntegration(TestCase):
                 _offline_runner(root) as calls,
                 patch.object(runner.monitor, "start") as start,
             ):
-                assert aranami.run_once(tasks=selected) is None
+                assert backend.run_once(tasks=selected) is None
                 start.assert_not_called()
             calls[selected].assert_called_once()
             context = calls[selected].call_args.kwargs["context"]
@@ -382,13 +377,13 @@ class TestRunnerLoggingIntegration(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "aranami.support.logs.Path.cwd",
+                "backend.support.logs.Path.cwd",
                 return_value=Path(directory),
             ),
-            patch("aranami.runner.pywikibot.Site") as site,
+            patch("backend.runner.pywikibot.Site") as site,
         ):
             with self.assertRaises(ValueError):  # ruff: ignore[pytest-unittest-raises-assertion]
-                aranami.run_once(dry=True, tasks=["unknown"])
+                backend.run_once(dry=True, tasks=["unknown"])
             site.assert_not_called()
 
 
@@ -404,18 +399,18 @@ class TestRunLogManagerIntegration(TestCase):
             root = Path(directory)
             with open_run_log(root) as logger:
                 with patch(
-                    "logging.time.time",
-                    return_value=before.timestamp(),
+                    "logging.time.time_ns",
+                    return_value=int(before.timestamp() * 1e9),
                 ):
                     logger.info("Before midnight.")
                 with patch(
-                    "logging.time.time",
-                    return_value=after.timestamp(),
+                    "logging.time.time_ns",
+                    return_value=int(after.timestamp() * 1e9),
                 ):
                     logger.info("After midnight.")
                 with patch(
-                    "logging.time.time",
-                    return_value=before.timestamp(),
+                    "logging.time.time_ns",
+                    return_value=int(before.timestamp() * 1e9),
                 ):
                     logger.info("Delayed previous-day event.")
             first = (root / "aranami.2026-10-02.log").read_text(
@@ -460,11 +455,11 @@ class TestRunLogManagerIntegration(TestCase):
 
     @staticmethod
     def test_nested_contexts_capture_descendants_once() -> None:
-        """Share one handler and remove it after the last context."""
+        """Share file and terminal handlers until the last context."""
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            package_logger = logging.getLogger("aranami")
-            source_logger = logging.getLogger("aranami.sources.quarry.query")
+            package_logger = logging.getLogger("backend")
+            source_logger = logging.getLogger("shared.sources.quarry.query")
             original_handlers = tuple(package_logger.handlers)
             with open_run_log(root) as outer:
                 with open_run_log(root) as inner:
@@ -476,7 +471,7 @@ class TestRunLogManagerIntegration(TestCase):
                     source_logger.debug("Excluded debug record.")
                     source_logger.info("Nested source record.")
                     assert outer is inner is package_logger
-                    assert len(handlers) == 1
+                    assert len(handlers) == len(("file", "terminal"))
                 source_logger.warning("Outer source record.")
             content = next(root.glob("*.log")).read_text(encoding="utf-8")
             assert content.count("Nested source record.") == 1
@@ -487,7 +482,7 @@ class TestRunLogManagerIntegration(TestCase):
     @staticmethod
     def test_context_restores_package_and_root_logger_configuration() -> None:
         """Restore package state and retain root logger handlers."""
-        package_logger = logging.getLogger("aranami")
+        package_logger = logging.getLogger("backend")
         root_logger = logging.getLogger()
         original_level = package_logger.level
         original_handlers = tuple(package_logger.handlers)

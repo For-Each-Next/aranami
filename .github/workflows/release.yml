@@ -32,12 +32,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          shopt -s nullglob
-          wheels=(dist/*.whl)
-          test "${#wheels[@]}" -eq 1
-          test "${wheels[0]}" = "dist/aranami-${GITHUB_REF_NAME#v}-py3-none-any.whl"
+          test -s dist/aranami-source.tar
           test -s dist/release-notes.md
-          gh release create "$GITHUB_REF_NAME" "${wheels[@]}" \
+          gh release create "$GITHUB_REF_NAME" dist/aranami-source.tar \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Aranami ${GITHUB_REF_NAME#v}" \
             --notes-file dist/release-notes.md

@@ -16,8 +16,8 @@ from sqlalchemy import (
 )
 from wiki_fixtures import OfflineSite
 
-from aranami.sources import wiki
-from aranami.sources.quarry import Replica, projects
+from shared.sources import wiki
+from shared.sources.quarry import Replica, projects
 
 
 class TestProjectTags(TestCase):
@@ -36,7 +36,7 @@ class TestProjectTags(TestCase):
             ("ALERT", "talk", "cat", "Category:Talk flag"),
         )
         with patch(
-            "aranami.sources.quarry.projects._tag_rows",
+            "shared.sources.quarry.projects._tag_rows",
             side_effect=[
                 pl.DataFrame({
                     "page_id": [1, 2],
@@ -60,7 +60,7 @@ class TestProjectTags(TestCase):
         pages = pl.DataFrame(
             schema={"page_id": pl.Int64, "talk_page_id": pl.Int64},
         )
-        with patch("aranami.sources.quarry.projects._replica") as replica:
+        with patch("shared.sources.quarry.projects._replica") as replica:
             tagged = projects.query_tags(
                 site,
                 pages,
@@ -102,7 +102,7 @@ class TestProjectStatements(TestCase):
         for kind in ("category", "template"):
             for talk_page in (False, True):
                 with patch(
-                    "aranami.sources.quarry.query._fetch",
+                    "shared.sources.quarry.query._fetch",
                     return_value=(("page_id", "name"), []),
                 ) as fetch:
                     result = projects.maintenance_tags(
@@ -251,7 +251,7 @@ class TestProjectStatements(TestCase):
                     ],
                 )
             with patch(
-                "aranami.sources.quarry.projects._replica",
+                "shared.sources.quarry.projects._replica",
                 return_value=replica,
             ):
                 site = OfflineSite("zh", "wikipedia")
@@ -281,7 +281,7 @@ class TestProjectStatements(TestCase):
         site = OfflineSite("zh", "wikipedia")
         identifiers = [*range(1, 1002), 1, 2]
         with patch(
-            "aranami.sources.quarry.query._fetch",
+            "shared.sources.quarry.query._fetch",
             return_value=(("page_id", "name"), []),
         ) as fetch:
             result = projects.page_categories(site, identifiers)
@@ -360,7 +360,7 @@ class TestProjectStatements(TestCase):
                     ],
                 )
             with patch(
-                "aranami.sources.quarry.projects._replica",
+                "shared.sources.quarry.projects._replica",
                 return_value=replica,
             ):
                 result = projects.page_categories(
@@ -379,7 +379,7 @@ class TestProjectStatements(TestCase):
         """Apply namespace zero as a membership restriction."""
         site = OfflineSite("zh", "wikipedia")
         with patch(
-            "aranami.sources.quarry.query._fetch",
+            "shared.sources.quarry.query._fetch",
             return_value=(("page_id", "page_namespace", "page_title"), []),
         ) as fetch:
             result = projects.category_members(
@@ -408,7 +408,7 @@ class TestProjectStatements(TestCase):
             "article_page_id",
         )
         with patch(
-            "aranami.sources.quarry.query._fetch",
+            "shared.sources.quarry.query._fetch",
             return_value=(
                 columns,
                 [(11, 1, "Game", 7), (12, 1, "Orphan", None)],
@@ -444,7 +444,7 @@ class TestProjectStatements(TestCase):
             "pa_importance",
         )
         with patch(
-            "aranami.sources.quarry.query._fetch",
+            "shared.sources.quarry.query._fetch",
             return_value=(columns, []),
         ) as fetch:
             result = projects.query_pages_by_wikiproject(site, name)
@@ -474,7 +474,7 @@ class TestProjectStatements(TestCase):
         """Restrict link joins to their exact targets."""
         site = OfflineSite("zh", "wikipedia")
         with patch(
-            "aranami.sources.quarry.query._fetch",
+            "shared.sources.quarry.query._fetch",
             return_value=(("page_id", "name"), []),
         ) as fetch:
             for category in (False, True):
@@ -503,7 +503,7 @@ class TestProjectStatements(TestCase):
         site = OfflineSite("zh", "wikipedia")
         identifiers = [*range(1001), 0, 1]
         with patch(
-            "aranami.sources.quarry.query._fetch",
+            "shared.sources.quarry.query._fetch",
             return_value=(("page_id", "page_latest"), []),
         ) as fetch:
             result = projects.latest_revisions(site, identifiers)
@@ -522,7 +522,7 @@ class TestProjectStatements(TestCase):
         """Restrict creation searches to eligible content pages."""
         site = OfflineSite("zh", "wikipedia")
         with patch(
-            "aranami.sources.quarry.query._fetch",
+            "shared.sources.quarry.query._fetch",
             return_value=(("page_id",), [(123,)]),
         ) as fetch:
             result = projects.new_page_ids(
@@ -547,7 +547,7 @@ class TestProjectStatements(TestCase):
         """Find tagged rewrites independently of creation revisions."""
         site = OfflineSite("zh", "wikipedia")
         with patch(
-            "aranami.sources.quarry.query._fetch",
+            "shared.sources.quarry.query._fetch",
             return_value=(("page_id",), [(123,)]),
         ) as fetch:
             result = projects.redirect_converted_page_ids(
@@ -587,7 +587,7 @@ class TestProjectStatements(TestCase):
         site = OfflineSite("zh", "wikipedia")
         with (
             patch(
-                "aranami.sources.quarry.query._fetch",
+                "shared.sources.quarry.query._fetch",
                 return_value=(("page_id",), []),
             ),
             patch.object(
@@ -720,7 +720,7 @@ class TestProjectStatements(TestCase):
                     ],
                 )
             with patch(
-                "aranami.sources.quarry.projects._replica",
+                "shared.sources.quarry.projects._replica",
                 return_value=replica,
             ):
                 result = projects.redirect_converted_page_ids(
@@ -739,7 +739,7 @@ class TestPageCreationMetadata(TestCase):
     @staticmethod
     def test_empty_titles_never_open_a_replica() -> None:
         """Retain the result schema without querying unrelated pages."""
-        with patch("aranami.sources.quarry.projects._replica") as replica:
+        with patch("shared.sources.quarry.projects._replica") as replica:
             result = projects.page_creation_metadata(
                 OfflineSite("zh", "wikipedia"),
                 [],
@@ -764,7 +764,7 @@ class TestPageCreationMetadata(TestCase):
             "Game_0",
         ]
         with patch(
-            "aranami.sources.quarry.query._fetch",
+            "shared.sources.quarry.query._fetch",
             return_value=(
                 ("page_id", "page_namespace", "page_title", "created_at"),
                 [],
@@ -804,7 +804,7 @@ class TestPageCreationMetadata(TestCase):
     def test_unavailable_revision_time_remains_null() -> None:
         """Keep page identities without inventing a creation date."""
         with patch(
-            "aranami.sources.quarry.query._fetch",
+            "shared.sources.quarry.query._fetch",
             return_value=(
                 ("page_id", "page_namespace", "page_title", "created_at"),
                 [(123, 102, "Good_games", None)],
@@ -886,7 +886,7 @@ class TestPageCreationMetadata(TestCase):
                     ],
                 )
             with patch(
-                "aranami.sources.quarry.projects._replica",
+                "shared.sources.quarry.projects._replica",
                 return_value=replica,
             ):
                 result = projects.page_creation_metadata(
@@ -927,7 +927,7 @@ class TestWikiPreloading(TestCase):
             first.text = "loaded text"
             second.text = ""
         with patch(
-            "aranami.sources.wiki.pagegenerators.PreloadingGenerator",
+            "shared.sources.wiki.pagegenerators.PreloadingGenerator",
             return_value=[second, first],
         ) as preload:
             pages = wiki.read_pages(site, ["First", "Missing", "First"])
@@ -942,7 +942,7 @@ class TestWikiPreloading(TestCase):
         site = OfflineSite("zh", "wikipedia")
         with (
             patch(
-                "aranami.sources.wiki.pagegenerators.PreloadingGenerator",
+                "shared.sources.wiki.pagegenerators.PreloadingGenerator",
                 return_value=[],
             ),
             self.assertRaises(RuntimeError),  # ruff: ignore[pytest-unittest-raises-assertion]
@@ -957,11 +957,11 @@ class TestWikiPreloading(TestCase):
         second = Mock(pageid=20)
         with (
             patch(
-                "aranami.sources.wiki.pagegenerators.PagesFromPageidGenerator",
+                "shared.sources.wiki.pagegenerators.PagesFromPageidGenerator",
                 return_value=iter([first, second]),
             ) as identify,
             patch(
-                "aranami.sources.wiki.pagegenerators.PreloadingGenerator",
+                "shared.sources.wiki.pagegenerators.PreloadingGenerator",
                 return_value=[first, second],
             ),
         ):
@@ -974,7 +974,7 @@ class TestWikiPreloading(TestCase):
         """Avoid generator work for empty title and ID requests."""
         site = OfflineSite("zh", "wikipedia")
         with patch(
-            "aranami.sources.wiki.pagegenerators.PreloadingGenerator",
+            "shared.sources.wiki.pagegenerators.PreloadingGenerator",
         ) as preload:
             assert wiki.read_pages(site, []) == []
             assert wiki.read_page_ids(site, []) == []

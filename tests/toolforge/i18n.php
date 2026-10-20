@@ -2,8 +2,8 @@
 /** Verify browser negotiation and complete interface translations. */
 declare(strict_types=1);
 
-require dirname(__DIR__, 2) . '/src/toolforge/i18n.php';
-require dirname(__DIR__, 2) . '/src/toolforge/status.php';
+require dirname(__DIR__, 2) . '/src/webservice/i18n.php';
+require dirname(__DIR__, 2) . '/src/webservice/status.php';
 
 /** Fail visibly even when the PHP runtime disables built-in assertions. */
 function expectUiSame(mixed $expected, mixed $actual, string $description): void
@@ -41,18 +41,6 @@ expectUiSame('zh-Hans', uiLanguageTag('zh-hans'), 'Simplified HTML language');
 expectUiSame('zh-Hant', uiLanguageTag('zh-hant'), 'Traditional HTML language');
 expectUiSame('en', uiLanguageTag('en'), 'English HTML language');
 
-$observedLanguages = explode(' ', 'ar ast az be bs ca ckb cs da de el en es fa fi fr gl he hu hy id it ja ka ko lt ml mr ms mzn nl no pam pl pt ro ru sh sl sq sr sv th tr uk uz vi zh');
-foreach ($observedLanguages as $language) {
-    foreach (['en', 'zh-hans', 'zh-hant'] as $locale) {
-        $key = 'language.' . $language;
-        expectUiSame(true, isset(uiCatalog()[$key][$locale]), 'Current Wikipedia language has a localized name: ' . $language . ' / ' . $locale);
-        expectUiSame(false, uiTextFor($locale, $key) === $language, 'Current language names do not fall back to a code: ' . $language . ' / ' . $locale);
-    }
-}
-expectUiSame('Asturian', uiTextFor('en', 'language.ast'), 'CLDR English language name');
-expectUiSame('阿斯图里亚斯语', uiTextFor('zh-hans', 'language.ast'), 'CLDR Simplified Chinese language name');
-expectUiSame('阿斯圖里亞文', uiTextFor('zh-hant', 'language.ast'), 'CLDR Traditional Chinese language name');
-
 foreach (uiCatalog() as $key => $translations) {
     expectUiSame(['en', 'zh-hans', 'zh-hant'], array_keys($translations), 'Every message has three locales: ' . $key);
     $expectedParameters = null;
@@ -67,13 +55,10 @@ foreach (uiCatalog() as $key => $translations) {
         expectUiSame($expectedParameters, $parameters, 'Translation placeholders match: ' . $key);
     }
 }
-expectUiSame('他山之石', uiTextFor('zh-hans', 'quality.heading'), 'Simplified interface text');
-expectUiSame('他山之石', uiTextFor('zh-hant', 'quality.heading'), 'Traditional interface text');
-expectUiSame('Across the wikis', uiTextFor('en', 'quality.heading'), 'English interface text');
 expectUiSame('12 articles', uiTextFor('en', 'backlog.count', ['count' => 12]), 'Plain text interpolation');
-expectUiSame('Not completed yet', uiTextFor('en', 'state.Deferred'), 'Deferred is described as an incomplete run');
-expectUiSame('暂未完成', uiTextFor('zh-hans', 'state.Deferred'), 'Simplified incomplete state');
-expectUiSame('暫未完成', uiTextFor('zh-hant', 'state.Deferred'), 'Traditional incomplete state');
+expectUiSame('Waiting to retry', uiTextFor('en', 'state.Deferred'), 'Deferred is described as waiting for a retry');
+expectUiSame('待重试', uiTextFor('zh-hans', 'state.Deferred'), 'Simplified retry state');
+expectUiSame('待重試', uiTextFor('zh-hant', 'state.Deferred'), 'Traditional retry state');
 
 $_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'zh-TW';
 expectUiSame('1分3秒', uiDuration('1 min 3 sec'), 'Localized whole-second long duration');
@@ -82,9 +67,7 @@ expectUiSame('—', uiDuration(null), 'Missing duration remains unknown');
 expectUiSame('6分15秒…', uiRunningDuration('2026-10-18T00:00:00.000000Z', 1792281975), 'Running durations show elapsed whole minutes and seconds with an ellipsis');
 expectUiSame('15秒…', uiRunningDuration('2026-10-18T00:00:00.000000Z', 1792281615), 'Short running durations use whole seconds');
 expectUiSame('0秒…', uiRunningDuration('2026-10-18T00:00:00.000000Z', 1792281599), 'Clock skew never produces a negative running duration');
-expectUiSame('?language=ru', uiUrl('', ['language' => 'ru']), 'Article filters leave interface selection to the browser');
 expectUiSame('/logs/', uiUrl('/logs/'), 'Log links leave interface selection to the browser');
-expectUiSame('unlisted-code', uiLanguageName('unlisted-code'), 'Unknown language codes remain source data');
 
 foreach ([
     'dyks' => ['WikiProject:电子游戏/新条目推荐'],
@@ -103,7 +86,7 @@ foreach ([
 ] as $routine => $targets) {
     $name = uiText('routine.' . $routine);
     ob_start();
-    dashboardRoutineLinks($routine, $name);
+    dashboardRoutineLinks($routine, $name, [$routine => ['pages' => $targets, 'prefixes' => []]]);
     $markup = ob_get_clean();
     preg_match_all('/<a href="([^"]+)" title="([^"]+)" aria-label="([^"]+)">([^<]+)<\/a>/', $markup, $links, PREG_SET_ORDER);
     expectUiSame(count($targets), count($links), 'Every configured report has one link: ' . $routine);
@@ -121,4 +104,39 @@ ob_start();
 dashboardRoutineLinks('unlisted', '<Unknown & routine>');
 expectUiSame('&lt;Unknown &amp; routine&gt;', ob_get_clean(), 'Unconfigured routine names remain escaped plain text');
 
+$uptime = ['state' => 'running', 'started_at' => '2026-10-16T08:56:00Z',
+    'updated_at' => '2026-10-18T12:00:00Z'];
+$clock = new DateTimeImmutable('2026-10-18T12:00:30Z');
+foreach ([
+    ['en', 'Aranami uptime: 2d 3h 4m · since 2026-10-16 08:56 UTC', 'Aranami uptime: unavailable'],
+    ['zh-CN', 'Aranami 已连续运行2天3小时4分钟（始于2026-10-16 08:56 UTC）', 'Aranami 连续运行时间：未获取'],
+    ['zh-TW', 'Aranami 已連續運行2天3小時4分鐘（始於2026-10-16 08:56 UTC）', 'Aranami 連續運行時間：未取得'],
+] as [$language, $label, $unknown]) {
+    $locale = selectUiLocale($language);
+    expectUiSame($label, uiTextFor($locale, 'footer.uptime', [
+        'days' => 2, 'hours' => 3, 'minutes' => 4, 'since' => '2026-10-16 08:56',
+    ]), 'Continuous runtime and UTC start are localized');
+    expectUiSame($unknown, uiTextFor($locale, 'footer.uptime_unknown'), 'Unavailable runtime has a localized explanation');
+}
+$label = uiText('footer.uptime', ['days' => 2, 'hours' => 3, 'minutes' => 4, 'since' => '2026-10-16 08:56']);
+expectUiSame($label, dashboardUptime($uptime, $clock), 'Uptime is calculated from the session start rather than heartbeat time');
+expectUiSame($label, dashboardUptime(array_replace($uptime, ['state' => 'paused']), $clock),
+    'Pausing report scheduling does not reset a live monitor session');
+foreach ([
+    ['state' => 'missing'], ['state' => 'stopped'], ['state' => 'stale'],
+    ['started_at' => null], ['started_at' => 'invalid'],
+    ['started_at' => '2026-10-19T00:00:00Z'],
+    ['updated_at' => '2026-10-18T11:58:29Z'],
+    ['updated_at' => '2026-10-18T12:01:00Z'],
+] as $change) {
+    expectUiSame(uiText('footer.uptime_unknown'), dashboardUptime(array_replace($uptime, $change), $clock),
+        'Missing, stopped, stale, malformed, and future observations do not invent continuous runtime');
+}
+expectUiSame(uiText('footer.uptime', ['days' => 2, 'hours' => 3, 'minutes' => 5, 'since' => '2026-10-16 08:56']),
+    dashboardUptime(array_replace($uptime, ['updated_at' => '2026-10-18T12:01:00Z']),
+        new DateTimeImmutable('2026-10-18T12:01:30Z')),
+    'Heartbeat updates advance elapsed time while retaining the original session start');
+expectUiSame(uiText('footer.uptime', ['days' => 0, 'hours' => 0, 'minutes' => 0, 'since' => '2026-10-18 12:00']),
+    dashboardUptime(array_replace($uptime, ['started_at' => '2026-10-18T12:00:00Z']), $clock),
+    'A newly recorded restart resets elapsed runtime without rounding up a minute');
 echo "Toolforge interface language checks passed.\n";

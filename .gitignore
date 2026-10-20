@@ -30,10 +30,12 @@ throttle.ctrl
 logs/
 cache/
 dry-run/
-!/src/toolforge/public_html/logs/
-!/src/toolforge/public_html/logs/index.php
-!/src/toolforge/public_html/logs/aranami/
-!/src/toolforge/public_html/logs/aranami/index.php
+reports/
+state/
+!/src/webservice/public_html/logs/
+!/src/webservice/public_html/logs/index.php
+!/src/webservice/public_html/logs/aranami/
+!/src/webservice/public_html/logs/aranami/index.php
 
 # Tests, coverage, and tool caches
 apicache/
@@ -50,7 +52,7 @@ htmlcov/
 .pytype/
 .ruff_cache/
 
-# PAWS notebooks live outside this development repository
+# Local notebooks
 *.ipynb
 .ipynb_checkpoints/
 

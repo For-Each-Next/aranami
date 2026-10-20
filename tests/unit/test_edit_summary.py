@@ -1,33 +1,27 @@
 """Verify shared edit-summary budgeting and complete link truncation."""
 
-# Preserve the user's minute and second prime symbols.
+# Preserve wiki punctuation in quoted-title fixtures.
 # ruff: file-ignore[ambiguous-unicode-character-string]
 import datetime as dt
 import pickle  # ruff: ignore[suspicious-pickle-import]
 from copy import copy, deepcopy
 from dataclasses import asdict
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
-from aranami.jobs import ProposedEdit
-from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
+from updater.jobs import ProposedEdit
+from updater.support.edit_summary import (
+    MAX_EDIT_SUMMARY_BYTES,
+    EditSummary,
+    article_mention,
+)
 
 _CHINESE_CHARACTER_BYTES = 3
-_EXAMPLE_DURATION = 1313.95
-_EXAMPLE_SUFFIX = "(in 21′54″ by [[toolforge:aranami|Aranami 0.3.5]])"
+_EXAMPLE_SUFFIX = "([[toolforge:Aranami|Aranami]])"
 
 
 class TestEditSummary(TestCase):
-    """Check Unicode byte limits and useful truncated descriptions."""
-
-    def setUp(self) -> None:
-        """Use a fixed installed version independent of wheel builds."""
-        version_patch = patch(
-            "aranami.support.edit_summary.version",
-            return_value="0.3.5",
-        )
-        version_patch.start()
-        self.addCleanup(version_patch.stop)
+    """Check dates, membership punctuation, and UTF-8 byte limits."""
 
     @staticmethod
     def test_daily_date_uses_compact_english_months() -> None:
@@ -116,61 +110,78 @@ class TestEditSummary(TestCase):
         assert not EditSummary("Items.", max_bytes=0).render()
 
     @staticmethod
-    def test_execution_time_precision_depends_on_duration() -> None:
-        """Keep hundredths below a minute and whole seconds above it."""
+    def test_attribution_uses_exact_compact_link() -> None:
+        """Reserve space for the exact configured attribution."""
+        assert EditSummary.with_attribution("summary") == (
+            f"summary {_EXAMPLE_SUFFIX}"
+        )
+        assert EditSummary.with_attribution("") == _EXAMPLE_SUFFIX
+        assert "toolforge:Aranami" in _EXAMPLE_SUFFIX
+
+
+class TestAttributedEditSummary(TestCase):
+    """Preserve complete mentions when adding attribution."""
+
+    @staticmethod
+    def test_primary_and_companion_mentions_use_shared_punctuation() -> None:
+        """Keep title parentheses inside primary and companion links."""
+        assert article_mention("惡靈古堡：爆發夜") == "«[[惡靈古堡：爆發夜]]»"
         assert (
-            EditSummary.with_execution_time(
-                EditSummary("1 item total.").render(),
-                _EXAMPLE_DURATION,
+            article_mention(
+                "Blade (Honkai)",
+                interwiki="en",
+                companion="刃 (崩壞：星穹鐵道)",
             )
-            == f"1 item total. {_EXAMPLE_SUFFIX}"
+            == "«[[:en:Blade (Honkai)]]» ([[刃 (崩壞：星穹鐵道)]])"
         )
-        assert EditSummary.with_execution_time("summary", 0) == (
-            "summary (in 0.00″ by [[toolforge:aranami|Aranami 0.3.5]])"
-        )
-        assert EditSummary.with_execution_time("summary", 5.2) == (
-            "summary (in 5.20″ by [[toolforge:aranami|Aranami 0.3.5]])"
-        )
-        assert EditSummary.with_execution_time("summary", 7.12) == (
-            "summary (in 7.12″ by [[toolforge:aranami|Aranami 0.3.5]])"
-        )
-        assert EditSummary.with_execution_time("summary", 59.99) == (
-            "summary (in 59.99″ by [[toolforge:aranami|Aranami 0.3.5]])"
-        )
-        assert EditSummary.with_execution_time("summary", 59.999) == (
-            "summary (in 1′00″ by [[toolforge:aranami|Aranami 0.3.5]])"
-        )
-        assert EditSummary.with_execution_time("summary", 60) == (
-            "summary (in 1′00″ by [[toolforge:aranami|Aranami 0.3.5]])"
-        )
-        assert EditSummary.with_execution_time("summary", 67.12) == (
-            "summary (in 1′07″ by [[toolforge:aranami|Aranami 0.3.5]])"
-        )
-        assert EditSummary.with_execution_time("summary", 119.99) == (
-            "summary (in 2′00″ by [[toolforge:aranami|Aranami 0.3.5]])"
-        )
-        assert EditSummary.with_execution_time("summary", 3600) == (
-            "summary (in 60′00″ by [[toolforge:aranami|Aranami 0.3.5]])"
-        )
-
-    @staticmethod
-    def test_version_preserves_release_and_build_identifiers() -> None:
-        """Render the installed version without losing its suffix."""
-        for installed in ("0.3.5", "0.3.5.dev12", "0.3.3.post1"):
-            with patch(
-                "aranami.support.edit_summary.version",
-                return_value=installed,
-            ) as installed_version:
-                summary = EditSummary.with_execution_time("summary", 7.12)
-                assert summary == (
-                    "summary (in 7.12″ by "
-                    f"[[toolforge:aranami|Aranami {installed}]])"
+        for companion in (None, ""):
+            assert (
+                article_mention(
+                    "Blade (Honkai)",
+                    interwiki="en",
+                    companion=companion,
                 )
-                installed_version.assert_called_once_with("aranami")
-                assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+                == "«[[:en:Blade (Honkai)]]»"
+            )
 
     @staticmethod
-    def test_timing_budget_preserves_total_and_change_groups() -> None:
+    def test_bilingual_transition_uses_complete_byte_boundaries() -> None:
+        """Rebudget a complete bilingual transition and attribution."""
+        mention = (
+            article_mention(
+                "Blade (Honkai)",
+                interwiki="en",
+                companion="刃 (崩壞：星穹鐵道)",
+            )
+            + " (from GA)"
+        )
+        summary = EditSummary("1 item total.").add_group(
+            "FA promoted ",
+            [mention],
+        )
+        rendered = EditSummary.with_attribution(summary.render())
+        assert (
+            rendered
+            == f"1 item total. FA promoted {mention}. {_EXAMPLE_SUFFIX}"
+        )
+        assert len(rendered.encode()) <= MAX_EDIT_SUMMARY_BYTES
+        oversized = (
+            EditSummary("1 item total.")
+            .add_group(
+                "FA promoted ",
+                [
+                    article_mention("遊" * 100, interwiki="en", companion="戲")
+                    + " (from GA)",
+                ],
+            )
+            .render()
+        )
+        assert EditSummary.with_attribution(oversized) == (
+            f"1 item total. FA promoted 1 more. {_EXAMPLE_SUFFIX}"
+        )
+
+    @staticmethod
+    def test_attribution_budget_preserves_total_and_change_groups() -> None:
         """Rebudget original mentions to keep the mandatory suffix."""
         original = EditSummary.membership(
             ["遊" * 30],
@@ -178,10 +189,7 @@ class TestEditSummary(TestCase):
             1234,
         ).render()
         assert "more" not in original
-        summary = EditSummary.with_execution_time(
-            original,
-            _EXAMPLE_DURATION,
-        )
+        summary = EditSummary.with_attribution(original)
         assert summary.startswith("1,234 items total. Added ")
         assert "; removed " in summary
         assert "more" in summary
@@ -194,20 +202,17 @@ class TestEditSummary(TestCase):
     @staticmethod
     def test_short_attribution_retains_complete_article_details() -> None:
         """Retain an article link with the shorter attribution."""
-        title = "遊" * 51
+        title = "遊" * 64
         original = EditSummary.membership([title], [], 1).render()
-        summary = EditSummary.with_execution_time(
-            original,
-            _EXAMPLE_DURATION,
-        )
+        summary = EditSummary.with_attribution(original)
         assert summary == (
             f"1 item total. Added «[[{title}]]». {_EXAMPLE_SUFFIX}"
         )
         assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
 
     @staticmethod
-    def test_timing_omits_whole_oversized_leader_clause() -> None:
-        """Keep the date and duration when a leader no longer fits."""
+    def test_attribution_omits_whole_oversized_leader_clause() -> None:
+        """Keep the date and attribution when a leader cannot fit."""
         original = (
             EditSummary
             .daily(dt.date(2025, 5, 5))
@@ -215,17 +220,14 @@ class TestEditSummary(TestCase):
             .render()
         )
         assert "Daily leader" in original
-        summary = EditSummary.with_execution_time(
-            original,
-            _EXAMPLE_DURATION,
-        )
+        summary = EditSummary.with_attribution(original)
         assert summary == (f"Updated for 5 May 2025. {_EXAMPLE_SUFFIX}")
 
     @staticmethod
-    def test_timing_tries_ordered_complete_clause_alternatives() -> None:
-        """Drop yearly then seasonal details when timing needs space."""
+    def test_attribution_tries_ordered_complete_clause_alternatives() -> None:
+        """Drop yearly then seasonal details to fit attribution."""
         daily = "Top: «[[Game]]» daily, weekly, and monthly"
-        seasonal = f"«[[{'遊' * 40}]]» seasonal"
+        seasonal = f"«[[{'遊' * 48}]]» seasonal"
         yearly = "«[[Year]]» yearly"
         original = (
             EditSummary
@@ -237,7 +239,7 @@ class TestEditSummary(TestCase):
             .render()
         )
         assert "yearly" in original
-        summary = EditSummary.with_execution_time(original, _EXAMPLE_DURATION)
+        summary = EditSummary.with_attribution(original)
         assert summary == (
             f"Updated for 1 Oct 2026. {daily}. {_EXAMPLE_SUFFIX}"
         )
@@ -267,77 +269,28 @@ class TestEditSummary(TestCase):
             assert summary == expected
 
     @staticmethod
-    def test_plain_input_preserves_links_and_replaces_old_suffix() -> None:
-        """Handle caller strings and keep only the latest duration."""
+    def test_plain_input_preserves_links_and_attribution_is_idempotent() -> (
+        None
+    ):
+        """Keep complete links and one attribution after reuse."""
         original = f"2 items total. Added «[[Short]]», «[[{'遊戲' * 100}]]»."
-        first = EditSummary.with_execution_time(original, _EXAMPLE_DURATION)
-        assert first == (
-            f"2 items total. Added «[[Short]]». {_EXAMPLE_SUFFIX}"
-        )
-        for previous in (
-            first,
-            first.replace("0.3.5", "0.3.3.post1"),
-            first.replace("0.3.5", "0.3.5.dev12"),
-            first.replace("21′54″", "21′53.95″"),
-            first.replace(
-                _EXAMPLE_SUFFIX,
-                "(in 21′54″ by Aranami 0.3.3.post1)",
-            ),
-            first.replace(
-                _EXAMPLE_SUFFIX,
-                "(in 7.12″ by Aranami 0.3.5.dev12)",
-            ),
-            first.replace(
-                _EXAMPLE_SUFFIX,
-                "([[toolforge:aranami|Aranami 0.3.5]] in 21′54″)",
-            ),
-            first.replace(
-                _EXAMPLE_SUFFIX,
-                "([[toolforge:aranami|Aranami 0.3.5]] in 5.20″)",
-            ),
-            first.replace(
-                _EXAMPLE_SUFFIX,
-                "By [[toolforge:aranami|Aranami 0.3.5]] in 21′54″.",
-            ),
-            first.replace(
-                _EXAMPLE_SUFFIX,
-                "By [[toolforge:aranami|Aranami 0.3.5]] in 21′53.95″.",
-            ),
-            first.replace(
-                _EXAMPLE_SUFFIX,
-                "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 𝟶.𝟹.𝟹.𝚙𝚘𝚜𝚝𝟷 in 5.20″.",
-            ),
-            first.replace(
-                _EXAMPLE_SUFFIX,
-                "executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 0.3.5.dev12 in 5.20″.",
-            ),
-            first.replace(_EXAMPLE_SUFFIX, "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 0′05.20″."),
-            first.replace(_EXAMPLE_SUFFIX, "Executed by 𝙰𝚛𝚊𝚗𝚊𝚖𝚒 in 5.20″."),
-            first.replace(_EXAMPLE_SUFFIX, "Executed in 0′05.20″."),
-            first.replace(_EXAMPLE_SUFFIX, "Executed in 5.20″."),
-            first.replace(_EXAMPLE_SUFFIX, "executed in 5.20″."),
-        ):
-            second = EditSummary.with_execution_time(previous, 5.2)
-            assert second == (
-                "2 items total. Added «[[Short]]». "
-                "(in 5.20″ by [[toolforge:aranami|Aranami 0.3.5]])"
-            )
-            assert second.count("[[toolforge:aranami|") == 1
-            assert len(second.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        first = EditSummary.with_attribution(original)
+        assert first == f"2 items total. Added «[[Short]]». {_EXAMPLE_SUFFIX}"
+        for repeated in (first, f"  {first}  "):
+            assert EditSummary.with_attribution(repeated) == first
+        assert first.count("[[toolforge:Aranami|") == 1
+        assert len(first.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
 
     @staticmethod
     def test_plain_input_can_fill_the_exact_final_byte_budget() -> None:
         """Include the complete suffix in the final size calculation."""
-        summary = EditSummary.with_execution_time(
-            "x" * MAX_EDIT_SUMMARY_BYTES,
-            _EXAMPLE_DURATION,
-        )
+        summary = EditSummary.with_attribution("x" * MAX_EDIT_SUMMARY_BYTES)
         assert summary.endswith(_EXAMPLE_SUFFIX)
         assert len(summary.encode("utf-8")) == MAX_EDIT_SUMMARY_BYTES
 
     @staticmethod
     def test_plain_input_keeps_complete_bilingual_title_delimiters() -> None:
-        """Keep linked titles balanced for new and legacy summaries."""
+        """Keep linked titles balanced for plain summaries."""
         for opening, closing in (("«", "»"), ("“", "”")):
             retained = (
                 f"2 items total. Added {opening}[[:en:Short]]{closing} "
@@ -347,26 +300,20 @@ class TestEditSummary(TestCase):
                 f"{retained}, {opening}[[:en:{'Long title' * 100}]]{closing} "
                 f"({opening}[[長]]{closing})."
             )
-            summary = EditSummary.with_execution_time(
-                original,
-                _EXAMPLE_DURATION,
-            )
+            summary = EditSummary.with_attribution(original)
             assert summary == f"{retained}. {_EXAMPLE_SUFFIX}"
             assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
 
     @staticmethod
     def test_plain_input_keeps_complete_square_bracket_annotations() -> None:
-        """Keep Chinese annotations whole when adding timing."""
+        """Keep Chinese annotations whole when adding attribution."""
         retained = "2 items total. Added «[[:en:Short]]» &#91;[[短]]&#93;"
         for opening, closing in (("[", "]"), ("&#91;", "&#93;")):
             original = (
                 f"{retained}, «[[:en:Long]]» "
                 f"{opening}[[{'長' * 100}]]{closing}."
             )
-            summary = EditSummary.with_execution_time(
-                original,
-                _EXAMPLE_DURATION,
-            )
+            summary = EditSummary.with_attribution(original)
             assert summary == (
                 f"{retained}, «[[:en:Long]]». {_EXAMPLE_SUFFIX}"
             )
@@ -387,16 +334,10 @@ class TestEditSummary(TestCase):
             exact = f"{'x' * padding}{prefix} {annotation}."
             assert len(exact.encode()) == body_budget
             assert (
-                EditSummary.with_execution_time(
-                    exact,
-                    _EXAMPLE_DURATION,
-                )
+                EditSummary.with_attribution(exact)
                 == f"{exact} {_EXAMPLE_SUFFIX}"
             )
-            shortened = EditSummary.with_execution_time(
-                "x" + exact,
-                _EXAMPLE_DURATION,
-            )
+            shortened = EditSummary.with_attribution("x" + exact)
             assert shortened == (
                 f"x{'x' * padding}{prefix}. {_EXAMPLE_SUFFIX}"
             )
@@ -414,8 +355,7 @@ class TestEditSummary(TestCase):
         restored = pickle.loads(pickle.dumps(original))  # ruff: ignore[suspicious-pickle-usage]
         for preserved in (copy(original), deepcopy(original), restored):
             assert preserved == original
-            assert EditSummary.with_execution_time(
+            assert EditSummary.with_attribution(
                 preserved,
-                _EXAMPLE_DURATION,
-            ) == EditSummary.with_execution_time(original, _EXAMPLE_DURATION)
+            ) == EditSummary.with_attribution(original)
         assert asdict(proposal)["summary"] == original

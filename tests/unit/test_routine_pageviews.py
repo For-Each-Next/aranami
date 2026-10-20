@@ -15,9 +15,11 @@ import mwparserfromhell
 import polars as pl
 from dateutil.relativedelta import relativedelta
 
-from aranami.jobs import JobContext, pageviews as job
-from aranami.services.zhwiki import pageviews
-from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
+from backend.services.zhwiki import pageviews
+from shared.reports import ReportResult
+from updater.jobs import JobContext, pageviews as job
+from updater.services.zhwiki import pageviews as rendering
+from updater.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
 
 _DAY = dt.date(2026, 1, 10)
 _STOP = dt.date(2026, 1, 11)
@@ -29,7 +31,19 @@ _TEXT = (
 _TOP_SCHEMA = {"title": pl.String, "top": pl.Int64}
 
 
-def _report(stop: dt.date) -> pageviews.PageviewReport:
+def _site() -> MagicMock:
+    """Provide an offline wiki identity suitable for report storage.
+
+    Returns:
+        Mock site with stable database and hostname identities.
+    """
+    fixture = MagicMock()
+    fixture.dbName.return_value = "zhwiki"
+    fixture.hostname.return_value = "zh.wikipedia.org"
+    return fixture
+
+
+def _report(stop: dt.date) -> rendering.PageviewReport:
     """Build a tiny report for publication tests.
 
     Args:
@@ -39,7 +53,7 @@ def _report(stop: dt.date) -> pageviews.PageviewReport:
         Report carrying a machine-readable date marker.
     """
     day = stop - dt.timedelta(days=1)
-    return pageviews.PageviewReport(
+    return rendering.PageviewReport(
         f"<!-- report date {day} -->",
         day,
         "A",
@@ -48,13 +62,125 @@ def _report(stop: dt.date) -> pageviews.PageviewReport:
     )
 
 
+def _build_report(
+    site: MagicMock,
+    stop: dt.date,
+    *,
+    settings: rendering.ReportSettings,
+    **options: int,
+) -> rendering.PageviewReport:
+    """Render the complete backend collection for offline checks.
+
+    Args:
+        site: Offline wiki identity.
+        stop: Exclusive interval end.
+        settings: Caller-selected populations and report presentation.
+        **options: Backend cache and availability options.
+
+    Returns:
+        Rendered report backed by complete prepared rankings.
+    """
+    prepared = pageviews.prepare_report(
+        site,
+        stop,
+        settings=settings.source_settings(),
+        **options,
+    )
+    return rendering.build_report(prepared, settings=settings)
+
+
+def _section(
+    articles: pl.DataFrame,
+    views: pl.DataFrame,
+    stop: dt.date,
+    config: rendering.ReportPeriod,
+    tag: str,
+) -> tuple[str, str | None, int | None]:
+    """Render a backend ranking while exposing its leader metadata.
+
+    Args:
+        articles: Offline project members.
+        views: Current and previous observed totals.
+        stop: Exclusive interval end.
+        config: Ranking interval and presentation choices.
+        tag: Project identity.
+
+    Returns:
+        Rendered section, backend leader, and nullable rank gain.
+    """
+    ranked = pageviews._ranked_data(articles, views, stop, config.delta)
+    retained = pageviews._retained_rankings(ranked, config, stop, tag, tag)
+    population = pageviews._ranking_data(retained, tag, config)
+    return (
+        rendering._render_section(population, stop, config, tag),
+        population.top,
+        population.gain,
+    )
+
+
+class TestPreparedRendering(TestCase):
+    """Keep source collection and destination rendering independent."""
+
+    @staticmethod
+    def test_prepared_ranking_renders_without_sources_or_cache() -> None:
+        """Render retained rows and metadata without extra reads."""
+        config = job.PROJECT_PERIODS[0]
+        settings = replace(
+            job.REPORT_SETTINGS,
+            periods=(config,),
+            task_forces=(),
+        )
+        rows = pl.DataFrame({
+            "title": ["A"],
+            "class": ["B"],
+            "importance": ["低"],
+            "views": [7],
+            "old_views": [3],
+            "rank": [1],
+            "old_rank": [2],
+            "site_rank": [42],
+            "site_period": ["daily"],
+        })
+        population = pageviews.RankingData("vg", "daily", rows, "A", 1, 1, 7)
+        result = ReportResult("pageviews", {"rankings": rows})
+        prepared = pageviews.PageviewData(_DAY, (population,), result)
+        with (
+            patch.object(
+                pageviews,
+                "query_pages_by_wikiproject",
+                side_effect=AssertionError("Rendering queried membership"),
+            ),
+            patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+                side_effect=AssertionError("Rendering fetched observations"),
+            ),
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                side_effect=AssertionError("Rendering fetched site ranks"),
+            ),
+            patch.object(
+                pageviews.PageviewsCache,
+                "load",
+                side_effect=AssertionError("Rendering loaded cache"),
+            ),
+        ):
+            report = rendering.build_report(prepared, settings=settings)
+        assert report.result is result
+        assert report.daily_top == "A"
+        assert report.daily_top_gain == 1
+        assert "top=daily/42" in report.text
+        assert report.result.tables["rankings"].equals(rows)
+
+
 class TestPeriodAggregation(TestCase):
     """Verify observation reduction retains only interval totals."""
 
     @staticmethod
     def test_zero_missing_and_half_open_boundaries() -> None:
         """Distinguish missing observations from observed zeroes."""
-        site = MagicMock()
+        site = _site()
         observations = pl.DataFrame({
             "page": ["A", "A", "A"],
             "date": [_DAY, _STOP, dt.date(2026, 1, 12)],
@@ -92,6 +218,74 @@ class TestPeriodAggregation(TestCase):
         assert (dt.date(2026, 1, 28), dt.date(2026, 2, 28)) in periods
 
     @staticmethod
+    def test_leap_year_uses_sequential_calendar_subtraction() -> None:
+        """Subtract calendar intervals from their preceding boundary."""
+        monthly = rendering.ReportPeriod(
+            "month",
+            "月",
+            relativedelta(months=1),
+            1,
+        )
+        annual = rendering.ReportPeriod(
+            "year",
+            "年",
+            relativedelta(years=1),
+            1,
+        )
+        assert pageviews.report_periods(dt.date(2024, 3, 31), (monthly,)) == (
+            (dt.date(2024, 1, 29), dt.date(2024, 2, 29)),
+            (dt.date(2024, 2, 29), dt.date(2024, 3, 31)),
+        )
+        assert pageviews.report_periods(dt.date(2024, 2, 29), (annual,)) == (
+            (dt.date(2022, 2, 28), dt.date(2023, 2, 28)),
+            (dt.date(2023, 2, 28), dt.date(2024, 2, 29)),
+        )
+
+    @staticmethod
+    def test_previous_below_cutoff_ignores_site_rank() -> None:
+        """Retain complete project movement when site ranks change."""
+        articles = pl.DataFrame({
+            "title": [f"A{index:02}" for index in range(60)],
+            "class": ["B"] * 60,
+            "importance": ["低"] * 60,
+        })
+        views = pl.DataFrame(
+            [
+                (title, start, stop, value)
+                for index, title in enumerate(articles.get_column("title"))
+                for start, stop, value in (
+                    (_DAY, _STOP, 100 if index == articles.height - 1 else 1),
+                    (_DAY - dt.timedelta(days=1), _DAY, 60 - index),
+                )
+            ],
+            schema=pageviews._VIEWS_SCHEMA,
+            orient="row",
+        )
+        config = rendering.ReportPeriod(
+            "daily",
+            "日",
+            relativedelta(days=1),
+            1,
+        )
+        for with_top in (False, True):
+            enriched = (
+                views.with_columns(pl.lit(681).alias("top"))
+                if with_top
+                else views
+            )
+            text, title, gain = _section(
+                articles,
+                enriched,
+                _STOP,
+                config,
+                "vg",
+            )
+            item = mwparserfromhell.parse(text).filter_templates()[1]
+            assert title == "A59"
+            assert str(item.get("old_rank").value) == "60"
+            assert gain == articles.height - 1
+
+    @staticmethod
     def test_rank_ties_and_previous_totals_use_selected_project() -> None:
         """Calculate task-force ranks within its member articles."""
         articles = pl.DataFrame({
@@ -116,13 +310,13 @@ class TestPeriodAggregation(TestCase):
             schema=pageviews._VIEWS_SCHEMA,
             orient="row",
         )
-        config = pageviews.ReportPeriod(
+        config = rendering.ReportPeriod(
             "daily",
             "日瀏覽量",
             relativedelta(days=1),
             50,
         )
-        text, top, gain = pageviews._section(
+        text, top, gain = _section(
             articles,
             views,
             _STOP,
@@ -172,7 +366,7 @@ class TestSiteTopRanks(TestCase):
     @staticmethod
     def test_calendar_month_reuses_site_ranks_for_task_forces() -> None:
         """Reuse interval lookups and omit unmatched titles."""
-        site = MagicMock()
+        site = _site()
         stop = dt.date(2026, 10, 1)
         periods = (job.PROJECT_PERIODS[0], job.PROJECT_PERIODS[2])
         articles = pl.DataFrame({
@@ -211,7 +405,7 @@ class TestSiteTopRanks(TestCase):
                 ),
             ) as fetch_top,
         ):
-            report = pageviews.build_report(site, stop, settings=settings)
+            report = _build_report(site, stop, settings=settings)
         assert fetch_top.call_args_list == [
             call(site, dt.date(2026, 9, 30), stop),
             call(site, dt.date(2026, 9, 1), stop),
@@ -234,6 +428,86 @@ class TestSiteTopRanks(TestCase):
             str(item.get("top").value) if item.has("top") else None
             for item in items
         ] == ["daily/701", None, None, "monthly/42", "monthly/42"]
+        assert report.result is not None
+        rankings = report.result.tables["rankings"]
+        assert rankings.height == len(items)
+        assert rankings.get_column("site_rank").to_list() == [
+            701,
+            None,
+            None,
+            42,
+            42,
+        ]
+        assert rankings.get_column("old_rank").to_list() == [1, 2, 1, 2, 1]
+        assert report.result.tables["totals"].get_column(
+            "article_count",
+        ).to_list() == [2, 2, 1]
+
+    @staticmethod
+    def test_retains_full_rankings_and_empty_populations() -> None:
+        """Retain all rows and populations beyond display limits."""
+        config = rendering.ReportPeriod(
+            "daily",
+            "日",
+            relativedelta(days=1),
+            1,
+        )
+        settings = replace(
+            job.REPORT_SETTINGS,
+            periods=(config,),
+            task_forces=(job.TASK_FORCES[0],),
+            task_force_period=config,
+        )
+        articles = pl.DataFrame({
+            "title": ["A", "B", "C"],
+            "page_id": [1, 2, 3],
+            "class": ["B"] * 3,
+            "importance": ["低"] * 3,
+        })
+        views = pl.DataFrame(
+            [
+                (title, start, stop, value)
+                for title, value in (("A", 8), ("B", 0), ("C", None))
+                for start, stop in pageviews.report_periods(_STOP, (config,))
+            ],
+            schema=pageviews._VIEWS_SCHEMA,
+            orient="row",
+        )
+        site = _site()
+        site.hostname.return_value = "zh.wikipedia.org"
+        with (
+            patch.object(
+                pageviews,
+                "_project_articles",
+                side_effect=(articles, articles.clear()),
+            ),
+            patch.object(pageviews, "aggregate_views", return_value=views),
+            patch.object(pageviews.PageviewsCache, "load"),
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=pl.DataFrame(schema=_TOP_SCHEMA),
+            ),
+        ):
+            report = _build_report(site, _STOP, settings=settings)
+        assert report.result is not None
+        retained = report.result.tables["rankings"]
+        assert retained.get_column("title").to_list() == ["A", "B", "C"]
+        assert retained.get_column("views").to_list() == [8, 0, None]
+        assert retained.get_column("page_id").to_list() == [1, 2, 3]
+        assert retained.get_column("old_rank").to_list() == [1, 2, None]
+        assert report.result.tables["totals"].get_column(
+            "article_count",
+        ).to_list() == [3, 0]
+        assert report.result.tables["totals"].get_column(
+            "total_views",
+        ).to_list() == [8, 0]
+        items = [
+            node
+            for node in mwparserfromhell.parse(report.text).filter_templates()
+            if str(node.name) == "PJ:VG/HOT/item"
+        ]
+        assert len(items) == 1
 
     @staticmethod
     def test_rolling_month_omits_top_without_requesting_site_ranks() -> None:
@@ -263,10 +537,10 @@ class TestSiteTopRanks(TestCase):
             patch.object(pageviews, "aggregate_views", return_value=views),
             patch.object(pageviews.PageviewsCache, "load"),
             patch(
-                "aranami.sources.pageviews.urllib.request.urlopen",
+                "shared.sources.pageviews.urllib.request.urlopen",
             ) as urlopen,
         ):
-            report = pageviews.build_report(
+            report = _build_report(
                 MagicMock(),
                 stop,
                 settings=replace(
@@ -289,7 +563,7 @@ class TestSiteTopRanks(TestCase):
 
     def test_unavailable_site_top_defers_complete_report(self) -> None:
         """Defer reports after required top-list requests fail."""
-        site = MagicMock()
+        site = _site()
         stop = dt.date(2026, 10, 1)
         periods = (job.PROJECT_PERIODS[0], job.PROJECT_PERIODS[2])
         for error in (
@@ -321,7 +595,7 @@ class TestSiteTopRanks(TestCase):
 
     def test_monthly_http_failure_closes_response_and_defers(self) -> None:
         """Defer reports when the calendar-month list is absent."""
-        site = MagicMock()
+        site = _site()
         stop = dt.date(2026, 10, 1)
         error = urllib.error.HTTPError(
             "https://example.test/top",
@@ -365,7 +639,7 @@ class TestSiteTopRanks(TestCase):
     @staticmethod
     def test_calendar_year_report_omits_site_ranks_without_deferral() -> None:
         """Publish yearly rankings without site ranks or deferral."""
-        site = MagicMock()
+        site = _site()
         stop = dt.date(2026, 1, 1)
         period = job.PROJECT_PERIODS[4]
         articles = pl.DataFrame({
@@ -391,10 +665,10 @@ class TestSiteTopRanks(TestCase):
             patch.object(pageviews, "aggregate_views", return_value=views),
             patch.object(pageviews.PageviewsCache, "load") as load_cache,
             patch(
-                "aranami.sources.pageviews.urllib.request.urlopen",
+                "shared.sources.pageviews.urllib.request.urlopen",
             ) as urlopen,
         ):
-            report = pageviews.build_report(
+            report = _build_report(
                 site,
                 stop,
                 settings=replace(
@@ -471,7 +745,7 @@ class TestReportState(TestCase):
                 ),
             ),
         ):
-            report = pageviews.build_report(
+            report = _build_report(
                 MagicMock(),
                 _STOP,
                 settings=job.REPORT_SETTINGS,
@@ -568,7 +842,7 @@ class TestReportState(TestCase):
             schema=pageviews._VIEWS_SCHEMA,
             orient="row",
         )
-        settings = pageviews.ReportSettings(
+        settings = rendering.ReportSettings(
             project="Fixture",
             periods=periods,
             task_forces=(),
@@ -594,7 +868,7 @@ class TestReportState(TestCase):
                 ),
             ),
         ):
-            report = pageviews.build_report(
+            report = _build_report(
                 MagicMock(),
                 _STOP,
                 settings=settings,
@@ -637,20 +911,20 @@ class TestReportState(TestCase):
     def test_report_uses_supplied_periods_and_task_force_selection() -> None:
         """Use supplied report scopes and ranking settings."""
         periods = (
-            pageviews.ReportPeriod(
+            rendering.ReportPeriod(
                 "daily",
                 "Daily fixture",
                 relativedelta(days=1),
                 1,
             ),
         )
-        force_period = pageviews.ReportPeriod(
+        force_period = rendering.ReportPeriod(
             "weekly",
             "",
             relativedelta(days=7),
             2,
         )
-        forces = (pageviews.TaskForce("Custom", "Weekly fixture", "custom"),)
+        forces = (rendering.TaskForce("Custom", "Weekly fixture", "custom"),)
         articles = pl.DataFrame({
             "title": ["A", "B"],
             "class": ["A", "B"],
@@ -685,10 +959,10 @@ class TestReportState(TestCase):
                 ),
             ),
         ):
-            report = pageviews.build_report(
+            report = _build_report(
                 MagicMock(),
                 _STOP,
-                settings=pageviews.ReportSettings(
+                settings=rendering.ReportSettings(
                     project="Fixture",
                     periods=periods,
                     task_forces=forces,
@@ -729,13 +1003,13 @@ class TestReportState(TestCase):
         None
     ):
         """Check daily data for weekly reports without empty groups."""
-        period = pageviews.ReportPeriod(
+        period = rendering.ReportPeriod(
             "weekly",
             "Weekly fixture",
             relativedelta(days=7),
             2,
         )
-        settings = pageviews.ReportSettings(
+        settings = rendering.ReportSettings(
             project="Fixture",
             periods=(period,),
             task_forces=(),
@@ -779,7 +1053,7 @@ class TestReportState(TestCase):
                 ),
             ),
         ):
-            report = pageviews.build_report(
+            report = _build_report(
                 MagicMock(),
                 _STOP,
                 settings=settings,
@@ -809,7 +1083,7 @@ class TestReportState(TestCase):
     @staticmethod
     def test_text_update_retains_unmanaged_content() -> None:
         """Preserve supplied text without choosing a target."""
-        text = pageviews.update_text(_TEXT, _report(_STOP))
+        text = rendering.update_text(_TEXT, _report(_STOP))
         assert text.startswith(
             'Before<!-- aranami begin="page_views" -->',
         )
@@ -856,11 +1130,21 @@ class TestPageviewAvailability(TestCase):
 class TestPageviewJob(TestCase):
     """Verify one-day catch-up, dry runs, and failed checkpoints."""
 
+    def setUp(self) -> None:
+        """Use rendered stand-ins for job coordination checks."""
+        super().setUp()
+        renderer = patch.object(
+            rendering,
+            "build_report",
+            new=lambda prepared, **_: prepared,
+        )
+        renderer.start()
+        self.addCleanup(renderer.stop)
+
     @staticmethod
-    @patch("aranami.jobs._execution.perf_counter", new=lambda: 0.0)
     def test_dry_run_builds_only_one_missing_day() -> None:
         """Build one missing day without publishing or looping."""
-        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry=True)
+        context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
         page = MagicMock(text=_TEXT)
         with (
             TemporaryDirectory() as directory,
@@ -868,7 +1152,7 @@ class TestPageviewJob(TestCase):
             patch.object(job, "read_pages", return_value=[page]),
             patch.object(
                 pageviews,
-                "build_report",
+                "prepare_report",
                 return_value=_report(_STOP),
             ) as build,
         ):
@@ -877,7 +1161,7 @@ class TestPageviewJob(TestCase):
         build.assert_called_once_with(
             context.site,
             _STOP,
-            settings=job.REPORT_SETTINGS,
+            settings=job.REPORT_SETTINGS.source_settings(),
             history_days=800,
             missing_percent=95,
         )
@@ -887,7 +1171,7 @@ class TestPageviewJob(TestCase):
         assert context.edits[0].summary == (
             "Updated for 10 Jan 2026. Top: «[[A]]» for daily; "
             "«[[B]]» for weekly; «[[C]]» for monthly. "
-            f"{job.EditSummary.with_execution_time('', 0)}"
+            f"{job.EditSummary.with_attribution('')}"
         )
         assert "2026-01-10" in context.edits[0].text
         page.save.assert_not_called()
@@ -895,6 +1179,7 @@ class TestPageviewJob(TestCase):
     def test_failed_save_stops_before_later_days(self) -> None:
         """Leave later days unbuilt after a failed publication."""
         context = MagicMock(
+            site=_site(),
             today=dt.date(2026, 1, 14),
             started_at=dt.datetime(2026, 1, 14, 18, tzinfo=dt.UTC),
         )
@@ -905,7 +1190,7 @@ class TestPageviewJob(TestCase):
             patch.object(job, "read_pages", return_value=[page]),
             patch.object(
                 pageviews,
-                "build_report",
+                "prepare_report",
                 return_value=_report(_STOP),
             ) as build,
             self.assertRaises(RuntimeError),
@@ -914,7 +1199,7 @@ class TestPageviewJob(TestCase):
         build.assert_called_once_with(
             context.site,
             _STOP,
-            settings=job.REPORT_SETTINGS,
+            settings=job.REPORT_SETTINGS.source_settings(),
             history_days=800,
             missing_percent=95,
         )
@@ -925,6 +1210,7 @@ class TestPageviewJob(TestCase):
     def test_current_report_requires_no_api_fetch() -> None:
         """Skip work when the page is at the latest complete date."""
         context = MagicMock(
+            site=_site(),
             today=dt.date(2026, 1, 11),
             started_at=dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC),
         )
@@ -936,7 +1222,7 @@ class TestPageviewJob(TestCase):
                 "read_pages",
                 return_value=[MagicMock(text=text)],
             ),
-            patch.object(pageviews, "build_report") as build,
+            patch.object(pageviews, "prepare_report") as build,
         ):
             job.run(context=context)
         build.assert_not_called()
@@ -950,7 +1236,7 @@ class TestPageviewJob(TestCase):
             'aranami begin="page_views" history-days="900" '
             'missing-percent="90"',
         )
-        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry=True)
+        context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(
@@ -960,7 +1246,7 @@ class TestPageviewJob(TestCase):
             ),
             patch.object(
                 pageviews,
-                "build_report",
+                "prepare_report",
                 return_value=_report(_STOP),
             ) as build,
         ):
@@ -968,7 +1254,7 @@ class TestPageviewJob(TestCase):
         build.assert_called_once_with(
             context.site,
             _STOP,
-            settings=job.REPORT_SETTINGS,
+            settings=job.REPORT_SETTINGS.source_settings(),
             history_days=900,
             missing_percent=90,
         )
@@ -978,7 +1264,7 @@ class TestPageviewJob(TestCase):
     def test_unavailable_daily_data_skips_publication(self) -> None:
         """Defer unavailable yesterday data after its UTC cutoff."""
         context = JobContext(
-            MagicMock(),
+            _site(),
             dt.date(2026, 1, 11),
             dry=True,
             started_at=dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC),
@@ -990,7 +1276,7 @@ class TestPageviewJob(TestCase):
             patch.object(job, "read_pages", return_value=[page]),
             patch.object(
                 pageviews,
-                "build_report",
+                "prepare_report",
                 side_effect=pageviews.PageviewsUnavailableError("missing"),
             ) as build,
             self.assertLogs(job.logger, level="WARNING"),
@@ -1004,7 +1290,7 @@ class TestPageviewJob(TestCase):
         build.assert_called_once_with(
             context.site,
             _STOP,
-            settings=job.REPORT_SETTINGS,
+            settings=job.REPORT_SETTINGS.source_settings(),
             history_days=800,
             missing_percent=95,
         )
@@ -1012,7 +1298,7 @@ class TestPageviewJob(TestCase):
     @staticmethod
     def test_gateway_outage_defers_without_publishing_or_raising() -> None:
         """Defer transient requests while other routines continue."""
-        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry=True)
+        context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
         page = MagicMock(text=_TEXT)
         with (
             TemporaryDirectory() as directory,
@@ -1020,7 +1306,7 @@ class TestPageviewJob(TestCase):
             patch.object(job, "read_pages", return_value=[page]),
             patch.object(
                 pageviews,
-                "build_report",
+                "prepare_report",
                 side_effect=pageviews.PageviewsDeferredError("HTTP 503"),
             ),
         ):
@@ -1034,7 +1320,7 @@ class TestPageviewJob(TestCase):
     @staticmethod
     def test_custom_destination_controls_read_and_proposal() -> None:
         """Keep the job's destination choice outside report services."""
-        context = JobContext(MagicMock(), dt.date(2026, 1, 13), dry=True)
+        context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
         target = "User:Example/Pageviews sandbox"
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
@@ -1045,7 +1331,7 @@ class TestPageviewJob(TestCase):
             ) as read,
             patch.object(
                 pageviews,
-                "build_report",
+                "prepare_report",
                 return_value=_report(_STOP),
             ),
         ):
@@ -1054,6 +1340,7 @@ class TestPageviewJob(TestCase):
         assert context.edits[0].title == target
 
 
+@patch.object(rendering, "build_report", new=lambda prepared, **_: prepared)
 class TestPageviewReadiness(TestCase):
     """Verify actual UTC time bounds requested report dates."""
 
@@ -1073,7 +1360,7 @@ class TestPageviewReadiness(TestCase):
             expected_stop: Exclusive report end, or none for no update.
             text: Existing checkpoint and optional publication settings.
         """
-        context = MagicMock(today=today, started_at=started_at)
+        context = MagicMock(site=_site(), today=today, started_at=started_at)
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(
@@ -1083,7 +1370,7 @@ class TestPageviewReadiness(TestCase):
             ),
             patch.object(
                 pageviews,
-                "build_report",
+                "prepare_report",
                 return_value=_report(expected_stop or _STOP),
             ) as build,
         ):
@@ -1095,7 +1382,7 @@ class TestPageviewReadiness(TestCase):
             build.assert_called_once_with(
                 context.site,
                 expected_stop,
-                settings=job.REPORT_SETTINGS,
+                settings=job.REPORT_SETTINGS.source_settings(),
                 history_days=800,
                 missing_percent=95,
             )
@@ -1269,13 +1556,13 @@ class TestPageviewSummaries(TestCase):
         assert long_title not in summary
         assert "for daily" not in summary
         assert summary.count("[[") == summary.count("]]")
-        timed = job.EditSummary.with_execution_time(summary, 1313.95)
-        assert len(timed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
-        assert timed.endswith(job.EditSummary.with_execution_time("", 1313.95))
-        assert long_title not in timed
-        assert "more" not in timed
-        assert timed.count("[[") == timed.count("]]")
-        assert timed.count("«") == timed.count("»")
+        attributed = job.EditSummary.with_attribution(summary)
+        assert len(attributed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        assert attributed.endswith(job.EditSummary.with_attribution(""))
+        assert long_title not in attributed
+        assert "more" not in attributed
+        assert attributed.count("[[") == attributed.count("]]")
+        assert attributed.count("«") == attributed.count("»")
 
     @staticmethod
     def test_seasonal_and_yearly_leaders_group_in_title_order() -> None:
@@ -1293,16 +1580,16 @@ class TestPageviewSummaries(TestCase):
             "«[[B]]» for weekly and seasonal (▲4); «[[C]]» for monthly; "
             "«[[D]]» for yearly (▲7)."
         )
-        timed = job.EditSummary.with_execution_time(summary, 1313.95)
-        assert len(timed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
-        assert "weekly and seasonal (▲4)" in timed
-        assert "«[[D]]» for yearly (▲7)." in timed
-        assert timed.count("[[B]]") == 1
-        assert timed.endswith(job.EditSummary.with_execution_time("", 1313.95))
+        attributed = job.EditSummary.with_attribution(summary)
+        assert len(attributed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        assert "weekly and seasonal (▲4)" in attributed
+        assert "«[[D]]» for yearly (▲7)." in attributed
+        assert attributed.count("[[B]]") == 1
+        assert attributed.endswith(job.EditSummary.with_attribution(""))
 
     @staticmethod
-    def test_grouped_periods_fit_with_timing_without_duplicate_links() -> None:
-        """Fit all shared periods and timing with one title mention."""
+    def test_grouped_periods_keep_one_attribution_and_unique_links() -> None:
+        """Fit periods and attribution with one title mention."""
         title = "遊戲甲乙丙"
         report = replace(
             _report(_STOP),
@@ -1317,19 +1604,19 @@ class TestPageviewSummaries(TestCase):
             f"Updated for 10 Jan 2026. Top: «[[{title}]]» for "
             "daily, weekly, monthly, seasonal, and yearly."
         )
-        timed = job.EditSummary.with_execution_time(summary, 1313.95)
-        assert timed.startswith(summary)
-        assert len(timed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
-        assert timed.count(f"[[{title}]]") == 1
-        assert timed.count("[[") == timed.count("]]")
-        assert timed.count("«") == timed.count("»")
-        assert timed.endswith(job.EditSummary.with_execution_time("", 1313.95))
+        attributed = job.EditSummary.with_attribution(summary)
+        assert attributed.startswith(summary)
+        assert len(attributed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+        assert attributed.count(f"[[{title}]]") == 1
+        assert attributed.count("[[") == attributed.count("]]")
+        assert attributed.count("«") == attributed.count("»")
+        assert attributed.endswith(job.EditSummary.with_attribution(""))
 
-    def test_timing_omits_yearly_then_seasonal_without_omission_counts(
+    def test_attribution_omits_yearly_then_seasonal_without_counts(
         self,
     ) -> None:
-        """Keep shorter periods and timing when space is limited."""
-        suffix = job.EditSummary.with_execution_time("", 37.78)
+        """Keep shorter periods and attribution within the limit."""
+        suffix = job.EditSummary.with_attribution("")
         body_budget = MAX_EDIT_SUMMARY_BYTES - len(suffix.encode("utf-8")) - 1
         for expected_periods in (
             "daily, weekly, monthly, and seasonal",
@@ -1353,10 +1640,12 @@ class TestPageviewSummaries(TestCase):
                 )
                 summary = job._edit_summary(report)
                 assert "seasonal, and yearly" in summary
-                timed = job.EditSummary.with_execution_time(summary, 37.78)
-                assert timed == (
+                attributed = job.EditSummary.with_attribution(summary)
+                assert attributed == (
                     f"Updated for 10 Jan 2026. Top: «[[{title}]]» for "
                     f"{expected_periods}. {suffix}"
                 )
-                assert len(timed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
-                assert "more" not in timed
+                assert (
+                    len(attributed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
+                )
+                assert "more" not in attributed

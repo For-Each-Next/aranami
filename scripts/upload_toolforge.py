@@ -1,159 +1,342 @@
-"""Upload the built Aranami wheel and its Toolforge setup script.
+"""Validate and stage one source payload without starting publication.
 
-Run ``uv run python scripts/upload_toolforge.py`` from the repository.
-Use ``--dry-run`` to check the filename and version without uploading.
-The upload reuses your SSH configuration and never starts the bot.
+Use ``--dry-run`` to inspect the payload without SSH, and optionally
+``--archive`` to retain it. Promote an upload explicitly with the staged
+``scripts/toolforge/deploy-source.sh`` script.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
+import json
 import os
+import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tarfile
 import tempfile
-from email.parser import BytesParser
-from pathlib import Path
-from zipfile import BadZipFile, ZipFile
+import tomllib
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
+from uuid import uuid4
 
-SSH_TARGET = "for-each-next@login.toolforge.org"
-TOOL_DIR = "/data/project/aranami"
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from typing import BinaryIO
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+from shared import config  # ruff: ignore[module-import-not-at-top-of-file]
+
+_PACKAGES = ("backend", "updater", "webservice", "shared")
+_SUFFIXES = {".py", ".php", ".json", ".svg", ".conf"}
+_SCRIPTS = (
+    "setup-env.sh",
+    "deploy-source.sh",
+    "run-hub.sh",
+    "source-files.json",
+    "validate-source.py",
+)
+_PRIVATE_NAMES = {
+    "user-config.py",
+    "user-password.py",
+    "user-password.cfg",
+    "user-fixes.py",
+    ".my.cnf",
+    ".env",
+}
+_RUNTIME_PARTS = {"cache", "dry-run", "reports", "state", ".git", ".venv"}
 
 
-def _find_wheel(dist_dir: Path) -> tuple[Path, str]:
-    """Find one wheel and verify its name against its package metadata.
+def _relative_path(name: str) -> PurePosixPath:
+    """Validate an exact relative archive path.
 
     Args:
-        dist_dir: Directory containing the locally built wheel.
+        name: Untrusted path from the reviewed source contract.
 
     Returns:
-        The wheel path and its declared package version.
+        Safe normalized POSIX path with no traversal or runtime data.
 
     Raises:
-        ValueError: A unique, valid Aranami wheel cannot be selected.
+        ValueError: The path is unsafe, private, or not canonical.
     """
-    wheels = sorted(dist_dir.glob("aranami-*.whl"))
-    if len(wheels) != 1:
-        message = (
-            f"Expected exactly one regular Aranami wheel in {dist_dir}; "
-            f"found {len(wheels)} candidates. Keep only the intended wheel."
-        )
-        raise ValueError(message)
-    wheel = wheels[0]
-    if wheel.is_symlink() or not wheel.is_file():
-        message = f"Not a regular wheel file: {wheel}"
-        raise ValueError(message)
-    with ZipFile(wheel) as archive:
-        metadata_files = [
-            name
-            for name in archive.namelist()
-            if name.endswith(".dist-info/METADATA")
-        ]
-        if len(metadata_files) != 1:
-            message = "The wheel must contain exactly one package METADATA."
-            raise ValueError(message)
-        metadata = BytesParser().parsebytes(archive.read(metadata_files[0]))
-    version = metadata.get("Version", "")
-    if (
-        metadata.get("Name", "").casefold() != "aranami"
-        or not version
-        or not wheel.name.startswith(f"aranami-{version}-")
-        or any(
-            not (
-                character.isascii()
-                and (character.isalnum() or character in "_.+-")
-            )
-            for character in wheel.name
-        )
-    ):
-        message = (
-            "The wheel filename and Aranami package metadata do not match."
-        )
-        raise ValueError(message)
-    return wheel, version
+    relative = PurePosixPath(name)
+    canonical = (
+        relative.parts
+        and not relative.is_absolute()
+        and relative.as_posix() == name
+        and "\\" not in name
+    )
+    private = (
+        relative.name in _PRIVATE_NAMES
+        or ".." in relative.parts
+        or _RUNTIME_PARTS.intersection(relative.parts)
+        or (relative.parts and relative.parts[0] == "logs")
+    )
+    if not canonical or private:
+        msg = f"Unsafe deployment path: {name}"
+        raise ValueError(msg)
+    return relative
 
 
-def _upload(wheel: Path, setup_script: Path) -> None:
-    """Upload code and the wheel filename as the tool account.
+def _read_regular(root: Path, name: str) -> bytes:
+    """Read a regular deployment file without traversing symlinks.
 
     Args:
-        wheel: Validated wheel to upload.
-        setup_script: Server setup script bundled beside this uploader.
+        root: Repository or isolated fixture root.
+        name: Exact reviewed relative deployment path.
+
+    Returns:
+        Complete source bytes.
 
     Raises:
-        FileNotFoundError: No SSH client is available.
+        ValueError: A path component is a symlink or the file is absent.
     """
-    ssh = shutil.which("ssh")
-    if ssh is None:
-        message = "OpenSSH is required; ssh was not found."
-        raise FileNotFoundError(message)
-    with tempfile.TemporaryFile() as upload:
-        with tarfile.open(
-            fileobj=upload,
-            mode="w",
-            format=tarfile.GNU_FORMAT,
-        ) as archive:
-            for path, name, mode in (
-                (setup_script, "setup-env.sh", 0o750),
-                (wheel, wheel.name, 0o640),
-            ):
-                info = archive.gettarinfo(str(path), arcname=name)
-                info.mode = mode
-                info.uid = info.gid = 0
-                info.uname = info.gname = ""
-                content = path.read_bytes()
-                if path == setup_script:
-                    content = content.replace(b"\r\n", b"\n")
-                info.size = len(content)
-                archive.addfile(info, io.BytesIO(content))
-            manifest = (wheel.name + "\n").encode("utf-8")
-            info = tarfile.TarInfo("aranami-wheel.txt")
-            info.mode = 0o600
-            info.size = len(manifest)
-            archive.addfile(info, io.BytesIO(manifest))
-        upload.seek(0)
-        ssh_environment = os.environ.copy()
-        ssh_environment.pop("LC_CTYPE", None)
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [
-                ssh,
-                SSH_TARGET,
-                f"become aranami tar --no-same-owner -xf - -C {TOOL_DIR}",
-            ],
-            stdin=upload,
-            env=ssh_environment,
-            check=True,
+    relative = _relative_path(name)
+    path = root
+    for part in relative.parts:
+        path /= part
+        if path.is_symlink():
+            msg = f"Deployment symlinks are not allowed: {name}"
+            raise ValueError(msg)
+    if not path.is_file():
+        msg = f"Missing regular deployment file: {name}"
+        raise ValueError(msg)
+    return path.read_bytes()
+
+
+def _actual_sources(root: Path) -> set[str]:
+    """Collect runtime sources and reject source symlinks.
+
+    Args:
+        root: Repository or isolated fixture root.
+
+    Returns:
+        Complete source names within the runtime packages.
+
+    Raises:
+        ValueError: A package is missing or contains a symlink.
+    """
+    actual = set()
+    for package in _PACKAGES:
+        _read_regular(root, f"src/{package}/__init__.py")
+        for path in sorted((root / "src" / package).rglob("*")):
+            relative = path.relative_to(root)
+            if "__pycache__" in relative.parts or path.name == "AGENTS.md":
+                continue
+            if path.is_symlink():
+                msg = f"Source symlinks are not allowed: {relative}"
+                raise ValueError(msg)
+            if path.is_file() and path.suffix in _SUFFIXES:
+                actual.add(relative.as_posix())
+    return actual
+
+
+def _source_names(root: Path, data: bytes) -> list[str]:
+    """Check all application sources against the reviewed file contract.
+
+    Args:
+        root: Repository or isolated fixture root.
+        data: Reviewed versioned source-files manifest bytes.
+
+    Returns:
+        Sorted complete source filenames.
+
+    Raises:
+        ValueError: The contract or source tree differs from its review.
+    """
+    contract = json.loads(data)
+    if (
+        not isinstance(contract, dict)
+        or set(contract) != {"schema", "files"}
+        or contract.get("schema") != 1
+        or not isinstance(contract.get("files"), list)
+        or not all(isinstance(name, str) for name in contract["files"])
+    ):
+        msg = "Invalid reviewed source-files manifest."
+        raise ValueError(msg)
+    expected = set(contract["files"])
+    if len(expected) != len(contract["files"]):
+        msg = "Source-files manifest contains duplicate paths."
+        raise ValueError(msg)
+    for name in expected:
+        relative = _relative_path(name)
+        if (
+            relative.parts[:2]
+            not in {("src", package) for package in _PACKAGES}
+            or relative.suffix not in _SUFFIXES
+        ):
+            msg = f"Unexpected reviewed source path: {name}"
+            raise ValueError(msg)
+    actual = _actual_sources(root)
+    if actual != expected:
+        msg = (
+            "Source files differ from the reviewed payload: "
+            f"{sorted(actual ^ expected)}"
         )
+        raise ValueError(msg)
+    return sorted(expected)
+
+
+def source_payload(root: Path = ROOT) -> dict[str, bytes]:
+    """Return the exact validated upload, excluding all runtime data.
+
+    Args:
+        root: Repository root containing both applications.
+
+    Returns:
+        Relative archive filenames and their validated bytes.
+
+    Raises:
+        ValueError: A required file is unsafe, missing, or inconsistent.
+    """
+    required = ["pyproject.toml", "uv.lock", ".python-version"]
+    required += [f"scripts/toolforge/{name}" for name in _SCRIPTS]
+    payload = {name: _read_regular(root, name) for name in required}
+    metadata = tomllib.loads(payload["pyproject.toml"].decode())
+    lock = tomllib.loads(payload["uv.lock"].decode())
+    version = metadata["project"]["version"]
+    packaging_invalid = (
+        "build-system" in metadata
+        or metadata["tool"]["uv"].get("package") is not False
+        or "pywikibot[mwoauth]" not in metadata["project"]["dependencies"]
+    )
+    runtime_invalid = (
+        metadata["project"]["requires-python"] != ">=3.15"
+        or lock.get("requires-python") not in {">=3.15", "==3.15.*"}
+        or payload[".python-version"].decode().strip() != "3.15.0"
+    )
+    if (
+        packaging_invalid
+        or runtime_invalid
+        or not re.fullmatch(
+            r"\d+\.\d+\.\d+(?:\.(?:dev|post)\d+)?",
+            version,
+        )
+    ):
+        msg = "Expected locked Python 3.15 source deployment metadata."
+        raise ValueError(msg)
+    for name in _source_names(
+        root,
+        payload["scripts/toolforge/source-files.json"],
+    ):
+        payload[name] = _read_regular(root, name)
+    for name in (
+        "src/webservice/public_html/index.php",
+        "src/webservice/status.php",
+        "src/backend/website/maintenance.json",
+        "src/shared/config.py",
+    ):
+        if name not in payload:
+            msg = f"Incomplete deployment: {name}"
+            raise ValueError(msg)
+    payload["src/shared/version.json"] = json.dumps({
+        "schema": 1,
+        "version": version,
+    }).encode()
+    payload["src/shared/routines.json"] = json.dumps(
+        config.routine_configuration(),
+        ensure_ascii=False,
+    ).encode()
+    payload["deployment.json"] = json.dumps(
+        {
+            "schema": 1,
+            "version": version,
+            "files": {
+                name: hashlib.sha256(data).hexdigest()
+                for name, data in sorted(payload.items())
+            },
+        },
+        sort_keys=True,
+    ).encode()
+    return dict(sorted(payload.items()))
+
+
+def write_archive(stream: BinaryIO, payload: Mapping[str, bytes]) -> None:
+    """Write regular-file source archives with fixed modes.
+
+    Args:
+        stream: Writable binary archive stream.
+        payload: Validated relative names and complete contents.
+
+    Raises:
+        ValueError: An archive name is unsafe or points to private data.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    with tarfile.open(
+        fileobj=stream,
+        mode="w",
+        format=tarfile.USTAR_FORMAT,
+    ) as archive:
+        for name, data in sorted(payload.items()):
+            _relative_path(name)
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mode = 0o750 if name.endswith(".sh") else 0o640
+            archive.addfile(info, io.BytesIO(data))
 
 
 def main() -> None:
-    """Check the wheel and upload it unless dry-run was requested."""
+    """Stage sources without starting either application."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    repository = Path(__file__).resolve().parent.parent
-    setup_script = repository / "scripts" / "toolforge" / "setup-env.sh"
-    if setup_script.is_symlink() or not setup_script.is_file():
-        parser.exit(1, f"Missing regular setup script: {setup_script}\n")
-    try:
-        wheel, version = _find_wheel(repository / "dist")
-    except (OSError, ValueError, BadZipFile) as error:
-        parser.exit(1, f"Invalid wheel: {error}\n")
-    print(f"Wheel: {wheel.name}\nVersion: {version}\nServer: {SSH_TARGET}")  # ruff: ignore[print]
-    if args.dry_run:
+    parser.add_argument("--archive", type=Path)
+    arguments = parser.parse_args()
+    payload = source_payload()
+    target = os.environ.get(
+        "TOOLFORGE_SSH_TARGET",
+        "for-each-next@login.toolforge.org",
+    )
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@-]*", target):
+        parser.error(
+            "TOOLFORGE_SSH_TARGET must name an SSH host or user@host.",
+        )
+    print("\n".join(payload))  # ruff: ignore[print]
+    manifest = payload["deployment.json"]
+    version = json.loads(manifest)["version"]
+    digest = hashlib.sha256(manifest).hexdigest()
+    print(  # ruff: ignore[print]
+        f"Aranami {version}; source manifest SHA-256: {digest}",
+    )
+    if arguments.archive is not None:
+        with arguments.archive.open("xb") as stream:
+            write_archive(stream, payload)
+    if arguments.dry_run:
         return
-    try:
-        _upload(wheel, setup_script)
-    except (
-        OSError,
-        ValueError,
-        BadZipFile,
-        subprocess.CalledProcessError,
-    ) as error:
-        parser.exit(1, f"Upload failed: {error}\n")
-    print("Upload complete. Continue with the installation job on Toolforge.")  # ruff: ignore[print]
+    ssh = shutil.which("ssh")
+    if ssh is None:
+        parser.error("OpenSSH is required for upload.")
+    options = [ssh, "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
+    hosts = os.environ.get("TOOLFORGE_KNOWN_HOSTS")
+    if hosts:
+        if not Path(hosts).is_file():
+            parser.error("TOOLFORGE_KNOWN_HOSTS must be a readable file.")
+        options += [
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            f"UserKnownHostsFile={hosts}",
+        ]
+    staging = f"/data/project/aranami/app-staging-{uuid4().hex}"
+    command = (
+        f"become aranami sh -c 'umask 027; mkdir {staging} "
+        f"&& tar --no-same-owner -xf - -C {staging}'"
+    )
+    with tempfile.TemporaryFile() as archive:
+        write_archive(archive, payload)
+        archive.seek(0)
+        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [*options, target, command],
+            stdin=archive,
+            check=True,
+        )
+    print(f"Staged: {staging}")  # ruff: ignore[print]
+    print(  # ruff: ignore[print]
+        f"Promote: become aranami sh {staging}/scripts/toolforge/"
+        f"deploy-source.sh {staging}",
+    )
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
 
 from unittest import TestCase
 
-from aranami.support.regions import (
+from shared.support.regions import (
     integer_option,
     managed_region,
     region_content,

@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 from pywikibot.exceptions import NoPageError
 
-from toolforge import homepage
+from backend.website import homepage
 
 
 class HomepageTests(unittest.TestCase):

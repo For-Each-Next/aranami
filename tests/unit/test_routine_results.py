@@ -4,19 +4,34 @@
 # ruff: file-ignore[pytest-unittest-raises-assertion]
 
 import datetime as dt
-import json
-import logging
 from contextlib import nullcontext
 from functools import partial
-from typing import override
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING, override
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from aranami.jobs import JobContext, ProposedEdit, job_run, pexbot
+from backend.services.zhwiki import pexbot as pexbot_data
+from updater.jobs import JobContext, ProposedEdit, job_run, pexbot
+
+if TYPE_CHECKING:
+    import logging
+
+
+def _site() -> Mock:
+    """Create an offline wiki identity for publication metadata.
+
+    Returns:
+        Mock site with an explicit valid database name.
+    """
+    site = Mock()
+    site.dbName.return_value = "zhwiki"
+    return site
 
 
 def _results(records: list[logging.LogRecord]) -> list[dict[str, object]]:
-    """Decode terminal results and verify their observable log origin.
+    """Read structured terminal metadata without parsing log messages.
 
     Args:
         records: Captured lifecycle and publication log records.
@@ -24,18 +39,13 @@ def _results(records: list[logging.LogRecord]) -> list[dict[str, object]]:
     Returns:
         Structured results in execution order.
     """
-    prefix = "Routine result: "
     results = []
     for record in records:
-        message = record.getMessage()
-        assert not message.startswith(
-            ("Routine finished", "Routine failed", "Routine deferred"),
-        )
-        if not message.startswith(prefix):
+        result = getattr(record, "routine_result", None)
+        if result is None:
             continue
-        assert record.funcName == "job_run"
-        result = json.loads(message.removeprefix(prefix))
-        assert record.name == f"aranami.jobs.{result['routine']}"
+        assert record.funcName == "routine_run"
+        assert record.name == "backend.support.execution"
         assert result["schema"] == 1
         assert result["duration_seconds"] >= 0
         results.append(result)
@@ -48,14 +58,14 @@ class TestRoutineResults(TestCase):
     @override
     def setUp(self) -> None:
         """Keep lifecycle logging and replace its filesystem sink."""
+        directory = self.enterContext(TemporaryDirectory())
+        self.enterContext(
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+        )
         for sink in (
             patch(
-                "aranami.jobs._execution.open_run_log",
+                "updater.jobs._execution.open_run_log",
                 side_effect=nullcontext,
-            ),
-            patch(
-                "aranami.jobs._execution.log_project_event",
-                return_value=True,
             ),
         ):
             sink.start()
@@ -65,11 +75,17 @@ class TestRoutineResults(TestCase):
         self,
     ) -> None:
         """Count one save and reset the next routine's count."""
-        context = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+        context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
         page = Mock(text="old")
         with (
-            patch("aranami.jobs._execution.pywikibot.Page", return_value=page),
-            self.assertLogs("aranami.jobs", level="INFO") as captured,
+            patch(
+                "updater.jobs._execution.pywikibot.Page",
+                return_value=page,
+            ),
+            self.assertLogs(
+                "backend.support.execution",
+                level="INFO",
+            ) as captured,
         ):
             with job_run("dyks", context=context):
                 context.publish(
@@ -114,10 +130,15 @@ class TestRoutineResults(TestCase):
 
     def test_dry_run_records_suppressed_writes(self) -> None:
         """Mark previews explicitly without counting their proposals."""
-        context = JobContext(Mock(), dt.date(2026, 10, 18), dry=True)
+        context = JobContext(_site(), dt.date(2026, 10, 18), dry=True)
         with (
-            patch("aranami.jobs._execution.pywikibot.Page") as page,
-            self.assertLogs("aranami.jobs", level="INFO") as captured,
+            patch(
+                "updater.jobs._execution.pywikibot.Page",
+            ) as page,
+            self.assertLogs(
+                "backend.support.execution",
+                level="INFO",
+            ) as captured,
             job_run("dyks", dry=False, context=context),
         ):
             context.publish(
@@ -132,7 +153,7 @@ class TestRoutineResults(TestCase):
     def test_failed_and_deferred_runs_keep_partial_saves(self) -> None:
         """Prioritize failures while preserving completed saves."""
         for status in ("failed", "deferred"):
-            context = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+            context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
             action = Mock(
                 side_effect=(
                     RuntimeError("Source failed after the first save.")
@@ -146,10 +167,13 @@ class TestRoutineResults(TestCase):
             with (
                 self.subTest(status=status),
                 patch(
-                    "aranami.jobs._execution.pywikibot.Page",
+                    "updater.jobs._execution.pywikibot.Page",
                     return_value=Mock(text="old"),
                 ),
-                self.assertLogs("aranami.jobs", level="INFO") as captured,
+                self.assertLogs(
+                    "backend.support.execution",
+                    level="INFO",
+                ) as captured,
                 self.assertRaises(RuntimeError)
                 if status == "failed"
                 else nullcontext(),
@@ -167,12 +191,18 @@ class TestRoutineResults(TestCase):
 
     def test_failed_save_is_not_counted(self) -> None:
         """A raised save operation cannot become a confirmed update."""
-        context = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+        context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
         page = Mock(text="old")
         page.save.side_effect = RuntimeError("Save rejected.")
         with (
-            patch("aranami.jobs._execution.pywikibot.Page", return_value=page),
-            self.assertLogs("aranami.jobs", level="INFO") as captured,
+            patch(
+                "updater.jobs._execution.pywikibot.Page",
+                return_value=page,
+            ),
+            self.assertLogs(
+                "backend.support.execution",
+                level="INFO",
+            ) as captured,
             self.assertRaises(RuntimeError),
             job_run("dyks", context=context),
         ):
@@ -201,12 +231,15 @@ class TestRoutineResults(TestCase):
                     return_value=["Target"],
                 ),
                 patch.object(
-                    pexbot,
+                    pexbot_data,
                     "edited_by_on_date",
                     return_value=skipped,
                 ),
                 patch.object(pexbot, "_refresh") as refresh,
-                self.assertLogs("aranami.jobs", level="INFO") as captured,
+                self.assertLogs(
+                    "backend.support.execution",
+                    level="INFO",
+                ) as captured,
             ):
                 pexbot.run(context=context)
             (result,) = _results(captured.records)
@@ -222,13 +255,16 @@ class TestRoutineResults(TestCase):
         context = JobContext(site, dt.date(2026, 10, 18), dry=False)
         with (
             patch.object(pexbot, "subscribed_titles", return_value=["Target"]),
-            patch.object(pexbot, "edited_by_on_date", return_value=False),
+            patch.object(pexbot_data, "edited_by_on_date", return_value=False),
             patch.object(
                 pexbot,
                 "_refresh",
                 side_effect=RuntimeError("Stream lost."),
             ),
-            self.assertLogs("aranami.jobs", level="INFO") as captured,
+            self.assertLogs(
+                "backend.support.execution",
+                level="INFO",
+            ) as captured,
             self.assertRaises(ExceptionGroup),
         ):
             pexbot.run(context=context)

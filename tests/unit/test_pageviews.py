@@ -7,16 +7,16 @@ import json
 import urllib.error
 from datetime import date
 from email.message import Message
-from importlib.metadata import version
 from io import BytesIO
 from unittest import TestCase
 from unittest.mock import MagicMock, call, patch
 
 import polars as pl
 
-from aranami import sources
-from aranami.sources import pageviews
-from aranami.sources.pageviews import (
+from shared import sources
+from shared.deployment import project_version
+from shared.sources import pageviews
+from shared.sources.pageviews import (
     DailyPageviews,
     fetch_data,
     fetch_data_dataframe,
@@ -63,7 +63,7 @@ class TestPageviewValues(TestCase):
     def test_user_agent_identifies_package_and_maintainer() -> None:
         """Include the installed version and maintainer contact."""
         assert (
-            f"Aranami/{version('aranami')} "
+            f"Aranami/{project_version()} "
             "(https://meta.wikimedia.org/wiki/User:For_Each_..._Next/)"
         ) == pageviews._USER_AGENT
 
@@ -125,7 +125,7 @@ class TestPageviewTransport(TestCase):
         )
 
         with patch(
-            "aranami.sources.pageviews.urllib.request.urlopen",
+            "shared.sources.pageviews.urllib.request.urlopen",
             return_value=response,
         ) as urlopen:
             observations = pageviews._open_request(request)
@@ -163,7 +163,7 @@ class TestPageviewTransport(TestCase):
         )
 
         with patch(
-            "aranami.sources.pageviews.urllib.request.urlopen",
+            "shared.sources.pageviews.urllib.request.urlopen",
             side_effect=error,
         ):
             observations = pageviews._open_request(request)
@@ -189,7 +189,7 @@ class TestPageviewTransport(TestCase):
 
         with (
             patch(
-                "aranami.sources.pageviews.urllib.request.urlopen",
+                "shared.sources.pageviews.urllib.request.urlopen",
                 side_effect=error,
             ) as urlopen,
             self.assertRaises(urllib.error.HTTPError) as caught,
@@ -279,7 +279,7 @@ class TestTopPageviewFrames(TestCase):
                 response = BytesIO(json.dumps(self._payload(day)).encode())
                 with (
                     patch(
-                        "aranami.sources.pageviews.urllib.request.urlopen",
+                        "shared.sources.pageviews.urllib.request.urlopen",
                         return_value=response,
                     ) as urlopen,
                     patch.object(
@@ -322,7 +322,7 @@ class TestTopPageviewFrames(TestCase):
         response = BytesIO(json.dumps(payload).encode())
         with (
             patch(
-                "aranami.sources.pageviews.urllib.request.urlopen",
+                "shared.sources.pageviews.urllib.request.urlopen",
                 return_value=response,
             ),
             patch.object(
@@ -399,7 +399,7 @@ class TestTopPageviewFrames(TestCase):
         response = BytesIO(json.dumps(payload).encode())
         with (
             patch(
-                "aranami.sources.pageviews.urllib.request.urlopen",
+                "shared.sources.pageviews.urllib.request.urlopen",
                 return_value=response,
             ) as urlopen,
             patch.object(
@@ -426,7 +426,7 @@ class TestTopPageviewFrames(TestCase):
         response = BytesIO(json.dumps(payload).encode())
         with (
             patch(
-                "aranami.sources.pageviews.urllib.request.urlopen",
+                "shared.sources.pageviews.urllib.request.urlopen",
                 return_value=response,
             ),
             patch.object(pageviews.pywikibot, "Page") as page,
@@ -453,7 +453,7 @@ class TestTopPageviewFrames(TestCase):
             with (
                 self.subTest(year=year),
                 patch(
-                    "aranami.sources.pageviews.urllib.request.urlopen",
+                    "shared.sources.pageviews.urllib.request.urlopen",
                 ) as urlopen,
             ):
                 frame = fetch_top_dataframe(site, start, stop)
@@ -477,7 +477,7 @@ class TestTopPageviewFrames(TestCase):
             with (
                 self.subTest(start=start, stop=stop),
                 patch(
-                    "aranami.sources.pageviews.urllib.request.urlopen",
+                    "shared.sources.pageviews.urllib.request.urlopen",
                 ) as urlopen,
             ):
                 frame = fetch_top_dataframe(site, start, stop)
@@ -505,7 +505,7 @@ class TestTopPageviewFrames(TestCase):
             with (
                 self.subTest(start=start),
                 patch(
-                    "aranami.sources.pageviews.urllib.request.urlopen",
+                    "shared.sources.pageviews.urllib.request.urlopen",
                     side_effect=error,
                 ) as urlopen,
                 self.assertRaises(urllib.error.HTTPError) as caught,
@@ -522,7 +522,7 @@ class TestTopPageviewFrames(TestCase):
         error = urllib.error.URLError("unavailable")
         with (
             patch(
-                "aranami.sources.pageviews.urllib.request.urlopen",
+                "shared.sources.pageviews.urllib.request.urlopen",
                 side_effect=error,
             ) as urlopen,
             self.assertRaises(urllib.error.URLError) as caught,
