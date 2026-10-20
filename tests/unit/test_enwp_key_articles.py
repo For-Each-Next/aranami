@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from contextlib import contextmanager, nullcontext
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -19,10 +21,19 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.sql.selectable import Select
 from wiki_fixtures import OfflineSite
 
-from aranami.jobs import enwp_key_articles as job
-from aranami.services.zhwiki import enwp_key_articles as reports
-from aranami.sources.quarry import enwp
-from aranami.support.report_membership import load_membership, save_membership
+from backend.services.enwiki import key_articles as data_service
+from backend.services.enwiki.article_changes import (
+    ArticleChanges,
+    QualityChange,
+    compare_articles,
+)
+from backend.support.report_membership import (
+    load_membership,
+    save_membership,
+)
+from shared.sources.quarry import enwp
+from updater.jobs import enwp_key_articles as job
+from updater.services.zhwiki import enwp_key_articles as reports
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -124,7 +135,7 @@ def _report_change_sources(
             return_value=english,
         ) as source,
         patch.object(
-            reports.quality_listing_dates,
+            data_service.quality_listing_dates,
             "listing_dates",
             return_value=pl.DataFrame(
                 schema={"page_id": pl.Int64, "quality_date": pl.Date},
@@ -164,6 +175,103 @@ class TestEnglishReportService(TestCase):
     """Exercise report membership, rendering, and summary behavior."""
 
     @staticmethod
+    def test_report_spec_requires_concrete_behavior() -> None:
+        """Require each report to choose its section behavior."""
+        failure = None
+        try:
+            reports.ReportSpec(
+                name="unspecified",
+                filter_column="en_class",
+                accepted_values=("GA",),
+                count_markers=(("GA", "count_ga"),),
+            )
+        except TypeError as error:
+            failure = error
+        assert failure is not None
+        assert "abstract" in str(failure)
+
+    def test_report_behavior_follows_type_instead_of_name(self) -> None:
+        """Choose source reads, membership, and summaries by type."""
+        site = OfflineSite("zh", "wikipedia")
+        cases = (
+            (replace(job.REPORT_SPECS[0], name="quality"), False, "Added"),
+            (replace(job.REPORT_SPECS[1], name="dated"), True, "GA listed"),
+        )
+        for spec, dated, verb in cases:
+            original = (
+                "{{PJ:VG/DBR/EN/item|en=Example|wd=99|en_cls=GA}}\n"
+                + _old_text(spec)
+            )
+            with (
+                self.subTest(report=spec.name),
+                patch.object(
+                    enwp,
+                    "fetch_en_key_pages",
+                    return_value=_english_rows(),
+                ),
+                patch.object(
+                    enwp,
+                    "fetch_wikidata_sitelinks",
+                    return_value=pl.DataFrame(
+                        schema={"item_id": pl.Int64, "zh_title": pl.String},
+                    ),
+                ),
+                patch.object(
+                    enwp,
+                    "fetch_wikidata_labels",
+                    return_value=pl.DataFrame(
+                        schema={"item_id": pl.Int64, "label": pl.String},
+                    ),
+                ),
+                patch.object(
+                    enwp,
+                    "fetch_zh_page_states",
+                    return_value=pl.DataFrame(
+                        schema={
+                            "zh_title": pl.String,
+                            "zh_is_redirect": pl.Int64,
+                            "zh_class": pl.String,
+                            "zh_importance": pl.String,
+                        },
+                    ),
+                ),
+                patch.object(
+                    data_service.quality_listing_dates,
+                    "listing_dates",
+                    return_value=pl.DataFrame({
+                        "page_id": [1002],
+                        "quality_date": [dt.date(2026, 9, 2)],
+                    }),
+                ) as dates,
+            ):
+                existing = {spec.name: original}
+                data = data_service.prepare_reports(
+                    existing,
+                    (spec.definition,),
+                    site,
+                )
+                updated = reports.build_reports(existing, data, (spec,))[
+                    spec.name
+                ]
+            members = reports.filter_report_rows(data.rows, spec)
+            summary = spec.build_edit_summary(
+                compare_articles({}, members),
+                data.linked_titles,
+            )
+            assert summary.startswith(f"1 item total. {verb} «[[:en:")
+            assert ("Example" in data.old_articles[spec.name]) is not dated
+            if dated:
+                dates.assert_called_once()
+                assert members.item(0, "quality_date") == dt.date(2026, 9, 2)
+                assert "== 2026年 ==" in updated
+                assert "<!-- 2026-09-02 -->" in updated
+            else:
+                dates.assert_not_called()
+                assert "quality_date" not in data.rows.columns
+                assert "== A ==" in updated
+                assert "<!-- 2026-09-02 -->" not in updated
+
+    @staticmethod
     def test_missing_body_markers_reject_update() -> None:
         """Refuse to replace a report without canonical body markers."""
         failure = None
@@ -177,7 +285,7 @@ class TestEnglishReportService(TestCase):
     @staticmethod
     def test_normalization_preserves_display_titles_and_fallbacks() -> None:
         """Fall back to titles for absent display or sort values."""
-        result = reports.normalize_en_pages(_english_rows())
+        result = data_service.normalize_en_pages(_english_rows())
         assert result.get_column("en_title").to_list() == [
             "Alpha Game",
             "Éclair",
@@ -194,7 +302,7 @@ class TestEnglishReportService(TestCase):
     @staticmethod
     def test_chinese_fallbacks_and_assessments() -> None:
         """Prefer sitelinks, then labels, and classify missing pages."""
-        english = reports.normalize_en_pages(_english_rows())
+        english = data_service.normalize_en_pages(_english_rows())
         links = pl.DataFrame({"item_id": [1], "zh_title": ["阿爾法"]})
         labels = pl.DataFrame({"item_id": [1, 2], "label": ["unused", "閃電"]})
         states = pl.DataFrame({
@@ -203,7 +311,7 @@ class TestEnglishReportService(TestCase):
             "zh_class": ["乙"],
             "zh_importance": ["高"],
         })
-        rows = reports.build_enriched_rows(english, links, labels, states)
+        rows = data_service.build_enriched_rows(english, links, labels, states)
         assert rows.get_column("display_title").to_list() == ["阿爾法", "閃電"]
         assert rows.get_column("final_zh_class").to_list() == ["乙", "请求"]
         assert rows.get_column("final_zh_importance").to_list() == ["高", "无"]
@@ -228,44 +336,93 @@ class TestEnglishReportService(TestCase):
         expected_parameter_count = 8
         assert len(parsed[0].params) == expected_parameter_count
         assert "&#124;" in str(template)
-        assert reports.parse_old_articles(
+        assert data_service.parse_old_articles(
             str(template),
             OfflineSite("zh", "wikipedia"),
         ) == {
-            "A|B": reports.OldArticle("A|B", 9, en_class="GA"),
+            "A|B": data_service.OldArticle("A|B", 9, en_class="GA"),
         }
         item = reports.render_item(row)
         assert "page-id" not in item
-        assert reports.parse_old_articles(
+        assert data_service.parse_old_articles(
             item,
             OfflineSite("zh", "wikipedia"),
-        ) == {"A|B": reports.OldArticle("A|B", 9, en_class="GA")}
+        ) == {"A|B": data_service.OldArticle("A|B", 9, en_class="GA")}
         legacy_item = item + '<!-- aranami-enwp page-id="123" -->'
-        assert reports.parse_old_articles(
+        assert data_service.parse_old_articles(
             legacy_item,
             OfflineSite("zh", "wikipedia"),
-        ) == {"A|B": reports.OldArticle("A|B", 9, en_class="GA")}
+        ) == {"A|B": data_service.OldArticle("A|B", 9, en_class="GA")}
         managed = _old_text(job.REPORT_SPECS[0], item)
         assert item in reports.replace_body(managed, item)
 
     @staticmethod
     def test_summary_reports_removed_sitelinks_and_bounds_utf8() -> None:
         """Mention linked article changes within the byte budget."""
-        old = {"Old": reports.OldArticle("Old", 8)}
+        old = {"Old": data_service.OldArticle("Old", 8)}
         new = pl.DataFrame({"en_title": ["New"], "item_id": [9]})
-        summary = reports.build_edit_summary(old, new, {8: "舊", 9: "新"})
+        summary = reports.build_edit_summary(
+            compare_articles(old, new),
+            {8: "舊", 9: "新"},
+        )
         assert summary == (
-            "1 item total. Added «[[:en:New]]» &#91;[[新]]&#93;; "
-            "removed «[[:en:Old]]» &#91;[[舊]]&#93;."
+            "1 item total. Added «[[:en:New]]» ([[新]]); "
+            "removed «[[:en:Old]]» ([[舊]])."
         )
         long_rows = pl.DataFrame({
             "en_title": ["中文" * 200],
             "item_id": [1],
         })
-        short = reports.build_edit_summary({}, long_rows, {}, max_bytes=50)
+        short = reports.build_edit_summary(
+            compare_articles({}, long_rows),
+            {},
+            max_bytes=50,
+        )
         summary_budget = 50
         assert len(short.encode()) <= summary_budget
         assert short == "1 item total. Added 1 more."
+
+    @staticmethod
+    def test_summary_only_formats_prepared_metadata() -> None:
+        """Render backend facts without source reads or new analysis."""
+        previous = data_service.OldArticle("Before", 1, 10, "GA")
+        current = data_service.OldArticle("After", 2, 20, "FA")
+        changes = ArticleChanges(
+            current_total=1,
+            added=(current,),
+            removed=(previous,),
+            quality_changes=(QualityChange(None, current),),
+        )
+        links = {1: "前", 2: "後"}
+        with (
+            patch(
+                "backend.services.enwiki.article_changes.compare_articles",
+                side_effect=AssertionError("Formatting must not compare."),
+            ) as compare,
+            patch.object(
+                enwp,
+                "fetch_en_key_pages",
+                side_effect=AssertionError("Formatting must not collect."),
+            ) as source,
+            patch.object(
+                data_service.quality_listing_dates,
+                "listing_dates",
+                side_effect=AssertionError("Formatting must not refresh."),
+            ) as dates,
+        ):
+            summary = reports.build_edit_summary(changes, links)
+            quality = reports.build_edit_summary(changes, links, quality=True)
+        assert summary == (
+            "1 item total. Added «[[:en:After]]» ([[後]]); "
+            "removed «[[:en:Before]]» ([[前]])."
+        )
+        assert quality == (
+            "1 item total. FA prompted «[[:en:After]]» ([[後]]); "
+            "GA delisted «[[:en:Before]]» ([[前]])."
+        )
+        compare.assert_not_called()
+        source.assert_not_called()
+        dates.assert_not_called()
 
     @staticmethod
     def test_summary_links_parenthesized_chinese_counterpart() -> None:
@@ -274,7 +431,7 @@ class TestEnglishReportService(TestCase):
         chinese = "刃 (崩壞：星穹鐵道)"
         mention = reports.format_summary_article(english, chinese)
         assert mention == (
-            "«[[:en:Blade (Honkai)]]» &#91;[[刃 (崩壞：星穹鐵道)]]&#93;"
+            "«[[:en:Blade (Honkai)]]» ([[刃 (崩壞：星穹鐵道)]])"
         )
         parsed = mwparserfromhell.parse(mention)
         assert str(parsed) == mention
@@ -286,7 +443,7 @@ class TestEnglishReportService(TestCase):
             node.normalize()
             for node in parsed.nodes
             if isinstance(node, HTMLEntity)
-        ] == ["[", "]"]
+        ] == []
 
     @staticmethod
     def test_summary_omits_missing_or_empty_chinese_counterpart() -> None:
@@ -305,7 +462,7 @@ class TestEnglishReportService(TestCase):
     @staticmethod
     def test_summary_ignores_renames_and_assessment_changes() -> None:
         """Keep only the total for renamed or reassessed pages."""
-        old = {"Old": reports.OldArticle("Old", 8, 123)}
+        old = {"Old": data_service.OldArticle("Old", 8, 123)}
         new = pl.DataFrame({
             "page_id": [123],
             "en_title": ["New"],
@@ -313,31 +470,35 @@ class TestEnglishReportService(TestCase):
             "en_class": ["FA"],
             "en_importance": ["Top"],
         })
-        assert reports.build_edit_summary(old, new, {}) == "1 item total."
+        assert reports.build_edit_summary(compare_articles(old, new), {}) == (
+            "1 item total."
+        )
 
     @staticmethod
     def test_summary_reports_recreated_pages_with_the_same_title() -> None:
         """Treat a different page ID as changed report membership."""
-        old = {"Same": reports.OldArticle("Same", 8, 123)}
+        old = {"Same": data_service.OldArticle("Same", 8, 123)}
         new = pl.DataFrame({
             "page_id": [456],
             "en_title": ["Same"],
             "item_id": [8],
         })
-        assert reports.build_edit_summary(old, new, {}) == (
+        assert reports.build_edit_summary(compare_articles(old, new), {}) == (
             "1 item total. Added «[[:en:Same]]»; removed «[[:en:Same]]»."
         )
 
     @staticmethod
     def test_summary_matches_wikidata_and_formats_totals() -> None:
         """Match Wikidata IDs and separate thousands in the total."""
-        old = {"Old": reports.OldArticle("Old", 8)}
+        old = {"Old": data_service.OldArticle("Old", 8)}
         new = pl.DataFrame({
             "page_id": [123],
             "en_title": ["New"],
             "item_id": [8],
         })
-        assert reports.build_edit_summary(old, new, {}) == "1 item total."
+        assert reports.build_edit_summary(compare_articles(old, new), {}) == (
+            "1 item total."
+        )
         count = 1234
         titles = [f"Article {index}" for index in range(count)]
         new = pl.DataFrame({
@@ -346,15 +507,17 @@ class TestEnglishReportService(TestCase):
             "item_id": list(range(1, count + 1)),
         })
         old = {
-            title: reports.OldArticle(title, index, index)
+            title: data_service.OldArticle(title, index, index)
             for index, title in enumerate(titles, start=1)
         }
-        assert reports.build_edit_summary(old, new, {}) == "1,234 items total."
+        assert reports.build_edit_summary(compare_articles(old, new), {}) == (
+            "1,234 items total."
+        )
 
     @staticmethod
     def test_summary_caps_utf8_bytes_and_preserves_complete_links() -> None:
         """Honor byte budgets while retaining complete article links."""
-        old = {"Old": reports.OldArticle("Old", 8, 100)}
+        old = {"Old": data_service.OldArticle("Old", 8, 100)}
         new = pl.DataFrame({
             "page_id": list(range(1, 11)),
             "en_title": [f"New {index} 中文中文中文" for index in range(10)],
@@ -363,8 +526,7 @@ class TestEnglishReportService(TestCase):
         chinese = {index: f"中文標題 {index}" for index in range(1, 11)}
         for requested, budget in [(90, 90), (500, 255)]:
             summary = reports.build_edit_summary(
-                old,
-                new,
+                compare_articles(old, new),
                 chinese,
                 max_bytes=requested,
             )
@@ -372,9 +534,13 @@ class TestEnglishReportService(TestCase):
             assert summary.startswith("10 items total.")
             assert summary.count("[[") == summary.count("]]")
             assert summary.count("«") == summary.count("»")
-            assert summary.count("&#91;") == summary.count("&#93;")
+            assert summary.count("(") == summary.count(")")
             assert "more" in summary
-        assert not reports.build_edit_summary(old, new, {}, max_bytes=0)
+        assert not reports.build_edit_summary(
+            compare_articles(old, new),
+            {},
+            max_bytes=0,
+        )
 
     @staticmethod
     def test_builds_both_reports_with_shared_reads() -> None:
@@ -408,7 +574,7 @@ class TestEnglishReportService(TestCase):
                 return_value=_english_rows(),
             ),
             patch.object(
-                reports.quality_listing_dates,
+                data_service.quality_listing_dates,
                 "listing_dates",
                 return_value=pl.DataFrame(
                     schema={"page_id": pl.Int64, "quality_date": pl.Date},
@@ -426,12 +592,18 @@ class TestEnglishReportService(TestCase):
             ) as label,
             patch.object(enwp, "fetch_zh_page_states", return_value=states),
         ):
-            data = reports.prepare_reports(existing, job.REPORT_SPECS, site)
+            data = data_service.prepare_reports(
+                existing,
+                tuple(spec.definition for spec in job.REPORT_SPECS),
+                site,
+            )
             texts = reports.build_reports(existing, data, job.REPORT_SPECS)
         summaries = {
             spec.name: reports.build_edit_summary(
-                data.old_articles[spec.name],
-                reports.filter_report_rows(data.rows, spec),
+                compare_articles(
+                    data.old_articles[spec.name],
+                    reports.filter_report_rows(data.rows, spec),
+                ),
                 data.linked_titles,
             )
             for spec in job.REPORT_SPECS
@@ -445,15 +617,40 @@ class TestEnglishReportService(TestCase):
         assert "en=Éclair" not in texts["important"]
         assert "en=Éclair" in texts["quality"]
         assert "en=Alpha Game" not in texts["quality"]
+        retained = {
+            spec.name: reports.report_result(data, spec)
+            for spec in job.REPORT_SPECS
+        }
+        assert data.calculated_at is not None
+        assert all(
+            result.tables["prepared_rows"].equals(data.rows)
+            and result.calculated_at == data.calculated_at
+            for result in retained.values()
+        )
+        assert retained["important"].tables["members"].get_column(
+            "en_title",
+        ).to_list() == ["Alpha Game"]
+        assert retained["quality"].tables["members"].get_column(
+            "en_title",
+        ).to_list() == ["Éclair"]
+        assert retained["important"].metadata["counts"] == {
+            "Top": 1,
+            "High": 0,
+        }
+        assert retained["quality"].metadata["counts"] == {
+            "FA": 0,
+            "FL": 0,
+            "GA": 1,
+        }
         assert all(
             text.startswith("Before") and text.endswith("After")
             for text in texts.values()
         )
         assert all(
-            "removed «[[:en:Old]]» &#91;[[舊]]&#93;" in summary
+            "removed «[[:en:Old]]» ([[舊]])" in summary
             for summary in summaries.values()
         )
-        custom = reports.ReportSpec(
+        custom = reports.ImportanceReportSpec(
             name="custom",
             filter_column="en_class",
             accepted_values=("B",),
@@ -574,8 +771,8 @@ class TestEnglishReportJob(TestCase):
         context.dry = True
         existing = {spec.name: _old_text(spec) for spec in job.REPORT_SPECS}
         pages = [Mock(text=existing[name]) for name in job.REPORT_TARGETS]
-        data = reports.ReportData(
-            rows=reports.normalize_en_pages(_english_rows()),
+        data = data_service.ReportData(
+            rows=data_service.normalize_en_pages(_english_rows()),
             old_articles={name: {} for name in job.REPORT_TARGETS},
             linked_titles={},
         )
@@ -588,7 +785,7 @@ class TestEnglishReportJob(TestCase):
             ) as run,
             patch.object(job, "read_pages", return_value=pages) as read,
             patch.object(
-                reports,
+                job,
                 "prepare_reports",
                 return_value=data,
             ) as prepare,
@@ -597,8 +794,12 @@ class TestEnglishReportJob(TestCase):
                 "build_reports",
                 return_value=texts,
             ) as build,
-            patch.object(job, "load_membership", return_value={}) as load,
-            patch.object(job, "save_membership") as save,
+            patch.object(
+                data_service,
+                "load_membership",
+                return_value={},
+            ) as load,
+            patch.object(data_service, "save_membership") as save,
         ):
             job.run(dry=True, context=context)
         run.assert_called_once_with(
@@ -612,7 +813,7 @@ class TestEnglishReportJob(TestCase):
         )
         prepare.assert_called_once_with(
             existing,
-            job.REPORT_SPECS,
+            tuple(spec.definition for spec in job.REPORT_SPECS),
             context.site,
         )
         build.assert_called_once_with(existing, data, job.REPORT_SPECS)
@@ -637,6 +838,7 @@ class TestEnglishReportJob(TestCase):
     def test_both_reports_cache_ids_and_summarize_english_membership() -> None:
         """List English changes and suppress same-ID renames."""
         context = Mock(site=OfflineSite("zh", "wikipedia"), dry=False)
+        context.publish.return_value = True
         existing = _old_change_reports()
         old_members = {"Old title": 101, "Gone": 102}
         with (
@@ -755,6 +957,7 @@ class TestEnglishReportJob(TestCase):
     def test_failed_publication_preserves_cached_report_membership() -> None:
         """Keep the live snapshot after publication fails."""
         context = Mock(site=OfflineSite("zh", "wikipedia"), dry=False)
+        context.publish.return_value = True
         context.publish.side_effect = RuntimeError("Publication failed.")
         existing = _old_change_reports()
         old_members = {"Old title": 101, "Gone": 102}
@@ -773,16 +976,22 @@ class TestEnglishReportJob(TestCase):
             failure = None
             try:
                 job.run(context=context)
-            except RuntimeError as error:
+            except ExceptionGroup as error:
                 failure = error
             assert failure is not None
-            assert str(failure) == "Publication failed."
+            assert [str(error) for error in failure.exceptions] == [
+                "Publication failed.",
+                "Publication failed.",
+            ]
             for name, title in job.REPORT_TARGETS.items():
                 assert load_membership(
                     context.site,
                     title,
                     existing[name],
                 ) == (old_members)
-            context.publish.assert_called_once()
-            edit = context.publish.call_args.args[0]
-            assert load_membership(context.site, edit.title, edit.text) == {}
+            assert context.publish.call_count == len(job.REPORT_SPECS)
+            for call in context.publish.call_args_list:
+                edit = call.args[0]
+                assert (
+                    load_membership(context.site, edit.title, edit.text) == {}
+                )

@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "routines": {
+    "dyks": {
+      "pages": {
+        "report": "WikiProject:电子游戏/新条目推荐"
+      },
+      "hour": "*",
+      "minute": 0,
+      "prefixes": [],
+      "misfire_grace_time": null
+    },
+    "new_pages": {
+      "pages": {
+        "report": "WikiProject:电子游戏/新进条目/关键词筛选"
+      },
+      "hour": "0",
+      "minute": 7,
+      "prefixes": [],
+      "misfire_grace_time": null
+    },
+    "assessment_lists": {
+      "pages": {
+        "Bplus": "WikiProject:电子游戏/认证条目/Bplus",
+        "BPAN": "WikiProject:电子游戏/认证条目/BPAN",
+        "A": "WikiProject:电子游戏/认证条目/A",
+        "AL": "WikiProject:电子游戏/认证条目/AL",
+        "ACC": "WikiProject:电子游戏/认证条目/ACC",
+        "PPR": "WikiProject:电子游戏/认证条目/PPR"
+      },
+      "hour": "*",
+      "minute": 31,
+      "prefixes": [],
+      "misfire_grace_time": null
+    },
+    "pageviews": {
+      "pages": {
+        "report": "WikiProject:电子游戏/热门条目"
+      },
+      "hour": "*",
+      "minute": 59,
+      "prefixes": [],
+      "misfire_grace_time": 3500
+    },
+    "enwp_key_articles": {
+      "pages": {
+        "important": "WikiProject:电子游戏/数据库报告/英文维基百科重要条目",
+        "quality": "WikiProject:电子游戏/数据库报告/英文维基百科优质条目"
+      },
+      "hour": "23",
+      "minute": 24,
+      "prefixes": [],
+      "misfire_grace_time": null
+    },
+    "pexbot": {
+      "pages": {},
+      "hour": "0",
+      "minute": 0,
+      "prefixes": [
+        "WikiProject:电子游戏/数据库报告"
+      ],
+      "misfire_grace_time": null
+    }
+  }
+}

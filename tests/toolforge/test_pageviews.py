@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from toolforge.pageviews import collect_pageviews
+from backend.website.pageviews import collect_pageviews
 
 
 def _site() -> SimpleNamespace:
@@ -112,7 +112,7 @@ class TestDailyPageviews(TestCase):
             ]
         )
         with patch(
-            "toolforge.pageviews.http.fetch",
+            "backend.website.pageviews.http.fetch",
             return_value=_response("15", articles),
         ):
             result = collect_pageviews(
@@ -154,7 +154,7 @@ class TestDailyPageviews(TestCase):
             for index, title in enumerate(titles, start=1)
         ]
         with patch(
-            "toolforge.pageviews.http.fetch",
+            "backend.website.pageviews.http.fetch",
             return_value=_response(articles=articles),
         ):
             result = collect_pageviews(
@@ -183,7 +183,7 @@ class TestDailyPageviews(TestCase):
             ],
         )
         with patch(
-            "toolforge.pageviews.http.fetch",
+            "backend.website.pageviews.http.fetch",
             return_value=response,
         ) as fetch:
             result = collect_pageviews(
@@ -240,7 +240,7 @@ class TestDailyPageviews(TestCase):
             for index in range(12)
         ]
         with patch(
-            "toolforge.pageviews.http.fetch",
+            "backend.website.pageviews.http.fetch",
             return_value=_response(articles=articles),
         ):
             result = collect_pageviews(
@@ -260,7 +260,7 @@ class TestDailyPageviews(TestCase):
     def test_only_absent_daily_results_fall_back_to_older_dates() -> None:
         """Skip HTTP 404 and explicit no-result responses only."""
         with patch(
-            "toolforge.pageviews.http.fetch",
+            "backend.website.pageviews.http.fetch",
             side_effect=[
                 Mock(status_code=404),
                 Mock(status_code=200, json=Mock(return_value={"items": []})),
@@ -292,7 +292,7 @@ class TestDailyPageviews(TestCase):
             with (
                 self.subTest(articles=articles),
                 patch(
-                    "toolforge.pageviews.http.fetch",
+                    "backend.website.pageviews.http.fetch",
                     return_value=_response(articles=articles),
                 ) as fetch,
             ):
@@ -309,7 +309,7 @@ class TestDailyPageviews(TestCase):
         """Leave exhausted missing observations unavailable."""
         with (
             patch(
-                "toolforge.pageviews.http.fetch",
+                "backend.website.pageviews.http.fetch",
                 return_value=Mock(status_code=404),
             ) as fetch,
             self.assertRaisesRegex(RuntimeError, "past seven dates"),
@@ -341,7 +341,7 @@ class TestDailyPageviews(TestCase):
             with (
                 self.subTest(response=response),
                 patch(
-                    "toolforge.pageviews.http.fetch",
+                    "backend.website.pageviews.http.fetch",
                     return_value=response,
                 ) as fetch,
                 self.assertRaises((OSError, RuntimeError)),
@@ -367,7 +367,7 @@ class TestDailyPageviews(TestCase):
             with (
                 self.subTest(key=key),
                 patch(
-                    "toolforge.pageviews.http.fetch",
+                    "backend.website.pageviews.http.fetch",
                     return_value=response,
                 ) as fetch,
                 self.assertRaisesRegex(ValueError, "metadata"),
@@ -397,7 +397,7 @@ class TestDailyPageviews(TestCase):
             with (
                 self.subTest(changes=changes),
                 patch(
-                    "toolforge.pageviews.http.fetch",
+                    "backend.website.pageviews.http.fetch",
                     return_value=_response(articles=[article]),
                 ),
                 self.assertRaisesRegex(ValueError, "article observation"),
@@ -421,7 +421,7 @@ class TestDailyPageviews(TestCase):
             with (
                 self.subTest(value=value),
                 patch(
-                    "toolforge.pageviews.http.fetch",
+                    "backend.website.pageviews.http.fetch",
                     return_value=Mock(
                         status_code=200,
                         json=Mock(return_value=value),

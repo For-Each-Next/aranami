@@ -6,6 +6,7 @@
 
 from contextlib import nullcontext
 from dataclasses import fields
+from functools import partial
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -13,10 +14,11 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from aranami.jobs import assessment_lists as job
-from aranami.services.zhwiki import assessment_lists as service
-from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
-from aranami.support.report_membership import MembershipReport
+from backend.services.zhwiki import assessment_lists as source
+from backend.support.report_membership import MembershipReport
+from updater.jobs import assessment_lists as job
+from updater.services.zhwiki import assessment_lists as service
+from updater.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
 
 _TEXT = (
     'Intro<section begin="count" /><!-- aranami begin="assessment-count" -->'
@@ -26,18 +28,114 @@ _TEXT = (
     "<section end=list />"
     "\nFooter [[Unmanaged]]"
 )
-_A_CONFIG = service.AssessmentList(
+_A_CONFIG = source.AssessmentList(
     "Category:甲级电子游戏条目",
     icon_template="A",
 )
-_BPLUS_CONFIG = service.AssessmentList(
+_BPLUS_CONFIG = source.AssessmentList(
     "Category:乙上级电子游戏条目",
     icon_template="Bplus",
 )
-_ACC_CONFIG = service.AssessmentList(
+_ACC_CONFIG = source.AssessmentList(
     "Category:请求甲级评审的电子游戏条目",
     review_grade="acc",
 )
+
+
+def _render_source(
+    site: object,
+    config: source.AssessmentList,
+    text: str,
+) -> MembershipReport:
+    """Render real backend data under the test's source mocks.
+
+    Args:
+        site: Offline wiki identity and source adapter input.
+        config: Category and review configuration under test.
+        text: Original destination text with managed ranges.
+
+    Returns:
+        Complete rendered report from real backend observations.
+    """
+    return service.prepare_report(
+        source.prepare_data(site, config, text),
+        text,
+    )
+
+
+def _source_data(  # ruff: ignore[too-many-arguments]
+    members: dict[str, int | None],
+    site: object,
+    config: source.AssessmentList,
+    text: str,
+    *,
+    assessments: pl.DataFrame | None = None,
+    previous_members: dict[str, int | None] | None = None,
+) -> source.AssessmentData:
+    """Supply replica facts for real backend interpretation.
+
+    Args:
+        members: Current category members and their article IDs.
+        site: Offline wiki identity passed through the publication job.
+        config: Category and review configuration selected by the job.
+        text: Current destination text interpreted by backend.
+        assessments: Shared project assessment observations.
+        previous_members: Cached IDs validated against current text.
+
+    Returns:
+        Real backend data prepared from deterministic source fixtures.
+    """
+    rows = pl.DataFrame(
+        {
+            "page_title": list(members),
+            "article_page_id": list(members.values()),
+        },
+        schema={"page_title": pl.String, "article_page_id": pl.Int64},
+    )
+
+    def page(_site: object, title: str) -> MagicMock:
+        """Resolve a deterministic talk title without external reads.
+
+        Args:
+            _site: Unused offline wiki identity.
+            title: Article whose talk page is resolved.
+
+        Returns:
+            Offline article object exposing its talk-page title.
+        """
+        result = MagicMock()
+        result.toggleTalkPage.return_value.title.return_value = f"Talk:{title}"
+        return result
+
+    def read(_site: object, titles: list[str]) -> list[MagicMock]:
+        """Return current talk texts without review headings.
+
+        Args:
+            _site: Unused offline wiki identity.
+            titles: Talk-page titles requested by backend.
+
+        Returns:
+            Preloaded empty talk texts with their exact source titles.
+        """
+        result = []
+        for title in titles:
+            item = MagicMock(text="")
+            item.title.return_value = title
+            result.append(item)
+        return result
+
+    with (
+        patch.object(source, "category_members", return_value=rows),
+        patch.object(source, "Page", side_effect=page),
+        patch.object(source, "read_pages", side_effect=read),
+    ):
+        return source.prepare_data(
+            site,
+            config,
+            text,
+            assessments=assessments,
+            previous_members=previous_members,
+        )
 
 
 class TestAssessmentContent(TestCase):
@@ -57,8 +155,8 @@ class TestAssessmentContent(TestCase):
         assert '<!-- aranami begin="assessment-count" -->2<!--' in text
         assert text.endswith("Footer [[Unmanaged]]")
         assert text.index("[[Another]]") < text.index("[[New]]")
-        assert service.article_titles(text) == {"Another", "New"}
-        assert service.article_titles(_TEXT) == {"Old"}
+        assert source.article_titles(text) == {"Another", "New"}
+        assert source.article_titles(_TEXT) == {"Old"}
 
     @staticmethod
     def test_member_ids_are_not_rendered_in_page_content() -> None:
@@ -70,17 +168,17 @@ class TestAssessmentContent(TestCase):
             {},
         )
         assert "aranami-member" not in text
-        assert service.article_members(text) == {"New": None}
+        assert source.article_members(text) == {"New": None}
         annotated = text.replace(
             "[[New]]",
             '[[New]]<!-- aranami-member id="7458204" -->',
         )
-        assert service.article_members(annotated) == {"New": None}
+        assert source.article_members(annotated) == {"New": None}
 
     @staticmethod
     def test_content_configuration_has_no_destination() -> None:
         """Keep content configuration independent of output pages."""
-        assert {field.name for field in fields(service.AssessmentList)} == {
+        assert {field.name for field in fields(source.AssessmentList)} == {
             "category_title",
             "icon_template",
             "review_grade",
@@ -93,7 +191,7 @@ class TestAssessmentContent(TestCase):
         assert "# {{icon|Bplus}} （無）" in text
         assert '<!-- aranami begin="assessment-count" -->0<!--' in text
         assert "[[Old]]" not in text
-        assert service.article_titles(text) == set()
+        assert source.article_titles(text) == set()
 
     @staticmethod
     def test_candidate_link_preserves_latest_review_anchor() -> None:
@@ -106,7 +204,7 @@ class TestAssessmentContent(TestCase):
         )
         assert "{{icon3|A candidate.svg}} [[Game]]" in text
         assert "<small>〔[[Talk:Game#甲级评审 2|评审]]〕</small>" in text
-        assert service.article_titles(text) == {"Game"}
+        assert source.article_titles(text) == {"Game"}
 
     def test_missing_or_duplicate_marker_boundaries_reject_updates(
         self,
@@ -126,19 +224,61 @@ class TestAssessmentContent(TestCase):
     @staticmethod
     def test_section_wrappers_and_unmanaged_members_are_preserved() -> None:
         """Preserve transclusion tags and unmanaged list entries."""
-        source = _TEXT.replace(
+        source_text = _TEXT.replace(
             '<!-- aranami begin="assessment-list" -->',
             '\n# [[Manual]]\n<!-- aranami begin="assessment-list" -->',
         )
-        updated = service.update_text(_A_CONFIG, source, ["New"], {})
+        updated = service.update_text(_A_CONFIG, source_text, ["New"], {})
         assert "\n# [[Manual]]\n" in updated
         assert "<section begin=list />" in updated
         assert "<section end=list />" in updated
-        assert service.article_titles(updated) == {"New"}
+        assert source.article_titles(updated) == {"New"}
 
 
 class TestReviewSources(TestCase):
     """Verify review matching and replica-based member selection."""
+
+    @staticmethod
+    def test_prepared_changes_and_rows_render_without_source_reads() -> None:
+        """Keep source identities and assessments behind backend."""
+        site = MagicMock()
+        site.dbName.return_value = "zhwiki"
+        assessments = pl.DataFrame({
+            "page_id": [11, 12],
+            "pa_class": ["A", "B"],
+            "pa_importance": ["High", None],
+        })
+        data = _source_data(
+            {"Renamed": 11, "Added": 12},
+            site,
+            _A_CONFIG,
+            _TEXT,
+            assessments=assessments,
+            previous_members={"Old": 11, "Unmanaged": 99},
+        )
+        assert data.previous_members == {"Old": 11}
+        assert data.preview_members == {"Old": 11}
+        assert data.changes == source.AssessmentChanges(("Added",), (), 2)
+        assert data.rows.sort("page_id").select(
+            "page_id",
+            "class",
+            "importance",
+        ).to_dicts() == [
+            {"page_id": 11, "class": "A", "importance": "High"},
+            {"page_id": 12, "class": "B", "importance": None},
+        ]
+        with (
+            patch.object(source, "category_members") as members,
+            patch.object(source, "read_pages") as read,
+            patch.object(source, "Page") as page,
+        ):
+            report = service.prepare_report(data, _TEXT)
+        members.assert_not_called()
+        read.assert_not_called()
+        page.assert_not_called()
+        assert "[[Renamed]]" in report.text
+        assert report.members == data.members
+        assert report.result.tables["members"].equals(data.rows)
 
     @staticmethod
     def test_latest_matching_heading() -> None:
@@ -147,11 +287,11 @@ class TestReviewSources(TestCase):
             "== A-Class review ==\n== 甲級評審 2 ==\n"
             "=== 甲级评审 wrong level ===\n== Unrelated ==\n"
         )
-        assert service.review_heading(text, "acc") == "甲級評審 2"
-        assert service.review_heading("== B-Class assessment ==", "bpan") == (
+        assert source.review_heading(text, "acc") == "甲級評審 2"
+        assert source.review_heading("== B-Class assessment ==", "bpan") == (
             "B-Class assessment"
         )
-        assert service.review_heading("No review", "ppr") is None
+        assert source.review_heading("No review", "ppr") is None
 
     @staticmethod
     def test_category_uses_replica_and_preloaded_talk_pages() -> None:
@@ -177,18 +317,18 @@ class TestReviewSources(TestCase):
         ].toggleTalkPage.return_value.title.return_value = "Talk:Video Game"
         with (
             patch.object(
-                service,
+                source,
                 "category_members",
                 return_value=members,
             ) as query,
             patch.object(
-                service,
+                source,
                 "read_pages",
                 return_value=[other, game],
             ) as read,
-            patch.object(service, "Page", side_effect=subjects),
+            patch.object(source, "Page", side_effect=subjects),
         ):
-            report = service.prepare_report(site, _ACC_CONFIG, _TEXT)
+            report = _render_source(site, _ACC_CONFIG, _TEXT)
         text = report.text
         query.assert_called_once_with(
             site,
@@ -200,7 +340,7 @@ class TestReviewSources(TestCase):
         assert "[[Talk:Other|评审]]" in text
         assert "[[Talk:Video Game#甲级评审|评审]]" in text
         assert report.members == {"Other": 2, "Video Game": 1}
-        assert service.article_members(text) == {
+        assert source.article_members(text) == {
             "Other": None,
             "Video Game": None,
         }
@@ -223,12 +363,12 @@ class TestReviewSources(TestCase):
             },
         )
         with patch.object(
-            service,
+            source,
             "category_members",
             return_value=empty,
         ) as query:
-            first = service.prepare_text(site, _BPLUS_CONFIG, text)
-            second = service.prepare_text(site, _BPLUS_CONFIG, first)
+            first = _render_source(site, _BPLUS_CONFIG, text).text
+            second = _render_source(site, _BPLUS_CONFIG, first).text
         query.assert_called_with(site, "分类:自定义电子游戏条目", namespace=1)
         assert 'category="分类:自定义电子游戏条目"' in first
         assert first == second
@@ -246,12 +386,12 @@ class TestReviewSources(TestCase):
         )
         replacement = original.with_columns(pl.lit(12).alias("page_id"))
         with patch.object(
-            service,
+            source,
             "category_members",
             side_effect=[original, replacement],
         ):
-            first = service.prepare_report(site, _A_CONFIG, _TEXT)
-            second = service.prepare_report(site, _A_CONFIG, first.text)
+            first = _render_source(site, _A_CONFIG, _TEXT)
+            second = _render_source(site, _A_CONFIG, first.text)
         assert second.members == {"Old": 1}
         assert first == second
         assert (
@@ -267,6 +407,26 @@ class TestReviewSources(TestCase):
 
 class TestAssessmentJob(TestCase):
     """Verify job targets, metadata, and independent failures."""
+
+    def setUp(self) -> None:
+        """Keep assessments and destination identities offline."""
+        self.assessments = pl.DataFrame(
+            schema={
+                "page_id": pl.Int64,
+                "pa_class": pl.String,
+                "pa_importance": pl.String,
+            },
+        )
+        self.enterContext(
+            patch.object(
+                job,
+                "read_assessments",
+                return_value=self.assessments,
+            ),
+        )
+        self.enterContext(
+            patch.object(job, "report_key", return_value="assessment-test"),
+        )
 
     @staticmethod
     def test_custom_destination_and_content_are_passed_to_job() -> None:
@@ -288,6 +448,11 @@ class TestAssessmentJob(TestCase):
             ) as read,
             patch.object(
                 job,
+                "prepare_data",
+                side_effect=partial(_source_data, {"New": 1, "Another": 2}),
+            ) as collect,
+            patch.object(
+                job,
                 "prepare_report",
                 return_value=MembershipReport(text, {"New": 1, "Another": 2}),
             ) as prepare,
@@ -302,7 +467,13 @@ class TestAssessmentJob(TestCase):
             context.site,
             ["User:Example/Custom report"],
         )
-        prepare.assert_called_once_with(context.site, _A_CONFIG, _TEXT)
+        assert prepare.call_count == 1
+        assert collect.call_args.args == (context.site, _A_CONFIG, _TEXT)
+        assert collect.call_args.kwargs["assessments"].columns == [
+            "page_id",
+            "pa_class",
+            "pa_importance",
+        ]
         edit = context.publish.call_args.args[0]
         assert edit.site is context.site
         assert edit.title == "User:Example/Custom report"
@@ -358,7 +529,7 @@ class TestAssessmentJob(TestCase):
             )
             == "1 item total."
         )
-        assert service.article_members(updated) == {"Renamed": None}
+        assert source.article_members(updated) == {"Renamed": None}
         assert "aranami-member" not in updated
 
     @staticmethod
@@ -420,6 +591,11 @@ class TestAssessmentJob(TestCase):
             patch.object(job, "read_pages", return_value=pages),
             patch.object(
                 job,
+                "prepare_data",
+                side_effect=partial(_source_data, {"Old": 1}),
+            ),
+            patch.object(
+                job,
                 "prepare_report",
                 side_effect=outputs,
             ) as prepare,
@@ -473,6 +649,14 @@ class TestAssessmentJob(TestCase):
                         "read_pages",
                         return_value=[MagicMock(text=original)],
                     ),
+                    patch.object(
+                        job,
+                        "prepare_data",
+                        side_effect=partial(
+                            _source_data,
+                            dict(report.members),
+                        ),
+                    ),
                     patch.object(job, "prepare_report", return_value=report),
                     patch.object(
                         job,
@@ -524,7 +708,7 @@ class TestAssessmentJob(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "aranami.support.report_membership.Path.cwd",
+                "backend.support.report_membership.Path.cwd",
                 return_value=Path(directory),
             ),
             patch.object(job, "job_run", return_value=nullcontext(context)),
@@ -532,6 +716,11 @@ class TestAssessmentJob(TestCase):
                 job,
                 "read_pages",
                 return_value=[MagicMock(text=_TEXT)],
+            ),
+            patch.object(
+                job,
+                "prepare_data",
+                side_effect=partial(_source_data, dict(report.members)),
             ),
             patch.object(
                 job,

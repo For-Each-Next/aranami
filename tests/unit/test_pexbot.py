@@ -8,6 +8,8 @@ import json
 from contextlib import nullcontext
 from dataclasses import replace
 from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import override
 from unittest import TestCase
 from unittest.mock import Mock, call, patch
@@ -16,8 +18,9 @@ from urllib.parse import parse_qs, urlparse
 import polars as pl
 from pywikibot.site import BaseSite, Namespace
 
-from aranami.jobs import JobContext, pexbot as job
-from aranami.services.zhwiki import pexbot as service
+from backend.services.zhwiki import pexbot as service
+from shared.reports import ReportStore, report_key
+from updater.jobs import JobContext, pexbot as job
 
 
 class _OfflineSite(BaseSite):
@@ -158,6 +161,33 @@ class TestPexbotEvents(TestCase):
     """Verify event decoding and explicit completion requirements."""
 
     @staticmethod
+    def test_backend_interprets_history_and_stream_outcomes() -> None:
+        """Prepare source evidence without delegated writes."""
+        site = _site()
+        day = dt.date(2026, 10, 20)
+        with (
+            patch.object(
+                service,
+                "edited_by_on_date",
+                return_value=True,
+            ) as read,
+            patch.object(job.urllib.request, "urlopen") as request,
+        ):
+            report = service.prepare_report(site, "Report", day)
+        assert report == service.PexBotReport(
+            "Report",
+            day,
+            already_updated=True,
+        )
+        read.assert_called_once_with(site, "Report", user="PexBot", day=day)
+        request.assert_not_called()
+        assert service.StreamEvent("error-query").failed
+        assert service.StreamEvent("failed-save").failed
+        assert service.StreamEvent("end").complete
+        assert not service.StreamEvent("query-executed").failed
+        assert not service.StreamEvent("step").complete
+
+    @staticmethod
     def test_nondata_lines_and_progress_arguments() -> None:
         """Ignore SSE framing and preserve valid progress data."""
         assert service.parse_event(": heartbeat") is None
@@ -218,7 +248,7 @@ class TestPexbotEvents(TestCase):
             assert response.closed
 
     def test_refresh_logs_only_present_event_arguments(self) -> None:
-        """Omit empty brackets and preserve progress details."""
+        """Use readable sentences instead of raw event payloads."""
         response = BytesIO(
             b'data: {"code":"shutoff-checked"}\n'
             b'data: {"code":"started","args":[]}\n'
@@ -231,14 +261,17 @@ class TestPexbotEvents(TestCase):
         ):
             job._refresh(_site(), "Wikipedia:Report")
         assert [record.getMessage() for record in logs.records] == [
-            "PexBot Wikipedia:Report: shutoff-checked.",
-            "PexBot Wikipedia:Report: started.",
-            "PexBot Wikipedia:Report: step ('queries', 2).",
-            "PexBot Wikipedia:Report: end.",
+            "PexBot Wikipedia:Report: safety check passed.",
+            "PexBot Wikipedia:Report: refresh started.",
+            "PexBot Wikipedia:Report: refresh progress received.",
+            (
+                "PexBot Wikipedia:Report: refresh completed; "
+                "edit count is unconfirmed."
+            ),
         ]
 
-    def test_refresh_omits_query_text_and_keeps_query_timing(self) -> None:
-        """Abbreviate SQL arguments while retaining query timing."""
+    def test_refresh_omits_query_text_and_event_payloads(self) -> None:
+        """Keep SQL and structured arguments out of diagnostics."""
         sql = "\nWITH recent_project_pages AS (\n" + "SELECT page_id;\n" * 300
         events = [
             {"code": "query-executing", "args": [sql]},
@@ -257,12 +290,12 @@ class TestPexbotEvents(TestCase):
         ):
             job._refresh(_site(), "Wikipedia:Report name/C++")
         assert [record.getMessage() for record in logs.records] == [
-            "PexBot Wikipedia:Report name/C++: query-executing (...).",
+            "PexBot Wikipedia:Report name/C++: running a database query.",
+            "PexBot Wikipedia:Report name/C++: database query completed.",
             (
-                "PexBot Wikipedia:Report name/C++: "
-                "query-executed ('1.25 seconds', 42)."
+                "PexBot Wikipedia:Report name/C++: refresh completed; "
+                "edit count is unconfirmed."
             ),
-            "PexBot Wikipedia:Report name/C++: end.",
         ]
         assert "SELECT" not in "\n".join(logs.output)
         prepared = request.call_args.args[0]
@@ -288,12 +321,50 @@ class TestPexbotJob(TestCase):
     @override
     def setUp(self) -> None:
         """Default to offline history without a matching edit."""
-        history = patch.object(job, "edited_by_on_date", return_value=False)
+        directory = self.enterContext(TemporaryDirectory())
+        self.enterContext(
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+        )
+        history = patch.object(
+            service,
+            "edited_by_on_date",
+            return_value=False,
+        )
         history.start()
         self.addCleanup(history.stop)
 
     @staticmethod
-    def test_dry_run_reads_wheel_defaults_without_refreshing() -> None:
+    def test_backend_retains_action_before_delegated_publication() -> None:
+        """Persist complete metadata before delegated publication."""
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
+        title = "Wikipedia:Report"
+        key = report_key("pexbot", context.site.dbName(), title)
+        observations = []
+
+        def inspect_saved_action(_site: object, _title: str) -> None:
+            """Observe retained facts before the external write."""
+            directory = Path.cwd() / "reports" / key
+            selected = json.loads((directory / "latest.json").read_text())
+            generation = directory / selected["latest"]
+            manifest = json.loads((generation / "manifest.json").read_text())
+            observations.append(manifest["publication"]["state"])
+            assert manifest["calculation"] == "complete"
+            assert (generation / "actions.parquet").is_file()
+
+        with (
+            patch.object(job, "job_run", return_value=nullcontext(context)),
+            patch.object(job, "subscribed_titles", return_value=[title]),
+            patch.object(job, "_refresh", side_effect=inspect_saved_action),
+        ):
+            job.run(context=context)
+        assert observations == ["unconfirmed"]
+        saved = ReportStore().read(key)
+        assert saved is not None
+        assert saved.manifest["publication"]["state"] == "delegated"
+        assert saved.manifest["publication"]["confirmed_edits"] is None
+
+    @staticmethod
+    def test_dry_run_reads_source_defaults_without_refreshing() -> None:
         """Use configured defaults and record proposed actions."""
         context = JobContext(_site(), dt.date(2026, 10, 3), dry=True)
         configured = ("Wikipedia:Custom", "User:Another/")
@@ -323,7 +394,7 @@ class TestPexbotJob(TestCase):
 
     @staticmethod
     def test_explicit_prefix_override_including_disable() -> None:
-        """Honor an explicit empty list instead of wheel defaults."""
+        """Honor an explicit empty list instead of source defaults."""
         context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
@@ -407,6 +478,12 @@ class TestPexbotJob(TestCase):
             call.pause(15),
             call.refresh(context.site, "B"),
         ]
+        failed = ReportStore().read(report_key("pexbot", "zhwiki", "A"))
+        completed = ReportStore().read(report_key("pexbot", "zhwiki", "B"))
+        assert failed is not None
+        assert completed is not None
+        assert failed.manifest["publication"]["state"] == "unconfirmed"
+        assert completed.manifest["publication"]["state"] == "delegated"
 
     def test_already_updated_reports_are_skipped_in_both_modes(self) -> None:
         """Record today's edit and skip proposals and refreshes."""
@@ -423,7 +500,7 @@ class TestPexbotJob(TestCase):
                 patch.object(job, "subscribed_titles", return_value=["A"]),
                 patch.object(job, "_utc_today", return_value=today),
                 patch.object(
-                    job,
+                    service,
                     "edited_by_on_date",
                     return_value=True,
                 ) as history,
@@ -469,7 +546,7 @@ class TestPexbotJob(TestCase):
                 ],
             ),
             patch.object(
-                job,
+                service,
                 "edited_by_on_date",
                 side_effect=[True, False, True, False, True],
             ),
@@ -493,7 +570,7 @@ class TestPexbotJob(TestCase):
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(job, "subscribed_titles", return_value=["A", "B"]),
             patch.object(
-                job,
+                service,
                 "edited_by_on_date",
                 side_effect=[error, False],
             ),
@@ -522,7 +599,7 @@ class TestPexbotJob(TestCase):
                 side_effect=[before_midnight, after_midnight],
             ),
             patch.object(
-                job,
+                service,
                 "edited_by_on_date",
                 return_value=False,
             ) as history,

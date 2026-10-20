@@ -3,7 +3,7 @@
 from datetime import date
 from unittest import TestCase
 
-from aranami.support.dates import parse_complete_date, parse_date
+from shared.support.dates import parse_complete_date, parse_date
 
 
 class TestCompleteDates(TestCase):

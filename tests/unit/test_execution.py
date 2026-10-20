@@ -2,8 +2,6 @@
 
 # Keep the repository's unittest runner and exception assertions.
 # ruff: file-ignore[pytest-unittest-raises-assertion]
-# Prime glyphs are required in elapsed edit summaries.
-# ruff: file-ignore[ambiguous-unicode-character-string]
 
 import datetime as dt
 import json
@@ -13,8 +11,20 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from aranami.jobs import JobContext, ProposedEdit, job_run, pexbot
-from aranami.support.cache import clear_runtime_cache
+from backend.services.zhwiki import pexbot as pexbot_data
+from shared.support.cache import clear_runtime_cache
+from updater.jobs import JobContext, ProposedEdit, job_run, pexbot
+
+
+def _site() -> Mock:
+    """Create an offline wiki identity for publication metadata.
+
+    Returns:
+        Mock site with an explicit valid database name.
+    """
+    site = Mock()
+    site.dbName.return_value = "zhwiki"
+    return site
 
 
 def _fail(message: str) -> None:
@@ -32,6 +42,13 @@ def _fail(message: str) -> None:
 class TestRoutineOutput(TestCase):
     """Verify dry runs and cache maintenance cannot edit Wikipedia."""
 
+    def setUp(self) -> None:
+        """Keep runtime metadata inside a disposable test folder."""
+        directory = self.enterContext(TemporaryDirectory())
+        self.enterContext(
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+        )
+
     @staticmethod
     def test_dry_run_combines_edits_in_one_markdown_file() -> None:
         """Link exact proposals without embedding their contents."""
@@ -48,7 +65,9 @@ class TestRoutineOutput(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
-            patch("aranami.jobs._execution.pywikibot.Page") as page,
+            patch(
+                "updater.jobs._execution.pywikibot.Page",
+            ) as page,
         ):
             context.publish(
                 ProposedEdit(
@@ -150,7 +169,7 @@ class TestRoutineOutput(TestCase):
     @staticmethod
     def test_live_report_writes_no_local_artifacts() -> None:
         """Avoid creating dry-run output during live execution."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=False)
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
         context.edits.append(
             ProposedEdit(context.site, "Target", "text", "summary"),
         )
@@ -163,10 +182,13 @@ class TestRoutineOutput(TestCase):
 
     def test_live_publish_checks_concurrent_changes(self) -> None:
         """Refuse to overwrite a concurrently modified page."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=False)
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
         page = Mock(text="someone else's update")
         with (
-            patch("aranami.jobs._execution.pywikibot.Page", return_value=page),
+            patch(
+                "updater.jobs._execution.pywikibot.Page",
+                return_value=page,
+            ),
             self.assertRaises(RuntimeError),
         ):
             context.publish(
@@ -182,20 +204,13 @@ class TestRoutineOutput(TestCase):
 
     @staticmethod
     def test_live_publish_and_unchanged_skip() -> None:
-        """Save changed text and avoid redundant writes."""
+        """Save changed text and skip redundant writes."""
         page = Mock(text="old")
-        with (
-            patch(
-                "aranami.support.edit_summary.version",
-                return_value="0.3.5",
-            ),
-            patch("aranami.jobs._execution.perf_counter", return_value=100),
-            patch(
-                "aranami.jobs._execution.pywikibot.Page",
-                return_value=page,
-            ),
+        with patch(
+            "updater.jobs._execution.pywikibot.Page",
+            return_value=page,
         ):
-            context = JobContext(Mock(), dt.date(2026, 10, 3), dry=False)
+            context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
             context.publish(
                 ProposedEdit(
                     context.site,
@@ -215,37 +230,20 @@ class TestRoutineOutput(TestCase):
                 ),
             )
         page.save.assert_called_once_with(
-            summary=(
-                "summary (in 0.00″ by [[toolforge:aranami|Aranami 0.3.5]])"
-            ),
+            summary="summary ([[toolforge:Aranami|Aranami]])",
         )
         assert page.text == "new"
 
     @staticmethod
-    def test_publish_records_timed_summary_in_live_and_dry_runs() -> None:
-        """Keep recorded and published summaries identical."""
+    def test_publish_records_attributed_summary_in_live_and_dry_runs() -> None:
+        """Keep recorded and published attribution identical."""
         for dry in (False, True):
             page = Mock(text="old")
-            with (
-                patch(
-                    "aranami.support.edit_summary.version",
-                    return_value="0.3.5",
-                ),
-                patch(
-                    "aranami.jobs._execution.perf_counter",
-                    return_value=100,
-                ) as clock,
-                patch(
-                    "aranami.jobs._execution.pywikibot.Page",
-                    return_value=page,
-                ) as page_factory,
-            ):
-                context = JobContext(
-                    Mock(),
-                    dt.date(2026, 10, 3),
-                    dry=dry,
-                )
-                context.site.dbName.return_value = "zhwiki"
+            with patch(
+                "updater.jobs._execution.pywikibot.Page",
+                return_value=page,
+            ) as page_factory:
+                context = JobContext(_site(), dt.date(2026, 10, 3), dry=dry)
                 proposal = ProposedEdit(
                     context.site,
                     "Target",
@@ -253,11 +251,9 @@ class TestRoutineOutput(TestCase):
                     "Updated for 5 May 2025.",
                     original_text="old",
                 )
-                clock.return_value = 1413.95
                 context.publish(proposal)
                 expected = (
-                    "Updated for 5 May 2025. "
-                    "(in 21′54″ by [[toolforge:aranami|Aranami 0.3.5]])"
+                    "Updated for 5 May 2025. ([[toolforge:Aranami|Aranami]])"
                 )
                 assert context.edits[0].summary == expected
                 assert proposal.summary == "Updated for 5 May 2025."
@@ -274,28 +270,26 @@ class TestRoutineOutput(TestCase):
                         assert report is not None
                         assert (
                             "Updated for 5 May 2025. "
-                            "(in 21′54″ by "
-                            r"\[\[toolforge:aranami|Aranami 0.3.5\]\])"
-                        ) in report.read_text(encoding="utf-8")
+                            r"(\[\[toolforge:Aranami|Aranami\]\])"
+                            in report.read_text(encoding="utf-8")
+                        )
                 else:
                     page.save.assert_called_once_with(summary=expected)
 
     @staticmethod
-    def test_publish_times_each_proposal_from_its_own_routine() -> None:
-        """Reset timing between routines and measure each proposal."""
+    def test_routine_timing_is_independent_of_publication_attribution() -> (
+        None
+    ):
+        """Keep durations in backend metadata and summaries brief."""
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
             patch(
-                "aranami.support.edit_summary.version",
-                return_value="0.3.5",
-            ),
-            patch(
-                "aranami.jobs._execution.perf_counter",
+                "backend.support.execution.perf_counter",
                 return_value=100,
             ) as clock,
         ):
-            context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
+            context = JobContext(_site(), dt.date(2026, 10, 3), dry=True)
             clock.return_value = 200
             with job_run("first", context=context):
                 clock.return_value = 260.5
@@ -317,41 +311,21 @@ class TestRoutineOutput(TestCase):
                 ProposedEdit(context.site, "Direct", "four", "summary"),
             )
         assert [edit.summary for edit in context.edits] == [
-            "summary (in 1′00″ by [[toolforge:aranami|Aranami 0.3.5]])",
-            "summary (in 1′10″ by [[toolforge:aranami|Aranami 0.3.5]])",
-            "summary (in 11.25″ by [[toolforge:aranami|Aranami 0.3.5]])",
-            "summary (in 8′20″ by [[toolforge:aranami|Aranami 0.3.5]])",
-        ]
+            "summary ([[toolforge:Aranami|Aranami]])",
+        ] * 4
         assert [task.elapsed_seconds for task in context.tasks] == [70, 11.25]
 
     @staticmethod
-    def test_publish_replaces_existing_execution_suffix() -> None:
-        """Retain one suffix when a proposal is published again."""
-        with (
-            patch(
-                "aranami.support.edit_summary.version",
-                return_value="0.3.5",
-            ),
-            patch(
-                "aranami.jobs._execution.perf_counter",
-                return_value=100,
-            ) as clock,
-        ):
-            context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
-            clock.return_value = 101
-            context.publish(
-                ProposedEdit(context.site, "Target", "text", "summary"),
-            )
-            clock.return_value = 102
-            context.publish(context.edits[0])
-        assert (
-            context.edits[0].summary
-            == "summary (in 1.00″ by [[toolforge:aranami|Aranami 0.3.5]])"
+    def test_republished_summary_has_one_attribution() -> None:
+        """Retain one exact suffix when publishing a proposal again."""
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=True)
+        context.publish(
+            ProposedEdit(context.site, "Target", "text", "summary"),
         )
-        assert (
-            context.edits[1].summary
-            == "summary (in 2.00″ by [[toolforge:aranami|Aranami 0.3.5]])"
-        )
+        context.publish(context.edits[0])
+        assert [edit.summary for edit in context.edits] == [
+            "summary ([[toolforge:Aranami|Aranami]])",
+        ] * 2
 
     @staticmethod
     def test_clear_cache_leaves_logs_and_reports() -> None:
@@ -373,7 +347,7 @@ class TestRoutineOutput(TestCase):
     @staticmethod
     def test_delegated_refresh_is_never_called_in_dry_run() -> None:
         """Group PexBot targets into one task without write requests."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=True)
         context.site.dbName.return_value = "zhwiki"
         targets = ["Target", "Second target"]
         with (
@@ -385,7 +359,7 @@ class TestRoutineOutput(TestCase):
                 return_value=targets,
             ),
             patch.object(
-                pexbot,
+                pexbot_data,
                 "edited_by_on_date",
                 return_value=False,
             ) as history,
@@ -409,7 +383,7 @@ class TestRoutineOutput(TestCase):
         None
     ):
         """Retain outputs and error details after a routine failure."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=True)
         context.site.dbName.return_value = "zhwiki"
         with (
             TemporaryDirectory() as directory,
@@ -458,7 +432,7 @@ class TestRoutineOutput(TestCase):
     @staticmethod
     def test_all_failed_tasks_report_failed() -> None:
         """Compute the overall outcome from failed routine results."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=True)
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
@@ -480,7 +454,7 @@ class TestRoutineOutput(TestCase):
     @staticmethod
     def test_deferred_task_reports_partial_success_without_exception() -> None:
         """Keep a postponed routine distinct from completed work."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=True)
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
@@ -499,7 +473,7 @@ class TestRoutineOutput(TestCase):
 
     def test_deferred_result_requires_a_routine(self) -> None:
         """Require a routine before recording its deferred result."""
-        context = JobContext(Mock(), dt.date(2026, 10, 3), dry=True)
+        context = JobContext(_site(), dt.date(2026, 10, 3), dry=True)
         with self.assertRaises(RuntimeError):
             context.defer("Source unavailable.")
 
@@ -511,9 +485,11 @@ class TestRoutineOutput(TestCase):
                 self.subTest(dry=dry),
                 TemporaryDirectory() as directory,
                 patch("pathlib.Path.cwd", return_value=Path(directory)),
-                patch("aranami.jobs._execution.pywikibot.Site") as site,
                 patch(
-                    "aranami.jobs._execution.pywikibot.Page",
+                    "updater.jobs._execution.pywikibot.Site",
+                ) as site,
+                patch(
+                    "updater.jobs._execution.pywikibot.Page",
                     return_value=page,
                 ) as page_factory,
             ):
@@ -549,14 +525,16 @@ class TestRoutineOutput(TestCase):
         """Honor shared mode and retain its pending report."""
         for dry in (False, True):
             page = Mock(text="old")
-            context = JobContext(Mock(), dt.date(2026, 10, 3), dry=dry)
+            context = JobContext(_site(), dt.date(2026, 10, 3), dry=dry)
             with (
                 self.subTest(dry=dry),
                 TemporaryDirectory() as directory,
                 patch("pathlib.Path.cwd", return_value=Path(directory)),
-                patch("aranami.jobs._execution.pywikibot.Site") as site,
                 patch(
-                    "aranami.jobs._execution.pywikibot.Page",
+                    "updater.jobs._execution.pywikibot.Site",
+                ) as site,
+                patch(
+                    "updater.jobs._execution.pywikibot.Page",
                     return_value=page,
                 ) as page_factory,
             ):
@@ -605,7 +583,7 @@ class TestRoutineStatusLifecycle(TestCase):
             Most recently persisted lifecycle fields for the routine.
         """
         snapshot = json.loads(
-            (self.root / "logs" / "aranami-status.json").read_text(),
+            (self.root / "state" / "routine-status.json").read_text(),
         )
         assert snapshot["schema"] == 1
         assert snapshot["updated_at"].endswith("Z")
@@ -615,11 +593,11 @@ class TestRoutineStatusLifecycle(TestCase):
         self,
     ) -> None:
         """Report a running routine and its confirmed save."""
-        context = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+        context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
         page = Mock(text="old")
         with (
             patch(
-                "aranami.jobs._execution.pywikibot.Page",
+                "updater.jobs._execution.pywikibot.Page",
                 return_value=page,
             ),
             job_run("dyks", context=context),
@@ -661,7 +639,7 @@ class TestRoutineStatusLifecycle(TestCase):
             ("failed", True, None),
         )
         for expected_status, delegated, count in cases:
-            context = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+            context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
             with (
                 self.subTest(status=expected_status, delegated=delegated),
                 self.assertRaisesRegex(RuntimeError, "Primary source failed")
@@ -683,14 +661,16 @@ class TestRoutineStatusLifecycle(TestCase):
 
     def test_preview_does_not_replace_public_live_state(self) -> None:
         """Omit previews despite conflicting invocation keywords."""
-        live = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+        live = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
         with job_run("dyks", context=live):
             pass
-        path = self.root / "logs" / "aranami-status.json"
+        path = self.root / "state" / "routine-status.json"
         before = path.read_bytes(), path.stat().st_mtime_ns
-        preview = JobContext(Mock(), dt.date(2026, 10, 18), dry=True)
+        preview = JobContext(_site(), dt.date(2026, 10, 18), dry=True)
         with (
-            patch("aranami.jobs._execution.write_routine_status") as writer,
+            patch(
+                "backend.support.execution.write_routine_status",
+            ) as writer,
             job_run("dyks", dry=False, context=preview),
         ):
             preview.mark_updates_unknown()
@@ -700,8 +680,8 @@ class TestRoutineStatusLifecycle(TestCase):
 
     def test_older_context_cannot_overwrite_a_newer_run(self) -> None:
         """Retain the newer state when an older context finishes."""
-        older = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
-        newer = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+        older = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
+        newer = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
         with job_run("dyks", context=older):
             older.defer("The older attempt is still waiting.")
             with job_run("dyks", context=newer):
@@ -716,21 +696,24 @@ class TestRoutineStatusLifecycle(TestCase):
     ) -> None:
         """Keep status failures outside the wiki result path."""
         for fail in (False, True):
-            context = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
+            context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
             page = Mock(text="old")
             primary = RuntimeError("The original wiki failure.")
             action = Mock(side_effect=primary if fail else None)
             with (
                 self.subTest(fail=fail),
                 patch(
-                    "aranami.jobs._execution.write_routine_status",
+                    "backend.support.execution.write_routine_status",
                     side_effect=OSError("Status storage unavailable."),
                 ) as writer,
                 patch(
-                    "aranami.jobs._execution.pywikibot.Page",
+                    "updater.jobs._execution.pywikibot.Page",
                     return_value=page,
                 ),
-                self.assertLogs("aranami.jobs._execution", level="WARNING"),
+                self.assertLogs(
+                    "backend.support.execution",
+                    level="WARNING",
+                ),
             ):
                 observed_error = None
                 try:

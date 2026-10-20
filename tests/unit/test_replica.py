@@ -3,7 +3,7 @@
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from aranami.sources.quarry import Replica
+from shared.sources.quarry import Replica
 
 
 class TestReplicaConfiguration(TestCase):

@@ -15,7 +15,7 @@ from unittest.mock import patch
 import polars as pl
 from pywikibot.site import BaseSite, Namespace
 
-from toolforge.backlog import collect_backlog
+from backend.website.backlog import collect_backlog
 
 _MEMBER_SCHEMA = {
     "page_id": pl.Int64,
@@ -86,7 +86,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "toolforge.backlog.page_categories",
+            "backend.website.backlog.page_categories",
             return_value=categories,
         ) as read:
             result = collect_backlog(site, members)
@@ -150,7 +150,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "toolforge.backlog.page_categories",
+            "backend.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(_OfflineSite("zh", "wikipedia"), members)
@@ -208,7 +208,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "toolforge.backlog.page_categories",
+            "backend.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(
@@ -255,7 +255,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "toolforge.backlog.page_categories",
+            "backend.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(
@@ -315,7 +315,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "toolforge.backlog.page_categories",
+            "backend.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(_OfflineSite("zh", "wikipedia"), members)
@@ -353,7 +353,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "toolforge.backlog.page_categories",
+            "backend.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(
@@ -386,7 +386,7 @@ class TestMaintenanceBacklog(TestCase):
     def test_successful_empty_membership_retains_zero_groups() -> None:
         """Keep successful absence separate from collection failures."""
         with patch(
-            "toolforge.backlog.page_categories",
+            "backend.website.backlog.page_categories",
             return_value=pl.DataFrame(schema=_CATEGORY_SCHEMA),
         ) as read:
             site = _OfflineSite("zh", "wikipedia")
@@ -421,7 +421,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "toolforge.backlog.page_categories",
+            "backend.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(_OfflineSite("zh", "wikipedia"), members)
@@ -437,7 +437,7 @@ class TestMaintenanceBacklog(TestCase):
         """Propagate source failure so orchestration can mark null."""
         with (
             patch(
-                "toolforge.backlog.page_categories",
+                "backend.website.backlog.page_categories",
                 side_effect=RuntimeError("Replica unavailable."),
             ),
             self.assertRaisesRegex(RuntimeError, "Replica unavailable"),
@@ -458,14 +458,14 @@ class TestMaintenanceBacklog(TestCase):
         )
         with (
             patch(
-                "toolforge.backlog.page_categories",
+                "backend.website.backlog.page_categories",
                 return_value=pl.DataFrame(
                     [(1, "需要清理的条目"), (2, "需要清理的条目")],
                     schema=_CATEGORY_SCHEMA,
                     orient="row",
                 ),
             ),
-            patch("toolforge.backlog._MAX_GROUP_ITEMS", 1),
+            patch("backend.website.backlog._MAX_GROUP_ITEMS", 1),
             self.assertRaisesRegex(ValueError, "snapshot record limit"),
         ):
             collect_backlog(_OfflineSite("zh", "wikipedia"), members)
@@ -503,7 +503,7 @@ class TestConfiguredMaintenance(TestCase):
             path = Path(directory) / "maintenance.json"
             path.write_text(json.dumps(config), encoding="utf-8")
             with patch(
-                "toolforge.backlog.page_categories",
+                "backend.website.backlog.page_categories",
                 return_value=pl.DataFrame(
                     [
                         (1, name),
@@ -606,7 +606,7 @@ class TestConfiguredMaintenance(TestCase):
             path.write_text(json.dumps(config), encoding="utf-8")
             with (
                 patch(
-                    "toolforge.backlog.page_categories",
+                    "backend.website.backlog.page_categories",
                     return_value=pl.DataFrame(
                         [
                             (1, "自2024年5月Needs_sources"),
@@ -617,7 +617,7 @@ class TestConfiguredMaintenance(TestCase):
                     ),
                 ) as categories,
                 patch(
-                    "toolforge.backlog.maintenance_tags",
+                    "backend.website.backlog.maintenance_tags",
                     side_effect=tags,
                 ) as read,
             ):
@@ -658,8 +658,8 @@ class TestConfiguredMaintenance(TestCase):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "maintenance.json"
             with (
-                patch("toolforge.backlog.page_categories") as categories,
-                patch("toolforge.backlog.maintenance_tags") as tags,
+                patch("backend.website.backlog.page_categories") as categories,
+                patch("backend.website.backlog.maintenance_tags") as tags,
                 self.assertRaises(OSError),
             ):
                 collect_backlog(

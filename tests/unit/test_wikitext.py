@@ -6,7 +6,7 @@ import mwparserfromhell
 from pywikibot.exceptions import InvalidTitleError
 from pywikibot.site import BaseSite, Namespace
 
-from aranami.support import get_templates
+from shared.support.wikitext import get_templates
 
 
 class _OfflineSite(BaseSite):

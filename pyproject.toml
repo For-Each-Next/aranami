@@ -1,10 +1,6 @@
-[build-system]
-requires = ["uv_build>=0.11.28,<0.12"]
-build-backend = "uv_build"
-
 [project]
 name = "aranami"
-version = "0.5.5"
+version = "0.6.0"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [
@@ -12,7 +8,7 @@ authors = [
 ]
 license = "CC0-1.0"
 license-files = ["LICENSE"]
-requires-python = ">=3.12"
+requires-python = ">=3.15"
 keywords = ["mediawiki", "pywikibot", "wikipedia"]
 classifiers = [
     "Development Status :: 1 - Planning",
@@ -22,9 +18,6 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: 3.15",
     "Topic :: Internet :: WWW/HTTP :: Dynamic Content :: Wiki",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -32,15 +25,14 @@ classifiers = [
     "Private :: Do Not Upload",
 ]
 dependencies = [
-    "apscheduler>=3.11,<4",
+    "apscheduler",
     "dateparser",
-    "great-tables",
     "jieba",
     "mwparserfromhell",
     "opencc-python-reimplemented",
     "polars",
     "pymysql",
-    "pywikibot",
+    "pywikibot[mwoauth]",
     "python-dateutil",
     "sqlalchemy",
     "tqdm",
@@ -51,19 +43,22 @@ dev = [
     "ruff",
 ]
 
-[tool.uv.build-backend]
-wheel-exclude = ["AGENTS.md"]
+[tool.uv]
+package = false
 
 [tool.ruff]
 fix = true
 line-length = 79
 preview = true
 show-fixes = true
-target-version = "py312"
+target-version = "py315"
 
 [tool.ruff.format]
 docstring-code-format = true
 docstring-code-line-length = 72
+
+[tool.ruff.per-file-target-version]
+"scripts/toolforge/validate-source.py" = "py311"
 
 [tool.ruff.lint]
 ignore = [

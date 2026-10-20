@@ -2,8 +2,8 @@
 /** Verify bounded homepage reuse, input invalidation, and safe cache failures. */
 declare(strict_types=1);
 
-require dirname(__DIR__, 2) . '/src/toolforge/status.php';
-require dirname(__DIR__, 2) . '/src/toolforge/page-cache.php';
+require dirname(__DIR__, 2) . '/src/webservice/status.php';
+require dirname(__DIR__, 2) . '/src/webservice/page-cache.php';
 
 /** Fail visibly even when built-in assertions are disabled. */
 function expectSame(mixed $expected, mixed $actual, string $description): void
@@ -31,26 +31,30 @@ function removeFixture(string $path): void
 
 $fixture = sys_get_temp_dir() . '/aranami-page-cache-' . bin2hex(random_bytes(8));
 mkdir($fixture . '/cache/toolforge', 0700, true);
-mkdir($fixture . '/logs', 0700);
+mkdir($fixture . '/state', 0700);
 register_shutdown_function(static function () use ($fixture): void {
     removeFixture($fixture);
 });
 $directory = $fixture . '/cache/toolforge/pages';
 $snapshot = $fixture . '/cache/toolforge/dashboard.json';
-$status = $fixture . '/logs/aranami-status.json';
+$status = $fixture . '/state/routine-status.json';
+$schedule = $fixture . '/state/schedule-status.json';
+$configuration = $fixture . '/routines.json';
+$version = $fixture . '/version.json';
 $template = $fixture . '/template.php';
 file_put_contents($snapshot, '{"snapshot":1}');
 file_put_contents($template, '<?php // template');
-$inputs = [$snapshot, $template];
-$optional = [$status];
+file_put_contents($configuration, '{"schema":1,"routines":{}}');
+file_put_contents($version, '{"schema":1,"version":"0.5.6.dev1"}');
+$inputs = [$snapshot, $template, $configuration, $version];
+$optional = [$status, $schedule];
 $key = homepageCacheKey($inputs, $optional);
 expectSame(true, is_string($key), 'A regular snapshot and missing optional status produce a key');
 expectSame(true, homepageCacheRequest('GET', [], ''), 'An ordinary GET can reuse HTML');
-foreach ([['HEAD', [], ''], ['POST', [], ''], ['GET', ['language' => 'en'], 'language=en'],
-    ['GET', ['random' => '1'], 'random=1'], ['GET', ['fragment' => 'quality'], 'fragment=quality'],
+foreach ([['HEAD', [], ''], ['POST', [], ''], ['GET', ['unexpected' => '1'], 'unexpected=1'],
     ['GET', [], '&']] as [$method, $query, $queryString]) {
     expectSame(false, homepageCacheRequest($method, $query, $queryString),
-        'HEAD, filtered, random, fragment, and nonempty query requests bypass the cache');
+        'HEAD, POST, and nonempty query requests bypass the cache');
 }
 
 $html = '<!doctype html><html lang="en"><body>Cached content.</body></html>';
@@ -90,6 +94,34 @@ expectSame(false, $key === $changedKey, 'New routine status files invalidate cac
 $key = $changedKey;
 touch($status, filemtime($status) + 1);
 expectSame(false, $key === homepageCacheKey($inputs, $optional), 'Routine status mtime changes invalidate HTML');
+$key = homepageCacheKey($inputs, $optional);
+file_put_contents($schedule, '{"state":"running"}');
+expectSame(false, $key === homepageCacheKey($inputs, $optional), 'Actual scheduler heartbeat snapshots invalidate HTML');
+$clock = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+$scheduleData = ['schema' => 1, 'updated_at' => $clock->format('Y-m-d\TH:i:s\Z'),
+    'state' => 'running', 'config_id' => str_repeat('a', 64), 'routines' => []];
+file_put_contents($schedule, json_encode($scheduleData));
+$freshScheduleKey = homepageCacheKey($inputs, $optional);
+$scheduleData['updated_at'] = $clock->modify('-121 seconds')->format('Y-m-d\TH:i:s\Z');
+file_put_contents($schedule, json_encode($scheduleData));
+expectSame(false, $freshScheduleKey === homepageCacheKey($inputs, $optional), 'A stale scheduler transition invalidates HTML without another heartbeat');
+$scheduleData['updated_at'] = $clock->format('Y-m-d\TH:i:s\Z');
+$scheduleData['started_at'] = $clock->modify('-2 days')->format('Y-m-d\TH:i:s\Z');
+file_put_contents($schedule, json_encode($scheduleData));
+$beforeRestart = homepageCacheKey($inputs, $optional);
+$scheduleTime = filemtime($schedule);
+$scheduleData['started_at'] = $clock->format('Y-m-d\TH:i:s\Z');
+file_put_contents($schedule . '.new', json_encode($scheduleData));
+touch($schedule . '.new', $scheduleTime);
+rename($schedule . '.new', $schedule);
+expectSame(false, $beforeRestart === homepageCacheKey($inputs, $optional),
+    'An atomic monitor restart invalidates the cached footer even with matching size and mtime');
+$key = homepageCacheKey($inputs, $optional);
+file_put_contents($configuration, '{"schema":1,"routines":{"changed":{}}}');
+expectSame(false, $key === homepageCacheKey($inputs, $optional), 'Shared routine configuration changes invalidate HTML');
+$key = homepageCacheKey($inputs, $optional);
+file_put_contents($version, '{"schema":1,"version":"0.5.6.dev2"}');
+expectSame(false, $key === homepageCacheKey($inputs, $optional), 'Source deployment version changes invalidate HTML');
 $key = homepageCacheKey($inputs, $optional);
 file_put_contents($template, '<?php // changed template');
 expectSame(false, $key === homepageCacheKey($inputs, $optional), 'PHP helper edits invalidate HTML');

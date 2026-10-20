@@ -2,7 +2,7 @@
 /** Verify semantic assessment sorting, stable pagination, and missing values. */
 declare(strict_types=1);
 
-require dirname(__DIR__, 2) . '/src/toolforge/assessment.php';
+require dirname(__DIR__, 2) . '/src/webservice/assessment.php';
 
 $items = [
     ['page_id' => 4, 'title' => 'D', 'oldest_issue_month' => null],

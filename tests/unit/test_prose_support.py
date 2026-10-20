@@ -10,10 +10,10 @@ from unittest.mock import Mock, patch
 
 from wiki_fixtures import OfflineSite
 
-from aranami.services.enwiki.prose import PROFILE as EN_PROFILE
-from aranami.services.zhwiki.prose import PROFILE as ZH_PROFILE
-from aranami.support import words
-from aranami.support.prose import ProseProfile, extract_prose
+from backend.services.enwiki.prose import PROFILE as EN_PROFILE
+from backend.services.zhwiki.prose import PROFILE as ZH_PROFILE
+from shared.support import words
+from shared.support.prose import ProseProfile, extract_prose
 
 
 class TestProseSupport(TestCase):

@@ -4,13 +4,13 @@ from unittest import TestCase
 
 import mwparserfromhell
 
-from aranami.support.templates import (
+from shared.support.templates import (
     normalize_oldid,
     normalize_param_name,
     template_get_param,
     template_get_raw_param,
 )
-from aranami.support.wikitext import clean_value
+from shared.support.wikitext import clean_value
 
 
 class TestScalarWikitext(TestCase):

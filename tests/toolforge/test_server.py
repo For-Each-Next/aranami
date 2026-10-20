@@ -1,4 +1,4 @@
-"""Verify background refreshes and read-only HTTP endpoints."""
+"""Verify hub-dispatched refreshes and read-only HTTP endpoints."""
 
 # Keep the repository unittest runner and exception assertions.
 # ruff: file-ignore[pytest-unittest-raises-assertion]
@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import math
 import tempfile
 import threading
 import time
@@ -17,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
-from toolforge.server import (
+from backend.server import (
     DashboardHTTPServer,
     DashboardUpdater,
     collect_dashboard_pass,
@@ -59,7 +58,7 @@ class DashboardUpdaterTests(unittest.TestCase):
         self.releases: list[threading.Event] = []
 
     def tearDown(self) -> None:
-        """Release blocked fixtures before joining every worker."""
+        """Release blocked refreshes before stopping output owners."""
         for release in self.releases:
             release.set()
         for updater in self.updaters:
@@ -69,7 +68,6 @@ class DashboardUpdaterTests(unittest.TestCase):
     def updater(
         self,
         collect: Callable[[], dict[str, object]],
-        interval: float = 3600,
     ) -> DashboardUpdater:
         """Track an updater for guaranteed cleanup.
 
@@ -80,7 +78,6 @@ class DashboardUpdaterTests(unittest.TestCase):
             self.output,
             collect,
             save_fixture,
-            interval=interval,
             log_dir=self.directory / "logs",
         )
         self.updaters.append(updater)
@@ -100,7 +97,7 @@ class DashboardUpdaterTests(unittest.TestCase):
         calls: list[int] = []
 
         def collect() -> dict[str, object]:
-            """Hold the worker until the test releases it.
+            """Hold the dispatched refresh until the test releases it.
 
             Returns:
                 A snapshot identifying the completed call.
@@ -112,41 +109,68 @@ class DashboardUpdaterTests(unittest.TestCase):
 
         return collect, entered, calls
 
-    def test_immediate_refresh_no_overlap_and_graceful_active_stop(
+    def test_start_claims_output_without_collecting(
         self,
     ) -> None:
-        """Start immediately and finish active work on shutdown."""
-        collect, entered, calls = self.blocked_collection()
-        updater = self.updater(collect, interval=0.001)
+        """Leave collection to the hub after acquiring ownership."""
+        calls = []
+
+        def collect() -> dict[str, object]:
+            """Record any collection invoked during ownership setup.
+
+            Returns:
+                A known successful snapshot.
+            """
+            calls.append(1)
+            return {"ready": True}
+
+        updater = self.updater(collect)
         assert not updater.health()["healthy"]
         updater.start()
-        assert entered.wait(1)
-        assert updater.health()["refreshing"]
-        assert updater.health()["last_attempt"] is not None
+        assert calls == []
+        assert not updater.health()["refreshing"]
+        assert updater.health()["last_attempt"] is None
         assert not updater.health()["healthy"]
+        assert not self.output.exists()
         with self.assertRaises(RuntimeError):
             updater.start()
+
+    def test_refresh_skips_overlap_and_retains_lock_until_done(
+        self,
+    ) -> None:
+        """Keep exclusive ownership until an active refresh finishes."""
+        collect, entered, calls = self.blocked_collection()
+        updater = self.updater(collect)
+        updater.start()
+        assert calls == []
+        worker = threading.Thread(target=updater.refresh)
+        worker.start()
+        assert entered.wait(1)
+        assert not updater.refresh()
+        assert calls == [1]
+        replacement = self.updater(lambda: {"replacement": True})
         stopper = threading.Thread(target=updater.stop)
         stopper.start()
         wait_for(lambda: updater.stopping)
         assert stopper.is_alive()
-        assert calls == [1]
+        with self.assertRaisesRegex(RuntimeError, "Another updater"):
+            replacement.start()
         self.releases[0].set()
+        worker.join(1)
         stopper.join(1)
+        assert not worker.is_alive()
         assert not stopper.is_alive()
-        assert calls == [1]
-        assert json.loads(self.output.read_text()) == {"value": 1}
-        assert not updater.health()["refreshing"]
+        assert not updater.refresh()
+        replacement.start()
+        assert replacement.refresh()
+        assert json.loads(self.output.read_text()) == {"replacement": True}
 
     def test_failure_preserves_previous_snapshot_and_retries(self) -> None:
         """Preserve good data after failure and recover on retry."""
         attempts = 0
-        failed = threading.Event()
-        retry = threading.Event()
-        self.releases.append(retry)
 
         def collect() -> dict[str, object]:
-            """Fail once and hold the next retry for inspection.
+            """Fail the second independently dispatched refresh.
 
             Returns:
                 A snapshot identifying this attempt.
@@ -157,51 +181,31 @@ class DashboardUpdaterTests(unittest.TestCase):
             nonlocal attempts
             attempts += 1
             if attempts == 2:  # ruff: ignore[magic-value-comparison]
-                failed.set()
                 message = "secret fixture credential must never reach logs"
                 raise RuntimeError(message)
-            if attempts >= 3:  # ruff: ignore[magic-value-comparison]
-                retry.wait(3)
             return {"attempt": attempts}
 
-        updater = self.updater(collect, interval=0.01)
+        updater = self.updater(collect)
         updater.start()
-        assert failed.wait(1)
-        wait_for(lambda: updater.health()["last_error"] == "RuntimeError")
+        assert updater.refresh()
+        assert not updater.refresh()
+        assert updater.health()["last_error"] == "RuntimeError"
         assert updater.health()["last_success"] is not None
         assert not updater.health()["healthy"]
         assert json.loads(self.output.read_text()) == {"attempt": 1}
-        retry.set()
-        wait_for(lambda: updater.health()["healthy"])
+        assert updater.refresh()
+        assert updater.health()["healthy"]
         updater.stop()
-        assert json.loads(self.output.read_text())["attempt"] >= 3  # ruff: ignore[magic-value-comparison]
-        log = next((self.directory / "logs").glob("project.*.log")).read_text()
+        assert json.loads(self.output.read_text()) == {"attempt": 3}
+        log = next((self.directory / "logs").glob("aranami.*.log")).read_text()
         assert "secret fixture" not in log
-        rows = [json.loads(line) for line in log.splitlines()]
-        assert any(
-            row["event"] == "refresh.result" and row["status"] == "failed"
-            for row in rows
-        )
-        assert all(row["timestamp"].endswith("Z") for row in rows)
+        assert "Website refresh failed after" in log
+        assert "(RuntimeError). Previous data was retained." in log
+        assert "Z ERROR [backend.server." in log
+        assert not list((self.directory / "logs").glob("project.*.log"))
 
-    def test_output_lock_survives_until_active_worker_stops(self) -> None:
-        """Reject another owner until shutdown releases the lock."""
-        collect, entered, _calls = self.blocked_collection()
-        first = self.updater(collect)
-        first.start()
-        assert entered.wait(1)
-        second = self.updater(lambda: {"second": True})
-        with self.assertRaisesRegex(RuntimeError, "Another updater"):
-            second.start()
-        self.releases[0].set()
-        first.stop()
-        replacement = self.updater(lambda: {"replacement": True})
-        replacement.start()
-        wait_for(lambda: replacement.health()["healthy"])
-        assert json.loads(self.output.read_text()) == {"replacement": True}
-
-    def test_major_results_distinguish_partial_source_failures(self) -> None:
-        """Record partial status without copying source details."""
+    def test_partial_refresh_logs_a_natural_retry_explanation(self) -> None:
+        """Describe source failures without copying private details."""
         snapshot = {
             "value": 1,
             "errors": [
@@ -210,37 +214,41 @@ class DashboardUpdaterTests(unittest.TestCase):
         }
         updater = self.updater(lambda: snapshot)
         updater.start()
-        wait_for(lambda: updater.health()["healthy"])
+        assert updater.refresh()
         updater.stop()
-        log = next((self.directory / "logs").glob("project.*.log")).read_text()
-        rows = [json.loads(line) for line in log.splitlines()]
-        results = [row for row in rows if row["event"] == "refresh.result"]
-        assert len(results) == 1
-        assert results[0]["status"] == "partial"
-        assert results[0]["source_failures"] == 1
+        log = next((self.directory / "logs").glob("aranami.*.log")).read_text()
+        assert "with 1 source failure." in log
+        assert "Previous data was retained for failed reports." in log
         assert "sensitive source detail" not in log
         assert json.loads(self.output.read_text()) == snapshot
 
-    def test_major_log_failure_does_not_discard_a_saved_snapshot(self) -> None:
-        """Keep updater success independent of major log persistence."""
+    def test_log_failure_does_not_discard_a_saved_snapshot(self) -> None:
+        """Keep success independent of diagnostic persistence."""
         updater = self.updater(lambda: {"ready": True, "errors": []})
-        with patch("toolforge.server.log_project_event", return_value=False):
+        with (
+            patch("logging.FileHandler._open", side_effect=OSError("fixture")),
+            patch("logging.Handler.handleError") as errors,
+        ):
             updater.start()
-            wait_for(lambda: updater.health()["healthy"])
+            assert updater.refresh()
             updater.stop()
+        assert errors.called
         assert json.loads(self.output.read_text()) == {
             "ready": True,
             "errors": [],
         }
 
-    def test_stop_interrupts_long_interval(self) -> None:
-        """Interrupt a long interval promptly."""
+    def test_stop_before_refresh_releases_ownership(self) -> None:
+        """Release an idle owner without collecting source data."""
         updater = self.updater(lambda: {"ready": True})
         updater.start()
-        wait_for(lambda: updater.health()["healthy"])
-        started = time.monotonic()
         updater.stop()
-        assert time.monotonic() - started < 1
+        assert updater.stopping
+        assert not updater.refresh()
+        assert not self.output.exists()
+        replacement = self.updater(lambda: {"replacement": True})
+        replacement.start()
+        assert replacement.refresh()
 
     def test_first_pass_publishes_progress_before_callback_finishes(
         self,
@@ -260,14 +268,14 @@ class DashboardUpdaterTests(unittest.TestCase):
             """Publish initial data before the final result.
 
             Returns:
-                The final observed quality result.
+                The final observed backlog result.
             """
             assert cache_directory == self.output.parent.resolve()
             assert publish is not None
-            publish({"phase": "homepage", "quality": None})
+            publish({"phase": "homepage", "backlog": None})
             entered.set()
             release.wait(3)
-            return {"phase": "complete", "quality": {"total": 0}}
+            return {"phase": "complete", "backlog": {"total": 0}}
 
         updater = self.updater(
             lambda: collect_dashboard_pass(
@@ -278,26 +286,30 @@ class DashboardUpdaterTests(unittest.TestCase):
             ),
         )
         updater.start()
+        worker = threading.Thread(target=updater.refresh)
+        worker.start()
         assert entered.wait(1)
         assert json.loads(self.output.read_text()) == {
             "phase": "homepage",
-            "quality": None,
+            "backlog": None,
         }
         assert updater.health()["refreshing"]
         assert not updater.health()["healthy"]
         release.set()
-        wait_for(lambda: updater.health()["healthy"])
+        worker.join(1)
+        assert not worker.is_alive()
+        assert updater.health()["healthy"]
         updater.stop()
         assert json.loads(self.output.read_text()) == {
             "phase": "complete",
-            "quality": {"total": 0},
+            "backlog": {"total": 0},
         }
 
     def test_existing_snapshot_is_preserved_during_pass_and_failure(
         self,
     ) -> None:
         """Retain saved data during a later collection."""
-        previous = {"phase": "previous", "quality": {"total": 42}}
+        previous = {"phase": "previous", "backlog": {"total": 42}}
         save_fixture(self.output, previous)
         entered = threading.Event()
         release = threading.Event()
@@ -331,10 +343,14 @@ class DashboardUpdaterTests(unittest.TestCase):
             ),
         )
         updater.start()
+        worker = threading.Thread(target=updater.refresh)
+        worker.start()
         assert entered.wait(1)
         assert json.loads(self.output.read_text()) == previous
         release.set()
-        wait_for(lambda: updater.health()["last_error"] == "RuntimeError")
+        worker.join(1)
+        assert not worker.is_alive()
+        assert updater.health()["last_error"] == "RuntimeError"
         updater.stop()
         assert json.loads(self.output.read_text()) == previous
 
@@ -399,7 +415,8 @@ class DashboardUpdaterTests(unittest.TestCase):
                 assert headers["Allow"] == "GET, HEAD"
         assert calls == []
         updater.start()
-        wait_for(lambda: updater.health()["healthy"])
+        assert calls == []
+        assert updater.refresh()
         assert request("GET", "/healthz")[0] == HTTPStatus.OK
         status, headers, body = request("GET", "/dashboard.json")
         assert status == HTTPStatus.OK
@@ -411,14 +428,8 @@ class DashboardUpdaterTests(unittest.TestCase):
         assert body == b""
         assert calls == [1]
 
-    def test_invalid_intervals_and_unreadable_snapshots(self) -> None:
-        """Reject invalid intervals and unsafe snapshot files."""
-        for interval in (0, -1, math.inf, math.nan):
-            with (
-                self.subTest(interval=interval),
-                self.assertRaises(ValueError),
-            ):
-                self.updater(dict, interval=interval)
+    def test_unreadable_snapshots(self) -> None:
+        """Reject invalid JSON and unsafe snapshot files."""
         updater = self.updater(dict)
         self.output.write_text("not JSON")
         assert updater.snapshot_bytes() is None

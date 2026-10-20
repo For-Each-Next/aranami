@@ -5,7 +5,7 @@ from unittest import TestCase
 from sqlalchemy import inspect
 from sqlalchemy.dialects import mysql
 
-from aranami.sources.quarry.tables import (
+from shared.sources.quarry.tables import (
     Base,
     BinaryDecoder,
     EnumDecoder,

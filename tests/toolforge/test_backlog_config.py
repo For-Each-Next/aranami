@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from toolforge.backlog_config import (
+from backend.website.backlog_config import (
     backlog_tasks,
     load_backlog_config,
     validate_backlog_config,
@@ -294,7 +294,10 @@ class TestBacklogConfig(TestCase):
             path.write_text(json.dumps(_config()), encoding="utf-8")
             expected = validate_backlog_config(_config())
             assert load_backlog_config(path) == expected
-            with patch("toolforge.backlog_config.DEFAULT_CONFIG_PATH", path):
+            with patch(
+                "backend.website.backlog_config.DEFAULT_CONFIG_PATH",
+                path,
+            ):
                 assert load_backlog_config() == expected
             for content in (
                 b"{invalid",

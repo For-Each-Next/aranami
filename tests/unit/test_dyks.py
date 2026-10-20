@@ -14,15 +14,56 @@ import mwparserfromhell
 import polars as pl
 from pywikibot.site import BaseSite, Namespace
 
-from aranami.jobs import JobContext, dyks as dyk_job
-from aranami.services.zhwiki import dyks
-from aranami.services.zhwiki.dyk_dates import extract_dates
-from aranami.sources.dyk import TalkPage
-from aranami.support import dyk_cache, report_membership
-from aranami.support.dates import parse_date
-from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
-from aranami.support.regions import region_content
-from aranami.support.report_membership import MembershipReport
+from backend.services.zhwiki import dyks
+from backend.services.zhwiki.dyk_dates import extract_dates
+from backend.support import dyk_cache, report_membership
+from shared.sources.dyk import TalkPage
+from shared.support.dates import parse_date
+from shared.support.regions import region_content
+from updater.jobs import JobContext, dyks as dyk_job
+from updater.services.zhwiki import dyks as rendering
+from updater.support.edit_summary import (
+    MAX_EDIT_SUMMARY_BYTES,
+    EditSummary,
+)
+
+
+def _update_report(  # ruff: ignore[too-many-arguments]
+    original: str,
+    site: BaseSite,
+    today: date,
+    *,
+    project: str,
+    report_title: str,
+    statistics_title: str,
+) -> str:
+    """Exercise preparation and rendering together.
+
+    Returns:
+        Complete proposed report text.
+    """
+    prepared = dyks.prepare_report(
+        original,
+        site,
+        today,
+        project=project,
+        report_title=report_title,
+    )
+    return rendering.update_text(
+        original,
+        prepared,
+        report_title=report_title,
+        statistics_title=statistics_title,
+    )
+
+
+def _prepared_fixture(text: str, members: dict[str, int | None]) -> Mock:
+    """Provide prepared facts for publication-only fixtures.
+
+    Returns:
+        Controlled backend metadata paired with fixture output.
+    """
+    return Mock(text=text, members=members, previous_members={}, result=None)
 
 
 class _OfflineSite(BaseSite):
@@ -179,10 +220,20 @@ class TestDykReports(TestCase):
                 ],
             },
         )
-        completed_text, nomination_text = dyks.render_reports(
-            completed,
-            completed.select("title", "class", "importance").head(0),
-            date(2024, 5, 1),
+        completed_text, nomination_text = rendering.render_reports(
+            Mock(
+                completed=dyks.prepare_tables(
+                    completed,
+                    completed.head(0),
+                    date(2024, 5, 1),
+                )[0],
+                nominations=completed.head(0),
+                statistics=dyks.prepare_tables(
+                    completed,
+                    completed.head(0),
+                    date(2024, 5, 1),
+                )[2],
+            ),
             report_title="Project:Example DYK report",
             statistics_title="c:Data:Example statistics.tab",
         )
@@ -221,19 +272,19 @@ class TestDykCache(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "aranami.support.dyk_cache.Path.cwd",
+                "backend.support.dyk_cache.Path.cwd",
                 return_value=Path(directory),
             ),
             patch(
-                "aranami.services.zhwiki.dyks.template_aliases",
+                "backend.services.zhwiki.dyks.template_aliases",
                 side_effect=lambda _site, title: (title,),
             ),
             patch(
-                "aranami.services.zhwiki.dyks.latest_revisions",
+                "backend.services.zhwiki.dyks.latest_revisions",
                 return_value=revisions,
             ) as latest,
             patch(
-                "aranami.services.zhwiki.dyks.read_talk_pages",
+                "backend.services.zhwiki.dyks.read_talk_pages",
                 return_value=[
                     TalkPage(11, 100, "{{DYKtalk|date=2024-01-01}}"),
                 ],
@@ -265,7 +316,7 @@ class TestDykCache(TestCase):
             path.parent.mkdir()
             path.write_bytes(b"not parquet")
             with patch(
-                "aranami.support.dyk_cache.Path.cwd",
+                "backend.support.dyk_cache.Path.cwd",
                 return_value=root,
             ):
                 assert dyk_cache.load().is_empty()
@@ -298,11 +349,11 @@ class TestDykEdit(TestCase):
         )
         with (
             patch(
-                "aranami.services.zhwiki.dyks.query_pages_by_wikiproject",
+                "backend.services.zhwiki.dyks.query_pages_by_wikiproject",
                 return_value=members,
             ) as query_members,
             patch(
-                "aranami.services.zhwiki.dyks.query_tags",
+                "backend.services.zhwiki.dyks.query_tags",
                 side_effect=[
                     pl.DataFrame(
                         {"talk_page_id": [11, 12], "tags": [["DYK"], []]},
@@ -314,10 +365,10 @@ class TestDykEdit(TestCase):
                 * 2,
             ),
             patch(
-                "aranami.services.zhwiki.dyks._dated_pages",
+                "backend.services.zhwiki.dyks._dated_pages",
                 return_value=dated,
             ),
-            patch("aranami.sources.wiki.read_pages") as read_pages,
+            patch("shared.sources.wiki.read_pages") as read_pages,
         ):
             report = dyks.prepare_report(
                 original_text,
@@ -325,10 +376,15 @@ class TestDykEdit(TestCase):
                 date(2024, 5, 1),
                 project="Example project",
                 report_title="Project:Example DYK report",
+            )
+            updated = rendering.update_text(
+                original_text,
+                report,
+                report_title="Project:Example DYK report",
                 statistics_title="c:Data:Example statistics.tab",
             )
-            repeated = dyks.update_text(
-                report.text,
+            repeated = _update_report(
+                updated,
                 site,
                 date(2024, 5, 1),
                 project="Example project",
@@ -337,7 +393,6 @@ class TestDykEdit(TestCase):
             )
         read_pages.assert_not_called()
         query_members.assert_called_with(site, "Example project")
-        updated = report.text
         assert isinstance(updated, str)
         assert repeated == updated
         assert "游戏甲" in updated
@@ -349,6 +404,14 @@ class TestDykEdit(TestCase):
         assert "\nMiddle\n" in updated
         assert updated.endswith("\nFooter")
         assert report.members == {"游戏甲": 1, "游戏乙": 2}
+        assert report.changes == dyks.compare_reports(
+            original_text,
+            updated,
+            previous_members=report.previous_members,
+            current_members=report.members,
+        )
+        assert report.result.tables["completed"].height == 1
+        assert report.result.tables["nominations"].height == 1
         assert dyks.article_members(updated) == {
             "游戏甲": None,
             "游戏乙": None,
@@ -356,10 +419,10 @@ class TestDykEdit(TestCase):
         assert "aranami-member" not in updated
 
     @staticmethod
-    @patch("aranami.jobs._execution.perf_counter", new=lambda: 0.0)
     def test_job_reads_target_and_owns_proposal_metadata() -> None:
         """Pass target text to the service and retain the source."""
         site = Mock()
+        site.dbName.return_value = "zhwiki"
         context = JobContext(site, date(2024, 5, 1), dry=True)
         original = (
             '<!-- aranami begin="dyk" -->\n'
@@ -371,10 +434,6 @@ class TestDykEdit(TestCase):
         page = Mock(text=original)
         title = "WikiProject:电子游戏/新条目推荐"
         with (
-            patch(
-                "aranami.support.edit_summary.version",
-                return_value="0.3.5",
-            ),
             patch.object(
                 dyk_job,
                 "job_run",
@@ -387,11 +446,22 @@ class TestDykEdit(TestCase):
             ) as read_pages,
             patch.object(
                 dyk_job,
+                "update_text",
+                side_effect=lambda _original, report, **_: report.text,
+            ),
+            patch.object(
+                dyks,
                 "prepare_report",
-                return_value=MembershipReport(updated, {"Renamed": 1}),
+                side_effect=lambda original, *_args, **_kwargs: _job_fixture(
+                    original,
+                    updated,
+                    {"Renamed": 1},
+                    site,
+                    title,
+                ),
             ) as prepare_report,
-            patch.object(dyk_job, "load_membership", return_value={"Old": 1}),
-            patch.object(dyk_job, "save_membership") as save,
+            patch.object(dyks, "load_membership", return_value={"Old": 1}),
+            patch.object(dyks, "save_membership") as save,
         ):
             dyk_job.run(context=context)
         read_pages.assert_called_once_with(site, [title])
@@ -401,9 +471,6 @@ class TestDykEdit(TestCase):
             context.today,
             project="电子游戏",
             report_title=title,
-            statistics_title=(
-                "c:Data:Zhwiki_WikiProject_Video_Games_DYK_Annual_Statistics.tab"
-            ),
         )
         [edit] = context.edits
         assert edit.site is site
@@ -412,7 +479,7 @@ class TestDykEdit(TestCase):
         assert edit.text == updated
         assert (
             edit.summary == "1 article, 0 nominees. "
-            "(in 0.00\u2033 by [[toolforge:aranami|Aranami 0.3.5]])"
+            "([[toolforge:Aranami|Aranami]])"
         )
         assert "aranami-member" not in edit.text
         save.assert_called_once_with(site, title, original, {"Old": 1})
@@ -451,7 +518,10 @@ class TestDykEdit(TestCase):
                 )
                 or "# {{icon|DYKC}}\uff08無\uff09",
             )
-            assert dyk_job._content_summary(text, text) == expected
+            assert (
+                dyk_job._content_summary(dyks.compare_reports(text, text))
+                == expected
+            )
 
     @staticmethod
     def test_membership_changes_cover_completed_and_nominated_items() -> None:
@@ -472,10 +542,12 @@ class TestDykEdit(TestCase):
             "# {{PJ:VG/DYK/item|Added|优良}}",
         )
         assert dyk_job._content_summary(
-            original,
-            updated,
-            previous_members={"Old": 1, "Removed": 2, "Candidate": 3},
-            current_members={"Renamed": 1, "Added": 4, "Candidate": 3},
+            dyks.compare_reports(
+                original,
+                updated,
+                previous_members={"Old": 1, "Removed": 2, "Candidate": 3},
+                current_members={"Renamed": 1, "Added": 4, "Candidate": 3},
+            ),
         ) == (
             "2 articles, 1 nominee. Passed nominee «[[Added]]»; "
             "removed «[[Removed]]»."
@@ -506,9 +578,9 @@ class TestDykEdit(TestCase):
         item = "\n# {{PJ:VG/DYK/item|Game|初级}}\n"
         original = ranges.format(completed="\n", nominated=item)
         updated = ranges.format(completed=item, nominated="\n")
-        assert dyk_job._content_summary(original, updated) == (
-            "1 article, 0 nominees. Passed nominee «[[Game]]»."
-        )
+        assert dyk_job._content_summary(
+            dyks.compare_reports(original, updated),
+        ) == ("1 article, 0 nominees. Passed nominee «[[Game]]».")
 
     @staticmethod
     def test_summary_distinguishes_new_passed_and_failed_nominees() -> None:
@@ -534,7 +606,9 @@ class TestDykEdit(TestCase):
             ),
             nominated="\n# {{PJ:VG/DYK/item|New|初级}}\n",
         )
-        assert dyk_job._content_summary(original, updated) == (
+        assert dyk_job._content_summary(
+            dyks.compare_reports(original, updated),
+        ) == (
             "2 articles, 1 nominee. New nominee «[[New]]»; "
             "passed nominee «[[Passed]]»; failed nominee «[[花园多惠]]»."
         )
@@ -557,9 +631,9 @@ class TestDykEdit(TestCase):
             '<!-- aranami begin="dykn" -->\n'
             '<!-- aranami end="dykn" -->'
         )
-        assert dyk_job._content_summary(original, updated) == (
-            "1 article, 0 nominees. Passed nominee «[[Video Game]]»."
-        )
+        assert dyk_job._content_summary(
+            dyks.compare_reports(original, updated),
+        ) == ("1 article, 0 nominees. Passed nominee «[[Video Game]]».")
 
     @staticmethod
     def test_cached_identity_recognizes_rename_during_promotion() -> None:
@@ -579,10 +653,12 @@ class TestDykEdit(TestCase):
         )
         assert (
             dyk_job._content_summary(
-                original,
-                updated,
-                previous_members={"Old name": 1},
-                current_members={"New name": 1},
+                dyks.compare_reports(
+                    original,
+                    updated,
+                    previous_members={"Old name": 1},
+                    current_members={"New name": 1},
+                ),
             )
             == "1 article, 0 nominees. Passed nominee «[[New name]]»."
         )
@@ -602,9 +678,9 @@ class TestDykEdit(TestCase):
             "date=2023-01-01",
             "date=2023-01-01、2024-05-01",
         ).replace("# {{PJ:VG/DYK/item|Game|初级}}\n", "")
-        assert dyk_job._content_summary(original, updated) == (
-            "1 article, 0 nominees. Passed nominee «[[Game]]»."
-        )
+        assert dyk_job._content_summary(
+            dyks.compare_reports(original, updated),
+        ) == ("1 article, 0 nominees. Passed nominee «[[Game]]».")
 
     @staticmethod
     def test_unchanged_historical_completion_leaves_outcome_unknown() -> None:
@@ -624,7 +700,7 @@ class TestDykEdit(TestCase):
             .replace("初级", "优良")
         )
         assert (
-            dyk_job._content_summary(original, updated)
+            dyk_job._content_summary(dyks.compare_reports(original, updated))
             == "1 article, 0 nominees."
         )
 
@@ -642,11 +718,11 @@ class TestDykEdit(TestCase):
         original = ranges.format(completed="\n", nominated=candidate)
         passed = ranges.format(completed=completed, nominated=candidate)
         cleaned = ranges.format(completed=completed, nominated="\n")
-        assert dyk_job._content_summary(original, passed) == (
-            "1 article, 1 nominee. Passed nominee «[[Game]]»."
-        )
+        assert dyk_job._content_summary(
+            dyks.compare_reports(original, passed),
+        ) == ("1 article, 1 nominee. Passed nominee «[[Game]]».")
         assert (
-            dyk_job._content_summary(passed, cleaned)
+            dyk_job._content_summary(dyks.compare_reports(passed, cleaned))
             == "1 article, 0 nominees."
         )
 
@@ -666,11 +742,11 @@ class TestDykEdit(TestCase):
             "date=2023-01-01、2024-05-01",
         )
         cleaned = passed.replace("# {{PJ:VG/DYK/item|Game|初级}}\n", "")
-        assert dyk_job._content_summary(original, passed) == (
-            "1 article, 1 nominee. Passed nominee «[[Game]]»."
-        )
+        assert dyk_job._content_summary(
+            dyks.compare_reports(original, passed),
+        ) == ("1 article, 1 nominee. Passed nominee «[[Game]]».")
         assert (
-            dyk_job._content_summary(passed, cleaned)
+            dyk_job._content_summary(dyks.compare_reports(passed, cleaned))
             == "1 article, 0 nominees."
         )
 
@@ -690,7 +766,7 @@ class TestDykEdit(TestCase):
             "date=2023-01-01、日期不詳",
         )
         assert (
-            dyk_job._content_summary(original, updated)
+            dyk_job._content_summary(dyks.compare_reports(original, updated))
             == "1 article, 1 nominee."
         )
 
@@ -713,10 +789,12 @@ class TestDykEdit(TestCase):
             '<!-- aranami end="dykn" -->'
         )
         assert dyk_job._content_summary(
-            original,
-            updated,
-            previous_members={"Game": 1},
-            current_members={"Game": 2},
+            dyks.compare_reports(
+                original,
+                updated,
+                previous_members={"Game": 1},
+                current_members={"Game": 2},
+            ),
         ) == (
             "1 article, 0 nominees. Passed nominee «[[Game]]»; "
             "failed nominee «[[Game]]»."
@@ -736,13 +814,15 @@ class TestDykEdit(TestCase):
             "# {{PJ:VG/DYK/item|Historical|初级|date=2023-01-01}}\n",
             "",
         )
-        assert dyk_job._content_summary(original, updated) == (
-            "0 articles, 0 nominees. Removed «[[Historical]]»."
-        )
+        assert dyk_job._content_summary(
+            dyks.compare_reports(original, updated),
+        ) == ("0 articles, 0 nominees. Removed «[[Historical]]».")
 
     @staticmethod
-    def test_long_nominee_summary_keeps_complete_links_with_timing() -> None:
-        """Fit multibyte outcomes and timing within the byte limit."""
+    def test_long_nominee_summary_keeps_complete_links_with_attribution() -> (
+        None
+    ):
+        """Fit multibyte outcomes and attribution in the byte limit."""
         ranges = (
             '<!-- aranami begin="dyk" -->{completed}'
             '<!-- aranami end="dyk" -->\n'
@@ -767,18 +847,13 @@ class TestDykEdit(TestCase):
                 f"# {{{{PJ:VG/DYK/item|{new_title}|初级}}}}\n"
             ),
         )
-        with patch(
-            "aranami.support.edit_summary.version",
-            return_value="0.3.5",
-        ):
-            summary = EditSummary.with_execution_time(
-                dyk_job._content_summary(original, updated),
-                7.12,
-            )
+        summary = EditSummary.with_attribution(
+            dyk_job._content_summary(dyks.compare_reports(original, updated)),
+        )
         assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
         assert summary.startswith("1 article, 2 nominees.")
         assert summary.endswith(
-            "(in 7.12\u2033 by [[toolforge:aranami|Aranami 0.3.5]])",
+            "([[toolforge:Aranami|Aranami]])",
         )
         assert f"«[[{short_title}]]»" in summary
         assert summary.count("«") == summary.count("»")
@@ -791,7 +866,7 @@ class TestDykEdit(TestCase):
             new_title,
             passed_title,
             failed_title,
-            "toolforge:aranami",
+            "toolforge:Aranami",
         }
 
     @staticmethod
@@ -807,7 +882,7 @@ class TestDykEdit(TestCase):
             "优良",
         )
         assert (
-            dyk_job._content_summary(original, updated)
+            dyk_job._content_summary(dyks.compare_reports(original, updated))
             == "1 article, 0 nominees."
         )
 
@@ -832,6 +907,7 @@ class TestDykEdit(TestCase):
         )
         site = _OfflineSite("zh", "wikipedia")
         context = Mock(site=site, today=date(2024, 5, 1), dry=False)
+        context.publish.return_value = True
         with (
             patch.object(
                 dyk_job,
@@ -845,18 +921,26 @@ class TestDykEdit(TestCase):
             ),
             patch.object(
                 dyk_job,
+                "update_text",
+                side_effect=lambda _original, report, **_: report.text,
+            ),
+            patch.object(
+                dyks,
                 "prepare_report",
-                return_value=MembershipReport(
+                side_effect=lambda original, *_args, **_kwargs: _job_fixture(
+                    original,
                     updated,
                     {"Renamed": 1, "Added": 3},
+                    site,
+                    "Report",
                 ),
             ) as prepare,
             patch.object(
-                dyk_job,
+                dyks,
                 "load_membership",
                 return_value={"Candidate": 1, "Removed": 2},
             ),
-            patch.object(dyk_job, "save_membership") as save,
+            patch.object(dyks, "save_membership") as save,
         ):
             dyk_job.run(title="Report", context=context)
         prepare.assert_called_once()
@@ -910,19 +994,27 @@ class TestDykEdit(TestCase):
             ),
             patch.object(
                 dyk_job,
+                "update_text",
+                side_effect=lambda _original, report, **_: report.text,
+            ),
+            patch.object(
+                dyks,
                 "prepare_report",
-                return_value=MembershipReport(
+                side_effect=lambda original, *_args, **_kwargs: _job_fixture(
+                    original,
                     updated,
                     {"Game": 1, "Added": 2},
+                    site,
+                    "Report",
                 ),
             ) as prepare,
         ):
             dyk_job.run(title="Report", context=context)
             dyk_job.run(title="Report", context=context)
-            assert dyk_job.load_membership(site, "Report", original) == {
+            assert dyks.load_membership(site, "Report", original) == {
                 "Game": 1,
             }
-            assert dyk_job.load_membership(site, "Report", updated) == {}
+            assert dyks.load_membership(site, "Report", updated) == {}
         assert prepare.call_count == 2  # ruff: ignore[magic-value-comparison]
         summaries = [
             call.args[0].summary for call in context.publish.call_args_list
@@ -939,6 +1031,7 @@ class TestDykEdit(TestCase):
         """Preserve cached identities when publication fails."""
         site = _OfflineSite("zh", "wikipedia")
         context = Mock(site=site, today=date(2024, 5, 1), dry=False)
+        context.publish.return_value = True
         context.publish.side_effect = RuntimeError("publication failed")
         original = (
             '<!-- aranami begin="dyk" -->\n'
@@ -960,12 +1053,50 @@ class TestDykEdit(TestCase):
             ),
             patch.object(
                 dyk_job,
-                "prepare_report",
-                return_value=MembershipReport(original, {"Game": 1}),
+                "update_text",
+                side_effect=lambda _original, report, **_: report.text,
             ),
-            patch.object(dyk_job, "load_membership", return_value={"Game": 1}),
-            patch.object(dyk_job, "save_membership") as save,
+            patch.object(
+                dyks,
+                "prepare_report",
+                side_effect=lambda original, *_args, **_kwargs: _job_fixture(
+                    original,
+                    original,
+                    {"Game": 1},
+                    site,
+                    "Report",
+                ),
+            ),
+            patch.object(dyks, "load_membership", return_value={"Game": 1}),
+            patch.object(dyks, "save_membership") as save,
             self.assertRaises(RuntimeError),  # ruff: ignore[pytest-unittest-raises-assertion]
         ):
             dyk_job.run(title="Report", context=context)
         save.assert_not_called()
+
+
+def _job_fixture(
+    original: str,
+    text: str,
+    members: dict[str, int | None],
+    site: BaseSite,
+    title: str,
+) -> Mock:
+    """Supply change metadata without collecting publication fixtures.
+
+    Returns:
+        Prepared report carrying validated previous identity facts.
+    """
+    previous = {
+        member: dyks.load_membership(site, title, original).get(member)
+        for member in dyks.article_members(original)
+    }
+    prepared = _prepared_fixture(text, members)
+    prepared.previous_members = previous
+    prepared.changes = dyks.compare_reports(
+        original,
+        text,
+        previous_members=previous,
+        current_members=members,
+    )
+    return prepared

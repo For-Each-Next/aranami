@@ -1,10 +1,12 @@
 """Verify date retention, gap recovery, and repeatable report output."""
 
 # Keep the repository's unittest runner and exception assertions.
-# ruff: file-ignore[pytest-unittest-raises-assertion]
+# ruff: file-ignore[pytest-unittest-raises-assertion, private-member-access]
 
 import datetime as dt
 from contextlib import nullcontext
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -12,16 +14,25 @@ import mwparserfromhell
 import polars as pl
 from pywikibot.site import BaseSite, Namespace
 
-from aranami.jobs import JobContext, new_pages as new_pages_job
-from aranami.services.zhwiki import new_pages
-from aranami.support.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
-from aranami.support.regions import managed_region
+from backend.services.zhwiki import new_pages
+from shared.support.regions import managed_region
+from updater.jobs import JobContext, new_pages as new_pages_job
+from updater.services.zhwiki import new_pages as rendering
+from updater.support.edit_summary import (
+    MAX_EDIT_SUMMARY_BYTES,
+    EditSummary,
+)
 
 _DAY_HEADING_LEVEL = 3
 
 
 class _TitleSite(BaseSite):
     """Provide Chinese title metadata without network access."""
+
+    @staticmethod
+    def dbName() -> str:  # ruff: ignore[invalid-function-name]
+        """Return a wiki identity without fetching site metadata."""
+        return "zhwiki"
 
     @staticmethod
     def _build_namespaces() -> dict[int, Namespace]:
@@ -87,8 +98,91 @@ def _section(day: dt.date) -> str:
     return f"=== {day.year}年{day.month}月{day.day}日 ===\nNo matches.\n\n"
 
 
+def _update_report(
+    original: str,
+    site: BaseSite,
+    stop: dt.date,
+    *,
+    project: str,
+) -> str:
+    """Exercise backend preparation and frontend rendering together.
+
+    Returns:
+        Proposed destination text from the complete preparation.
+    """
+    return rendering.update_text(
+        original,
+        new_pages.prepare_report(original, site, stop, project=project),
+    )
+
+
+def _summary_metadata(
+    text: str,
+    site: BaseSite,
+    day: dt.date,
+    filled_dates: set[dt.date],
+) -> new_pages.PreparedNewPages:
+    """Prepare source-derived facts for isolated summary fixtures.
+
+    Returns:
+        Backend metadata preserving the fixture's observed counts.
+    """
+    articles, non_articles = new_pages.record_counts(text, site, {day})
+    return new_pages.PreparedNewPages(
+        (),
+        frozenset(filled_dates),
+        frozenset(new_pages.record_dates(text)),
+        len(new_pages.record_dates(text)),
+        day,
+        articles,
+        non_articles,
+        new_pages.build_result(text, site),
+    )
+
+
 class TestNewPageRecords(TestCase):
     """Test persistent on-wiki records without network access."""
+
+    def setUp(self) -> None:
+        """Isolate report and preview outputs in a runtime root."""
+        directory = self.enterContext(TemporaryDirectory())
+        self.enterContext(
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+        )
+
+    @staticmethod
+    def test_structured_records_keep_known_times_and_unknown_old_flags() -> (
+        None
+    ):
+        """Retain source facts while preserving historical unknowns."""
+        day = dt.date(2026, 10, 19)
+        text = managed_region(
+            "new-pages",
+            "=== 2026年10月19日 ===\n"
+            "搜尋12個頁面，匹配到1個頁面：\n"  # ruff: ignore[ambiguous-unicode-character-string]
+            "* {{class/icon|初}} [[:Game]] "
+            "<!-- 页面ID 42 · 创建时间 2026-08-05 11:22:33 -->\n",
+        )
+        site = _TitleSite("zh", "wikipedia")
+        historical = new_pages.build_result(text, site)
+        fresh = new_pages.build_result(text, site, discovered_dates={day})
+        row = historical.tables["articles"].row(0, named=True)
+        assert row["page_id"] == 42  # ruff: ignore[magic-value-comparison]
+        assert row["created_at"] == dt.datetime(
+            2026,
+            8,
+            5,
+            11,
+            22,
+            33,
+            tzinfo=dt.UTC,
+        )
+        assert row["class"] == "初"
+        assert row["redirect_conversion"] is None
+        assert fresh.tables["articles"].item(0, "redirect_conversion") is False
+        assert (
+            historical.tables["daily_records"].item(0, "discovery_count") == 12  # ruff: ignore[magic-value-comparison]
+        )
 
     @staticmethod
     def test_redirect_conversions_join_new_pages_once_and_keep_notes() -> None:
@@ -126,17 +220,22 @@ class TestNewPageRecords(TestCase):
                 "full_title": list(titles[:4]),
                 "page_id": [11, 12, 13, 14],
                 "created_at": [
-                    dt.datetime(2026, 10, 2, tzinfo=dt.UTC),
-                    dt.datetime(2026, 10, 2, 1, 2, 3, tzinfo=dt.UTC),
-                    dt.datetime(2026, 8, 5, 11, 22, 33, tzinfo=dt.UTC),
-                    dt.datetime(2026, 8, 6, 11, 22, 33, tzinfo=dt.UTC),
+                    "2026-10-02 00:00:00",
+                    "2026-10-02 01:02:03",
+                    "2026-08-05 11:22:33",
+                    "2026-08-06 11:22:33",
                 ],
             },
             schema={
                 "full_title": pl.String,
                 "page_id": pl.Int64,
-                "created_at": pl.Datetime("us", "UTC"),
+                "created_at": pl.String,
             },
+        ).with_columns(
+            pl.col("created_at").str.to_datetime(
+                format="%Y-%m-%d %H:%M:%S",
+                time_zone="UTC",
+            ),
         )
         with (
             patch.object(
@@ -165,13 +264,20 @@ class TestNewPageRecords(TestCase):
                 return_value=creation_metadata,
             ) as creation_info,
         ):
-            updated = new_pages.update_text(
+            prepared = new_pages.prepare_report(
                 original,
                 site,
                 today,
                 project="电子游戏",
             )
-            repeated = new_pages.update_text(
+            with (
+                patch.object(new_pages, "collect_day") as source,
+                patch.object(new_pages, "build_result") as parser,
+            ):
+                updated = rendering.update_text(original, prepared)
+            source.assert_not_called()
+            parser.assert_not_called()
+            repeated = _update_report(
                 updated,
                 site,
                 today,
@@ -203,11 +309,24 @@ class TestNewPageRecords(TestCase):
         )
         assert "搜尋8個頁面，匹配到4個頁面" in updated  # ruff: ignore[ambiguous-unicode-character-string]
         assert new_pages.record_counts(updated, site, {day}) == (3, 1)
-        assert new_pages_job._edit_summary(  # ruff: ignore[private-member-access]
-            updated,
-            site,
-            day,
-            {day},
+        assert prepared.result.tables["articles"].get_column(
+            "redirect_conversion",
+        ).to_list() == [False, True, True, True]
+        discovery_count = 8
+        assert (
+            prepared.result.tables["daily_records"].item(
+                0,
+                "discovery_count",
+            )
+            == discovery_count
+        )
+        assert new_pages_job._edit_summary(
+            _summary_metadata(
+                updated,
+                site,
+                day,
+                {day},
+            ),
         ) == (
             "Updated for 2 Oct 2026. "
             "Found 3 article pages and 1 non-article page."
@@ -238,14 +357,19 @@ class TestNewPageRecords(TestCase):
                 "full_title": ["模板:Game"],
                 "page_id": [42],
                 "created_at": [
-                    dt.datetime(2026, 8, 5, 11, 22, 33, tzinfo=dt.UTC),
+                    "2026-08-05 11:22:33",
                 ],
             },
             schema={
                 "full_title": pl.String,
                 "page_id": pl.Int64,
-                "created_at": pl.Datetime("us", "UTC"),
+                "created_at": pl.String,
             },
+        ).with_columns(
+            pl.col("created_at").str.to_datetime(
+                format="%Y-%m-%d %H:%M:%S",
+                time_zone="UTC",
+            ),
         )
         grades = pl.DataFrame({
             "full_title": ["Moved game", "模板:Game"],
@@ -254,8 +378,11 @@ class TestNewPageRecords(TestCase):
         with (
             patch.object(
                 new_pages,
-                "_build_section",
-                return_value=_section(missing),
+                "collect_day",
+                return_value=new_pages.DailyRecord(
+                    missing,
+                    lines=new_pages.prepare_lines(_section(missing), {}, site),
+                ),
             ) as build,
             patch.object(
                 new_pages,
@@ -268,13 +395,13 @@ class TestNewPageRecords(TestCase):
                 return_value=grades,
             ),
         ):
-            updated = new_pages.update_text(
+            updated = _update_report(
                 original,
                 site,
                 today,
                 project="电子游戏",
             )
-            repeated = new_pages.update_text(
+            repeated = _update_report(
                 updated,
                 site,
                 today,
@@ -314,9 +441,11 @@ class TestNewPageRecords(TestCase):
             ),
             self.assertLogs(new_pages.__name__, level="WARNING") as logs,
         ):
-            updated = new_pages._annotate_items(  # ruff: ignore[private-member-access]
-                source,
-                _TitleSite("zh", "wikipedia"),
+            updated = rendering.render_lines(
+                new_pages.prepare_identity_lines(
+                    source,
+                    _TitleSite("zh", "wikipedia"),
+                ),
             )
         assert updated == (
             "* [[:Game]] <!-- 页面ID 7 · 创建时间 未知 -->\r\n"
@@ -345,7 +474,9 @@ class TestNewPageRecords(TestCase):
                 return_value=[],
             ) as preload,
         ):
-            result = new_pages._build_section(Mock(), day)  # ruff: ignore[private-member-access]
+            result = rendering.render_record(
+                new_pages.collect_day(Mock(), day),
+            )
         assert result.startswith("=== 2026年10月2日 ===\n")
         assert "搜尋0個頁面，匹配到0個頁面" in result  # ruff: ignore[ambiguous-unicode-character-string]
         assert "自重定向页改写" not in result
@@ -373,7 +504,7 @@ class TestNewPageRecords(TestCase):
             schema={"full_title": pl.String, "pa_class": pl.String},
         )
         with (
-            patch("aranami.sources.wiki.read_pages") as read_pages,
+            patch("shared.sources.wiki.read_pages") as read_pages,
             patch.object(
                 new_pages,
                 "query_pages_by_wikiproject",
@@ -381,11 +512,14 @@ class TestNewPageRecords(TestCase):
             ) as query_members,
             patch.object(
                 new_pages,
-                "_build_section",
-                side_effect=lambda _site, day: _section(day),
+                "collect_day",
+                side_effect=lambda _site, day: new_pages.DailyRecord(
+                    day,
+                    lines=new_pages.prepare_lines(_section(day), {}, _site),
+                ),
             ) as build,
         ):
-            updated = new_pages.update_text(
+            updated = _update_report(
                 original,
                 site,
                 today,
@@ -410,7 +544,7 @@ class TestNewPageRecords(TestCase):
             query_members.assert_called_once_with(site, "Example project")
             build.reset_mock()
             query_members.reset_mock()
-            repeated = new_pages.update_text(
+            repeated = _update_report(
                 updated,
                 site,
                 today,
@@ -435,14 +569,14 @@ class TestNewPageRecords(TestCase):
         ):
             with (
                 self.subTest(original=original),
-                patch.object(new_pages, "_build_section") as build,
+                patch.object(new_pages, "collect_day") as build,
                 patch.object(
                     new_pages,
                     "query_pages_by_wikiproject",
                 ) as query,
             ):
                 with self.assertRaises(ValueError):
-                    new_pages.update_text(
+                    _update_report(
                         original,
                         Mock(),
                         dt.date(2026, 10, 3),
@@ -477,11 +611,14 @@ class TestNewPageRecords(TestCase):
             ),
             patch.object(
                 new_pages,
-                "_build_section",
-                side_effect=lambda _site, day: _section(day),
+                "collect_day",
+                side_effect=lambda _site, day: new_pages.DailyRecord(
+                    day,
+                    lines=new_pages.prepare_lines(_section(day), {}, _site),
+                ),
             ) as build,
         ):
-            updated = new_pages.update_text(
+            updated = _update_report(
                 original,
                 Mock(),
                 today,
@@ -497,10 +634,10 @@ class TestNewPageRecords(TestCase):
         }
 
     @staticmethod
-    @patch("aranami.jobs._execution.perf_counter", new=lambda: 0.0)
     def test_job_owns_target_and_records_filled_date_metadata() -> None:
         """Keep summaries and tags consistent with generated dates."""
         site = Mock()
+        site.dbName.return_value = "zhwiki"
         today = dt.date(2026, 10, 3)
         yesterday = today - dt.timedelta(days=1)
         previous = today - dt.timedelta(days=2)
@@ -530,6 +667,19 @@ class TestNewPageRecords(TestCase):
                 return_value=[page],
             ) as read_pages,
             patch.object(
+                new_pages,
+                "prepare_report",
+                side_effect=lambda original, site, *_args, **_kwargs: (
+                    _summary_metadata(
+                        updated,
+                        site,
+                        max(new_pages.record_dates(updated)),
+                        new_pages.record_dates(updated)
+                        - new_pages.record_dates(original),
+                    )
+                ),
+            ),
+            patch.object(
                 new_pages_job,
                 "update_text",
                 return_value=updated,
@@ -537,21 +687,16 @@ class TestNewPageRecords(TestCase):
         ):
             new_pages_job.run(context=context)
             read_pages.assert_called_once_with(site, [title])
-            update_text.assert_called_once_with(
-                original,
-                site,
-                today,
-                project="电子游戏",
-            )
+            assert update_text.call_args.args[0] == original
+            assert update_text.call_args.args[1].filled_dates == {yesterday}
             [edit] = context.edits
             assert edit.site is site
             assert edit.title == title
             assert edit.original_text == original
             assert edit.text == updated
-            assert edit.summary == EditSummary.with_execution_time(
+            assert edit.summary == EditSummary.with_attribution(
                 "Updated for 2 Oct 2026. "
                 "Found 0 article pages and 0 non-article pages.",
-                0,
             )
             assert edit.tags == ("new-pages", "filled-1-dates")
             page.text = updated
@@ -583,7 +728,6 @@ class TestNewPageRecords(TestCase):
         ) == (1, 2)
 
     @staticmethod
-    @patch("aranami.jobs._execution.perf_counter", new=lambda: 0.0)
     def test_summary_reports_latest_counts_and_older_backfill() -> None:
         """Separate the current day's matches from recovered records."""
         day = dt.date(2025, 5, 5)
@@ -614,23 +758,37 @@ class TestNewPageRecords(TestCase):
                 "read_pages",
                 return_value=[Mock(text=original)],
             ),
+            patch.object(
+                new_pages,
+                "prepare_report",
+                side_effect=lambda original, site, *_args, **_kwargs: (
+                    _summary_metadata(
+                        updated,
+                        site,
+                        max(new_pages.record_dates(updated)),
+                        new_pages.record_dates(updated)
+                        - new_pages.record_dates(original),
+                    )
+                ),
+            ),
             patch.object(new_pages_job, "update_text", return_value=updated),
         ):
             new_pages_job.run(context=context)
         [edit] = context.edits
-        assert edit.summary == EditSummary.with_execution_time(
+        assert edit.summary == EditSummary.with_attribution(
             "Updated for 5 May 2025. "
             "Found 1 article page and 1 non-article page. "
             "Backfilled 11 older daily records.",
-            0,
         )
         assert len(edit.summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
         assert (
-            new_pages_job._edit_summary(  # ruff: ignore[private-member-access]
-                updated,
-                context.site,
-                day,
-                older,
+            new_pages_job._edit_summary(
+                _summary_metadata(
+                    updated,
+                    context.site,
+                    day,
+                    older,
+                ),
             )
             == "Updated class icons. Backfilled 11 older daily records."
         )
@@ -651,15 +809,15 @@ class TestNewPageRecords(TestCase):
         )
         site = _TitleSite("zh", "wikipedia")
         with (
-            patch.object(new_pages, "_build_section") as build,
+            patch.object(new_pages, "collect_day") as build,
             patch.object(new_pages, "page_creation_metadata") as metadata,
             patch.object(
                 new_pages,
                 "query_pages_by_wikiproject",
             ) as grades,
-            patch.object(new_pages, "update_icons") as icons,
+            patch.object(new_pages, "prepare_lines") as icons,
         ):
-            updated = new_pages.update_text(
+            updated = _update_report(
                 original,
                 site,
                 today,
@@ -701,7 +859,7 @@ class TestNewPageRecords(TestCase):
                         "read_pages",
                         return_value=[page],
                     ),
-                    patch.object(new_pages, "_build_section") as build,
+                    patch.object(new_pages, "collect_day") as build,
                     patch.object(
                         new_pages,
                         "page_creation_metadata",
@@ -710,7 +868,7 @@ class TestNewPageRecords(TestCase):
                         new_pages,
                         "query_pages_by_wikiproject",
                     ) as grades,
-                    patch.object(new_pages_job, "record_counts") as counts,
+                    patch.object(new_pages, "record_counts") as counts,
                 ):
                     new_pages_job.run(context=context)
                 assert context.edits == []
@@ -732,13 +890,18 @@ class TestNewPageRecords(TestCase):
             "* {{class/icon|GA}} [[Other]]\n"
         )
         site = _TitleSite("zh", "wikipedia")
-        updated = new_pages.update_icons(source, {"Game": "优良"}, site)
+        updated = rendering.render_lines(
+            new_pages.prepare_lines(source, {"Game": "优良"}, site),
+        )
         assert (
             updated
             == "* {{class/icon|优良}} [[:Game|Display]] tail\n* [[Other]]\n"
         )
         assert (
-            new_pages.update_icons(updated, {"Game": "优良"}, site) == updated
+            rendering.render_lines(
+                new_pages.prepare_lines(updated, {"Game": "优良"}, site),
+            )
+            == updated
         )
 
     @staticmethod

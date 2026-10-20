@@ -3,20 +3,18 @@
 The [project overview](../README.md) describes what Aranami does and the
 reports and data it produces.
 
-## Using Aranami
+Choose the guide for your role:
 
-The [usage guide](usage.md) starts with Toolforge, Aranami's primary runtime.
-Its [maintenance workflow](usage.md#maintain-on-toolforge) covers status and
-logs, wheel upgrades, stopping and restarting the monitor, and recovery.
-The guide also covers optional PAWS notebooks, recurring schedules, immediate
-reports, previews, and the source and support APIs.
-Documentation in this directory is maintained in English.
+| Audience | Guide | What it helps you do |
+|---|---|---|
+| Terminal user | [Usage](usage.md) | Inspect operation, understand UTC triggers, preview changes, and request immediate reports |
+| System administrator or maintainer | [Administration](administration.md) | Upload source to Toolforge, start/stop/restart services, manage runtime folders, and recover |
+| Human application developer | [Development](development.md) | Prepare a workspace, change application code, run offline checks, and prepare a release |
+| AI coding agent or system-level developer | [Architecture](architecture.md) | Preserve component ownership, data/report contracts, storage, logging, status, and lifecycle behavior |
 
-## Design and development
-
-The [design and development guide](development.md) explains architecture,
-report contracts, storage and caching, engineering conventions, testing,
-wheel building, and releases. [Repository instructions](../AGENTS.md) and
-package-scoped instructions apply to changes in their directories.
+Aranami is developed and tested locally; Toolforge is its only runtime.
+All project documentation in this directory is maintained in English.
+[Repository instructions](../AGENTS.md) and package-scoped instructions
+apply to changes in their directories.
 
 Completed changes are recorded in the [changelog](../CHANGELOG.md).

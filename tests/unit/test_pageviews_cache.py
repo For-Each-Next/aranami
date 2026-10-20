@@ -17,9 +17,10 @@ from urllib.error import HTTPError
 import mwparserfromhell
 import polars as pl
 
-from aranami.jobs import JobContext, pageviews as job
-from aranami.services.zhwiki import pageviews
-from aranami.support.pageviews_cache import SCHEMA, PageviewsCache
+from backend.services.zhwiki import pageviews
+from backend.support.pageviews_cache import SCHEMA, PageviewsCache
+from updater.jobs import JobContext, pageviews as job
+from updater.services.zhwiki import pageviews as rendering
 
 _STOP = dt.date(2026, 10, 1)
 _OLDEST = _STOP - dt.timedelta(days=800)
@@ -28,6 +29,18 @@ _DAY = _STOP - dt.timedelta(days=1)
 _PERIODS = ((_REQUIRED, _STOP), (_DAY, _STOP))
 _OBSERVATIONS = {"date": pl.Date, "pageview": pl.Int64}
 _TOP_SCHEMA = {"title": pl.String, "top": pl.Int64}
+
+
+def _site() -> MagicMock:
+    """Provide a stable offline source and publication identity.
+
+    Returns:
+        Mock wiki with explicit database and hostname strings.
+    """
+    fixture = MagicMock()
+    fixture.dbName.return_value = "zhwiki"
+    fixture.hostname.return_value = "zh.wikipedia.org"
+    return fixture
 
 
 def _observations(*rows: tuple[dt.date, int]) -> pl.DataFrame:
@@ -79,6 +92,33 @@ def _articles(*titles: str) -> pl.DataFrame:
         "class": ["B"] * len(titles),
         "importance": ["低"] * len(titles),
     })
+
+
+def _build_report(
+    site: MagicMock,
+    stop: dt.date,
+    *,
+    settings: rendering.ReportSettings,
+    **options: int,
+) -> rendering.PageviewReport:
+    """Render backend data while checking observation-cache behavior.
+
+    Args:
+        site: Offline wiki identity.
+        stop: Exclusive interval end.
+        settings: Caller-selected report populations and presentation.
+        **options: Backend cache and availability options.
+
+    Returns:
+        Rendered report containing the backend's complete result tables.
+    """
+    prepared = pageviews.prepare_report(
+        site,
+        stop,
+        settings=settings.source_settings(),
+        **options,
+    )
+    return rendering.build_report(prepared, settings=settings)
 
 
 class TestTransientPageviews(TestCase):
@@ -135,7 +175,7 @@ class TestTransientPageviews(TestCase):
         """Close HTTP 504 and continue with the next article."""
         cache = PageviewsCache(Path("unused.parquet"))
         response_body = BytesIO(b"gateway timeout")
-        site = MagicMock()
+        site = _site()
         with patch.object(
             pageviews.pageviews,
             "fetch_data_dataframe",
@@ -209,7 +249,7 @@ class TestTransientPageviews(TestCase):
     def test_all_gateway_timeouts_reject_empty_report(self) -> None:
         """Reject reports where every article returns HTTP 504."""
         with TemporaryDirectory() as directory, chdir(directory):
-            site = MagicMock()
+            site = _site()
             site.hostname.return_value = "zh.wikipedia.org"
             with (
                 patch.object(
@@ -231,7 +271,7 @@ class TestTransientPageviews(TestCase):
                 ) as fetch_top,
                 self.assertRaises(pageviews.PageviewsUnavailableError),
             ):
-                pageviews.build_report(
+                _build_report(
                     site,
                     _STOP,
                     settings=job.REPORT_SETTINGS,
@@ -269,7 +309,7 @@ class TestTransientPageviews(TestCase):
                     )
                     primary.save(["Skipped"])
                 previous = primary.get("Skipped")
-                site = MagicMock()
+                site = _site()
                 site.hostname.return_value = "zh.wikipedia.org"
                 with (
                     patch.object(
@@ -294,7 +334,7 @@ class TestTransientPageviews(TestCase):
                         ),
                     ),
                 ):
-                    report = pageviews.build_report(
+                    report = _build_report(
                         site,
                         _STOP,
                         settings=settings,
@@ -334,9 +374,9 @@ class TestTransientPageviews(TestCase):
                 restored = PageviewsCache.load("zh.wikipedia.org")
                 healthy = restored.get("Healthy")
                 assert healthy is not None
-                assert healthy.get_column(
-                    "pageview",
-                ).drop_nulls().to_list() == [0]
+                assert healthy.select(
+                    pl.col("pageview").drop_nulls(),
+                ).to_series().to_list() == [0]
                 skipped = restored.get("Skipped")
                 if previous is None:
                     assert skipped is None
@@ -370,6 +410,31 @@ class TestIncrementalPageviews(TestCase):
     """Verify coverage-driven request planning at article boundaries."""
 
     @staticmethod
+    def test_retained_and_fresh_inputs_produce_identical_totals() -> None:
+        """Match fresh and retained observation totals."""
+        observed = _observations((_REQUIRED, 11), (_DAY, 0))
+        with patch.object(
+            pageviews.pageviews,
+            "fetch_data_dataframe",
+            return_value=observed,
+        ):
+            fresh = pageviews.aggregate_views(_site(), ["A"], _PERIODS)
+        cache = PageviewsCache(Path("unused.parquet"))
+        cache.replace("A", _OLDEST, _STOP, observed)
+        with patch.object(
+            pageviews.pageviews,
+            "fetch_data_dataframe",
+        ) as fetch:
+            retained = pageviews.aggregate_views(
+                _site(),
+                ["A"],
+                _PERIODS,
+                cache=cache,
+            )
+        fetch.assert_not_called()
+        assert retained.equals(fresh)
+
+    @staticmethod
     def test_complete_cache_makes_no_requests() -> None:
         """Reuse cached values when all required dates are covered."""
         cache = PageviewsCache(Path("unused.parquet"))
@@ -393,7 +458,7 @@ class TestIncrementalPageviews(TestCase):
         cache = PageviewsCache(Path("unused.parquet"))
         cached_stop = _STOP - dt.timedelta(days=5)
         cache.replace("A", _OLDEST, cached_stop, _observations((_REQUIRED, 4)))
-        site = MagicMock()
+        site = _site()
         with patch.object(
             pageviews.pageviews,
             "fetch_data_dataframe",
@@ -421,7 +486,7 @@ class TestIncrementalPageviews(TestCase):
             _STOP,
             _observations((_DAY, 999)),
         )
-        site = MagicMock()
+        site = _site()
         with patch.object(
             pageviews.pageviews,
             "fetch_data_dataframe",
@@ -437,11 +502,43 @@ class TestIncrementalPageviews(TestCase):
         assert result.get_column("views").to_list() == [7, 7]
 
     @staticmethod
+    def test_full_rebuild_retains_previously_observed_omitted_dates() -> None:
+        """Keep observations omitted by a rebuilt response."""
+        cache = PageviewsCache(Path("unused.parquet"))
+        prior = _DAY - dt.timedelta(days=1)
+        cache.replace(
+            "A",
+            _STOP - dt.timedelta(days=500),
+            _STOP,
+            _observations((prior, 11), (_DAY, 0)),
+        )
+        with patch.object(
+            pageviews.pageviews,
+            "fetch_data_dataframe",
+            return_value=_observations(),
+        ):
+            result = pageviews.aggregate_views(
+                MagicMock(),
+                ["A"],
+                _PERIODS,
+                cache=cache,
+            )
+        assert result.get_column("views").to_list() == [11, 0]
+        retained = cache.get("A")
+        assert retained is not None
+        assert retained.select(
+            pl.col("pageview").drop_nulls(),
+        ).to_series().to_list() == [
+            11,
+            0,
+        ]
+
+    @staticmethod
     def test_new_article_fetches_its_own_history() -> None:
         """Fetch an unknown title while reusing cached members."""
         cache = PageviewsCache(Path("unused.parquet"))
         cache.replace("A", _OLDEST, _STOP, _observations((_DAY, 0)))
-        site = MagicMock()
+        site = _site()
         with patch.object(
             pageviews.pageviews,
             "fetch_data_dataframe",
@@ -498,7 +595,9 @@ class TestParquetSnapshot(TestCase):
             assert article is not None
             assert empty is not None
             assert article.item(0, "coverage_start") == _OLDEST
-            assert article.get_column("pageview").drop_nulls().to_list() == [0]
+            assert article.select(
+                pl.col("pageview").drop_nulls(),
+            ).to_series().to_list() == [0]
             assert empty.height == 1
             assert list(Path("cache").glob(".pageviews-*")) == []
 
@@ -518,7 +617,7 @@ class TestParquetSnapshot(TestCase):
                     else:
                         malformed.write_parquet(initial.path)
                     cache = PageviewsCache.load("zh.wikipedia.org")
-                    site = MagicMock()
+                    site = _site()
                     with patch.object(
                         pageviews.pageviews,
                         "fetch_data_dataframe",
@@ -545,7 +644,7 @@ class TestParquetSnapshot(TestCase):
                 "pa_class": ["B"],
                 "pa_importance": ["低"],
             })
-            site = MagicMock()
+            site = _site()
             site.hostname.return_value = "zh.wikipedia.org"
             with (
                 patch.object(
@@ -560,7 +659,7 @@ class TestParquetSnapshot(TestCase):
                 ),
                 self.assertRaises(pageviews.PageviewsUnavailableError),
             ):
-                pageviews.build_report(
+                _build_report(
                     site,
                     _STOP,
                     settings=job.REPORT_SETTINGS,
@@ -580,7 +679,7 @@ class TestParquetSnapshot(TestCase):
             with (
                 patch.object(Path, "replace", side_effect=OSError("blocked")),
                 self.assertLogs(
-                    "aranami.support.pageviews_cache",
+                    "backend.support.pageviews_cache",
                     level="WARNING",
                 ),
             ):
@@ -591,6 +690,69 @@ class TestParquetSnapshot(TestCase):
 
 class TestPendingSnapshot(TestCase):
     """Resume completed requests before validating report inputs."""
+
+    @staticmethod
+    def test_pending_extension_preserves_healthy_observations() -> None:
+        """Merge resumed coverage with the complete healthy history."""
+        with TemporaryDirectory() as directory, chdir(directory):
+            healthy = PageviewsCache.load("zh.wikipedia.org", data_date=_DAY)
+            healthy.replace("A", _OLDEST, _DAY, _observations((_REQUIRED, 11)))
+            healthy.save(["A"])
+            assert healthy.pending_path is not None
+            pending = PageviewsCache(
+                healthy.path,
+                pending_path=healthy.pending_path,
+            )
+            pending.replace("A", _DAY, _STOP, _observations((_DAY, 0)))
+            pending.save_pending()
+            resumed = PageviewsCache.load("zh.wikipedia.org", data_date=_DAY)
+            with patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+            ) as fetch:
+                result = pageviews.aggregate_views(
+                    MagicMock(),
+                    ["A"],
+                    _PERIODS,
+                    cache=resumed,
+                )
+            fetch.assert_not_called()
+            assert result.get_column("views").to_list() == [11, 0]
+
+    @staticmethod
+    def test_healthy_refresh_supersedes_older_contained_pending_work() -> None:
+        """Ignore obsolete pending values after a healthy commit."""
+        with TemporaryDirectory() as directory, chdir(directory):
+            healthy = PageviewsCache.load("zh.wikipedia.org", data_date=_DAY)
+            healthy.replace("A", _OLDEST, _STOP, _observations((_DAY, 7)))
+            healthy.save(["A"])
+            assert healthy.pending_path is not None
+            pending = PageviewsCache(
+                healthy.path,
+                pending_path=healthy.pending_path,
+            )
+            pending.replace("A", _DAY, _STOP, _observations((_DAY, 99)))
+            pending.save_pending()
+            restored = PageviewsCache.load(
+                "zh.wikipedia.org",
+                data_date=_DAY,
+            ).get("A")
+            assert restored is not None
+            assert restored.select(
+                pl.col("pageview").drop_nulls(),
+            ).to_series().to_list() == [
+                7,
+            ]
+
+    @staticmethod
+    def test_disconnected_replacement_does_not_claim_gap_coverage() -> None:
+        """Avoid claiming coverage between separated request ranges."""
+        cache = PageviewsCache(Path("unused.parquet"))
+        cache.replace("A", _OLDEST, _REQUIRED, _observations())
+        cache.replace("A", _DAY, _STOP, _observations((_DAY, 0)))
+        restored = cache.get("A")
+        assert restored is not None
+        assert restored.item(0, "coverage_start") == _DAY
 
     def test_monthly_top_deferral_logs_reason_and_resumes_same_date(
         self,
@@ -616,7 +778,7 @@ class TestPendingSnapshot(TestCase):
             )
             primary.save(["A"])
             before = primary.path.read_bytes()
-            site = MagicMock()
+            site = _site()
             site.hostname.return_value = "zh.wikipedia.org"
             page = MagicMock(text=original)
             started_at = dt.datetime(2026, 10, 1, 18, tzinfo=dt.UTC)
@@ -750,7 +912,7 @@ class TestPendingSnapshot(TestCase):
                 )
             primary.save(["A", "B", "C"])
             before = primary.path.read_bytes()
-            site = MagicMock()
+            site = _site()
             site.hostname.return_value = "zh.wikipedia.org"
             with (
                 patch.object(
@@ -772,7 +934,7 @@ class TestPendingSnapshot(TestCase):
                 ) as fetch_top,
                 self.assertRaises(pageviews.PageviewsDeferredError),
             ):
-                pageviews.build_report(
+                _build_report(
                     site,
                     _STOP,
                     settings=job.REPORT_SETTINGS,
@@ -814,7 +976,7 @@ class TestPendingSnapshot(TestCase):
                     ),
                 ),
             ):
-                report = pageviews.build_report(
+                report = _build_report(
                     site,
                     _STOP,
                     settings=job.REPORT_SETTINGS,
@@ -847,7 +1009,7 @@ class TestPendingSnapshot(TestCase):
                 )
             primary.save(["A", "B"])
             before = primary.path.read_bytes()
-            site = MagicMock()
+            site = _site()
             site.hostname.return_value = "zh.wikipedia.org"
             with (
                 patch.object(
@@ -865,7 +1027,7 @@ class TestPendingSnapshot(TestCase):
                 ),
                 self.assertRaises(pageviews.PageviewsDeferredError),
             ):
-                pageviews.build_report(
+                _build_report(
                     site,
                     _STOP,
                     settings=job.REPORT_SETTINGS,
@@ -887,7 +1049,7 @@ class TestPendingSnapshot(TestCase):
                     ) as fetch,
                     self.assertRaises(pageviews.PageviewsUnavailableError),
                 ):
-                    pageviews.build_report(
+                    _build_report(
                         site,
                         _STOP,
                         settings=job.REPORT_SETTINGS,
@@ -936,7 +1098,7 @@ class TestPendingSnapshot(TestCase):
             with (
                 patch.object(Path, "replace", side_effect=OSError("blocked")),
                 self.assertLogs(
-                    "aranami.support.pageviews_cache",
+                    "backend.support.pageviews_cache",
                     level="WARNING",
                 ),
             ):

@@ -6,7 +6,7 @@ from unittest.mock import patch
 import polars as pl
 from sqlalchemy import bindparam, create_engine, select
 
-from aranami.sources.quarry import QueryFrame, Replica
+from shared.sources.quarry import QueryFrame, Replica
 
 
 class TestQueryFrameIntegration(TestCase):
@@ -35,7 +35,7 @@ class TestQueryFrameIntegration(TestCase):
         )
 
         with patch(
-            "aranami.sources.quarry.query._create_engine",
+            "shared.sources.quarry.query._create_engine",
             return_value=engine,
         ) as create_replica_engine:
             result = frame.collect()

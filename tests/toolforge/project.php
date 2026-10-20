@@ -3,38 +3,24 @@
 declare(strict_types=1);
 
 require __DIR__ . '/status.php';
-require dirname(__DIR__, 2) . '/src/toolforge/project.php';
-
-/** Build a recognized article with a distinct item identity for selection fixtures. */
-function qualitySelectionRecord(int $number, string $status = 'GA', string $language = 'en'): array
-{
-    return [
-        'item' => 'Q' . $number, 'site' => $language . 'wiki', 'language' => $language, 'status' => $status,
-        'title' => 'Article ' . $number, 'url' => 'https://' . $language . '.wikipedia.org/wiki/Article_' . $number,
-        'zh_title' => null, 'zh_url' => null,
-    ];
-}
+require dirname(__DIR__, 2) . '/src/webservice/project.php';
 
 $snapshotDirectory = fixtureDirectory($fixture . '/cache/toolforge');
 $snapshotPath = $snapshotDirectory . '/dashboard.json';
 $data = [
     'period' => ['label' => '2026-10-18', 'start' => '2026-10-18', 'end' => '2026-10-19'],
     'updated_at' => '2026-10-18T00:00:00+00:00',
-    'quality' => null,
-    'homepage' => ['featured' => [], 'dyk' => null, 'good' => [], 'news' => [], 'history' => []],
+    'schema' => 2,
+    'reports' => array_fill_keys(['recognized', 'dyk', 'pageviews', 'news_history', 'backlog'], [
+        'config_id' => str_repeat('a', 64), 'refresh_interval_seconds' => 86400,
+        'last_success_at' => '2026-10-18T00:00:00Z', 'last_attempt_at' => '2026-10-18T00:00:00Z',
+        'failed' => false,
+    ]),
+    'homepage' => ['featured' => [], 'dyk' => null, 'good' => [], 'news' => [], 'history' => [], 'upcoming' => null],
     'sources' => [], 'errors' => [],
 ];
 file_put_contents($snapshotPath, json_encode($data));
 expectSame($data, projectDashboard($snapshotPath), 'Known empty and unknown observations remain distinct');
-foreach ([null, '2026-10-17T12:00:00Z'] as $highlightTime) {
-    $timedData = $data + ['highlights_updated_at' => $highlightTime];
-    file_put_contents($snapshotPath, json_encode($timedData));
-    expectSame($timedData, projectDashboard($snapshotPath), 'Highlights retain an independent source timestamp or an unavailable observation');
-}
-foreach (['2026-02-30T12:00:00Z', '2026-10-18T12:00:00+08:00', 123] as $highlightTime) {
-    file_put_contents($snapshotPath, json_encode($data + ['highlights_updated_at' => $highlightTime]));
-    expectSame(null, projectDashboard($snapshotPath), 'Invalid highlights timestamps cannot reach the heading');
-}
 $dailyViews = [
     'date' => '2026-10-17', 'limit' => 10, 'scope' => 'site_top_1000',
     'items' => [
@@ -48,6 +34,11 @@ foreach ([null, array_replace($dailyViews, ['items' => []]), $dailyViews] as $vi
     file_put_contents($snapshotPath, json_encode($data));
     expectSame($data, projectDashboard($snapshotPath), 'Daily views preserve unavailable, measured empty, and zero-valued records');
 }
+$staleData = $data;
+$staleData['updated_at'] = '2026-10-28T12:00:00Z';
+$staleData['period'] = ['label' => 'New display window', 'start' => '2026-10-27', 'end' => '2026-10-29'];
+file_put_contents($snapshotPath, json_encode($staleData));
+expectSame($staleData, projectDashboard($snapshotPath), 'An outage preserves old measured pageviews against their actual successful source date');
 $data['sources'][] = ['label' => 'Wikimedia daily top pageviews', 'url' => $dailyViews['source_url']];
 file_put_contents($snapshotPath, json_encode($data));
 expectSame($data, projectDashboard($snapshotPath), 'The exact official daily endpoint is allowed among audited sources');
@@ -154,6 +145,7 @@ $invalid = $data;
 $invalid['sources'][0]['url'] = 'https://evil.example/api/rest_v1/metrics/pageviews/top/zh.wikipedia.org/all-access/2026/10/17';
 file_put_contents($snapshotPath, json_encode($invalid));
 expectSame(null, projectDashboard($snapshotPath), 'Official endpoint support does not allow arbitrary API hosts');
+$data['reports']['recognized']['period'] = $data['period'];
 $scheduled = ['title' => 'Scheduled article', 'url' => 'https://zh.wikipedia.org/wiki/Example',
     'date' => '2026-10-19', 'date_kind' => 'scheduled', 'kind' => 'fa'];
 foreach ([null, [], [$scheduled], [array_replace($scheduled, ['date' => '2026-11-17', 'kind' => 'ga'])]] as $upcoming) {
@@ -177,118 +169,6 @@ $article = ['title' => '<script>alert(1)</script>', 'url' => 'https://zh.wikiped
 $data['homepage']['dyk'] = [$article];
 file_put_contents($snapshotPath, json_encode($data));
 expectSame($data, projectDashboard($snapshotPath), 'Text is retained for HTML escaping by the renderer');
-$data['quality'] = [
-    'total' => 1, 'languages' => 1, 'scope' => 'Video games',
-    'observed_at' => '2026-10-18T00:00:00Z',
-    'counts' => [['site' => 'enwiki', 'language' => 'en', 'status' => 'GA', 'count' => 1]],
-    'items' => [['item' => 'Q1', 'site' => 'enwiki', 'language' => 'en', 'status' => 'GA',
-        'title' => 'English title', 'url' => 'https://en.wikipedia.org/wiki/Example',
-        'zh_title' => '中文條目', 'zh_url' => 'https://zh.wikipedia.org/wiki/Example']],
-];
-file_put_contents($snapshotPath, json_encode($data));
-expectSame($data, projectDashboard($snapshotPath), 'Foreign content retains its Chinese companion link');
-foreach ([false, true] as $stale) {
-    $cached = $data;
-    $cached['quality']['stale'] = $stale;
-    file_put_contents($snapshotPath, json_encode($cached));
-    expectSame($cached, projectDashboard($snapshotPath), 'Cached quality records retain an explicit stale state');
-}
-foreach ([null, 1, 'true', []] as $stale) {
-    $invalid = $data;
-    $invalid['quality']['stale'] = $stale;
-    file_put_contents($snapshotPath, json_encode($invalid));
-    expectSame(null, projectDashboard($snapshotPath), 'The quality stale marker must be a boolean');
-}
-$recent = $data['quality']['items'][0] + ['badge_observed_at' => '2026-10-18T00:00:00Z'];
-foreach ([[], [$recent], [array_replace($recent, ['badge_observed_at' => '2026-10-18T00:00:00+00:00'])]] as $observations) {
-    $data['quality']['recent_items'] = $observations;
-    file_put_contents($snapshotPath, json_encode($data));
-    expectSame($data, projectDashboard($snapshotPath), 'Recent badge observations preserve empty baselines and explicit UTC times');
-}
-foreach ([null, '2026-02-30T00:00:00Z', '2026-10-18', '2026-10-18T08:00:00+08:00', 1] as $timestamp) {
-    $invalid = $data;
-    $invalid['quality']['recent_items'][0]['badge_observed_at'] = $timestamp;
-    file_put_contents($snapshotPath, json_encode($invalid));
-    expectSame(null, projectDashboard($snapshotPath), 'Badge observation times must be actual explicit UTC timestamps');
-}
-foreach ([null, 'GA', 'B', 'C'] as $grade) {
-    $data['quality']['items'][0]['zh_class'] = $grade;
-    file_put_contents($snapshotPath, json_encode($data));
-    expectSame($data, projectDashboard($snapshotPath), 'Chinese companion classes retain recognized and ordinary project grades');
-}
-foreach ([false, 1, '', str_repeat('x', 65), "B\n"] as $grade) {
-    $invalid = $data;
-    $invalid['quality']['items'][0]['zh_class'] = $grade;
-    file_put_contents($snapshotPath, json_encode($invalid));
-    expectSame(null, projectDashboard($snapshotPath), 'Chinese companion classes require a bounded printable string or null');
-}
-$chinese = array_replace($data['quality']['items'][0], [
-    'site' => 'zhwiki', 'language' => 'zh', 'title' => '中文條目', 'url' => 'https://zh.wikipedia.org/wiki/Example',
-]);
-expectSame(true, validQualityArticle($chinese), 'Chinese quality records use a consistent Chinese identity and domain');
-$allLanguages = $data;
-$allLanguages['quality']['recent_items'][] = $chinese + ['badge_observed_at' => '2026-10-18T00:00:01Z'];
-file_put_contents($snapshotPath, json_encode($allLanguages));
-expectSame($allLanguages, projectDashboard($snapshotPath), 'All-language observations can include Chinese recognized articles');
-expectSame(false, validQualityArticle(array_replace($chinese, ['site' => 'enwiki'])),
-    'Chinese quality records require the Chinese site identity');
-expectSame(false, validPopularArticle($chinese + ['language_count' => 1, 'articles' => [$chinese]]),
-    'The default across-wiki ranking counts foreign editions only');
-$data['quality']['language_totals'] = [['site' => 'enwiki', 'language' => 'en', 'count' => 1]];
-file_put_contents($snapshotPath, json_encode($data));
-expectSame($data, projectDashboard($snapshotPath), 'Optional distinct article totals survive snapshot validation');
-$popular = $data['quality']['items'][0];
-$popular['language_count'] = 1;
-$popular['articles'] = $data['quality']['items'];
-$data['quality']['popular_items'] = [$popular];
-file_put_contents($snapshotPath, json_encode($data));
-expectSame($data, projectDashboard($snapshotPath), 'Ranked items retain their primary article and distinct foreign links');
-foreach ([
-    ['language_count' => 0], ['language_count' => 2], ['language_count' => '1'],
-    ['articles' => null], ['articles' => []],
-    ['articles' => [array_replace($popular['articles'][0], ['item' => 'Q2'])]],
-    ['language_count' => 2, 'articles' => [$popular['articles'][0], $popular['articles'][0]]],
-] as $changes) {
-    $invalid = $data;
-    $invalid['quality']['popular_items'][0] = array_replace($popular, $changes);
-    file_put_contents($snapshotPath, json_encode($invalid));
-    expectSame(null, projectDashboard($snapshotPath), 'Ranked items require consistent distinct same-item editions');
-}
-$invalid = $data;
-$invalid['quality']['popular_items'] = array_fill(0, 11, $popular);
-file_put_contents($snapshotPath, json_encode($invalid));
-expectSame(null, projectDashboard($snapshotPath), 'The global article ranking is bounded to ten items');
-foreach ([null, '1', -1, true] as $count) {
-    $invalid = $data;
-    $invalid['quality']['language_totals'][0]['count'] = $count;
-    file_put_contents($snapshotPath, json_encode($invalid));
-    expectSame(null, projectDashboard($snapshotPath), 'Distinct language totals require nonnegative integer counts');
-}
-foreach ([null, 'not a list', ['site' => 'enwiki', 'language' => 'en', 'count' => 1]] as $totals) {
-    $invalid = $data;
-    $invalid['quality']['language_totals'] = $totals;
-    file_put_contents($snapshotPath, json_encode($invalid));
-    expectSame(null, projectDashboard($snapshotPath), 'Present language totals must be a list of records');
-}
-$invalid = $data;
-$invalid['quality']['counts'][0]['status'] = 'unsupported';
-file_put_contents($snapshotPath, json_encode($invalid));
-expectSame(null, projectDashboard($snapshotPath), 'Unsupported recognition is rejected');
-expectSame(true, validQualityType('recommended'), 'Recommended is a supported common recognition tier');
-foreach (['https://www.wikidata.org/wiki/Q1', 'https://zh.wikipedia.org/wiki/Example'] as $url) {
-    $invalid = $data;
-    $invalid['quality']['items'][0]['url'] = $url;
-    file_put_contents($snapshotPath, json_encode($invalid));
-    expectSame(null, projectDashboard($snapshotPath), 'Primary quality articles must belong to a foreign Wikipedia');
-}
-$invalid = $data;
-$invalid['quality']['items'][0]['zh_url'] = 'https://en.wikipedia.org/wiki/Example';
-file_put_contents($snapshotPath, json_encode($invalid));
-expectSame(null, projectDashboard($snapshotPath), 'Chinese companion links must point to Chinese Wikipedia');
-$invalid = $data;
-$invalid['quality']['items'][0]['zh_title'] = null;
-file_put_contents($snapshotPath, json_encode($invalid));
-expectSame(null, projectDashboard($snapshotPath), 'Chinese companion fields must be known or null together');
 foreach (['javascript:alert(1)', 'https://evil.example/wiki/Example', 'https://user@zh.wikipedia.org/wiki/Example', 'https://zh.wikipedia.org:443/wiki/Example', "https://zh.wikipedia.org/wiki/Example\n"] as $url) {
     $invalid = $data;
     $invalid['homepage']['dyk'][0]['url'] = $url;
@@ -311,47 +191,10 @@ file_put_contents($fixture . '/snapshot.json', json_encode($data));
 symlink($fixture . '/snapshot.json', $snapshotPath);
 expectSame(null, projectDashboard($snapshotPath), 'Snapshots cannot be symlinks');
 
-expectSame(null, selectQualityArticles(null), 'An unavailable quality source remains unavailable');
-expectSame([], selectQualityArticles(['items' => [], 'recent_items' => []]),
-    'An available empty quality source remains empty');
-$selectionItems = array_map('qualitySelectionRecord', range(1, 12));
-foreach ([['items' => $selectionItems], ['items' => $selectionItems, 'recent_items' => []]] as $selection) {
-    expectSame(array_slice($selectionItems, 0, 10), selectQualityArticles($selection),
-        'Missing or zero recent recognitions fill ten places from the current records');
+expectSame(false, validReportMetadata(['config_id' => 'invalid']), 'Incomplete refresh metadata is rejected');
+$metadata = $data['reports']['dyk'];
+foreach (['refresh_interval_seconds' => 0, 'config_id' => 'wrong', 'failed' => 'yes',
+    'last_success_at' => '2026-10-19T00:00:00Z'] as $key => $value) {
+    expectSame(false, validReportMetadata(array_replace($metadata, [$key => $value])), 'Report metadata retains validated timestamps and configuration identity');
 }
-expectSame(array_slice($selectionItems, 0, 4), selectQualityArticles(['items' => array_slice($selectionItems, 0, 4)]),
-    'Fewer than ten current articles are returned without inventing extra records');
-$newest = $selectionItems[10] + ['badge_observed_at' => '2026-10-18T00:00:00Z'];
-$older = $selectionItems[11] + ['badge_observed_at' => '2026-10-17T00:00:00+00:00'];
-$selection = ['items' => $selectionItems, 'recent_items' => [$older, $newest]];
-expectSame(array_merge([$newest, $older], array_slice($selectionItems, 0, 8)), selectQualityArticles($selection),
-    'Recent recognitions come first in newest order and current records fill the remaining places');
-$selection['recent_items'][] = array_replace($newest, ['badge_observed_at' => '2026-10-16T00:00:00Z']);
-$selection['items'] = array_merge([$selectionItems[0]], $selectionItems);
-expectSame(array_merge([$newest, $older], array_slice($selectionItems, 0, 8)), selectQualityArticles($selection),
-    'Repeated recent and current identities consume only one place and keep the newest observation');
-$manyRecent = [];
-foreach ($selectionItems as $index => $item) {
-    $manyRecent[] = $item + ['badge_observed_at' => sprintf('2026-10-%02dT00:00:00Z', $index + 1)];
-}
-expectSame(array_slice(array_reverse($manyRecent), 0, 10),
-    selectQualityArticles(['items' => $selectionItems, 'recent_items' => $manyRecent]),
-    'More than ten recent records keep only the ten newest recognitions');
-$featured = qualitySelectionRecord(13, 'FA');
-$recentFeatured = qualitySelectionRecord(14, 'FA') + ['badge_observed_at' => '2026-10-17T00:00:00Z'];
-$selection = ['items' => array_merge($selectionItems, [$featured, qualitySelectionRecord(14, 'FA')]),
-    'recent_items' => array_merge($manyRecent, [$recentFeatured])];
-expectSame([$recentFeatured, $featured], selectQualityArticles($selection, 'FA'),
-    'The requested status filters recent recognitions and fallback articles before applying the limit');
-expectSame([], selectQualityArticles($selection, 'FL'), 'An unmatched status is known empty');
-$otherStatus = qualitySelectionRecord(1, 'FA');
-$otherSite = qualitySelectionRecord(1, 'GA', 'fr');
-$chineseRecent = qualitySelectionRecord(15, 'GA', 'zh') + ['badge_observed_at' => '2026-10-18T00:00:00Z'];
-expectSame([$chineseRecent, $selectionItems[0], $otherStatus, $otherSite], selectQualityArticles([
-    'items' => [$selectionItems[0], $otherStatus, $otherSite, qualitySelectionRecord(15, 'GA', 'zh')],
-    'recent_items' => [$chineseRecent],
-]), 'Selection includes Chinese articles and preserves distinct site and badge identities');
-expectSame(array_slice($selectionItems, 0, 3), selectQualityArticles(['items' => $selectionItems], '', 3),
-    'Callers can request a smaller bounded selection');
-
 echo "Toolforge project snapshot checks passed.\n";

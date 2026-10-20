@@ -1,72 +1,80 @@
-"""Verify shared major events across components and UTC dates."""
-
-# Fixed Python programs use the configured SDK without a shell.
-# ruff: file-ignore[suspicious-subprocess-import, subprocess-without-shell-equals-true]
+"""Verify natural-language logging across backend components."""
 
 import datetime as dt
-import json
 import logging
-import subprocess
-import sys
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
-from aranami.jobs import JobContext, ProposedEdit, job_run
-from aranami.support.logs import log_project_event
+from backend.support.logs import open_run_log
 
 
 class TestProjectLogs(TestCase):
-    """Keep major events independent from detailed logging state."""
+    """Keep readable diagnostics separate from persisted metadata."""
 
     @staticmethod
-    def test_components_share_files_and_roll_over_at_midnight() -> None:
-        """Route events by UTC date without adding handlers."""
-        before = dt.datetime(2026, 10, 18, 23, 59, 59, tzinfo=dt.UTC)
-        after = before + dt.timedelta(seconds=1)
-        logger = logging.getLogger("aranami")
-        original = (logger.level, logger.handlers[:], logging.root.handlers[:])
+    def test_components_share_one_natural_language_daily_file() -> None:
+        """Capture standard loggers without configuring the root."""
+        root_state = logging.root.level, tuple(logging.root.handlers)
         with TemporaryDirectory() as directory:
             destination = Path(directory)
-            for instant, component in (
-                (before, "aranami"),
-                (after, "dashboard"),
-            ):
-                with patch(
-                    "aranami.support.logs.time.time",
-                    return_value=instant.timestamp(),
-                ):
-                    assert log_project_event(
-                        component,
-                        "lifecycle.started",
-                        directory=destination,
-                    )
-            paths = sorted(destination.glob("project.*.log"))
-            assert [path.name for path in paths] == [
-                "project.2026-10-18.log",
-                "project.2026-10-19.log",
-            ]
-            rows = [json.loads(path.read_text()) for path in paths]
-            assert [row["component"] for row in rows] == [
-                "aranami",
-                "dashboard",
-            ]
-            assert [row["timestamp"] for row in rows] == [
-                "2026-10-18T23:59:59Z",
-                "2026-10-19T00:00:00Z",
-            ]
-            assert all(row["schema"] == 1 for row in rows)
-        assert original == (
-            logger.level,
-            logger.handlers[:],
-            logging.root.handlers[:],
-        )
+            with open_run_log(destination):
+                logging.getLogger("backend.server").info(
+                    "Website refresh completed.",
+                )
+                logging.getLogger("updater.jobs.dyks").warning(
+                    "DYK publication was deferred.",
+                )
+                logging.getLogger("shared.sources.wiki").info(
+                    "Read current source pages.",
+                )
+            paths = list(destination.iterdir())
+            assert len(paths) == 1
+            assert paths[0].name.startswith("aranami.")
+            content = paths[0].read_text()
+            assert "Website refresh completed." in content
+            assert "DYK publication was deferred." in content
+            assert "Read current source pages." in content
+            assert "Z INFO [backend.server." in content
+            assert "Z WARNING [updater.jobs.dyks." in content
+            assert all(
+                not line.startswith("{") for line in content.splitlines()
+            )
+        assert root_state == (logging.root.level, tuple(logging.root.handlers))
 
     @staticmethod
-    def test_retention_keeps_ninety_completed_dates_and_other_logs() -> None:
-        """Prune only old project dates and preserve other files."""
+    def test_utc_midnight_routes_each_record_to_its_own_date() -> None:
+        """Rotate filenames by the record's actual UTC timestamp."""
+        before = dt.datetime(2026, 10, 18, 23, 59, 59, tzinfo=dt.UTC)
+        after = before + dt.timedelta(seconds=1)
+        with TemporaryDirectory() as directory:
+            destination = Path(directory)
+            with open_run_log(destination) as logger:
+                with patch(
+                    "logging.time.time_ns",
+                    return_value=int(before.timestamp() * 1e9),
+                ):
+                    logger.info("Work before midnight.")
+                with patch(
+                    "logging.time.time_ns",
+                    return_value=int(after.timestamp() * 1e9),
+                ):
+                    logger.info("Work after midnight.")
+            first = destination / "aranami.2026-10-18.log"
+            second = destination / "aranami.2026-10-19.log"
+            assert "2026-10-18 23:59:59Z" in first.read_text()
+            assert "Work before midnight." in first.read_text()
+            assert "2026-10-19 00:00:00Z" in second.read_text()
+            assert "Work after midnight." in second.read_text()
+            assert "Work after midnight." not in first.read_text()
+
+    @staticmethod
+    def test_retention_preserves_ninety_completed_dates_and_metadata() -> None:
+        """Prune only recognized diagnostic files beyond retention."""
         today = dt.date(2026, 10, 18)
         instant = dt.datetime.combine(today, dt.time(), tzinfo=dt.UTC)
         with TemporaryDirectory() as directory:
@@ -74,143 +82,109 @@ class TestProjectLogs(TestCase):
             for age in range(1, 96):
                 (
                     destination
-                    / f"project.{today - dt.timedelta(days=age)}.log"
-                ).write_text("old")
-            retained = {
-                f"project.{today - dt.timedelta(days=age)}.log"
-                for age in range(1, 91)
+                    / f"aranami.{today - dt.timedelta(days=age)}.log"
+                ).write_text("Earlier diagnostic.\n")
+            preserved = {
+                "routine-status.json",
+                "schedule-status.json",
+                "aranami.invalid.log",
+                "project.2020-01-01.log",
             }
-            unrelated = {
-                "aranami.2020-01-01.log",
-                "project.invalid.log",
-                "notes.txt",
-            }
-            future = f"project.{today + dt.timedelta(days=1)}.log"
-            for filename in unrelated | {future}:
-                (destination / filename).write_text("keep")
-            with patch(
-                "aranami.support.logs.time.time",
-                return_value=instant.timestamp(),
+            for filename in preserved:
+                (destination / filename).write_text("preserved")
+            with (
+                open_run_log(destination) as logger,
+                patch(
+                    "logging.time.time_ns",
+                    return_value=int(instant.timestamp() * 1e9),
+                ),
             ):
-                assert log_project_event(
-                    "dashboard",
-                    "updater.started",
-                    directory=destination,
-                )
+                logger.info("Current diagnostic.")
+            expected = {
+                f"aranami.{today - dt.timedelta(days=age)}.log"
+                for age in range(91)
+            }
             assert {path.name for path in destination.iterdir()} == (
-                retained | unrelated | {future, f"project.{today}.log"}
+                expected | preserved
+            )
+            assert all(
+                (destination / name).read_text() == "preserved"
+                for name in preserved
             )
 
     @staticmethod
-    def test_threads_and_processes_append_complete_records() -> None:
-        """Keep concurrent component writes intact and distinct."""
+    def test_overlapping_thread_contexts_share_one_handler() -> None:
+        """Retain complete standard log records from concurrent work."""
+        components = ("backend.website.collect", "updater.jobs.dyks")
         with TemporaryDirectory() as directory:
             destination = Path(directory)
 
             def append(component: str) -> None:
-                """Write one component's sequence concurrently."""
+                """Write one component's diagnostic sequence.
+
+                Args:
+                    component: Ordinary Python logger name.
+                """
+                with open_run_log():
+                    for sequence in range(20):
+                        logging.getLogger(component).info(
+                            "Completed fixture operation %d.",
+                            sequence,
+                        )
+
+            with open_run_log(destination), ThreadPoolExecutor(2) as pool:
+                list(pool.map(append, components))
+            (path,) = destination.glob("aranami.*.log")
+            lines = path.read_text().splitlines()
+            expected_count = 40
+            assert len(lines) == expected_count
+            for component in components:
                 for sequence in range(20):
-                    assert log_project_event(
-                        component,
-                        "test.event",
-                        directory=destination,
-                        sequence=sequence,
+                    assert (
+                        sum(
+                            f"[{component}.append]" in line
+                            and line.endswith(
+                                f"Completed fixture operation {sequence}.",
+                            )
+                            for line in lines
+                        )
+                        == 1
                     )
 
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                list(pool.map(append, ("aranami", "dashboard")))
-            program = (
-                "from pathlib import Path; import sys; "
-                "from aranami.support.logs import log_project_event; "
-                "[log_project_event(sys.argv[2], 'test.event', "
-                "directory=Path(sys.argv[1]), sequence=n) for n in range(20)]"
-            )
-            processes = [
-                subprocess.Popen([
-                    sys.executable,
-                    "-c",
-                    program,
-                    directory,
-                    component,
-                ])
-                for component in ("process-a", "process-b")
-            ]
-            assert [process.wait(timeout=10) for process in processes] == [
-                0,
-                0,
-            ]
-            rows = [
-                json.loads(line)
-                for path in destination.glob("project.*.log")
-                for line in path.read_text().splitlines()
-            ]
-            assert {(row["component"], row["sequence"]) for row in rows} == {
-                (component, sequence)
-                for component in (
-                    "aranami",
-                    "dashboard",
-                    "process-a",
-                    "process-b",
-                )
-                for sequence in range(20)
-            }
-            expected_records = 80
-            assert len(rows) == expected_records
-
-    def test_invalid_or_unwritable_events_do_not_raise(self) -> None:
-        """Keep logging failures separate from runtime outcomes."""
+    @staticmethod
+    def test_retention_failure_preserves_work_and_message() -> None:
+        """Use standard handler error reporting and continue logging."""
         with (
             TemporaryDirectory() as directory,
-            self.assertLogs(
-                "aranami.support.logs",
-                level="WARNING",
-            ) as captured,
+            patch(
+                "backend.support.logs._prune_daily_logs",
+                side_effect=OSError("fixture retention failure"),
+            ),
+            patch("logging.Handler.handleError") as error,
         ):
             destination = Path(directory)
-            assert not log_project_event(
-                "aranami",
-                "invalid",
-                directory=destination,
-                detail="x" * 5000,
-            )
-            assert not log_project_event(
-                "aranami",
-                "invalid",
-                directory=destination,
-                duration_seconds=float("nan"),
-            )
-            with patch(
-                "aranami.support.logs.os.open",
-                side_effect=OSError("sensitive fixture text"),
-            ):
-                assert not log_project_event(
-                    "dashboard",
-                    "updater.started",
-                    directory=destination,
-                )
-            assert "sensitive fixture" not in "\n".join(captured.output)
-            assert not list(destination.glob("project.*.log"))
+            with open_run_log(destination) as logger:
+                logger.info("Required work completed.")
+            (path,) = destination.glob("aranami.*.log")
+            assert "Required work completed." in path.read_text()
+        error.assert_called_once()
 
-    def test_log_failure_cannot_turn_a_save_into_a_failed_routine(
-        self,
-    ) -> None:
-        """Keep saves successful when the major log is unwritable."""
-        context = JobContext(Mock(), dt.date(2026, 10, 18), dry=False)
-        page = Mock(text="old")
+    @staticmethod
+    def test_terminal_receives_one_copy_of_each_natural_message() -> None:
+        """Share standard stderr output across nested run contexts."""
+        output = StringIO()
+        logger = logging.getLogger("backend.server")
         with (
             TemporaryDirectory() as directory,
-            patch("pathlib.Path.cwd", return_value=Path(directory)),
-            patch("aranami.jobs._execution.pywikibot.Page", return_value=page),
-            patch(
-                "aranami.support.logs.os.open",
-                side_effect=OSError("No space."),
-            ),
-            self.assertLogs("aranami.support.logs", level="WARNING"),
-            job_run("dyks", context=context),
+            redirect_stderr(output),
+            open_run_log(Path(directory)),
         ):
-            context.publish(
-                ProposedEdit(context.site, "Target", "new", "summary"),
-            )
-        page.save.assert_called_once()
-        assert context.tasks[0].status == "success"
-        assert context.tasks[0].updated == 1
+            with open_run_log():
+                logger.info("Updated website highlights.")
+            logger.warning("A source will retry at the next check.")
+        content = output.getvalue()
+        assert content.count("Updated website highlights.") == 1
+        assert content.count("A source will retry at the next check.") == 1
+        assert "Z INFO [backend.server." in content
+        assert "Z WARNING [backend.server." in content
+        assert all(not line.startswith("{") for line in content.splitlines())

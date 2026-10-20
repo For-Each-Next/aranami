@@ -7,7 +7,9 @@ from unittest import TestCase
 import polars as pl
 from wiki_fixtures import OfflineSite
 
-from aranami.services.zhwiki import enwp_key_articles as reports
+from backend.services.enwiki import key_articles as data_service
+from backend.services.enwiki.article_changes import compare_articles
+from updater.services.zhwiki import enwp_key_articles as reports
 
 
 def _rows(*articles: tuple[str, int, int, str]) -> pl.DataFrame:
@@ -37,23 +39,25 @@ class TestQualitySummaries(TestCase):
     @staticmethod
     def test_parse_stored_english_class() -> None:
         """Read template classes and ignore obsolete ID comments."""
-        parsed = reports.parse_old_articles(
+        parsed = data_service.parse_old_articles(
             "{{PJ:VG/DBR/EN/item|en=Known|en_cls= ga |wd=Q1}}"
             '<!-- aranami-enwp page-id="10" -->\n'
             "{{PJ:VG/DBR/EN/item|en=Legacy|wd=2}}",
             OfflineSite("zh", "wikipedia"),
         )
         assert parsed == {
-            "Known": reports.OldArticle("Known", 1, en_class="GA"),
-            "Legacy": reports.OldArticle("Legacy", 2),
+            "Known": data_service.OldArticle("Known", 1, en_class="GA"),
+            "Legacy": data_service.OldArticle("Legacy", 2),
         }
 
     @staticmethod
     def test_new_english_classes_use_requested_verbs() -> None:
         """Name GA listings and FA and FL promotions independently."""
         summary = reports.build_edit_summary(
-            {},
-            _rows(("Good", 1, 10, "GA"), ("Article", 2, 20, "FA")),
+            compare_articles(
+                {},
+                _rows(("Good", 1, 10, "GA"), ("Article", 2, 20, "FA")),
+            ),
             {},
             quality=True,
         )
@@ -63,8 +67,7 @@ class TestQualitySummaries(TestCase):
         )
         assert (
             reports.build_edit_summary(
-                {},
-                _rows(("List", 3, 30, "FL")),
+                compare_articles({}, _rows(("List", 3, 30, "FL"))),
                 {},
                 quality=True,
             )
@@ -75,13 +78,12 @@ class TestQualitySummaries(TestCase):
     def test_removed_english_classes_use_previous_class() -> None:
         """Name GA delistings and FA and FL removals."""
         previous = {
-            "Good": reports.OldArticle("Good", 1, 10, "GA"),
-            "Article": reports.OldArticle("Article", 2, 20, "FA"),
-            "List": reports.OldArticle("List", 3, 30, "FL"),
+            "Good": data_service.OldArticle("Good", 1, 10, "GA"),
+            "Article": data_service.OldArticle("Article", 2, 20, "FA"),
+            "List": data_service.OldArticle("List", 3, 30, "FL"),
         }
         assert reports.build_edit_summary(
-            previous,
-            _rows(),
+            compare_articles(previous, _rows()),
             {},
             quality=True,
         ) == (
@@ -92,33 +94,53 @@ class TestQualitySummaries(TestCase):
     @staticmethod
     def test_class_change_matches_page_id_after_rename() -> None:
         """Match one transition despite changed titles and item IDs."""
-        previous = {"Before": reports.OldArticle("Before", 1, 10, "GA")}
+        previous = {"Before": data_service.OldArticle("Before", 1, 10, "GA")}
         current = _rows(("After", 2, 10, "FA"))
         summary = reports.build_edit_summary(
-            previous,
-            current,
+            compare_articles(previous, current),
             {},
             quality=True,
         )
         assert summary == (
             "1 item total. FA prompted «[[:en:After]]» (from GA)."
         )
-        assert reports.build_edit_summary(previous, current, {}) == (
-            "1 item total."
-        )
+        assert reports.build_edit_summary(
+            compare_articles(previous, current),
+            {},
+        ) == ("1 item total.")
 
     @staticmethod
     def test_class_change_uses_wikidata_or_title_without_cached_ids() -> None:
         """Find transitions when earlier rows have no stored page ID."""
         cases = (
-            ({"Before": reports.OldArticle("Before", 1, en_class="GA")}, 1),
-            ({"After": reports.OldArticle("After", None, en_class="GA")}, 2),
+            (
+                {
+                    "Before": data_service.OldArticle(
+                        "Before",
+                        1,
+                        en_class="GA",
+                    ),
+                },
+                1,
+            ),
+            (
+                {
+                    "After": data_service.OldArticle(
+                        "After",
+                        None,
+                        en_class="GA",
+                    ),
+                },
+                2,
+            ),
         )
         for previous, item_id in cases:
             assert (
                 reports.build_edit_summary(
-                    previous,
-                    _rows(("After", item_id, 10, "FA")),
+                    compare_articles(
+                        previous,
+                        _rows(("After", item_id, 10, "FA")),
+                    ),
                     {},
                     quality=True,
                 )
@@ -129,14 +151,13 @@ class TestQualitySummaries(TestCase):
     def test_class_change_mentions_current_chinese_sitelink() -> None:
         """Preserve bilingual links in transition mentions."""
         assert reports.build_edit_summary(
-            {"Before": reports.OldArticle("Before", 1, 10, "GA")},
-            _rows(("After", 1, 10, "FA")),
+            compare_articles(
+                {"Before": data_service.OldArticle("Before", 1, 10, "GA")},
+                _rows(("After", 1, 10, "FA")),
+            ),
             {1: "後"},
             quality=True,
-        ) == (
-            "1 item total. FA prompted «[[:en:After]]» "
-            "&#91;[[後]]&#93; (from GA)."
-        )
+        ) == ("1 item total. FA prompted «[[:en:After]]» ([[後]]) (from GA).")
 
     @staticmethod
     def test_same_class_ignores_renames_and_other_assessments() -> None:
@@ -148,8 +169,10 @@ class TestQualitySummaries(TestCase):
         )
         assert (
             reports.build_edit_summary(
-                {"Before": reports.OldArticle("Before", 1, 10, "GA")},
-                current,
+                compare_articles(
+                    {"Before": data_service.OldArticle("Before", 1, 10, "GA")},
+                    current,
+                ),
                 {},
                 quality=True,
             )
@@ -160,8 +183,10 @@ class TestQualitySummaries(TestCase):
     def test_recreated_page_does_not_match_previous_page_id() -> None:
         """Report both memberships when a page is recreated in place."""
         assert reports.build_edit_summary(
-            {"Same": reports.OldArticle("Same", 1, 10, "GA")},
-            _rows(("Same", 1, 20, "GA")),
+            compare_articles(
+                {"Same": data_service.OldArticle("Same", 1, 10, "GA")},
+                _rows(("Same", 1, 20, "GA")),
+            ),
             {},
             quality=True,
         ) == (
@@ -172,11 +197,10 @@ class TestQualitySummaries(TestCase):
     @staticmethod
     def test_unknown_previous_class_does_not_imply_promotion() -> None:
         """Keep matched members quiet without a known baseline class."""
-        previous = {"Before": reports.OldArticle("Before", 1, 10)}
+        previous = {"Before": data_service.OldArticle("Before", 1, 10)}
         assert (
             reports.build_edit_summary(
-                previous,
-                _rows(("After", 1, 10, "FA")),
+                compare_articles(previous, _rows(("After", 1, 10, "FA"))),
                 {},
                 quality=True,
             )
@@ -184,8 +208,7 @@ class TestQualitySummaries(TestCase):
         )
         assert (
             reports.build_edit_summary(
-                previous,
-                _rows(),
+                compare_articles(previous, _rows()),
                 {},
                 quality=True,
             )
@@ -197,8 +220,10 @@ class TestQualitySummaries(TestCase):
         """Replace an oversized transition with an omission count."""
         summary_budget = 55
         summary = reports.build_edit_summary(
-            {"Before": reports.OldArticle("Before", 1, 10, "GA")},
-            _rows(("中文" * 200, 1, 10, "FA")),
+            compare_articles(
+                {"Before": data_service.OldArticle("Before", 1, 10, "GA")},
+                _rows(("中文" * 200, 1, 10, "FA")),
+            ),
             {1: "中" * 200},
             max_bytes=summary_budget,
             quality=True,

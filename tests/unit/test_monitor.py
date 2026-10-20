@@ -6,6 +6,7 @@
 import datetime as dt
 import json
 from contextlib import ExitStack
+from functools import partial
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
@@ -16,8 +17,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_PAUSED
 from apscheduler.triggers.cron import CronTrigger
 
-from aranami import monitor
-from aranami.jobs import (
+from backend import monitor
+from updater.jobs import (
     assessment_lists,
     dyks,
     enwp_key_articles,
@@ -28,6 +29,23 @@ from aranami.jobs import (
 
 _PAGEVIEWS_GRACE_SECONDS = 3_500
 _FUTURE_SCHEDULE_YEAR = 2099
+
+
+def _complete(
+    finished: Event,
+    *,
+    mode: bool,
+    **options: bool,
+) -> None:
+    """Signal a scheduled mock after checking its requested output mode.
+
+    Args:
+        finished: Event recording dispatch completion.
+        mode: Expected preview mode.
+        **options: Dispatch options, including preview selection.
+    """
+    if options["dry"] == mode:
+        finished.set()
 
 
 class _PausedScheduler(BackgroundScheduler):
@@ -80,21 +98,38 @@ class TestMonitor(TestCase):
             if scheduler.running:
                 scheduler.shutdown(wait=True)
 
-    def test_major_events_record_actual_start_and_shutdown_once(self) -> None:
-        """Reuse an active monitor without duplicate major records."""
+    def test_natural_logs_record_actual_start_and_shutdown_once(self) -> None:
+        """Reuse a monitor without duplicate lifecycle messages."""
         scheduler = monitor.start(dry=True)
         assert monitor.start(dry=True) is scheduler
         scheduler.shutdown(wait=True)
-        rows = [
-            json.loads(line)
-            for path in (self.root / "logs").glob("project.*.log")
-            for line in path.read_text().splitlines()
-        ]
-        assert [row["event"] for row in rows] == [
-            "monitor.started",
-            "monitor.stopped",
-        ]
-        assert all(row["dry"] is True for row in rows)
+        content = "".join(
+            path.read_text()
+            for path in (self.root / "logs").glob("aranami.*.log")
+        )
+        assert content.count("Aranami monitor started") == 1
+        assert content.count("Aranami monitor stopped.") == 1
+        assert "in preview mode" in content
+        assert not list((self.root / "logs").glob("project.*.log"))
+
+    def test_session_start_survives_reuse_and_resets_after_restart(
+        self,
+    ) -> None:
+        """Retain session start until a fresh monitor is created."""
+        scheduler = monitor.start(run_immediately=False)
+        path = self.root / "state" / "schedule-status.json"
+        first = json.loads(path.read_text())
+        assert first["started_at"] is not None
+        assert monitor.start(run_immediately=False) is scheduler
+        reused = json.loads(path.read_text())
+        assert reused["started_at"] == first["started_at"]
+        scheduler.shutdown(wait=True)
+        stopped = json.loads(path.read_text())
+        assert stopped["started_at"] == first["started_at"]
+        assert stopped["state"] == "stopped"
+        monitor.start(run_immediately=False)
+        restarted = json.loads(path.read_text())
+        assert restarted["started_at"] != first["started_at"]
 
     @staticmethod
     def test_registered_jobs_match_standalone_routines() -> None:
@@ -110,10 +145,10 @@ class TestMonitor(TestCase):
         }
         jobs = {job.id: job for job in scheduler.get_jobs()}
         assert set(jobs) == set(expected)
-        for name, run in expected.items():
+        for name in expected:
             job = jobs[name]
-            assert job.func is run
-            assert job.args == ()
+            assert job.func.__name__ == "_dispatch"
+            assert job.args == (name,)
             assert job.kwargs == {"dry": False}
             assert job.max_instances == 1
             assert job.coalesce is True
@@ -140,7 +175,7 @@ class TestMonitor(TestCase):
                 2026,
                 10,
                 3,
-                1,
+                0,
                 31,
                 tzinfo=dt.UTC,
             ),
@@ -175,8 +210,8 @@ class TestMonitor(TestCase):
             actual.append(previous)
         assert actual == [
             dt.datetime(2026, 10, 3, hour, 31, tzinfo=dt.UTC)
-            for hour in (1, 7, 13, 19)
-        ] + [dt.datetime(2026, 10, 4, 1, 31, tzinfo=dt.UTC)]
+            for hour in range(5)
+        ]
 
     @staticmethod
     def test_start_does_not_execute_and_dispatches_selected_job() -> None:
@@ -185,15 +220,22 @@ class TestMonitor(TestCase):
         with ExitStack() as patches:
             for name, callback in callbacks.items():
                 patches.enter_context(
-                    patch(f"aranami.jobs.{name}.run", callback),
+                    patch(f"updater.jobs.{name}.run", callback),
                 )
             scheduler = monitor.start(dry=True)
         for callback in callbacks.values():
             callback.assert_not_called()
         job = scheduler.get_job("new_pages")
         assert job is not None
-        job.func(*job.args, **job.kwargs)
-        callbacks["new_pages"].assert_called_once_with(dry=True)
+        with patch(
+            "updater.jobs.new_pages.run",
+            callbacks["new_pages"],
+        ):
+            job.func(*job.args, **job.kwargs)
+        callbacks["new_pages"].assert_called_once_with(
+            dry=True,
+            automatic=True,
+        )
         for name, callback in callbacks.items():
             if name != "new_pages":
                 callback.assert_not_called()
@@ -225,6 +267,26 @@ class TestMonitor(TestCase):
                     assert first.state == STATE_PAUSED
                     first.shutdown(wait=True)
         assert len(self.schedulers) == 4  # ruff: ignore[magic-value-comparison]
+
+    def test_dispatch_hook_cannot_replace_an_active_monitor(self) -> None:
+        """Require shutdown before changing the dispatch callback."""
+        scheduler = monitor.start(run_immediately=False)
+        dispatch = Mock(return_value=None)
+        with self.assertRaisesRegex(ValueError, "dispatch callback"):
+            monitor.start(dispatch=dispatch)
+        scheduler.shutdown(wait=True)
+        scheduler = monitor.start(
+            dispatch=dispatch,
+            run_immediately=False,
+        )
+        assert monitor.start(dispatch=dispatch) is scheduler
+        job = scheduler.get_job("dyks")
+        assert job is not None
+        assert job.func is dispatch
+        job.func(*job.args, **job.kwargs)
+        dispatch.assert_called_once_with("dyks", dry=False)
+        with self.assertRaisesRegex(ValueError, "dispatch callback"):
+            monitor.start()
 
     @staticmethod
     def test_fresh_monitors_check_all_jobs_immediately_by_default() -> None:
@@ -280,18 +342,17 @@ class TestMonitor(TestCase):
                 schedule.name: Event() for schedule in monitor.SCHEDULES
             }
             callbacks = {
-                name: Mock(
-                    side_effect=lambda *, dry, finished=finished, mode=dry: (
-                        finished.set() if dry == mode else None
-                    ),
-                )
+                name: Mock(side_effect=partial(_complete, finished, mode=dry))
                 for name, finished in completed.items()
             }
             trigger = CronTrigger(year=_FUTURE_SCHEDULE_YEAR, timezone=dt.UTC)
             with ExitStack() as patches:
                 for name, callback in callbacks.items():
                     patches.enter_context(
-                        patch(f"aranami.jobs.{name}.run", callback),
+                        patch(
+                            f"updater.jobs.{name}.run",
+                            callback,
+                        ),
                     )
                 patches.enter_context(
                     patch.object(
@@ -317,8 +378,13 @@ class TestMonitor(TestCase):
                     monitor.start(dry=dry, run_immediately=True) is scheduler
                 )
                 scheduler.shutdown(wait=True)
-            for callback in callbacks.values():
-                callback.assert_called_once_with(dry=dry)
+            for name, callback in callbacks.items():
+                options = (
+                    {"automatic": True}
+                    if name in {"new_pages", "pageviews"}
+                    else {}
+                )
+                callback.assert_called_once_with(dry=dry, **options)
 
     def test_active_monitor_rejects_output_mode_change(self) -> None:
         """Require shutdown before switching dry or live mode."""
