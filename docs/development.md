@@ -3,8 +3,7 @@
 Development (this guide) is for people contributing application features,
 fixes, tests, and documentation. It explains how to prepare a local workspace, find the
 right component, verify a change offline, and prepare a source payload.
-For cross-component design and contracts, including instructions for AI
-coding agents, read [Architecture](architecture.md).
+For cross-component design and contracts, read [Architecture](architecture.md).
 
 The development computer is not a runtime target. Live collection and
 publication run only on Toolforge. Do not provision local credentials or
@@ -155,9 +154,9 @@ Keep all files in `docs/` in English and lead with outcomes and use cases.
   work, and previewing changes.
 - [Administration](administration.md): maintainers uploading source,
   operating processes, managing runtime folders, and recovering service.
-- Development (this guide): human contributors preparing, changing, and
+- Development (this guide): contributors preparing, changing, and
   testing code.
-- [Architecture](architecture.md): AI/system-level developers preserving
+- [Architecture](architecture.md): system-level developers preserving
   ownership, storage, lifecycle, and domain contracts.
 
 Keep the root README focused on the tool's results and UTC schedules.

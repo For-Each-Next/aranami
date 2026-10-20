@@ -125,6 +125,7 @@ class TestSourcePayload(TestCase):
             *(f"scripts/toolforge/{name}" for name in self.uploader._SCRIPTS),
         }
         assert set(self.payload) == expected
+        assert "src/webservice/public_html/dialogs.js" in self.payload
         assert {
             Path(name).parts[1]
             for name in self.payload
@@ -132,6 +133,10 @@ class TestSourcePayload(TestCase):
         } == _PACKAGES
         assert (
             'exec "$tool_dir/pyvenv-3.15/bin/python" -m backend "$@"'
+            in self.payload["scripts/toolforge/run-hub.sh"].decode()
+        )
+        assert (
+            "umask 077\n"
             in self.payload["scripts/toolforge/run-hub.sh"].decode()
         )
         manifest = json.loads(self.payload["deployment.json"])

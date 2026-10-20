@@ -102,10 +102,14 @@ class TestMaintenanceBacklog(TestCase):
                 "assessment_importance": None,
                 "issues": ["unreferenced", "references"],
                 "oldest_issue_month": "2020-01",
+                "oldest_issue_category": "自2020年1月缺少来源的条目",
                 "url": "https://zh.wikipedia.org/wiki/Z_Game",
             },
         ]
         assert groups["references"]["count"] == 2  # ruff: ignore[magic-value-comparison]
+        assert groups["references"]["items"][1]["oldest_issue_category"] == (
+            "自2020年1月缺少来源的条目"
+        )
         assert [item["title"] for item in groups["references"]["items"]] == [
             "A Game",
             "Z Game",
@@ -279,6 +283,10 @@ class TestMaintenanceBacklog(TestCase):
         assert all(group["count"] == 1 for group in matched)
         assert all(
             group["items"][0]["oldest_issue_month"] is None
+            for group in matched
+        )
+        assert all(
+            group["items"][0]["oldest_issue_category"] is None
             for group in matched
         )
 

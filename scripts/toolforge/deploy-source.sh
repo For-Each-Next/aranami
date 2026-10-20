@@ -196,4 +196,4 @@ done
 printf '%s\n' 'Validated source and isolated Python 3.15 environment promoted. Applications remain stopped.' \
     "Backup: $backup" \
     'Start website: toolforge jobs run aranami-logs --image php8.4 --webservice --mount=all' \
-    "Start data hub and publication explicitly: toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --command 'sh $tool_dir/app/scripts/toolforge/run-hub.sh'"
+    "Start data hub and publication explicitly: toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --command 'exec sh $tool_dir/app/scripts/toolforge/run-hub.sh'"

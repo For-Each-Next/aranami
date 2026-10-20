@@ -1,6 +1,7 @@
 #!/bin/sh
 # Start the data hub and report schedules with existing account configuration.
 set -eu
+umask 077
 tool_dir=${ARANAMI_TOOL_DIR:-/data/project/aranami}
 cd "$tool_dir"
 test ! -e deployment.lock || { printf '%s\n' 'Source deployment is still in progress.' >&2; exit 1; }

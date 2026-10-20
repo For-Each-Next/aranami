@@ -43,10 +43,10 @@ function homepageCacheKey(array $requiredPaths, array $optionalPaths = []): ?str
     return hash('sha256', serialize($identity));
 }
 
-/** Select one of three fixed cache files without accepting caller-controlled paths. */
+/** Select a fixed locale cache file without accepting caller-controlled paths. */
 function homepageCachePath(string $directory, string $locale): ?string
 {
-    return in_array($locale, ['en', 'zh-hans', 'zh-hant'], true)
+    return in_array($locale, ['en', 'zh', 'zh-hans', 'zh-hant'], true)
         ? $directory . '/homepage-' . $locale . '.cache' : null;
 }
 

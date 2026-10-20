@@ -59,13 +59,13 @@ foreach ([['HEAD', [], ''], ['POST', [], ''], ['GET', ['unexpected' => '1'], 'un
 
 $html = '<!doctype html><html lang="en"><body>Cached content.</body></html>';
 expectSame(null, readHomepageCache($directory, 'en', $key, 1000), 'Missing caches render normally');
-foreach (['en', 'zh-hans', 'zh-hant'] as $locale) {
+foreach (['en', 'zh', 'zh-hans', 'zh-hant'] as $locale) {
     expectSame(true, writeHomepageCache($directory, $locale, $key, $html . $locale, 1000),
         'Each supported locale has its own writable cache');
     expectSame($html . $locale, readHomepageCache($directory, $locale, $key, 1059),
         'Locale contents remain separate throughout their sixty-second lifetime');
 }
-expectSame(3, count(glob($directory . '/*')), 'Cache cardinality is fixed to three locale files');
+expectSame(4, count(glob($directory . '/*')), 'Original Chinese and converted locales have separate fixed cache files');
 expectSame([], glob($directory . '/.homepage-*.tmp'), 'Atomic replacement leaves no staging files');
 expectSame(null, readHomepageCache($directory, 'en', $key, 1060), 'Entries expire at sixty seconds');
 expectSame(null, readHomepageCache($directory, 'en', $key, 999), 'Future timestamps are rejected');

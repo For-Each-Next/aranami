@@ -203,9 +203,10 @@ class TestTransientPageviews(TestCase):
         assert cache.get("Created today") is None
         assert cache.get("Healthy") is not None
 
-    @staticmethod
-    def test_gateway_timeout_preserves_history_without_checkpointing() -> None:
-        """Preserve cached history and coverage after HTTP 504."""
+    def test_gateway_timeout_preserves_history_without_checkpointing(
+        self,
+    ) -> None:
+        """Preserve existing history when its next request times out."""
         with TemporaryDirectory() as directory, chdir(directory):
             primary = PageviewsCache.load("zh.wikipedia.org")
             primary.replace(
@@ -219,25 +220,21 @@ class TestTransientPageviews(TestCase):
             cache = PageviewsCache.load("zh.wikipedia.org", data_date=_DAY)
             previous = cache.get("A")
             assert previous is not None
-            with patch.object(
-                pageviews.pageviews,
-                "fetch_data_dataframe",
-                side_effect=_http_error(HTTPStatus.GATEWAY_TIMEOUT),
-            ) as fetch:
-                views = pageviews.aggregate_views(
+            with (
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_data_dataframe",
+                    side_effect=_http_error(HTTPStatus.GATEWAY_TIMEOUT),
+                ) as fetch,
+                self.assertRaises(pageviews.PageviewsUnavailableError),
+            ):
+                pageviews.aggregate_views(
                     MagicMock(),
                     ["A"],
                     _PERIODS,
                     cache=cache,
                 )
             fetch.assert_called_once()
-            assert views.is_empty()
-            assert views.schema == {
-                "title": pl.String,
-                "start": pl.Date,
-                "stop": pl.Date,
-                "views": pl.Int64,
-            }
             current = cache.get("A")
             assert current is not None
             assert current.equals(previous)
@@ -287,7 +284,7 @@ class TestTransientPageviews(TestCase):
             assert not cache.pending_path.exists()
 
     def test_report_omits_skipped_article_and_keeps_valid_zero(self) -> None:
-        """Omit skipped members and preserve zeroes and old history."""
+        """Reject existing timeouts but skip unmeasured titles."""
         settings = replace(
             job.REPORT_SETTINGS,
             periods=(job.PROJECT_PERIODS[0],),
@@ -334,6 +331,19 @@ class TestTransientPageviews(TestCase):
                         ),
                     ),
                 ):
+                    if has_history:
+                        before = primary.path.read_bytes()
+                        with self.assertRaises(
+                            pageviews.PageviewsUnavailableError,
+                        ):
+                            _build_report(
+                                site,
+                                _STOP,
+                                settings=settings,
+                                missing_percent=1,
+                            )
+                        assert primary.path.read_bytes() == before
+                        continue
                     report = _build_report(
                         site,
                         _STOP,
@@ -412,7 +422,7 @@ class TestIncrementalPageviews(TestCase):
     @staticmethod
     def test_retained_and_fresh_inputs_produce_identical_totals() -> None:
         """Match fresh and retained observation totals."""
-        observed = _observations((_REQUIRED, 11), (_DAY, 0))
+        observed = _observations((_DAY - dt.timedelta(days=1), 11), (_DAY, 0))
         with patch.object(
             pageviews.pageviews,
             "fetch_data_dataframe",
@@ -457,12 +467,28 @@ class TestIncrementalPageviews(TestCase):
         """Extend sufficient history from its cached stop date."""
         cache = PageviewsCache(Path("unused.parquet"))
         cached_stop = _STOP - dt.timedelta(days=5)
-        cache.replace("A", _OLDEST, cached_stop, _observations((_REQUIRED, 4)))
+        cache.replace(
+            "A",
+            _OLDEST,
+            cached_stop,
+            _observations((cached_stop - dt.timedelta(days=1), 4)),
+        )
         site = _site()
         with patch.object(
             pageviews.pageviews,
             "fetch_data_dataframe",
-            return_value=_observations((_DAY, 7)),
+            return_value=pl
+            .date_range(cached_stop, _STOP, closed="left", eager=True)
+            .alias("date")
+            .to_frame()
+            .with_columns(
+                pl
+                .when(pl.col("date") == _DAY)
+                .then(7)
+                .otherwise(0)
+                .cast(pl.Int64)
+                .alias("pageview"),
+            ),
         ) as fetch:
             result = pageviews.aggregate_views(
                 site,
@@ -572,6 +598,204 @@ class TestIncrementalPageviews(TestCase):
             )
         fetch.assert_not_called()
         assert result.get_column("views").to_list() == [None, None]
+
+
+class TestHistoryContinuity(TestCase):
+    """Keep daily additions atomic and measured zeroes continuous."""
+
+    @staticmethod
+    def test_absent_file_downloads_800_days_before_daily_extension() -> None:
+        """Bootstrap all history before requesting the next day."""
+        with TemporaryDirectory() as directory, chdir(directory):
+            site = _site()
+            cache = PageviewsCache.load("zh.wikipedia.org")
+            assert not cache.path.exists()
+            full = (
+                pl
+                .date_range(_OLDEST, _STOP, closed="left", eager=True)
+                .alias("date")
+                .to_frame()
+                .with_columns(pl.lit(0, dtype=pl.Int64).alias("pageview"))
+            )
+            with patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+                return_value=full,
+            ) as fetch:
+                totals = pageviews.aggregate_views(
+                    site,
+                    ["A"],
+                    _PERIODS,
+                    cache=cache,
+                )
+            fetch.assert_called_once_with(site, "A", _OLDEST, _STOP)
+            assert totals.get_column("views").to_list() == [0, 0]
+            cache.save(["A"])
+            restored = PageviewsCache.load("zh.wikipedia.org")
+            stop = _STOP + dt.timedelta(days=1)
+            with patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+                return_value=_observations((_STOP, 0)),
+            ) as fetch:
+                totals = pageviews.aggregate_views(
+                    site,
+                    ["A"],
+                    ((_STOP, stop),),
+                    cache=restored,
+                )
+            fetch.assert_called_once_with(site, "A", _STOP, stop)
+            assert totals.item(0, "views") == 0
+
+    @staticmethod
+    def test_internal_gap_is_refetched_despite_complete_coverage_marker() -> (
+        None
+    ):
+        """Repair an omitted middle date, retaining existing zeroes."""
+        cache = PageviewsCache(Path("unused.parquet"))
+        gap = _DAY - dt.timedelta(days=2)
+        cache.replace(
+            "A",
+            _OLDEST,
+            _STOP,
+            _observations(
+                (gap - dt.timedelta(days=1), 4),
+                (gap + dt.timedelta(days=1), 0),
+                (_DAY, 7),
+            ),
+        )
+        site = _site()
+        with patch.object(
+            pageviews.pageviews,
+            "fetch_data_dataframe",
+            return_value=_observations((gap, 5)),
+        ) as fetch:
+            totals = pageviews.aggregate_views(
+                site,
+                ["A"],
+                _PERIODS,
+                cache=cache,
+            )
+        fetch.assert_called_once_with(site, "A", gap, _STOP)
+        assert totals.get_column("views").to_list() == [16, 7]
+        retained = cache.get("A")
+        assert retained is not None
+        assert retained.filter(pl.col("date").is_not_null()).get_column(
+            "pageview",
+        ).to_list() == [4, 5, 0, 7]
+
+    @staticmethod
+    def test_one_missing_title_rejects_batch_until_retry() -> None:
+        """Keep healthy data and the wiki marker until all pass."""
+        with TemporaryDirectory() as directory, chdir(directory):
+            cache = PageviewsCache.load("zh.wikipedia.org", data_date=_DAY)
+            for title in ("A", "B"):
+                cache.replace(
+                    title,
+                    _OLDEST,
+                    _DAY,
+                    _observations((_DAY - dt.timedelta(days=1), 4)),
+                )
+            cache.save(["A", "B"])
+            before = cache.path.read_bytes()
+            site = _site()
+            original = (
+                '<!-- aranami begin="page_views" -->'
+                "<!-- report date 2026-09-29 -->"
+                '<!-- aranami end="page_views" -->'
+            )
+            page = MagicMock(text=original)
+            context = JobContext(
+                site,
+                _STOP,
+                dry=True,
+                started_at=dt.datetime(2026, 10, 1, 18, tzinfo=dt.UTC),
+            )
+            with (
+                patch.object(job, "read_pages", return_value=[page]),
+                patch.object(
+                    pageviews,
+                    "_project_articles",
+                    return_value=_articles("A", "B"),
+                ),
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_data_dataframe",
+                    side_effect=[_observations((_DAY, 0)), _observations()],
+                ) as fetch,
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_top_dataframe",
+                ) as top,
+            ):
+                job.run(context=context)
+            assert [request.args[1] for request in fetch.call_args_list] == [
+                "A",
+                "B",
+            ]
+            assert context.tasks[0].status == "deferred"
+            assert "entire daily batch" in context.notes[0]
+            assert not context.edits
+            assert page.text == original
+            page.save.assert_not_called()
+            top.assert_not_called()
+            assert cache.path.read_bytes() == before
+            assert cache.pending_path is not None
+            assert not cache.pending_path.exists()
+            with (
+                patch.object(
+                    pageviews,
+                    "_project_articles",
+                    return_value=_articles("A", "B"),
+                ),
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_data_dataframe",
+                    return_value=_observations((_DAY, 0)),
+                ) as retry,
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_top_dataframe",
+                    return_value=pl.DataFrame(schema=_TOP_SCHEMA),
+                ),
+            ):
+                report = _build_report(
+                    site,
+                    _STOP,
+                    settings=job.REPORT_SETTINGS,
+                )
+            assert [request.args[1] for request in retry.call_args_list] == [
+                "A",
+                "B",
+            ]
+            assert report.data_date == _DAY
+            assert cache.path.read_bytes() != before
+            assert not cache.pending_path.exists()
+
+    def test_unresolved_middle_gap_rejects_batch_even_with_target_day(
+        self,
+    ) -> None:
+        """Reject older gaps even when the target day is present."""
+        cache = PageviewsCache(Path("unused.parquet"))
+        gap = _DAY - dt.timedelta(days=1)
+        cache.replace(
+            "A",
+            _OLDEST,
+            _STOP,
+            _observations((gap - dt.timedelta(days=1), 3), (_DAY, 0)),
+        )
+        with (
+            patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+                return_value=_observations((_DAY, 0)),
+            ),
+            self.assertRaisesRegex(
+                pageviews.PageviewsUnavailableError,
+                "1 missing dates",
+            ),
+        ):
+            pageviews.aggregate_views(_site(), ["A"], _PERIODS, cache=cache)
 
 
 class TestParquetSnapshot(TestCase):
@@ -696,7 +920,12 @@ class TestPendingSnapshot(TestCase):
         """Merge resumed coverage with the complete healthy history."""
         with TemporaryDirectory() as directory, chdir(directory):
             healthy = PageviewsCache.load("zh.wikipedia.org", data_date=_DAY)
-            healthy.replace("A", _OLDEST, _DAY, _observations((_REQUIRED, 11)))
+            healthy.replace(
+                "A",
+                _OLDEST,
+                _DAY,
+                _observations((_DAY - dt.timedelta(days=1), 11)),
+            )
             healthy.save(["A"])
             assert healthy.pending_path is not None
             pending = PageviewsCache(
@@ -774,7 +1003,7 @@ class TestPendingSnapshot(TestCase):
                 "A",
                 _OLDEST,
                 _DAY,
-                _observations((_REQUIRED, 7)),
+                _observations((_DAY - dt.timedelta(days=1), 7)),
             )
             primary.save(["A"])
             before = primary.path.read_bytes()
@@ -908,7 +1137,7 @@ class TestPendingSnapshot(TestCase):
                     title,
                     _OLDEST,
                     _DAY,
-                    _observations((_REQUIRED, 7)),
+                    _observations((_DAY - dt.timedelta(days=1), 7)),
                 )
             primary.save(["A", "B", "C"])
             before = primary.path.read_bytes()
@@ -1005,7 +1234,7 @@ class TestPendingSnapshot(TestCase):
                     title,
                     _OLDEST,
                     _DAY,
-                    _observations((_REQUIRED, 7)),
+                    _observations((_DAY - dt.timedelta(days=1), 7)),
                 )
             primary.save(["A", "B"])
             before = primary.path.read_bytes()
@@ -1021,7 +1250,7 @@ class TestPendingSnapshot(TestCase):
                     pageviews.pageviews,
                     "fetch_data_dataframe",
                     side_effect=[
-                        _observations(),
+                        _observations((_DAY, 0)),
                         *[_http_error() for _ in range(3)],
                     ],
                 ),
@@ -1045,7 +1274,11 @@ class TestPendingSnapshot(TestCase):
                     patch.object(
                         pageviews.pageviews,
                         "fetch_data_dataframe",
-                        return_value=_observations(),
+                        side_effect=lambda _site, title, _start, _stop: (
+                            _observations()
+                            if title == "B"
+                            else _observations((_DAY, 0))
+                        ),
                     ) as fetch,
                     self.assertRaises(pageviews.PageviewsUnavailableError),
                 ):

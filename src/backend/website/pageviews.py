@@ -27,6 +27,7 @@ from urllib.parse import quote
 import polars as pl
 from pywikibot.comms import http
 
+from shared.sources import pageviews_rate
 from shared.sources.cycle import read_top_pageviews
 from shared.sources.pageviews import article_rank_filter
 
@@ -38,7 +39,7 @@ _API_ROOT = (
     "zh.wikipedia.org/all-access/"
 )
 _TOP_LIMIT = 1000
-_ITEM_LIMIT = 10
+_ITEM_LIMIT = 12
 _LOOKBACK_DAYS = 7
 _MAX_VIEWS = 2**64 - 1
 _SCHEMA = {
@@ -169,6 +170,7 @@ def _fetch_payload(day: dt.date) -> object:
     Raises:
         ValueError: A response violates the verified daily contract.
     """
+    pageviews_rate.wait_for_pageviews_request()
     response = http.fetch(
         _source_url(day),
         headers={"accept": "application/json"},
@@ -248,7 +250,7 @@ def collect_pageviews(
         site: Chinese Wikipedia supplying shared namespace metadata.
 
     Returns:
-        Date, coverage, source URL, and up to ten ranked articles.
+        Date, coverage, source URL, and up to twelve ranked articles.
         Ranks identify this filtered list; ``site_rank`` follows the
         complete article-only list before project filtering, matching
         Topviews' defaults. Views keep their original counts.

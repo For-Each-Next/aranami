@@ -293,6 +293,10 @@ class TestDeploymentShell(TestCase):
         assert len(started) == 1
         assert started[0][3].startswith("aranami-setup-")
         assert "Applications remain stopped" in result.stdout
+        assert (
+            f"--command 'exec sh {self.root}/app/scripts/toolforge/run-hub.sh'"
+            in result.stdout
+        )
 
     def test_post_promotion_failure_restores_source_environment_and_routing(
         self,

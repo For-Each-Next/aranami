@@ -322,6 +322,115 @@ class TestDykCache(TestCase):
                 assert dyk_cache.load().is_empty()
 
 
+class TestDykUnchangedStatus(TestCase):
+    """Skip statistical edits without missing visible changes."""
+
+    def setUp(self) -> None:
+        """Keep one dated article and one published candidate."""
+        self.completed = pl.DataFrame({
+            "title": ["Game"],
+            "class": ["B"],
+            "dyk_dates": [[date(2024, 1, 1), None]],
+        })
+        self.nominations = pl.DataFrame({
+            "title": ["Candidate"],
+            "class": ["C"],
+        })
+        self.text = (
+            'Before<!-- aranami begin="dyk" -->\n共計1篇條目'
+            "<!-- retained hidden statistics -->\n=== 2024年 ===\n"
+            "# {{PJ:VG/DYK/item|Game|B|date=2024-01-01、日期不詳}}\n"
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->\n'
+            "# {{PJ:VG/DYK/item|Candidate|C}}\n"
+            '<!-- aranami end="dykn" -->After'
+        )
+
+    def test_unchanged_status_ignores_hidden_statistics(self) -> None:
+        """Ignore statistical dates when source states match."""
+        for text in (
+            self.text,
+            self.text.replace("retained hidden statistics", "another date"),
+        ):
+            assert dyks._published_statuses_match(
+                text,
+                self.completed,
+                self.nominations,
+            )
+
+    def test_visible_changes_still_require_rendering(self) -> None:
+        """Detect grade, date, title, and candidate changes."""
+        cases = [
+            (
+                self.completed.with_columns(pl.lit("C").alias("class")),
+                self.nominations,
+            ),
+            (
+                self.completed.with_columns(pl.lit("Renamed").alias("title")),
+                self.nominations,
+            ),
+            (
+                self.completed.with_columns(
+                    pl.lit([date(2024, 2, 1)], dtype=pl.List(pl.Date)).alias(
+                        "dyk_dates",
+                    ),
+                ),
+                self.nominations,
+            ),
+            (self.completed.head(0), self.nominations),
+            (self.completed, self.nominations.head(0)),
+            (
+                self.completed,
+                self.nominations.with_columns(pl.lit("New").alias("title")),
+            ),
+        ]
+        for completed, nominations in cases:
+            assert not dyks._published_statuses_match(
+                self.text,
+                completed,
+                nominations,
+            )
+        for text in (
+            self.text.replace("共計1篇", "共計2篇"),
+            self.text.replace("2024-01-01", "invalid"),
+            self.text.replace("|date=2024-01-01、日期不詳", ""),
+        ):
+            assert not dyks._published_statuses_match(
+                text,
+                self.completed,
+                self.nominations,
+            )
+
+    def test_unchanged_job_preserves_text_without_rendering(self) -> None:
+        """Keep published text and membership on a no-op pass."""
+        site = _OfflineSite("zh", "wikipedia")
+        context = Mock(site=site, today=date(2024, 5, 2), dry=False)
+        context.publish.return_value = True
+        report = _prepared_fixture(self.text, {"Game": 1, "Candidate": 2})
+        report.content_unchanged = True
+        report.changes = dyks.compare_reports(self.text, self.text)
+        with (
+            patch.object(
+                dyk_job,
+                "job_run",
+                return_value=nullcontext(context),
+            ),
+            patch.object(
+                dyk_job,
+                "read_pages",
+                return_value=[Mock(text=self.text)],
+            ),
+            patch.object(dyks, "prepare_report", return_value=report),
+            patch.object(dyk_job, "update_text") as render,
+            patch.object(dyks, "save_membership") as save,
+        ):
+            dyk_job.run(title="Report", context=context)
+        render.assert_not_called()
+        context.publish.assert_called_once()
+        assert context.publish.call_args.args[0].text == self.text
+        save.assert_called_once_with(site, "Report", self.text, report.members)
+
+
 class TestDykEdit(TestCase):
     """Verify content processing and job-owned publication metadata."""
 

@@ -79,7 +79,7 @@ Choose the guide for your role:
   files to Toolforge, promote deployments, stop, start, restart, and recover.
 - [Application developer](docs/development.md): local setup, contribution
   workflow, tests, and release checks.
-- [System-level developer / AI](docs/architecture.md): component boundaries,
+- [System-level developer](docs/architecture.md): component boundaries,
   data contracts, publication safety, scheduling, and engineering rules.
 
 See the [documentation index](docs/README.md) and [change history](CHANGELOG.md)

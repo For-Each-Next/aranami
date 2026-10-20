@@ -73,6 +73,11 @@ expectSame(true, str_contains($html, '&lt;script&gt;'), 'Diagnostic HTML-shaped 
 expectSame(false, str_contains($html, "<script>alert('x')</script>"), 'Diagnostic text cannot add script markup');
 expectSame(false, str_contains($html, '/logs/aranami/'), 'The retired secondary log route is absent');
 expectSame(false, str_contains($html, '{"event"'), 'Legacy event streams are neither listed nor interpreted');
+expectSame(true, str_contains($html, '<h2>Recent logs</h2>'), 'The excerpt has a concise reader-facing heading');
+expectSame(false, str_contains($html, 'download=1') || str_contains($html, '1 MiB')
+    || str_contains($html, '500 matching'), 'Download metadata and excerpt implementation details are absent');
+expectSame(false, str_contains($html, 'Follow data refreshes') || str_contains($html, 'Logs use UTC')
+    || str_contains($html, '<footer>'), 'The log browser omits introductory and footer filler');
 
 $_GET = ['date' => '2026-10-18', 'download' => '1'];
 ob_start();
@@ -97,11 +102,12 @@ ob_end_clean();
 expectSame(405, http_response_code(), 'The log browser accepts only read-only GET requests');
 
 $large = 'aranami.2026-10-21.log';
+expectSame(100, LOG_MAX_LINES, 'Recent logs show at most one hundred matching lines');
 file_put_contents($directory . '/' . $large, str_repeat("one natural diagnostic\n", LOG_MAX_LINES + 10)
     . "Last visible diagnostic.\n");
 $bounded = readLogExcerpt($directory, $large);
 expectSame(LOG_MAX_LINES, count($bounded['lines']), 'Visible excerpts have a fixed line limit');
-expectSame(true, $bounded['truncated'], 'Clipped excerpts direct readers to full downloads');
+expectSame(true, $bounded['truncated'], 'Clipped excerpts retain truncation metadata');
 expectSame('Last visible diagnostic.', $bounded['lines'][LOG_MAX_LINES - 1], 'A bounded excerpt retains the newest matching messages');
 $tail = 'aranami.2026-10-22.log';
 file_put_contents($directory . '/' . $tail, str_repeat("Earlier diagnostic.\n", 60000) . "Unique latest diagnostic.\n");

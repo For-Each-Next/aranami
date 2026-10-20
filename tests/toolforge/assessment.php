@@ -26,6 +26,13 @@ if (array_column($items, 'page_id') !== [4, 1, 3, 2, 5]
     || dashboardMaintenanceItems([]) !== []) {
     throw new RuntimeException('Sorting must preserve the saved input and accept empty lists.');
 }
+$random = dashboardMaintenanceItems($items, 'random', 'asc', '0123456789abcdef');
+if ($random !== dashboardMaintenanceItems(array_reverse($items), 'random', 'asc', '0123456789abcdef')
+    || array_reverse($random) !== dashboardMaintenanceItems($items, 'random', 'desc', '0123456789abcdef')
+    || $random === dashboardMaintenanceItems($items, 'random', 'asc', 'fedcba9876543210')
+    || count(array_unique(array_column($random, 'page_id'))) !== count($items)) {
+    throw new RuntimeException('Seeded random sorting is repeatable, reversible, complete, and independent of saved order.');
+}
 
 // Article/list counterparts share quality levels from WP:ASSESS revision 89490563.
 $levels = [['FA', 'FL', '典范', '典範', '特色列表'], ['A', 'AL', '甲', '甲级列表', '甲級列表'],

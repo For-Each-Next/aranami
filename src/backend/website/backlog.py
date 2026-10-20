@@ -4,8 +4,9 @@ The background collector passes its current project membership. Read
 direct category links for those article IDs, group verified maintenance
 categories, and retain every matched article for the saved presentation.
 Each record includes the available project assessments, all recognized
-maintenance issues, and the oldest known category month. That month
-dates a maintenance marker, not article creation or observation.
+maintenance issues, and the oldest known category month and source.
+That month dates a maintenance marker, rather than article creation or
+observation.
 Successful empty groups contain zero counts. Source failures reach the
 collector so that unavailable observations remain null.
 The deployed ``maintenance.json`` supplies groups and exact category or
@@ -215,7 +216,7 @@ def _matching_tags(
             .alias("tag"),
         )
     )
-    match_columns = ("key", "page_id", "priority", "year", "month")
+    match_columns = ("key", "page_id", "priority", "year", "month", "name")
     matches = (
         pl
         .concat([
@@ -250,7 +251,7 @@ def _matching_tags(
             .otherwise(None)
             .alias("issue_month"),
         )
-        .select("key", "page_id", "priority", "issue_month")
+        .select("key", "page_id", "priority", "issue_month", "name")
         .unique()
     )
     return matches
@@ -276,7 +277,8 @@ def collect_backlog(
         Article identities appear once within each group and may occur
         in several different groups. Assessments are null when absent or
         conflicting. Issue keys follow catalogue order, and the oldest
-        issue month is null without a recognized dated category.
+        issue month and source category are null without a recognized
+        dated category.
 
     Raises:
         OSError: The configuration file cannot be read.
@@ -328,6 +330,12 @@ def collect_backlog(
         .agg(
             pl.col("key").unique(maintain_order=True).alias("issues"),
             pl.col("issue_month").min().alias("oldest_issue_month"),
+            pl
+            .col("name")
+            .filter(pl.col("issue_month") == pl.col("issue_month").min())
+            .sort()
+            .first()
+            .alias("oldest_issue_category"),
         )
     )
     detailed = (
@@ -346,6 +354,7 @@ def collect_backlog(
             *assessments,
             "issues",
             "oldest_issue_month",
+            "oldest_issue_category",
         ).alias("items"),
     )
     if grouped.filter(pl.col("count") > _MAX_GROUP_ITEMS).height:

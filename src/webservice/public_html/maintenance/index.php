@@ -23,10 +23,12 @@ $task = $_GET['task'] ?? null;
 $requestedPage = $_GET['page'] ?? '1';
 $sort = $_GET['sort'] ?? 'oldest';
 $order = $_GET['order'] ?? (in_array($sort, ['class', 'importance'], true) ? 'desc' : 'asc');
+$seed = $_GET['seed'] ?? null;
 if (!is_string($task) || preg_match('/\A[a-z][a-z0-9_]*\z/', $task) !== 1
     || !is_string($requestedPage) || preg_match('/\A[1-9][0-9]*\z/', $requestedPage) !== 1
-    || !is_string($sort) || !in_array($sort, ['oldest', 'title', 'class', 'importance'], true)
-    || !is_string($order) || !in_array($order, ['asc', 'desc'], true)) {
+    || !is_string($sort) || !in_array($sort, ['oldest', 'title', 'class', 'importance', 'random'], true)
+    || !is_string($order) || !in_array($order, ['asc', 'desc'], true)
+    || ($seed !== null && (!is_string($seed) || preg_match('/\A[0-9a-f]{16}\z/', $seed) !== 1))) {
     http_response_code(404);
     header('Content-Type: text/plain; charset=UTF-8');
     if ($method !== 'HEAD') {
@@ -72,13 +74,18 @@ $pages = max(1, intdiv($selected['count'] + $perPage - 1, $perPage));
 // Compare lengths before casting so even enormous positive page values clamp.
 $page = strlen($requestedPage) > strlen((string) $pages) ? $pages : min((int) $requestedPage, $pages);
 $offset = ($page - 1) * $perPage;
-$orderedItems = dashboardMaintenanceItems($selected['items'], $sort, $order);
+$seed = $sort === 'random' ? ($seed ?? bin2hex(random_bytes(8))) : '';
+$orderedItems = dashboardMaintenanceItems($selected['items'], $sort, $order, $seed);
 $items = array_slice($orderedItems, $offset, $perPage);
 $sortParameters = $sort === 'oldest' && $order === 'asc' ? [] : ['sort' => $sort, 'order' => $order];
-$titleSortUrl = uiUrl('/maintenance/', ['task' => $task, 'sort' => 'title', 'order' => $sort === 'title' && $order === 'asc' ? 'desc' : 'asc']);
-$monthSortUrl = uiUrl('/maintenance/', ['task' => $task, 'sort' => 'oldest', 'order' => $sort === 'oldest' && $order === 'asc' ? 'desc' : 'asc']);
-$classSortUrl = uiUrl('/maintenance/', ['task' => $task, 'sort' => 'class', 'order' => $sort === 'class' && $order === 'desc' ? 'asc' : 'desc']);
-$importanceSortUrl = uiUrl('/maintenance/', ['task' => $task, 'sort' => 'importance', 'order' => $sort === 'importance' && $order === 'desc' ? 'asc' : 'desc']);
+if ($sort === 'random') {
+    $sortParameters['seed'] = $seed;
+}
+$sortChoices = ['title' => 'backlog.sort.title', 'class' => 'backlog.sort.class',
+    'importance' => 'backlog.column.importance', 'oldest' => 'backlog.sort.time', 'random' => 'backlog.sort.random'];
+$defaultOrder = in_array($sort, ['class', 'importance'], true) ? 'desc' : 'asc';
+$reverseSortUrl = uiUrl('/maintenance/', ['task' => $task, 'sort' => $sort,
+    'order' => $order === 'asc' ? 'desc' : 'asc'] + ($sort === 'random' ? ['seed' => $seed] : []));
 $heading = dashboardMaintenanceTaskLabel($selected);
 $updated = (new DateTimeImmutable($backlog['observed_at']))->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i');
 header('Content-Type: text/html; charset=UTF-8');
@@ -110,26 +117,19 @@ if ($method === 'HEAD') {
     .metadata { display: flex; flex-wrap: wrap; gap: 4px 24px; margin-top: 12px; font-size: .85rem; color: #54595d; }
     .metadata p { margin: 0; }
     main { padding-top: 24px; padding-bottom: 32px; }
-    .maintenance-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(18em, 100%), 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
-    .article-card { min-width: 0; padding: 16px; background: #fff; border: 1px solid #c1d1cc; border-radius: 8px; overflow-wrap: anywhere; }
-    .article-card h2 { margin: 0 0 10px; font-size: 1.1rem; }
-    .article-card p { margin: 8px 0; }
-    .number { color: #54595d; font-size: .85rem; font-weight: 400; }
-    .assessment-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+    <?php dashboardCardStyles(); ?>
     <?php dashboardChipStyles(); ?>
-    .issues { display: flex; flex-wrap: wrap; gap: 3px 14px; margin: 0; padding: 0; list-style: none; }
+    .issues { display: flex; flex-wrap: wrap; gap: 3px 14px; padding: 0; list-style: none; }
     .unknown { color: #54595d; }
     .empty { margin: 0 0 24px; color: #54595d; }
     .pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin-top: 24px; font-size: .9rem; }
     .pagination p { margin: 0; }
     .sort-controls { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 20px; }
+    .sort-controls a[aria-current="true"] { font-weight: 600; text-decoration: underline; text-underline-offset: .15em; }
     footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #d9ebe4; font-size: .8rem; color: #54595d; }
     footer p { margin: 0; }
-    footer p + p { margin-top: 8px; }
     @media (max-width: 640px) {
-      .sort-controls { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 20px; }
       .shell { padding-right: 16px; padding-left: 16px; }
-
     }
   </style>
 </head>
@@ -146,25 +146,31 @@ if ($method === 'HEAD') {
     </div>
   </header>
   <main class="shell">
-    <nav class="sort-controls" aria-label="<?= html(uiText('backlog.sort')) ?>"><a href="<?= html($titleSortUrl) ?>"><?= html(uiText('column.article')) ?><?= $sort === 'title' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a><a href="<?= html($classSortUrl) ?>"><?= html(uiText('backlog.column.class')) ?><?= $sort === 'class' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a><a href="<?= html($importanceSortUrl) ?>"><?= html(uiText('backlog.column.importance')) ?><?= $sort === 'importance' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a><a href="<?= html($monthSortUrl) ?>"><?= html(uiText('backlog.column.oldest')) ?><?= $sort === 'oldest' ? ($order === 'asc' ? ' ↑' : ' ↓') : '' ?></a></nav>
+    <nav class="sort-controls" aria-label="<?= html(uiText('backlog.sort')) ?>">
+      <span><?= html(uiText('backlog.sort')) ?>:</span>
+<?php foreach ($sortChoices as $choice => $label): ?>
+      <a href="<?= html(uiUrl('/maintenance/', ['task' => $task, 'sort' => $choice])) ?>"<?= $choice === $sort ? ' aria-current="true"' : '' ?>><?= html(uiText($label)) ?></a>
+<?php endforeach; ?>
+      <a href="<?= html($reverseSortUrl) ?>"<?= $order !== $defaultOrder ? ' aria-current="true"' : '' ?>>[<?= html(uiText('backlog.sort.reverse')) ?>]</a>
+    </nav>
     <?php if ($items === []): ?>
       <p class="empty"><?= html(uiText('backlog.empty')) ?></p>
     <?php else: ?>
-      <ol class="maintenance-cards" start="<?= html((string) ($offset + 1)) ?>" aria-label="<?= html($heading) ?>">
-<?php foreach ($items as $index => $item): ?>
+      <ol class="card-grid article-list" start="<?= html((string) ($offset + 1)) ?>" aria-label="<?= html($heading) ?>">
+<?php foreach ($items as $item): ?>
         <li class="article-card">
-          <h2><span class="number"><?= html((string) ($offset + $index + 1)) ?>.</span> <a href="<?= html($item['url']) ?>"><bdi lang="zh"><?= html($item['title']) ?></bdi></a></h2>
-          <p><?= html(uiText('backlog.column.assessment')) ?>:
-<?php if (($item['assessment_class'] ?? null) !== null || ($item['assessment_importance'] ?? null) !== null): dashboardAssessmentChips($item);
-else: ?><span class="unknown">—</span><?php endif; ?>
-          </p>
-          <p><?= html(uiText('backlog.column.issues')) ?>:</p>
-<?php if (($item['issues'] ?? []) === []): ?><span class="unknown">—</span>
-<?php else: ?><ul class="issues">
-<?php foreach ($item['issues'] as $issue): ?><li><a href="<?= html(uiUrl('/maintenance/', ['task' => $issue, 'page' => 1])) ?>"><?= html(dashboardMaintenanceTaskLabel($groupsByKey[$issue])) ?></a></li><?php endforeach; ?>
-          </ul><?php endif; ?>
-          <p><?= html(uiText('backlog.column.oldest')) ?>:
-<?php if (($item['oldest_issue_month'] ?? null) !== null): ?><time datetime="<?= html($item['oldest_issue_month']) ?>"><?= html($item['oldest_issue_month']) ?></time>
+          <span class="article-summary"><a href="<?= html($item['url']) ?>"><bdi lang="zh"><?= html($item['title']) ?></bdi></a> <?php dashboardAssessmentChips($item); ?></span>
+          <ul class="card-meta issues" aria-label="<?= html(uiText('backlog.column.issues')) ?>">
+<?php if (($item['issues'] ?? []) === []): ?><li class="unknown">—</li>
+<?php else: ?>
+<?php foreach ($item['issues'] as $issue): ?><li><a href="<?= html($groupsByKey[$issue]['source_url']) ?>"><?= html(dashboardMaintenanceTaskLabel($groupsByKey[$issue])) ?></a></li><?php endforeach; ?>
+<?php endif; ?>
+          </ul>
+          <p class="card-meta" aria-label="<?= html(uiText('backlog.column.oldest')) ?>">
+<?php if (($item['oldest_issue_month'] ?? null) !== null): ?>
+<?php if (($item['oldest_issue_category'] ?? null) !== null): ?><a href="<?= html('https://zh.wikipedia.org/wiki/Category:' . rawurlencode(str_replace(' ', '_', $item['oldest_issue_category']))) ?>"><?php endif; ?>
+            <time datetime="<?= html($item['oldest_issue_month']) ?>"><?= html((new DateTimeImmutable($item['oldest_issue_month'] . '-01'))->format(uiLocale() === 'en' ? 'F Y' : 'Y年n月')) ?></time>
+<?php if (($item['oldest_issue_category'] ?? null) !== null): ?></a><?php endif; ?>
 <?php else: ?><span class="unknown">—</span><?php endif; ?>
           </p>
         </li>
@@ -181,7 +187,6 @@ else: ?><span class="unknown">—</span><?php endif; ?>
       <?php endif; ?>
     </nav>
     <footer>
-      <p><?= html(uiText('backlog.oldest_note')) ?></p>
       <p><a href="<?= html($selected['source_url']) ?>"><?= html(uiText('backlog.source')) ?>: <bdi lang="zh"><?= html($selected['category']) ?></bdi></a></p>
     </footer>
   </main>

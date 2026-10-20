@@ -192,7 +192,7 @@ class TestDailyPageviews(TestCase):
                 site=_site(),
             )
         assert result["date"] == "2026-10-17"
-        expected_limit = 10
+        expected_limit = 12
         assert result["limit"] == expected_limit
         assert result["scope"] == "site_top_1000"
         assert result["items"] == [
@@ -229,7 +229,7 @@ class TestDailyPageviews(TestCase):
         )
 
     @staticmethod
-    def test_top_ten_uses_views_and_stable_source_rank_ties() -> None:
+    def test_top_twelve_uses_views_and_stable_source_rank_ties() -> None:
         """Limit filtered observations without trusting input order."""
         articles = [
             {
@@ -237,7 +237,7 @@ class TestDailyPageviews(TestCase):
                 "views": index // 2,
                 "rank": 20 - index,
             }
-            for index in range(12)
+            for index in range(14)
         ]
         with patch(
             "backend.website.pageviews.http.fetch",
@@ -245,15 +245,15 @@ class TestDailyPageviews(TestCase):
         ):
             result = collect_pageviews(
                 dt.date(2026, 10, 18),
-                {f"Game {index}" for index in range(12)},
+                {f"Game {index}" for index in range(14)},
                 site=_site(),
             )
         assert [item["title"] for item in result["items"]] == [
-            f"Game {index}" for index in range(11, 1, -1)
+            f"Game {index}" for index in range(13, 1, -1)
         ]
-        assert [item["rank"] for item in result["items"]] == list(range(1, 11))
+        assert [item["rank"] for item in result["items"]] == list(range(1, 13))
         assert [item["site_rank"] for item in result["items"]] == list(
-            range(1, 11),
+            range(1, 13),
         )
 
     @staticmethod

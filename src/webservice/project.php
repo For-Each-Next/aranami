@@ -71,7 +71,7 @@ function validArticle(array $row): bool
     return is_string($row['title'] ?? null) && $row['title'] !== ''
         && validWikiUrl($row['url'] ?? null) && array_key_exists('date', $row)
         && parse_url($row['url'], PHP_URL_HOST) === 'zh.wikipedia.org'
-        && validDate($row['date'], true) && validAssessments($row)
+        && validDate($row['date'], true) && validAssessments($row) && validExtract($row)
         && (!isset($row['date_kind']) || in_array($row['date_kind'], ['appearance', 'window_start', 'observed', 'scheduled'], true));
 }
 
@@ -82,6 +82,19 @@ function validAssessments(array $row): bool
         $value = $row[$field] ?? null;
         if ($value !== null && (!is_string($value) || trim($value) === ''
             || strlen($value) > 192 || preg_match('/[\x00-\x1f\x7f]/', $value) === 1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** Accept optional bounded plain-text article introductions in saved data. */
+function validExtract(array $row): bool
+{
+    foreach (['extract', 'extract_hant', 'extract_zh'] as $field) {
+        $value = $row[$field] ?? null;
+        if ($value !== null && (!is_string($value) || trim($value) === ''
+            || strlen($value) > 1600 || preg_match('/[\x00-\x1f\x7f]/', $value) === 1)) {
             return false;
         }
     }
@@ -104,9 +117,9 @@ function validPageviews(mixed $value, string $today): bool
     if (!is_array($value) || !validDate($value['date'] ?? null)
         || $value['date'] >= $today
         || $value['date'] < (new DateTimeImmutable($today, new DateTimeZone('UTC')))->modify('-7 days')->format('Y-m-d')
-        || ($value['limit'] ?? null) !== 10 || ($value['scope'] ?? null) !== 'site_top_1000'
+        || !in_array($value['limit'] ?? null, [10, 12], true) || ($value['scope'] ?? null) !== 'site_top_1000'
         || !validPageviewsSourceUrl($value['source_url'] ?? null, $value['date'])
-        || !is_array($value['items'] ?? null) || !array_is_list($value['items']) || count($value['items']) > 10) {
+        || !is_array($value['items'] ?? null) || !array_is_list($value['items']) || count($value['items']) > $value['limit']) {
         return false;
     }
     $titles = [];
@@ -115,7 +128,7 @@ function validPageviews(mixed $value, string $today): bool
         if (!is_array($item) || !is_string($item['title'] ?? null) || trim($item['title']) === ''
             || isset($titles[$item['title']]) || !validWikiUrl($item['url'] ?? null)
             || parse_url($item['url'], PHP_URL_HOST) !== 'zh.wikipedia.org'
-            || !validAssessments($item) || !validCount($item['views'] ?? null) || ($item['rank'] ?? null) !== $index + 1
+            || !validAssessments($item) || !validExtract($item) || !validCount($item['views'] ?? null) || ($item['rank'] ?? null) !== $index + 1
             || (isset($item['site_rank']) && (!is_int($item['site_rank']) || $item['site_rank'] < 1 || $item['site_rank'] > 1000))
             || ($previousViews !== null && $item['views'] > $previousViews)) {
             return false;
@@ -205,6 +218,11 @@ function validBacklog(mixed $value): bool
             }
             $month = $item['oldest_issue_month'] ?? null;
             if ($month !== null && (!is_string($month) || !validDate($month . '-01'))) {
+                return false;
+            }
+            $category = $item['oldest_issue_category'] ?? null;
+            if ($category !== null && ($month === null || !is_string($category) || trim($category) === ''
+                || strlen($category) > 800 || preg_match('/[\x00-\x1f\x7f]/', $category) === 1)) {
                 return false;
             }
             if (array_key_exists('issues', $item)) {

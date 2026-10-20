@@ -171,6 +171,56 @@ class TestPageviewTransport(TestCase):
         assert observations == []
         assert response_body.closed
 
+    def test_daily_measurements_reject_invalid_counts_but_keep_zero(
+        self,
+    ) -> None:
+        """Accept zeroes but reject invalid or duplicate records."""
+        request = pageviews._build_request(
+            "zh.wikipedia.org",
+            "A",
+            date(2026, 1, 1),
+            date(2026, 1, 2),
+        )
+        for count in (None, False, -1, "0", 0.0):
+            response = BytesIO(
+                json.dumps({
+                    "items": [{"timestamp": "2026010100", "views": count}],
+                }).encode(),
+            )
+            with (
+                self.subTest(count=count),
+                patch.object(
+                    pageviews.urllib.request,
+                    "urlopen",
+                    return_value=response,
+                ),
+                self.assertRaises((TypeError, ValueError)),
+            ):
+                pageviews._open_request(request)
+            assert response.closed
+        measurement = {"timestamp": "2026010100", "views": 0}
+        with patch.object(
+            pageviews.urllib.request,
+            "urlopen",
+            return_value=BytesIO(
+                json.dumps({"items": [measurement]}).encode(),
+            ),
+        ):
+            assert pageviews._open_request(request) == [
+                DailyPageviews(date(2026, 1, 1), 0),
+            ]
+        with (
+            patch.object(
+                pageviews.urllib.request,
+                "urlopen",
+                return_value=BytesIO(
+                    json.dumps({"items": [measurement, measurement]}).encode(),
+                ),
+            ),
+            self.assertRaises(ValueError),
+        ):
+            pageviews._open_request(request)
+
     def test_other_http_errors_propagate(self) -> None:
         """Leave non-404 HTTP errors for the caller to handle."""
         error = urllib.error.HTTPError(

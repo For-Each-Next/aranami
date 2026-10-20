@@ -4,6 +4,42 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.7
 
+### 0.6.1 (2026-10-21 06:28 UTC)
+
+Overview: Unified article cards with cached introductions, simplified report
+status and logs, improved maintenance navigation and sorting, protected
+daily pageview additions from incomplete histories, and capped Pageviews
+requests at fifty per second.
+
+- Shared numbered cards with full-width introductions, title-aligned bottom
+  metadata, and up to twelve popular and DYK articles.
+- Displayed other supplied article lists directly without remaining-record
+  expanders or truncated previews.
+- Cached original, simplified, and traditional Page Previews introductions,
+  keeping generic zh unchanged with independent caches and attribution.
+- Placed introduction licensing after each source update time and omitted
+  confirmed-empty content sections while retaining unavailable states.
+- Preserved literal title spaces in summary requests to avoid empty upstream
+  responses for underscore-equivalent paths.
+- Combined daily view counts and site ranks, linking counts to thirty-day
+  article trends ending on the actual source date.
+- Added routine daily-history continuity checks, rejecting incomplete daily
+  batches without replacing healthy data or advancing the report date.
+- Capped article and top-list Pageviews requests at fifty per second across
+  wiki reports, website refreshes, and retries with one shared allowance.
+- Reused revision-backed DYK statuses and skipped page rendering when visible
+  facts matched, avoiding edits solely to refresh hidden statistics.
+- Added stable random pagination and reverse sorting, with maintenance tags
+  and retained months linking to their actual wiki categories.
+- Made status text open a modal table with linked destination titles and
+  UTC timing, omitting redundant wiki labels beside Chinese report pages.
+- Simplified the masthead, renamed showcases to 佳作展示, and combined the
+  source version and continuous runtime in one footer line.
+- Limited Recent logs to one hundred matching lines and exposed graceful
+  shutdown logs by delivering Toolforge's stop signal directly to Python.
+- Documented Toolforge-only software, local-site, and Games conversion forks,
+  with layered overrides and multiple longest matches per title.
+
 ### 0.6.0 (2026-10-20 15:00 UTC)
 
 Overview: Centralized Aranami's Toolforge data updates in a Python 3.15
@@ -53,7 +89,7 @@ completion-aware scheduling, readable logs, and a responsive project website.
 - Added a reader-focused About page and rebuilt the English README with
   current schedules, component responsibilities, and the Toolforge layout.
 - Organized English guides for terminal users, administrators, application
-  developers, and AI/system-level developers, including upload and restart.
+  developers, and system-level developers, including upload and restart.
 
 ## Until 0.6
 

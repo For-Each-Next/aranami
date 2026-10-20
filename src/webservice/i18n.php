@@ -7,9 +7,8 @@ function uiCatalog(): array
 {
     static $messages = [
         'page.title' => ['en' => 'Video games dashboard · Aranami', 'zh-hans' => '电子游戏专题看板 · Aranami', 'zh-hant' => '電子遊戲專題看板 · Aranami'],
-        'page.description' => ['en' => 'Chinese Wikipedia video-game highlights, popularity, maintenance worklists, and report update status.', 'zh-hans' => '中文维基百科电子游戏专题看板：优质内容、动态热门、维护列表与站内报告更新状态。', 'zh-hant' => '中文維基百科電子遊戲專題看板：優質內容、動態熱門、維護列表與站內報告更新狀態。'],
+        'page.description' => ['en' => 'Chinese Wikipedia video-game highlights, popularity, maintenance worklists, and report update status.', 'zh-hans' => '中文维基百科电子游戏专题看板：佳作展示、动态热门、维护列表与站内报告更新状态。', 'zh-hant' => '中文維基百科電子遊戲專題看板：佳作展示、動態熱門、維護列表與站內報告更新狀態。'],
         'page.heading' => ['en' => 'Video games dashboard', 'zh-hans' => '电子游戏专题看板', 'zh-hant' => '電子遊戲專題看板'],
-        'brand.context' => ['en' => 'Wikipedia · Video games', 'zh-hans' => '维基百科 · 电子游戏', 'zh-hant' => '維基百科 · 電子遊戲'],
         'nav.skip' => ['en' => 'Skip to the dashboard', 'zh-hans' => '跳至专题看板', 'zh-hant' => '跳至專題看板'],
         'nav.backlog' => ['en' => 'Maintenance', 'zh-hans' => '条目维护', 'zh-hant' => '條目維護'],
         'nav.project' => ['en' => 'Join the project', 'zh-hans' => '参与专题', 'zh-hant' => '參與專題'],
@@ -24,15 +23,15 @@ function uiCatalog(): array
         'about.reports_heading' => ['en' => 'Keep project reports up to date', 'zh-hans' => '保持专题报告更新', 'zh-hant' => '保持專題報告更新'],
         'about.reports' => ['en' => 'Aranami automatically updates selected project report pages on Wikipedia and requests refreshes of subscribed database reports. The dashboard links to these reports and shows their latest recorded update results. Editors remain responsible for reviewing and improving the articles themselves.', 'zh-hans' => 'Aranami自动更新维基百科上指定的专题报告，并请求刷新订阅的数据库报告。看板提供报告链接，显示最近记录的更新结果；条目本身仍由编辑审阅和完善。', 'zh-hant' => 'Aranami自動更新維基百科上指定的專題報告，並請求重新整理訂閱的資料庫報告。看板提供報告連結，顯示最近記錄的更新結果；條目本身仍由編輯審閱和完善。'],
         'about.freshness' => ['en' => 'Lists refresh automatically, but changes are not immediate. Check the displayed update dates and follow the Wikipedia links for the current article or report.', 'zh-hans' => '列表会自动刷新，但并非即时更新。请查看所示的更新时间，并通过维基百科链接了解条目或报告的最新内容。', 'zh-hant' => '列表會自動重新整理，但並非即時更新。請查看所示的更新時間，並透過維基百科連結了解條目或報告的最新內容。'],
-        'ops.pages' => ['en' => 'Page update details ({count})', 'zh-hans' => '页面更新详情（{count}）', 'zh-hant' => '頁面更新詳情（{count}）'],
         'ops.started' => ['en' => 'Started', 'zh-hans' => '开始', 'zh-hant' => '開始'],
         'ops.finished' => ['en' => 'Finished', 'zh-hans' => '结束', 'zh-hant' => '結束'],
         'empty.section' => ['en' => 'This section is temporarily unavailable.', 'zh-hans' => '这一栏的数据暂时无法获取。', 'zh-hant' => '這一欄的資料暫時無法取得。'],
         'empty.period' => ['en' => 'No appearances are recorded for this period.', 'zh-hans' => '这段期间没有已记录的展示。', 'zh-hant' => '這段期間沒有已記錄的展示。'],
-        'records.more' => ['en' => 'Show remaining records ({count})', 'zh-hans' => '查看其余{count}条记录', 'zh-hant' => '查看其餘{count}筆記錄'],
         'date.window_start' => ['en' => 'Already displayed at the start of this period', 'zh-hans' => '期初已在首页展示', 'zh-hant' => '期初已在首頁展示'],
         'date.observed' => ['en' => 'Observation date', 'zh-hans' => '观察日期', 'zh-hant' => '觀察日期'],
         'date.scheduled' => ['en' => 'Scheduled', 'zh-hans' => '预定', 'zh-hant' => '預定'],
+        'appearance.featured' => ['en' => 'Featured content on the main page', 'zh-hans' => '典范内容展示', 'zh-hant' => '典範內容展示'],
+        'appearance.good' => ['en' => 'Good content on the main page', 'zh-hans' => '优良内容展示', 'zh-hant' => '優良內容展示'],
         'badge.FA' => ['en' => 'Featured article', 'zh-hans' => '典范条目', 'zh-hant' => '典範條目'],
         'badge.FL' => ['en' => 'FL · Featured list', 'zh-hans' => '特色列表', 'zh-hant' => '特色列表'],
         'badge.GA' => ['en' => 'Good article', 'zh-hans' => '优良条目', 'zh-hant' => '優良條目'],
@@ -69,13 +68,17 @@ function uiCatalog(): array
         'column.article' => ['en' => 'Article', 'zh-hans' => '条目', 'zh-hant' => '條目'],
         'homepage.heading' => ['en' => 'Current highlights', 'zh-hans' => '动态热门', 'zh-hant' => '動態熱門'],
         'pageviews.heading' => ['en' => 'Popular articles', 'zh-hans' => '热门条目', 'zh-hant' => '熱門條目'],
-        'pageviews.description' => ['en' => 'Pages in the site-wide daily {top}', 'zh-hans' => '全站日访问量{top}的页面', 'zh-hant' => '全站日瀏覽量{top}的頁面'],
+        'pageviews.description' => ['en' => '{date}Project articles ranked in the site-wide daily {top}', 'zh-hans' => '{date}访问量位居全站{top}的专题条目', 'zh-hant' => '{date}瀏覽量位居全站{top}的專題條目'],
         'pageviews.top' => ['en' => 'top 1,000', 'zh-hans' => '前1,000名', 'zh-hant' => '前1,000名'],
-        'pageviews.views' => ['en' => '{count} views', 'zh-hans' => '{count}次浏览', 'zh-hant' => '{count}次瀏覽'],
-        'pageviews.site_rank' => ['en' => 'Sitewide rank: {rank}', 'zh-hans' => '全站排名：第{rank}名', 'zh-hant' => '全站排名：第{rank}名'],
+        'pageviews.views' => ['en' => '{count} daily views', 'zh-hans' => '日浏览{count}次', 'zh-hant' => '日瀏覽{count}次'],
+        'extracts.attribution' => ['en' => 'Introductions come from the corresponding Chinese Wikipedia articles and are available under {license}.', 'zh-hans' => '简介摘自中文维基百科对应条目，以{license}协议发布', 'zh-hant' => '簡介摘自中文維基百科對應條目，以{license}協議發布'],
+        'dialog.close' => ['en' => 'Close', 'zh-hans' => '关闭', 'zh-hant' => '關閉'],
+        'ops.details' => ['en' => '{routine}: page updates', 'zh-hans' => '{routine}：页面更新', 'zh-hant' => '{routine}：頁面更新'],
+        'ops.column_status' => ['en' => 'Status', 'zh-hans' => '状态', 'zh-hant' => '狀態'],
+        'pageviews.site_rank' => ['en' => 'Sitewide rank: {rank}', 'zh-hans' => '全站第{rank}名', 'zh-hant' => '全站第{rank}名'],
         'pageviews.unavailable' => ['en' => 'Daily pageview data is temporarily unavailable.', 'zh-hans' => '每日浏览量数据暂时无法获取。', 'zh-hant' => '每日瀏覽量資料暫時無法取得。'],
         'pageviews.empty' => ['en' => 'No video-game project articles appeared in this day’s site top 1,000.', 'zh-hans' => '这天全站前1,000名中没有电子游戏专题条目。', 'zh-hant' => '這天全站前1,000名中沒有電子遊戲專題條目。'],
-        'homepage.recognized' => ['en' => 'Quality content', 'zh-hans' => '优质内容', 'zh-hant' => '優質內容'],
+        'homepage.recognized' => ['en' => 'Main-page highlights', 'zh-hans' => '佳作展示', 'zh-hant' => '佳作展示'],
         'homepage.recognized_description' => ['en' => 'Featured and good content recently shown on the main page', 'zh-hans' => '近期登上首页展示的典范、优良内容', 'zh-hant' => '近期登上首頁展示的典範、優良內容'],
         'homepage.dyk' => ['en' => 'New article highlights', 'zh-hans' => '新篇推荐', 'zh-hant' => '新篇推薦'],
         'homepage.dyk_description' => ['en' => '“Did you know?” (DYK) on the Chinese main page', 'zh-hans' => '中文首页的“你知道吗？”（DYK）', 'zh-hant' => '中文首頁的「你知道嗎？」（DYK）'],
@@ -89,13 +92,15 @@ function uiCatalog(): array
         'backlog.empty' => ['en' => 'No articles currently match this task.', 'zh-hans' => '目前没有这类待维护条目。', 'zh-hant' => '目前沒有這類待維護條目。'],
         'backlog.unavailable' => ['en' => 'The maintenance lists are temporarily unavailable.', 'zh-hans' => '维护列表暂时无法获取。', 'zh-hant' => '維護列表暫時無法取得。'],
         'backlog.source' => ['en' => 'Maintenance tag', 'zh-hans' => '维护标签', 'zh-hant' => '維護標籤'],
-        'backlog.column.assessment' => ['en' => 'Assessment', 'zh-hans' => '评级·重要度', 'zh-hant' => '評級·重要度'],
-        'backlog.column.class' => ['en' => 'Class', 'zh-hans' => '评级', 'zh-hant' => '評級'],
         'backlog.column.importance' => ['en' => 'Importance', 'zh-hans' => '重要度', 'zh-hant' => '重要度'],
         'backlog.column.issues' => ['en' => 'Maintenance issues', 'zh-hans' => '维护问题', 'zh-hant' => '維護問題'],
         'backlog.column.oldest' => ['en' => 'Earliest tagged month', 'zh-hans' => '最早标记月份', 'zh-hant' => '最早標記月份'],
-        'backlog.sort' => ['en' => 'Sort maintenance articles', 'zh-hans' => '维护条目排序', 'zh-hant' => '維護條目排序'],
-        'backlog.oldest_note' => ['en' => 'Months come from the earliest dated maintenance category currently present, rather than when the issue began. A dash means no month is recorded.', 'zh-hans' => '月份来自现存最早的维护分类，不代表问题实际出现时间；— 表示没有可确认的月份。', 'zh-hant' => '月份來自目前最早的維護分類，不代表問題實際出現時間；— 表示沒有可確認的月份。'],
+        'backlog.sort' => ['en' => 'Sort by', 'zh-hans' => '排序方式', 'zh-hant' => '排序方式'],
+        'backlog.sort.title' => ['en' => 'Article name', 'zh-hans' => '条目名', 'zh-hant' => '條目名'],
+        'backlog.sort.class' => ['en' => 'Quality', 'zh-hans' => '品质', 'zh-hant' => '品質'],
+        'backlog.sort.time' => ['en' => 'Time', 'zh-hans' => '时间', 'zh-hant' => '時間'],
+        'backlog.sort.random' => ['en' => 'Random', 'zh-hans' => '随机', 'zh-hant' => '隨機'],
+        'backlog.sort.reverse' => ['en' => 'Reverse', 'zh-hans' => '逆序', 'zh-hant' => '逆序'],
         'backlog.back' => ['en' => 'Back to maintenance', 'zh-hans' => '返回条目维护', 'zh-hant' => '返回條目維護'],
         'backlog.page' => ['en' => 'Page {page} of {pages}', 'zh-hans' => '第{page}页，共{pages}页', 'zh-hant' => '第{page}頁，共{pages}頁'],
         'backlog.previous' => ['en' => 'Previous page', 'zh-hans' => '上一页', 'zh-hant' => '上一頁'],
@@ -107,10 +112,10 @@ function uiCatalog(): array
         'ops.browse_logs' => ['en' => 'Detailed Aranami logs', 'zh-hans' => 'Aranami详细日志', 'zh-hant' => 'Aranami詳細日誌'],
         'ops.aria' => ['en' => 'Aranami task activity', 'zh-hans' => 'Aranami工作状态表', 'zh-hant' => 'Aranami工作狀態表'],
         'ops.column_task' => ['en' => 'Job', 'zh-hans' => '作业', 'zh-hant' => '作業'],
-        'ops.column_state' => ['en' => 'Current status', 'zh-hans' => '当前状态', 'zh-hant' => '當前狀態'],
         'ops.column_duration' => ['en' => 'Execution time', 'zh-hans' => '执行时间', 'zh-hant' => '執行時間'],
-        'ops.column_time' => ['en' => 'Status updated', 'zh-hans' => '状态更新时间', 'zh-hant' => '狀態更新時間'],
-        'ops.next_run' => ['en' => 'Next scheduled run', 'zh-hans' => '下次计划运行', 'zh-hant' => '下次排程執行'],
+        'ops.state_duration' => ['en' => '(Execution time: {duration})', 'zh-hans' => '（执行时间{duration}）', 'zh-hant' => '（執行時間{duration}）'],
+        'ops.column_time' => ['en' => 'Updated', 'zh-hans' => '更新时间', 'zh-hant' => '更新時間'],
+        'ops.next_run' => ['en' => 'Next run', 'zh-hans' => '下次执行时间', 'zh-hant' => '下次執行時間'],
         'ops.schedule_stale' => ['en' => 'Scheduler state is stale', 'zh-hans' => '调度状态已过期', 'zh-hant' => '排程狀態已過期'],
         'ops.schedule_stopped' => ['en' => 'Scheduler stopped', 'zh-hans' => '调度已停止', 'zh-hant' => '排程已停止'],
         'ops.schedule_paused' => ['en' => 'Scheduler paused', 'zh-hans' => '调度已暂停', 'zh-hant' => '排程已暫停'],
@@ -130,21 +135,17 @@ function uiCatalog(): array
         'state.Running' => ['en' => 'Running', 'zh-hans' => '更新中', 'zh-hant' => '更新中'],
         'section.featured' => ['en' => 'Featured content', 'zh-hans' => '典范内容', 'zh-hant' => '典範內容'],
         'section.good' => ['en' => 'Good articles', 'zh-hans' => '优良条目', 'zh-hant' => '優良條目'],
-        'footer.title' => ['en' => 'Aranami · Video games dashboard', 'zh-hans' => 'Aranami · 电子游戏专题看板', 'zh-hant' => 'Aranami · 電子遊戲專題看板'],
-        'footer.uptime' => ['en' => 'Aranami uptime: {days}d {hours}h {minutes}m · since {since} UTC', 'zh-hans' => 'Aranami 已连续运行{days}天{hours}小时{minutes}分钟（始于{since} UTC）', 'zh-hant' => 'Aranami 已連續運行{days}天{hours}小時{minutes}分鐘（始於{since} UTC）'],
-        'footer.uptime_unknown' => ['en' => 'Aranami uptime: unavailable', 'zh-hans' => 'Aranami 连续运行时间：未获取', 'zh-hant' => 'Aranami 連續運行時間：未取得'],
+        'footer.uptime' => ['en' => 'Aranami ({version}) uptime: {days}d {hours}h {minutes}m · since {since} UTC', 'zh-hans' => 'Aranami ({version}) 已连续运行{days}天{hours}小时{minutes}分钟（始于{since} UTC）', 'zh-hant' => 'Aranami ({version}) 已連續運行{days}天{hours}小時{minutes}分鐘（始於{since} UTC）'],
+        'footer.uptime_unknown' => ['en' => 'Aranami ({version}) uptime: unavailable', 'zh-hans' => 'Aranami ({version}) 连续运行时间：未获取', 'zh-hant' => 'Aranami ({version}) 連續運行時間：未取得'],
         'format.list_separator' => ['en' => ', ', 'zh-hans' => '、', 'zh-hant' => '、'],
         'duration.seconds' => ['en' => '{seconds} sec', 'zh-hans' => '{seconds}秒', 'zh-hant' => '{seconds}秒'],
         'duration.minutes' => ['en' => '{minutes} min {seconds} sec', 'zh-hans' => '{minutes}分{seconds}秒', 'zh-hant' => '{minutes}分{seconds}秒'],
         'http.method_not_allowed' => ['en' => 'Method not allowed.', 'zh-hans' => '不允许此请求方法。', 'zh-hant' => '不允許此請求方法。'],
         'logs.not_found' => ['en' => 'Log not found.', 'zh-hans' => '未找到日志。', 'zh-hant' => '未找到日誌。'],
-        'logs.intro' => ['en' => 'Follow data refreshes, wiki updates, and failures by UTC date.', 'zh-hans' => '按UTC日期查看数据刷新、站内更新及失败原因。', 'zh-hant' => '依UTC日期查看資料更新、站內更新及失敗原因。'],
         'logs.query' => ['en' => 'Text contains', 'zh-hans' => '包含文字', 'zh-hant' => '包含文字'],
         'logs.apply' => ['en' => 'Show logs', 'zh-hans' => '查看日志', 'zh-hant' => '查看日誌'],
-        'logs.download' => ['en' => 'Download full log', 'zh-hans' => '下载完整日志', 'zh-hant' => '下載完整日誌'],
-        'logs.excerpt_note' => ['en' => 'Shows the latest 500 matching lines from the final 1 MiB of this daily log.', 'zh-hans' => '显示当日日志最后1 MiB中最新的最多500行匹配内容。', 'zh-hant' => '顯示當日日誌最後1 MiB中最新的最多500行符合內容。'],
+        'logs.recent' => ['en' => 'Recent logs', 'zh-hans' => '最近日志', 'zh-hant' => '最近日誌'],
         'logs.no_matches' => ['en' => 'No matching lines in the displayed portion.', 'zh-hans' => '当前范围内没有匹配行。', 'zh-hant' => '目前範圍內沒有符合的行。'],
-        'logs.truncated' => ['en' => 'More log content is available in the full download.', 'zh-hans' => '下载完整日志可查看其余内容。', 'zh-hant' => '下載完整日誌可查看其餘內容。'],
         'logs.invalid_query' => ['en' => 'The log date or text query is invalid.', 'zh-hans' => '日志日期或文字查询无效。', 'zh-hant' => '日誌日期或文字查詢無效。'],
         'logs.page_title' => ['en' => 'Aranami logs', 'zh-hans' => 'Aranami日志', 'zh-hant' => 'Aranami日誌'],
         'logs.heading' => ['en' => 'Run logs', 'zh-hans' => '运行日志', 'zh-hant' => '執行日誌'],
@@ -153,7 +154,6 @@ function uiCatalog(): array
         'logs.column_date' => ['en' => 'Date (UTC)', 'zh-hans' => '日期（UTC）', 'zh-hant' => '日期（UTC）'],
         'logs.column_file' => ['en' => 'Log file', 'zh-hans' => '日志文件', 'zh-hant' => '日誌檔案'],
         'logs.column_size' => ['en' => 'Size', 'zh-hans' => '大小', 'zh-hant' => '大小'],
-        'logs.footer' => ['en' => 'Logs use UTC and update as Aranami runs.', 'zh-hans' => '日志使用UTC时间，随Aranami运行而更新。', 'zh-hant' => '日誌使用UTC時間，隨Aranami運行而更新。'],
     ];
     return $messages;
 }
@@ -174,7 +174,10 @@ function uiRangeLocale(string $range): ?string
     if (in_array('hans', $parts, true)) {
         return 'zh-hans';
     }
-    return array_intersect(['tw', 'hk', 'mo'], $parts) !== [] ? 'zh-hant' : 'zh-hans';
+    if (array_intersect(['tw', 'hk', 'mo'], $parts) !== []) {
+        return 'zh-hant';
+    }
+    return array_intersect(['cn', 'sg', 'my'], $parts) !== [] ? 'zh-hans' : 'zh';
 }
 
 /** Select a supported browser language by quality, then header order. */
@@ -220,7 +223,14 @@ function uiLocale(): string
 /** Return the standard HTML and Content-Language tag for this interface. */
 function uiLanguageTag(?string $locale = null): string
 {
-    return ['zh-hans' => 'zh-Hans', 'zh-hant' => 'zh-Hant', 'en' => 'en'][$locale ?? uiLocale()] ?? 'en';
+    return ['zh' => 'zh', 'zh-hans' => 'zh-Hans', 'zh-hant' => 'zh-Hant', 'en' => 'en'][$locale ?? uiLocale()] ?? 'en';
+}
+
+/** Use authored base-Chinese interface copy without converting source data. */
+function uiMessageLocale(?string $locale = null): string
+{
+    $locale ??= uiLocale();
+    return $locale === 'zh' ? 'zh-hans' : $locale;
 }
 
 /** Translate plain interface text; callers escape it for its output context. */
@@ -230,7 +240,7 @@ function uiTextFor(string $locale, string $key, array $parameters = []): string
     if (!isset($messages[$key])) {
         throw new InvalidArgumentException('Unknown interface message: ' . $key);
     }
-    $message = $messages[$key][$locale] ?? $messages[$key]['en'];
+    $message = $messages[$key][uiMessageLocale($locale)] ?? $messages[$key]['en'];
     $replacements = [];
     foreach ($parameters as $name => $value) {
         $replacements['{' . $name . '}'] = (string) $value;

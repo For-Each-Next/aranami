@@ -41,6 +41,11 @@ if TYPE_CHECKING:
     from pywikibot.site import BaseSite
 
 _LOGGER = logging.getLogger(__name__)
+_STATUS_SCHEMA = {
+    "title": pl.String,
+    "class": pl.String,
+    "dyk_dates": pl.List(pl.Date),
+}
 
 
 @dataclass(frozen=True)
@@ -66,6 +71,7 @@ class PreparedDyk:
     previous_members: Mapping[str, int | None]
     changes: DykChanges
     result: ReportResult
+    content_unchanged: bool = False
 
 
 def _dated_pages(site: BaseSite, pages: pl.DataFrame) -> pl.DataFrame:
@@ -310,6 +316,87 @@ def _completed_dates(text: str) -> dict[str, set[date]]:
     return dates
 
 
+def _published_status_rows(
+    text: str,
+    range_name: Literal["dyk", "dykn"],
+) -> pl.DataFrame | None:
+    """Read visible DYK statuses without interpreting hidden statistics.
+
+    Args:
+        text: Published report containing both managed ranges.
+        range_name: Completed entries or current candidates.
+
+    Returns:
+        Typed status rows, or none for invalid dates.
+    """
+    rows = []
+    for title, template in _article_items(text, range_name):
+        dates = []
+        if range_name == "dyk":
+            if not template.has("date"):
+                return None
+            for label in str(template.get("date").value).split("、"):
+                if label.strip() == "日期不詳":
+                    dates.append(None)
+                else:
+                    try:
+                        dates.append(date.fromisoformat(label.strip()))
+                    except ValueError:
+                        return None
+        rows.append({
+            "title": title,
+            "class": str(template.get("2").value).strip()
+            if template.has("2")
+            else "",
+            "dyk_dates": dates,
+        })
+    return (
+        pl
+        .DataFrame(rows, schema=_STATUS_SCHEMA)
+        .with_columns(pl.col("dyk_dates").list.sort(nulls_last=True))
+        .sort("title")
+    )
+
+
+def _published_statuses_match(
+    text: str,
+    completed: pl.DataFrame,
+    nominations: pl.DataFrame,
+) -> bool:
+    """Recognize unchanged revision-backed states before page rendering.
+
+    Args:
+        text: Published report whose visible facts remain authoritative.
+        completed: Current completed articles and revision-keyed dates.
+        nominations: Current candidate titles and assessments.
+
+    Returns:
+        Whether published members, grades, and dates match source facts.
+        Hidden statistical sampling dates do not cause a new wiki edit.
+    """
+    content = region_content(text, "dyk")
+    if content is None or not content.lstrip().startswith(
+        f"共計{completed.height:,}篇條目",
+    ):
+        return False
+    for name, source in (("dyk", completed), ("dykn", nominations)):
+        published = _published_status_rows(text, name)
+        if published is None:
+            return False
+        current = source.select(
+            pl.col("title").str.replace_all("_", " ").str.strip_chars(),
+            pl.col("class").cast(pl.String).fill_null("").str.strip_chars(),
+            (
+                pl.col("dyk_dates").list.sort(nulls_last=True)
+                if name == "dyk"
+                else pl.lit([], dtype=pl.List(pl.Date)).alias("dyk_dates")
+            ),
+        ).sort("title")
+        if not published.equals(current):
+            return False
+    return True
+
+
 @dataclass(frozen=True)
 class _DykState:
     """Keep parsed membership and known completion dates."""
@@ -539,6 +626,16 @@ def prepare_report(
         nominations,
         today,
     )
+    content_unchanged = _published_statuses_match(
+        original_text,
+        completed,
+        nominations,
+    )
+    if content_unchanged:
+        _LOGGER.info(
+            "DYK revision-backed statuses are unchanged; keeping published "
+            "text without refreshing its hidden statistics comment.",
+        )
     identities = dict(
         pl
         .concat([
@@ -593,6 +690,7 @@ def prepare_report(
         previous,
         changes,
         result,
+        content_unchanged,
     )
 
 

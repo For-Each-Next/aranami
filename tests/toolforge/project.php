@@ -92,6 +92,9 @@ foreach ([['issues' => null], ['issues' => []], ['issues' => ['references']],
     ['issues' => ['unreferenced', 'missing_task']], ['issues' => ['unreferenced', 'unreferenced']],
     ['issues' => ['unreferenced', 1]], ['oldest_issue_month' => '2026-13'],
     ['oldest_issue_month' => '2026-01-01'], ['oldest_issue_month' => ''],
+    ['oldest_issue_category' => 4], ['oldest_issue_category' => ''],
+    ['oldest_issue_category' => "Category\nBad"],
+    ['oldest_issue_month' => null, 'oldest_issue_category' => '自2020年3月需补充来源的条目'],
     ['assessment_class' => []], ['assessment_importance' => "低\n"]] as $change) {
     $invalid = $detailedBacklog;
     $invalid['groups'][0]['items'][0] = array_replace($detailedItem, $change);
@@ -169,6 +172,25 @@ $article = ['title' => '<script>alert(1)</script>', 'url' => 'https://zh.wikiped
 $data['homepage']['dyk'] = [$article];
 file_put_contents($snapshotPath, json_encode($data));
 expectSame($data, projectDashboard($snapshotPath), 'Text is retained for HTML escaping by the renderer');
+foreach ([null, 'Saved introduction. <safe text>'] as $extract) {
+    $data['homepage']['dyk'][0]['extract'] = $extract;
+    file_put_contents($snapshotPath, json_encode($data));
+    expectSame($data, projectDashboard($snapshotPath), 'Saved introductions preserve nulls and plain text for escaping');
+}
+foreach ([42, [], '', "Bad\nText", str_repeat('x', 1601)] as $extract) {
+    $invalid = $data;
+    $invalid['homepage']['dyk'][0]['extract'] = $extract;
+    file_put_contents($snapshotPath, json_encode($invalid));
+    expectSame(null, projectDashboard($snapshotPath), 'Invalid or oversized saved introductions are rejected');
+    $invalid = $data;
+    $invalid['homepage']['dyk'][0]['extract_hant'] = $extract;
+    file_put_contents($snapshotPath, json_encode($invalid));
+    expectSame(null, projectDashboard($snapshotPath), 'Traditional introductions have the same bounded plain-text contract');
+    $invalid = $data;
+    $invalid['homepage']['dyk'][0]['extract_zh'] = $extract;
+    file_put_contents($snapshotPath, json_encode($invalid));
+    expectSame(null, projectDashboard($snapshotPath), 'Original introductions have the same bounded plain-text contract');
+}
 foreach (['javascript:alert(1)', 'https://evil.example/wiki/Example', 'https://user@zh.wikipedia.org/wiki/Example', 'https://zh.wikipedia.org:443/wiki/Example', "https://zh.wikipedia.org/wiki/Example\n"] as $url) {
     $invalid = $data;
     $invalid['homepage']['dyk'][0]['url'] = $url;

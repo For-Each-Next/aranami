@@ -61,6 +61,7 @@ foreach ([
     ['en', 'en', 'About Aranami', 'Discover articles', 'Find something to improve', 'Keep project reports up to date', 'Method not allowed.'],
     ['zh-CN', 'zh-Hans', '关于Aranami', '发现条目', '寻找改善方向', '保持专题报告更新', '不允许此请求方法。'],
     ['zh-TW', 'zh-Hant', '關於Aranami', '發現條目', '尋找改善方向', '保持專題報告更新', '不允許此請求方法。'],
+    ['zh', 'zh', '关于Aranami', '发现条目', '寻找改善方向', '保持专题报告更新', '不允许此请求方法。'],
 ] as [$language, $tag, $heading, $discover, $improve, $reports, $notAllowed]) {
     [$html] = renderAboutFixture($private . '/public_html/about/index.php', $language);
     expectAbout(str_contains($html, '<html lang="' . $tag . '">')

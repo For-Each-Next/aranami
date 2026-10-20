@@ -34,13 +34,14 @@ import urllib.request
 from calendar import monthrange
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Final, TypedDict, cast
+from typing import TYPE_CHECKING, Final
 
 import polars as pl
 import pywikibot
 from tqdm import tqdm
 
 from shared.deployment import project_version
+from shared.sources import pageviews_rate
 from shared.sources.cycle import read_top_pageviews
 
 if TYPE_CHECKING:
@@ -65,13 +66,6 @@ _TOP_FRAME_SCHEMA: Final[pl.Schema] = pl.Schema(
 )
 # Topviews' config/topviews_excludes.yaml was verified on 2026-10-18.
 _TOPVIEWS_EXCLUDED_TITLES: Final[frozenset[str]] = frozenset({"XHamster"})
-
-
-class _ViewItem(TypedDict):
-    """Fields read from one Pageviews API observation."""
-
-    timestamp: str
-    views: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +251,7 @@ def _request_top_payload(
         headers={"Accept": "application/json", "User-Agent": _USER_AGENT},
     )
     try:
+        pageviews_rate.wait_for_pageviews_request()
         # ruff: ignore[suspicious-url-open-usage]
         with urllib.request.urlopen(request) as response:
             payload = json.load(response)
@@ -551,26 +546,53 @@ def _open_request(
     Raises:
         urllib.error.HTTPError: If opening the request raises an HTTP
             error other than 404.
+        TypeError: Response containers or measurement types are invalid.
+        ValueError: The payload has invalid or duplicate measurements.
     """
     try:
+        pageviews_rate.wait_for_pageviews_request()
         # ruff: ignore[suspicious-url-open-usage]
         with urllib.request.urlopen(request) as response:
-            payload = cast("dict[str, list[_ViewItem]]", json.load(response))
+            payload = json.load(response)
     except urllib.error.HTTPError as error:
         if error.code == HTTPStatus.NOT_FOUND:
             error.close()
             return []
         raise
 
+    if not isinstance(payload, dict) or not isinstance(
+        payload.get("items"),
+        list,
+    ):
+        message = "Malformed Wikimedia daily pageviews response"
+        raise TypeError(message)
     observations: list[DailyPageviews] = []
+    dates: set[dt.date] = set()
     for item in payload["items"]:
-        timestamp = item["timestamp"]
+        timestamp = item.get("timestamp") if isinstance(item, dict) else None
+        views = item.get("views") if isinstance(item, dict) else None
+        if not isinstance(timestamp, str) or type(views) is not int:
+            message = "Invalid Wikimedia daily pageviews measurement types"
+            raise TypeError(message)
+        if (
+            len(timestamp) != 10  # ruff: ignore[magic-value-comparison]
+            or not timestamp.isascii()
+            or not timestamp.isdigit()
+            or not timestamp.endswith("00")
+            or views < 0
+        ):
+            message = "Invalid Wikimedia daily pageviews measurement"
+            raise ValueError(message)
         observation_date = dt.date(
             int(timestamp[0:4]),
             int(timestamp[4:6]),
             int(timestamp[6:8]),
         )
+        if observation_date in dates:
+            message = "Duplicate Wikimedia daily pageviews date"
+            raise ValueError(message)
+        dates.add(observation_date)
         observations.append(
-            DailyPageviews(observation_date, item["views"]),
+            DailyPageviews(observation_date, views),
         )
     return observations
