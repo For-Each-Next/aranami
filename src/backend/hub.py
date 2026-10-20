@@ -152,14 +152,22 @@ def run(config: HubConfig) -> None:
         config: Validated runtime settings for this backend process.
     """
     stopped = Event()
+    shutdown_reason = "HTTP loop ended"
 
-    def stop(_signum: int, _frame: FrameType | None) -> None:
+    def stop(signum: int, _frame: FrameType | None) -> None:
         """Request graceful shutdown from the process's main thread."""
+        nonlocal shutdown_reason
+        shutdown_reason = signal.Signals(signum).name
         stopped.set()
 
     with ExitStack() as resources:
         resources.enter_context(open_run_log(config.log_dir))
         _LOGGER.info("Aranami %s backend hub started.", project_version())
+        resources.callback(
+            _LOGGER.info,
+            "Aranami %s backend hub stopped.",
+            project_version(),
+        )
         for kind in (signal.SIGINT, signal.SIGTERM):
             previous = signal.signal(kind, stop)
             resources.callback(signal.signal, kind, previous)
@@ -215,7 +223,13 @@ def run(config: HubConfig) -> None:
                 while not stopped.is_set():
                     server.handle_request()
         except KeyboardInterrupt:
+            shutdown_reason = "KeyboardInterrupt"
             stopped.set()
+        finally:
+            _LOGGER.info(
+                "Aranami backend hub stopping (%s); waiting for active work.",
+                shutdown_reason,
+            )
 
 
 def main(argv: Sequence[str] | None = None) -> None:

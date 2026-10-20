@@ -10,7 +10,7 @@ import json
 import tempfile
 from pathlib import Path
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import polars as pl
 
@@ -32,6 +32,7 @@ class TestDashboardReportCache(TestCase):
         self.cache = Path(directory.name)
         self.reader = Mock()
         self.reader.sources = {}
+        self.reader.summary.return_value = ""
         self.site = self._patch("backend.website.collect.pywikibot.Site")
         self._patch(
             "backend.website.collect.WikiReader",
@@ -117,6 +118,122 @@ class TestDashboardReportCache(TestCase):
             now=now,
             **kwargs,
         )
+
+    def test_maintenance_month_source_survives_cache_and_bad_refresh(
+        self,
+    ) -> None:
+        """Retain dated categories and reject invalid replacements."""
+        self.backlog.return_value = {
+            "observed_at": self.clock.isoformat(timespec="seconds"),
+            "total": 1,
+            "groups": [
+                {
+                    "key": "sources",
+                    "category": "缺少可靠来源的条目",
+                    "source_url": (
+                        "https://zh.wikipedia.org/wiki/Category:Sources"
+                    ),
+                    "label": "Sources",
+                    "section_key": "sources",
+                    "section_label": "Sources",
+                    "count": 1,
+                    "items": [
+                        {
+                            "page_id": 1,
+                            "title": "Game",
+                            "url": "https://zh.wikipedia.org/wiki/Game",
+                            "issues": ["sources"],
+                            "oldest_issue_month": "2009-04",
+                            "oldest_issue_category": (
+                                "自2009年04月缺少可靠来源的条目"
+                            ),
+                        },
+                    ],
+                },
+            ],
+        }
+        saved = json.loads(json.dumps(self._collect()["backlog"]))
+        self.backlog.reset_mock()
+        assert self._collect()["backlog"] == saved
+        self.backlog.assert_not_called()
+        for hour, value in enumerate((42, "", "Bad\nCategory"), start=24):
+            with self.subTest(value=value):
+                invalid = json.loads(json.dumps(saved))
+                invalid["groups"][0]["items"][0]["oldest_issue_category"] = (
+                    value
+                )
+                self.backlog.return_value = invalid
+                snapshot = self._collect(dt.timedelta(hours=hour))
+                assert snapshot["backlog"] == saved
+                assert snapshot["reports"]["backlog"]["failed"]
+
+    def test_introductions_are_shared_across_all_homepage_reports(
+        self,
+    ) -> None:
+        """Reuse one title request across sections and restarts."""
+        self.reader.summary.return_value = "第一句。第二句。"
+        self.membership.return_value = pl.DataFrame({
+            "full_title": ["Game"],
+            "page_namespace": [0],
+            "pa_class": ["C"],
+            "pa_importance": ["Low"],
+        })
+        article = {
+            "title": "Game",
+            "url": "https://zh.wikipedia.org/wiki/Game",
+            "date": self.clock.date().isoformat(),
+        }
+        for key, collector in self.collectors.items():
+            collector.return_value = [
+                {
+                    **article,
+                    **(
+                        {
+                            "date": "2026-10-20",
+                            "date_kind": "scheduled",
+                            "kind": "fa",
+                        }
+                        if key == "upcoming"
+                        else {}
+                    ),
+                },
+            ]
+        self.popularity.return_value["items"] = [
+            {
+                "title": "Game",
+                "url": article["url"],
+                "views": 0,
+                "rank": 1,
+                "site_rank": 6,
+            },
+        ]
+        first = self._collect()
+        for rows in first["homepage"].values():
+            assert rows[0]["extract"] == "第一句。第二句。"
+            assert rows[0]["assessment_class"] == "C"
+            assert rows[0]["assessment_importance"] == "Low"
+        assert first["pageviews"]["items"][0]["views"] == 0
+        assert first["pageviews"]["items"][0]["extract"] == "第一句。第二句。"
+        assert self.reader.summary.call_args_list == [
+            call("Game", "zh-hans"),
+            call("Game", "zh-hant"),
+            call("Game", "zh"),
+        ]
+        self.reader.summary.reset_mock()
+        repeated = self._collect(dt.timedelta(hours=23))
+        assert repeated["homepage"] == first["homepage"]
+        self.reader.summary.assert_not_called()
+        self.reader.summary.side_effect = OSError("summary offline")
+        refreshed = self._collect(dt.timedelta(hours=24))
+        assert (
+            refreshed["pageviews"]["items"][0]["extract"] == "第一句。第二句。"
+        )
+        assert not refreshed["reports"]["pageviews"]["failed"]
+        assert self.reader.summary.call_args_list == [
+            call("Game", "zh-hans"),
+            call("Game", "zh-hant"),
+            call("Game", "zh"),
+        ]
 
     def test_restart_reuses_every_report_without_constructing_clients(
         self,

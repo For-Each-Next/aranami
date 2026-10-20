@@ -25,7 +25,9 @@ import pywikibot
 from pywikibot.pagegenerators import PreloadingGenerator
 
 from backend.website import backlog, homepage, pageviews
+from backend.website.extracts import MAX_EXTRACT_BYTES, ExtractCache
 from shared.sources.quarry.projects import query_pages_by_wikiproject
+from shared.sources.summaries import fetch_summary
 
 if TYPE_CHECKING:
     import argparse
@@ -48,8 +50,9 @@ _SECTION_RECORD_LIMIT = 10_000
 _SECTION_GROUP_LIMIT = 64
 _SECTION_HEADING_LIMIT = 12
 _SECTION_LABEL_MAX_BYTES = 800
+_CATEGORY_MAX_BYTES = 800
 _ASSESSMENT_MAX_BYTES = 192
-_PAGEVIEWS_LIMIT = 10
+_PAGEVIEWS_LIMIT = 12
 _PAGEVIEWS_SITE_LIMIT = 1000
 _URL_MAX_BYTES = 4096
 _MAX_DAYS = 365
@@ -103,6 +106,19 @@ class WikiReader:
         )
         for page in PreloadingGenerator(pages):
             self._pages[page.title()] = page
+
+    @staticmethod
+    def summary(title: str, variant: str) -> str | None:
+        """Read the plain-text first paragraph used by page previews.
+
+        Args:
+            title: Canonical Chinese Wikipedia article title.
+            variant: Original or script-specific Chinese text.
+
+        Returns:
+            Introductory text, or none for a confirmed absent extract.
+        """
+        return fetch_summary(title, variant=variant)
 
     def resolve(self, title: str) -> str:
         """Resolve a title using wiki normalization and redirects.
@@ -403,7 +419,7 @@ def _assessed_section(
     observation: object,
     membership: pl.DataFrame | None,
 ) -> object:
-    """Attach assessments to the two homepage lists that display them.
+    """Attach current project assessments to homepage article lists.
 
     Args:
         section: Dashboard source being collected.
@@ -411,7 +427,7 @@ def _assessed_section(
         membership: Shared current project assessment metadata.
 
     Returns:
-        Enriched pageviews or DYK records; other sections pass through.
+        Enriched article records with original display metadata.
     """
     if observation is None:
         return None
@@ -423,7 +439,7 @@ def _assessed_section(
                 membership,
             ),
         }
-    if section == "dyk":
+    if section in {"featured", "good", "upcoming", "dyk", "news", "history"}:
         return enrich_project_assessments(observation, membership)
     return observation
 
@@ -494,6 +510,18 @@ def _cache_article(value: object) -> bool:
         and (
             bool(value["title"].strip())
             and _cache_wiki_url(value.get("url"))
+            and (
+                all(
+                    value.get(field) is None
+                    or (
+                        isinstance(value[field], str)
+                        and bool(value[field].strip())
+                        and len(value[field].encode()) <= MAX_EXTRACT_BYTES
+                        and re.search(r"[\x00-\x1f\x7f]", value[field]) is None
+                    )
+                    for field in ("extract", "extract_hant", "extract_zh")
+                )
+            )
             and all(
                 value.get(field) is None
                 or (
@@ -604,6 +632,16 @@ def _valid_backlog_cache(value: object) -> bool:  # ruff: ignore[complex-structu
                     != month
                 ):
                     return False
+                category = row.get("oldest_issue_category")
+                if category is not None:
+                    if month is None or not isinstance(category, str):
+                        return False
+                    if (
+                        not category.strip()
+                        or len(category.encode()) > _CATEGORY_MAX_BYTES
+                        or re.search(r"[\x00-\x1f\x7f]", category) is not None
+                    ):
+                        return False
                 tags = row["issues"]
                 if (
                     not isinstance(tags, list)
@@ -716,7 +754,8 @@ def _valid_popularity_cache(
     day = dt.date.fromisoformat(value["date"])
     if (
         day.isoformat() != value["date"]  # ruff: ignore[too-many-boolean-expressions]
-        or value["limit"] != _PAGEVIEWS_LIMIT
+        or type(value["limit"]) is not int
+        or value["limit"] not in {10, _PAGEVIEWS_LIMIT}
         or value["scope"] != "site_top_1000"
         or value["source_url"]
         != (
@@ -724,7 +763,7 @@ def _valid_popularity_cache(
             f"zh.wikipedia.org/all-access/{day:%Y/%m/%d}"
         )
         or not isinstance(value["items"], list)
-        or len(value["items"]) > _PAGEVIEWS_LIMIT
+        or len(value["items"]) > value["limit"]
     ):
         return False
     titles = set()
@@ -953,9 +992,9 @@ def _report_plan(
         source_id = (
             _maintenance_cache_key()
             if name == "backlog"
-            else "zh:all-access:user:top1000:limit10:lookback7"
+            else "zh:all-access:user:top1000:limit12:lookback7:extracts-v3"
             if name == "pageviews"
-            else f"days:{days}"
+            else f"days:{days}:extracts-v3"
         )
         identity = hashlib.sha256(
             f"dashboard-v2:{name}:{source_id}:{intervals[name]}".encode(),
@@ -1152,6 +1191,29 @@ def _report_record_count(name: str, data: dict[str, object]) -> int:
     return sum(len(records) for records in data["homepage"].values())
 
 
+def _with_extracts(
+    name: str,
+    data: dict[str, object],
+    extracts: ExtractCache,
+) -> dict[str, object]:
+    """Attach shared introductions only to homepage article collections.
+
+    Returns:
+        Enriched records with all original source dates and counts.
+    """
+    if name == "backlog":
+        return data
+    if name == "pageviews":
+        return {**data, "items": extracts.enrich(data["items"])}
+    return {
+        **data,
+        "homepage": {
+            key: extracts.enrich(rows)
+            for key, rows in data["homepage"].items()
+        },
+    }
+
+
 def collect_dashboard(  # ruff: ignore[too-many-arguments]
     today: dt.date,
     days: int = 100,
@@ -1211,6 +1273,17 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
             type(error).__name__,
         )
         read = membership = members = None
+    extracts = (
+        ExtractCache(
+            cache_directory / "article-extracts-v2.parquet"
+            if cache_directory
+            else None,
+            clock,
+            read.summary,
+        )
+        if read is not None
+        else None
+    )
     for name in plan["due"]:
         _LOGGER.info("Refreshing website %s data.", _REPORT_LABELS[name])
         previous = plan["caches"][name]
@@ -1225,8 +1298,11 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
             "failed": True,
             "data": previous["data"] if previous else None,
         }
-        try:
+        try:  # ruff: ignore[too-many-statements-in-try-clause]
             data = _collect_report(name, read, membership, members, period)
+            if extracts is not None:
+                data = _with_extracts(name, data, extracts)
+                extracts.save()
             completed = (
                 (now or dt.datetime.now(dt.UTC))
                 .astimezone(dt.UTC)

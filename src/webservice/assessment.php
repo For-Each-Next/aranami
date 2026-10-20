@@ -8,6 +8,19 @@ function dashboardChipStyles(): void
     echo '.assessment-chip { display: inline-block; flex: 0 0 auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; padding: 0 5px; border: 1px solid #a8d9cb; border-radius: 9px; background: #edf9f4; color: #54595d; font-size: .75rem; font-weight: 400; line-height: 1.7; vertical-align: baseline; }';
 }
 
+/** Share responsive card columns and native article numbering across pages. */
+function dashboardCardStyles(): void
+{
+    echo '.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(18em, 100%), 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
+    .article-card, .backlog-task, .routine-card { min-width: 0; padding: 16px; border: 1px solid #c1d1cc; border-radius: 8px; background: #fff; overflow-wrap: anywhere; }
+    .article-list { list-style: decimal inside; }
+    .article-list > li::marker { color: #54595d; font-size: .875rem; font-variant-numeric: tabular-nums; }
+    .article-summary { display: inline; min-width: 0; }
+    .article-summary > a { overflow-wrap: anywhere; }
+    .assessment-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; max-width: 100%; vertical-align: baseline; }
+    .card-meta { display: block; margin: 8px 0 0; color: #54595d; font-size: .875rem; }';
+}
+
 /** Normalize known assessment codes and Chinese names without inferring grades. */
 function dashboardAssessmentCode(string $value, string $dimension): ?string
 {
@@ -83,7 +96,7 @@ function dashboardMaintenanceLabel(mixed $label, string $fallback): string
         return $label;
     }
     if (is_array($label) && $label !== []) {
-        return $label[uiLocale()] ?? $label['en'] ?? reset($label);
+        return $label[uiMessageLocale()] ?? $label['en'] ?? reset($label);
     }
     return $fallback;
 }
@@ -100,9 +113,20 @@ function dashboardMaintenanceSectionLabel(array $groups): string
     return dashboardMaintenanceLabel($groups[0]['section_label'] ?? null, uiText('backlog.heading'));
 }
 
-/** Sort saved worklists with unranked observations last and stable article ties. */
-function dashboardMaintenanceItems(array $items, string $sort = 'oldest', string $order = 'asc'): array
+/** Sort complete worklists, keeping unknowns last and seeded random pages stable. */
+function dashboardMaintenanceItems(array $items, string $sort = 'oldest', string $order = 'asc', string $seed = ''): array
 {
+    if ($sort === 'random') {
+        $keys = [];
+        foreach ($items as $item) {
+            $keys[$item['page_id']] = hash('sha256', $seed . ':' . $item['page_id']);
+        }
+        usort($items, static function (array $left, array $right) use ($keys, $order): int {
+            $comparison = strcmp($keys[$left['page_id']], $keys[$right['page_id']]) ?: $left['page_id'] <=> $right['page_id'];
+            return $order === 'desc' ? -$comparison : $comparison;
+        });
+        return $items;
+    }
     usort($items, static function (array $left, array $right) use ($sort, $order): int {
         if (in_array($sort, ['oldest', 'class', 'importance'], true)) {
             $leftValue = $sort === 'oldest' ? ($left['oldest_issue_month'] ?? null)

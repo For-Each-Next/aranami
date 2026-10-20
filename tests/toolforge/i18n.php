@@ -17,7 +17,7 @@ function expectUiSame(mixed $expected, mixed $actual, string $description): void
 foreach ([
     ['', 'en'], ['fr,de;q=0.9', 'en'], ['*', 'en'],
     ['en-US,en;q=0.9', 'en'], ['EN-gb', 'en'],
-    ['zh', 'zh-hans'], ['zh-CN', 'zh-hans'], ['zh-SG', 'zh-hans'],
+    ['zh', 'zh'], ['zh-CN', 'zh-hans'], ['zh-SG', 'zh-hans'], ['zh-MY', 'zh-hans'],
     ['zh-Hans', 'zh-hans'], ['zh-Hans-TW', 'zh-hans'],
     ['zh-TW', 'zh-hant'], ['zh-HK', 'zh-hant'], ['zh-MO', 'zh-hant'],
     ['zh-Hant', 'zh-hant'], ['zh-Hant-CN', 'zh-hant'],
@@ -29,7 +29,7 @@ foreach ([
     ['zh-HK;q=0,en;q=0.1', 'en'],
     ['en;q=0,zh-CN;q=0.5', 'zh-hans'],
     ['en;q=invalid,zh-TW;q=0.5', 'zh-hant'],
-    ['en;q=1.5,zh;q=0.4', 'zh-hans'],
+    ['en;q=1.5,zh;q=0.4', 'zh'],
     ['en;q=0.7;q=1,zh-TW;q=0.2', 'zh-hant'],
     ['zh-HK;q=0.000,en;q=0.001', 'en'],
     ['zh-CN;q=0.4, *;q=0.2', 'zh-hans'],
@@ -38,6 +38,8 @@ foreach ([
     expectUiSame($expected, selectUiLocale($header), 'Weighted browser preference: ' . $header);
 }
 expectUiSame('zh-Hans', uiLanguageTag('zh-hans'), 'Simplified HTML language');
+expectUiSame('zh', uiLanguageTag('zh'), 'Generic Chinese stays unspecified');
+expectUiSame('条目', uiTextFor('zh', 'column.article'), 'Generic Chinese uses authored Chinese interface copy');
 expectUiSame('zh-Hant', uiLanguageTag('zh-hant'), 'Traditional HTML language');
 expectUiSame('en', uiLanguageTag('en'), 'English HTML language');
 
@@ -108,17 +110,18 @@ $uptime = ['state' => 'running', 'started_at' => '2026-10-16T08:56:00Z',
     'updated_at' => '2026-10-18T12:00:00Z'];
 $clock = new DateTimeImmutable('2026-10-18T12:00:30Z');
 foreach ([
-    ['en', 'Aranami uptime: 2d 3h 4m · since 2026-10-16 08:56 UTC', 'Aranami uptime: unavailable'],
-    ['zh-CN', 'Aranami 已连续运行2天3小时4分钟（始于2026-10-16 08:56 UTC）', 'Aranami 连续运行时间：未获取'],
-    ['zh-TW', 'Aranami 已連續運行2天3小時4分鐘（始於2026-10-16 08:56 UTC）', 'Aranami 連續運行時間：未取得'],
+    ['en', 'Aranami (0.6.0) uptime: 2d 3h 4m · since 2026-10-16 08:56 UTC', 'Aranami (0.6.0) uptime: unavailable'],
+    ['zh-CN', 'Aranami (0.6.0) 已连续运行2天3小时4分钟（始于2026-10-16 08:56 UTC）', 'Aranami (0.6.0) 连续运行时间：未获取'],
+    ['zh-TW', 'Aranami (0.6.0) 已連續運行2天3小時4分鐘（始於2026-10-16 08:56 UTC）', 'Aranami (0.6.0) 連續運行時間：未取得'],
 ] as [$language, $label, $unknown]) {
     $locale = selectUiLocale($language);
     expectUiSame($label, uiTextFor($locale, 'footer.uptime', [
-        'days' => 2, 'hours' => 3, 'minutes' => 4, 'since' => '2026-10-16 08:56',
+        'version' => '0.6.0', 'days' => 2, 'hours' => 3, 'minutes' => 4, 'since' => '2026-10-16 08:56',
     ]), 'Continuous runtime and UTC start are localized');
-    expectUiSame($unknown, uiTextFor($locale, 'footer.uptime_unknown'), 'Unavailable runtime has a localized explanation');
+    expectUiSame($unknown, uiTextFor($locale, 'footer.uptime_unknown', ['version' => '0.6.0']), 'Unavailable runtime has a localized explanation');
 }
-$label = uiText('footer.uptime', ['days' => 2, 'hours' => 3, 'minutes' => 4, 'since' => '2026-10-16 08:56']);
+$version = ['version' => sourceVersion()];
+$label = uiText('footer.uptime', $version + ['days' => 2, 'hours' => 3, 'minutes' => 4, 'since' => '2026-10-16 08:56']);
 expectUiSame($label, dashboardUptime($uptime, $clock), 'Uptime is calculated from the session start rather than heartbeat time');
 expectUiSame($label, dashboardUptime(array_replace($uptime, ['state' => 'paused']), $clock),
     'Pausing report scheduling does not reset a live monitor session');
@@ -129,14 +132,14 @@ foreach ([
     ['updated_at' => '2026-10-18T11:58:29Z'],
     ['updated_at' => '2026-10-18T12:01:00Z'],
 ] as $change) {
-    expectUiSame(uiText('footer.uptime_unknown'), dashboardUptime(array_replace($uptime, $change), $clock),
+    expectUiSame(uiText('footer.uptime_unknown', $version), dashboardUptime(array_replace($uptime, $change), $clock),
         'Missing, stopped, stale, malformed, and future observations do not invent continuous runtime');
 }
-expectUiSame(uiText('footer.uptime', ['days' => 2, 'hours' => 3, 'minutes' => 5, 'since' => '2026-10-16 08:56']),
+expectUiSame(uiText('footer.uptime', $version + ['days' => 2, 'hours' => 3, 'minutes' => 5, 'since' => '2026-10-16 08:56']),
     dashboardUptime(array_replace($uptime, ['updated_at' => '2026-10-18T12:01:00Z']),
         new DateTimeImmutable('2026-10-18T12:01:30Z')),
     'Heartbeat updates advance elapsed time while retaining the original session start');
-expectUiSame(uiText('footer.uptime', ['days' => 0, 'hours' => 0, 'minutes' => 0, 'since' => '2026-10-18 12:00']),
+expectUiSame(uiText('footer.uptime', $version + ['days' => 0, 'hours' => 0, 'minutes' => 0, 'since' => '2026-10-18 12:00']),
     dashboardUptime(array_replace($uptime, ['started_at' => '2026-10-18T12:00:00Z']), $clock),
     'A newly recorded restart resets elapsed runtime without rounding up a minute');
 echo "Toolforge interface language checks passed.\n";

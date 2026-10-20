@@ -81,11 +81,15 @@ def run(
             project="电子游戏",
             report_title=title,
         )
-        text = update_text(
-            original_text,
-            report,
-            report_title=title,
-            statistics_title=statistics_title,
+        text = (
+            original_text
+            if report.content_unchanged is True
+            else update_text(
+                original_text,
+                report,
+                report_title=title,
+                statistics_title=statistics_title,
+            )
         )
         confirmed = active.publish(
             ProposedEdit(

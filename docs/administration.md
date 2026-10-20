@@ -198,6 +198,17 @@ account. In particular, keep `user-password.py`, `user-password.cfg`,
 `.my.cnf`, replica credentials, and OAuth secrets private. Avoid broad
 commands that print every hidden file or recursively dump account contents.
 
+Keep private credential directories owner-only (`700`, or `2700` where
+Toolforge retains directory group inheritance). Use `600` for writable
+OAuth/Pywikibot and Kubernetes configuration, and `400` for read-only
+private keys. Verify ownership and modes without displaying file contents.
+Do not change `.my.cnf` as though it were a regular file: its platform-managed
+target may enforce `440` and reject permission changes. That mode permits
+only the tool owner and its tool group to read it, not other users.
+The hub starts with `umask 077` so newly created runtime files and private
+directories do not gain group or other-user access. Keep credentials outside
+`public_html`; source replacement must never upload or overwrite them.
+
 ## Validate and upload source
 
 On the development computer, use a recent uv release with Python 3.15
@@ -258,12 +269,17 @@ metadata, and active receipt from the same generation.
 Run on the bastion as the tool account:
 
 ```shell
-toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --command 'sh /data/project/aranami/app/scripts/toolforge/run-hub.sh'
+toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --command 'exec sh /data/project/aranami/app/scripts/toolforge/run-hub.sh'
 toolforge jobs run aranami-logs --image php8.4 --webservice --mount=all
 ```
 
 Despite the retained `aranami-logs` job name, this PHP webservice serves
 the complete website as well as the log viewer.
+
+Keep the leading `exec` in the hub command. It replaces Toolforge's outer
+shell so Python receives the container's stop signal, records the shutdown
+request, and logs completion after cleanup. A forced kill or an expired
+container termination grace period cannot guarantee the final log entry.
 
 The hub enables live wiki publication. By default it checks routines and
 due website outputs on startup, then follows the configured schedules and
@@ -275,6 +291,145 @@ when startup should wait for scheduled callbacks.
 
 Without a valid website snapshot, PHP shows a preparing state until
 collection succeeds. A frontend request never initiates collection.
+
+## Prepare Chinese conversion tables on Toolforge
+
+Use this workflow to prepare reproducible upstream data for regional
+article-title display. Fork all three sources independently:
+
+| Layer | Forked sources | Override priority |
+|---|---|---|
+| Software | MediaWiki Chinese tables, converter definitions, and license at one commit | Base |
+| Local site | Chinese Wikipedia `MediaWiki:Conversiontable/*`, including referenced subpages | Overrides software |
+| Video games | `Module:CGroup/Games` and its verified Item contract | Overrides local site and software |
+
+Games-specific rules from
+[Module:CGroup/Games](https://zh.wikipedia.org/wiki/Module:CGroup/Games)
+take precedence over MediaWiki's default Chinese conversion tables. The
+[architecture contract](architecture.md#regional-article-title-conversion-planned)
+defines extraction, variant selection, and unchanged article identities.
+This is preparation guidance: Aranami does not yet ship a conversion-table
+importer or activate these files for title rendering.
+
+Run acquisition and updates only on Toolforge as the `aranami` account,
+using `curl` and `jq`. Keep the inputs in the tool home's disposable cache,
+outside active source, credentials, and public files. Do not update tables
+from the development computer or during a website request.
+
+Create one isolated candidate and resolve an immutable MediaWiki commit:
+
+```shell
+cd /data/project/aranami
+mkdir -p cache/chinese-conversion
+conversion_stage=$(mktemp -d /data/project/aranami/cache/chinese-conversion/staging.XXXXXX)
+mkdir -p "$conversion_stage/software" "$conversion_stage/site" "$conversion_stage/games"
+conversion_agent='Aranami conversion maintenance (https://aranami.toolforge.org/)'
+curl --fail --silent --show-error --max-time 60 --retry 2 \
+  --user-agent "$conversion_agent" \
+  --output "$conversion_stage/software/mediawiki-revision.json" \
+  'https://api.github.com/repos/wikimedia/mediawiki/commits?path=includes/Languages/Data/ZhConversion.php&per_page=1'
+conversion_commit=$(jq -er '.[0].sha | select(test("^[0-9a-f]{40}$"))' "$conversion_stage/software/mediawiki-revision.json")
+```
+
+Stop if either command fails or the commit is empty. Fetch the default
+tables, converter fallback/rule definitions, and license from that same
+commit:
+
+```shell
+curl --fail --silent --show-error --max-time 60 --retry 2 \
+  --user-agent "$conversion_agent" \
+  --output "$conversion_stage/software/ZhConversion.php" \
+  "https://raw.githubusercontent.com/wikimedia/mediawiki/$conversion_commit/includes/Languages/Data/ZhConversion.php"
+curl --fail --silent --show-error --max-time 60 --retry 2 \
+  --user-agent "$conversion_agent" \
+  --output "$conversion_stage/software/ZhConverter.php" \
+  "https://raw.githubusercontent.com/wikimedia/mediawiki/$conversion_commit/includes/Language/Converters/ZhConverter.php"
+curl --fail --silent --show-error --max-time 60 --retry 2 \
+  --user-agent "$conversion_agent" \
+  --output "$conversion_stage/software/LanguageConverter.php" \
+  "https://raw.githubusercontent.com/wikimedia/mediawiki/$conversion_commit/includes/Language/LanguageConverter.php"
+curl --fail --silent --show-error --max-time 60 --retry 2 \
+  --user-agent "$conversion_agent" \
+  --output "$conversion_stage/software/COPYING" \
+  "https://raw.githubusercontent.com/wikimedia/mediawiki/$conversion_commit/COPYING"
+```
+
+Treat the PHP files as source data; do not `include`, `require`, or execute
+them. If upstream paths or declarations change, review the new format and
+adapt the importer before proceeding. Preserve the upstream license and
+attribution rather than treating imported data as Aranami's CC0 source.
+
+Fork the local site's conversion pages, including their raw content and
+revision identities. Start the read-only namespace listing with:
+
+```shell
+curl --fail --silent --show-error --max-time 60 --retry 2 \
+  --user-agent "$conversion_agent" --get \
+  --data-urlencode 'action=query' \
+  --data-urlencode 'format=json' \
+  --data-urlencode 'formatversion=2' \
+  --data-urlencode 'generator=allpages' \
+  --data-urlencode 'gapnamespace=8' \
+  --data-urlencode 'gapprefix=Conversiontable/' \
+  --data-urlencode 'gaplimit=50' \
+  --data-urlencode 'prop=revisions' \
+  --data-urlencode 'rvprop=ids|timestamp|content' \
+  --data-urlencode 'rvslots=main' \
+  --output "$conversion_stage/site/pages-001.json" \
+  'https://zh.wikipedia.org/w/api.php'
+```
+
+If a response contains `continue`, repeat the request with every returned
+continuation field and save each subsequent response under a new numbered
+filename. Do not compile or activate a partial listing. Select the parents
+for `zh-hans`, `zh-hant`, `zh-cn`, `zh-tw`, `zh-hk`, `zh-mo`, `zh-sg`, and
+`zh-my` and the conversion subpages they actually reference. Resolve any
+redirects or further references through revision-bearing read-only API
+requests. Follow the pinned converter's traversal and override semantics;
+distinguish a confirmed absent/empty local override from a failed request.
+
+Capture Games and its Item constructor through the read-only wiki API. The
+response retains the precise revision IDs and their corresponding content:
+
+```shell
+curl --fail --silent --show-error --max-time 60 --retry 2 \
+  --user-agent "$conversion_agent" --get \
+  --data-urlencode 'action=query' \
+  --data-urlencode 'format=json' \
+  --data-urlencode 'formatversion=2' \
+  --data-urlencode 'prop=revisions' \
+  --data-urlencode 'rvprop=ids|timestamp|content' \
+  --data-urlencode 'rvslots=main' \
+  --data-urlencode 'redirects=1' \
+  --data-urlencode 'titles=Module:CGroup/Games|Module:CGroup/core' \
+  --output "$conversion_stage/games/cgroup-revisions.json" \
+  'https://zh.wikipedia.org/w/api.php'
+```
+
+Keep all three forks together in the candidate manifest while retaining
+their separate provenance. Article-local NoteTA/title overrides need a
+separate implementation before claiming exact per-article parity.
+
+Reject API errors, missing pages/slots, empty Games sources, or unsupported
+rule syntax. Keep the source/history links and applicable upstream attribution
+with the compiled data. When the importer is implemented, validate all
+supported variants and Games-over-default conflicts before activation.
+Include the 生化危机 / 惡靈古堡 / 生化危機 example, a title with several
+Games matches such as 合金装备 和平行者, a one-way rule, a repeated phrase,
+overlapping short/full-title rules, duplicate definitions, Latin text with
+no applicable rule, and unchanged article/Pageviews URLs. Merge rules into
+each target's table in the verified layer/source order, then apply all
+non-overlapping longest matches without reconverting replacement output.
+
+Record each layer's UTC fetch time, commit and revision IDs, SHA-256 hashes,
+rule counts, and the conversion implementation version in the candidate manifest.
+Activate only a complete validated generation through an atomic runtime
+selector, retaining its predecessor for rollback. Refresh affected display
+labels and rendered pages after selection; do not relabel source
+observation timestamps as new collection. A failed fetch, parse, or
+validation leaves the selected generation and website data intact. Without
+a validated generation, keep canonical article titles visible. Do not add
+a schedule until the updater and its failure handling have been deployed.
 
 ## Inspect operation
 

@@ -237,11 +237,14 @@ def aggregate_views(
 ) -> pl.DataFrame:
     """Fetch missing article observations and return period totals.
 
+    Check each cached history from its earliest retained observation
+    through the target day, refetching gaps as well as missing tails.
     Missing observations produce a null total; an observed zero remains
     zero. Cache changes are staged in memory for the caller to validate
     before saving; an omitted cache performs ordinary transient queries.
-    HTTP 504 skips the affected article without retrying or changing its
-    cached coverage. Skipped articles contribute no period rows.
+    An incomplete previously measured history rejects the whole batch.
+    HTTP 504 skips only titles without prior measurements; a timeout for
+    an existing measured title also rejects the batch without retrying.
 
     Args:
         site: Authenticated site identifying the Wikimedia project.
@@ -252,7 +255,10 @@ def aggregate_views(
 
     Returns:
         Totals with title, start, stop, and nullable views columns.
-    """
+
+    Raises:
+        PageviewsUnavailableError: An existing history has gaps.
+    """  # ruff: ignore[docstring-extraneous-exception]
     if not titles or not periods:
         return pl.DataFrame(schema=_VIEWS_SCHEMA)
     fetch_start = min(start for start, _ in periods)
@@ -301,6 +307,84 @@ def aggregate_views(
     return pl.concat(frames) if frames else pl.DataFrame(schema=_VIEWS_SCHEMA)
 
 
+def _missing_observation_dates(
+    observations: pl.DataFrame,
+    start: dt.date,
+    stop: dt.date,
+) -> pl.DataFrame:
+    """Find unknown dates after the earliest retained measurement.
+
+    Leading unobserved dates and empty successful responses do not
+    establish when an article began receiving traffic. Explicit zeroes
+    count as measurements; queried coverage alone does not establish
+    that dates between measurements are complete.
+
+    Args:
+        observations: Daily measurements without coverage sentinels.
+        start: Earliest date still needed in the retained history.
+        stop: Exclusive reporting stop date.
+
+    Returns:
+        Sorted missing UTC dates, excluding the leading interval.
+    """
+    known = observations.filter(
+        pl.col("date").is_between(start, stop, closed="left"),
+    ).select("date")
+    earliest = known.select(pl.col("date").min()).item()
+    if earliest is None:
+        return pl.DataFrame(schema={"date": pl.Date})
+    return (
+        pl
+        .date_range(earliest, stop, closed="left", eager=True)
+        .alias("date")
+        .to_frame()
+        .join(known, on="date", how="anti")
+        .sort("date")
+    )
+
+
+def _check_history_continuity(
+    observations: pl.DataFrame,
+    title: str,
+    start: dt.date,
+    stop: dt.date,
+    *,
+    required: bool,
+) -> None:
+    """Reject incomplete daily additions or log a new title's gaps.
+
+    Args:
+        observations: Combined known daily measurements.
+        title: Exact article title identifying a failure.
+        start: Earliest date needed in the retained history.
+        stop: Exclusive reporting stop date.
+        required: Whether a previously measured title must be complete.
+
+    Raises:
+        PageviewsUnavailableError: A previously measured title has gaps.
+    """
+    missing = _missing_observation_dates(observations, start, stop)
+    if missing.is_empty():
+        return
+    if required:
+        message = (
+            f"Pageviews history for {title} has {missing.height} "
+            f"missing dates from {missing.item(0, 'date')} through "
+            f"{stop - dt.timedelta(days=1)}; discarding the entire "
+            "daily batch and leaving the healthy cache and report "
+            "date unchanged for the next invocation."
+        )
+        raise PageviewsUnavailableError(message)
+    logger.warning(
+        "Pageviews history for %s still has %d unknown dates from %s "
+        "through %s; keeping observations and retrying next build",
+        title,
+        missing.height,
+        missing.item(0, "date"),
+        stop - dt.timedelta(days=1),
+    )
+
+
 def _article_observations(
     site: BaseSite,
     title: str,
@@ -309,7 +393,7 @@ def _article_observations(
     cache: PageviewsCache | None,
     history_days: int,
 ) -> pl.DataFrame | None:
-    """Reuse sufficient history or request one missing contiguous range.
+    """Check daily continuity and request one missing contiguous range.
 
     Args:
         site: Site whose hostname identifies the Pageviews project.
@@ -320,12 +404,17 @@ def _article_observations(
 
     Returns:
         Known dates and observed counts, with missing dates omitted.
-        None after HTTP 504, leaving cached history and coverage intact.
+        None after HTTP 504 for a title without prior measurements.
+
+    Raises:
+        PageviewsUnavailableError: Reject additions when an existing
+            history has gaps, before replacing the healthy cache.
     """
     start, stop = period
     previous = pl.DataFrame(schema={"date": pl.Date, "pageview": pl.Int64})
     request_start = start
     coverage_start = start
+    had_observations = False
     if cache is not None:
         request_start = coverage_start = min(
             start,
@@ -333,18 +422,42 @@ def _article_observations(
         )
         history = cache.get(title)
         if history is not None:
+            had_observations = history.get_column("date").count() > 0
             cached_start = history.item(0, "coverage_start")
             cached_stop = history.item(0, "coverage_stop")
-            if cached_start <= start and cached_stop > start:
+            if cached_start <= start and cached_stop >= start:
                 previous = history.filter(pl.col("date").is_not_null()).select(
                     "date",
                     "pageview",
                 )
-                if cached_stop >= stop:
+                missing = _missing_observation_dates(
+                    previous,
+                    request_start,
+                    stop,
+                )
+                if cached_stop >= stop and missing.is_empty():
                     return previous
                 request_start, coverage_start = cached_stop, cached_start
+                if not missing.is_empty():
+                    request_start = min(request_start, missing.item(0, "date"))
+                    logger.debug(
+                        "Repairing Pageviews history for %s: %d missing dates "
+                        "from %s through %s",
+                        title,
+                        missing.height,
+                        missing.item(0, "date"),
+                        stop - dt.timedelta(days=1),
+                    )
     fetched = _fetch_article_data(site, title, request_start, stop)
     if fetched is None:
+        if had_observations:
+            message = (
+                f"Pageviews history for {title} could not be completed after "
+                f"HTTP 504 through {stop - dt.timedelta(days=1)}; "
+                "discarding the entire daily batch and leaving the healthy "
+                "cache and report date unchanged for the next invocation."
+            )
+            raise PageviewsUnavailableError(message)
         return None
     fresh = fetched.select("date", "pageview").filter(
         pl.col("date").is_between(request_start, stop, closed="left"),
@@ -354,10 +467,17 @@ def _article_observations(
         cache.replace(title, coverage_start, stop, combined)
         retained = cache.get(title)
         if retained is not None:
-            return retained.filter(pl.col("date").is_not_null()).select(
+            combined = retained.filter(pl.col("date").is_not_null()).select(
                 "date",
                 "pageview",
             )
+        _check_history_continuity(
+            combined,
+            title,
+            min(start, stop - dt.timedelta(days=history_days)),
+            stop,
+            required=had_observations,
+        )
     return combined
 
 

@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from shared import config  # ruff: ignore[module-import-not-at-top-of-file]
 
 _PACKAGES = ("backend", "updater", "webservice", "shared")
-_SUFFIXES = {".py", ".php", ".json", ".svg", ".conf"}
+_SUFFIXES = {".py", ".php", ".json", ".svg", ".conf", ".js"}
 _SCRIPTS = (
     "setup-env.sh",
     "deploy-source.sh",

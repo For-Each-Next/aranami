@@ -356,18 +356,20 @@ function dashboardSchedule(string $directory, ?DateTimeImmutable $now = null, ?a
 }
 
 /** Show continuous monitor uptime only when a fresh snapshot confirms its start. */
-function dashboardUptime(array $schedule, ?DateTimeImmutable $now = null): string
+function dashboardUptime(array $schedule, ?DateTimeImmutable $now = null, ?string $version = null): string
 {
+    $version ??= sourceVersion() ?? uiText('ops.unavailable');
     $clock = $now ?? new DateTimeImmutable('now', new DateTimeZone('UTC'));
     $started = statusTimestamp($schedule['started_at'] ?? null);
     $updated = statusTimestamp($schedule['updated_at'] ?? null);
     if (!in_array($schedule['state'] ?? null, ['running', 'paused'], true)
         || $started === null || $updated === null || $started > $updated || $updated > $clock
         || $clock->getTimestamp() - $updated->getTimestamp() > 120) {
-        return uiText('footer.uptime_unknown');
+        return uiText('footer.uptime_unknown', ['version' => $version]);
     }
     $minutes = (int) floor(((float) $clock->format('U.u') - (float) $started->format('U.u')) / 60);
     return uiText('footer.uptime', [
+        'version' => $version,
         'days' => intdiv($minutes, 1440),
         'hours' => intdiv($minutes % 1440, 60),
         'minutes' => $minutes % 60,

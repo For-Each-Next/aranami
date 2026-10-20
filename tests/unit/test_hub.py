@@ -12,7 +12,7 @@ import signal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from backend import hub
 from backend.support.logs import open_run_log
@@ -163,8 +163,15 @@ class TestHubLifecycle(TestCase):
             assert "Monitor fixture started." in content
             assert "Website fixture refresh failed." in content
             assert "RuntimeError: website-only fixture failure" in content
+            assert "backend hub stopping (KeyboardInterrupt)" in content
+            assert content.index("backend hub stopping") < content.index(
+                "Website fixture stopped.",
+            )
             assert content.index("Website fixture stopped.") < content.index(
                 "HTTP fixture closed.",
+            )
+            assert content.index("HTTP fixture closed.") < content.index(
+                "backend hub stopped.",
             )
             logger.info("After the hub fixture stopped.")
             assert path.read_text() == content
@@ -187,6 +194,7 @@ class TestHubLifecycle(TestCase):
             return previous
 
         with (
+            patch.object(hub._LOGGER, "info") as logged,
             patch.object(hub.signal, "signal", side_effect=install),
             patch.object(hub, "DashboardUpdater") as updater_type,
             patch.object(hub, "DashboardHTTPServer") as server_type,
@@ -208,6 +216,16 @@ class TestHubLifecycle(TestCase):
             hub.run(hub.HubConfig())
 
         assert order == ["scheduler", "updater", "http"]
+        assert (
+            call(
+                "Aranami backend hub stopping (%s); waiting for active work.",
+                "SIGTERM",
+            )
+            in logged.call_args_list
+        )
+        assert (
+            logged.call_args_list[-1].args[0].endswith("backend hub stopped.")
+        )
         updater.start.assert_called_once_with()
         scheduler.shutdown.assert_called_once_with(wait=True)
         assert start.call_args.kwargs["dispatch"].keywords == {

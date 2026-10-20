@@ -1,10 +1,9 @@
 # Aranami system architecture
 
-Architecture (this guide) is for AI coding agents and system-level
-developers changing Aranami's architecture, data ownership, or cross-component behavior. It
-defines the contracts a change must preserve. Read the repository and
-applicable scoped `AGENTS.md` files before making changes; they remain
-the authoritative engineering instructions.
+Architecture (this guide) is for developers changing Aranami's architecture,
+data ownership, or cross-component behavior. It defines the contracts a change
+must preserve. Read the repository and applicable scoped `AGENTS.md` files
+before making changes; they remain the authoritative engineering instructions.
 
 For practical contribution and verification steps, use the
 [Development](development.md). Terminal commands belong
@@ -205,6 +204,9 @@ PHP reads `cache/toolforge/dashboard.json` and the routine/schedule/report
 snapshots directly from the shared runtime directory. The hub also exposes
 local read-only `/dashboard.json` and `/healthz` endpoints for diagnostics
 and other local readers; PHP does not depend on those endpoints.
+Omit confirmed-empty presentation sections, without confusing source
+unavailability with zero items. Keep the saved observations and their
+refresh metadata even when an empty section is not displayed.
 
 Historical Chinese main-page appearances cover 100 UTC dates and upcoming
 quality content covers 30 days. A carry-in subject is not assigned an
@@ -214,33 +216,150 @@ membership joins enrich assessments without per-article queries. All
 retained datasets remain independent of requests and the status heartbeat.
 English comparisons are on-wiki reports with reusable results.
 
+Homepage cards reuse plain-text introductions from the stable
+[Page Content Service summary endpoint][page-summaries], the source used
+by Page Previews. The read-only shared adapter owns the REST request;
+backend website preparation requests original `zh`, native `zh-hans`,
+and `zh-hant` text with `Accept-Language`, normalizes up to three sentences,
+and caps each
+introduction at 360 characters plus an omission mark. PHP selects the
+prepared text matching the browser preference. Generic `zh` keeps original
+text without a simplified/traditional fallback; English uses simplified
+introductions. Keep literal title spaces encoded as `%20` in REST
+requests: underscore-equivalent upstream paths can have different cached
+extracts. Article and Pageviews URLs are unchanged. Preparation escapes no
+HTML for reuse: PHP escapes all saved text on output. Display upstream
+article links and CC BY-SA 4.0 attribution after each introduction
+section's update time, separately from Aranami's
+source license. Canonical titles and article identities remain unchanged.
+
+The title/script-keyed `article-extracts-v2.parquet` cache belongs alongside the
+private website report caches. A refresh pass shares it across popularity,
+recognized content, DYK, and news/history, including repeated dated
+appearances. Request each script once per distinct title, not once per
+card or interface visit. Successful text and confirmed empty extracts last 24 hours.
+Failed requests retain old text and wait at least an hour before another
+attempt; script failures remain independent and do not fail an otherwise
+valid report. Persist UTC epoch
+seconds for source/attempt/use metadata, bound cache size and row count,
+and drop observations unused for 30 days. Nothing due still means no
+clients or source requests; cached report rows keep their introductions
+across restarts. A changed introduction contract invalidates the four
+affected report identities, without resetting maintenance data. Adding original
+text reuses existing script observations and requests only missing variants.
+
 Main sections and subsections stack vertically; only sibling article,
-maintenance-tag, and routine cards form columns. Cards have an 18em minimum
-and fit one column on narrow screens without horizontal overflow. Preserve
-article ordering, display limits, inline unsqueezed chips, and catalogue
-subsection order. Maintenance pages sort the complete saved group before
-fifty-row pagination, with stable page-ID ties and unknown dates/grades
-last in both directions. Keep the 37 verified task definitions and their
-category/template evidence in `backend/website/maintenance.json` and the
-collector. Page requests never query wiki sources.
+maintenance-tag, and routine cards form columns. Cards have an 18em minimum,
+retain their normal column width in sparse groups, and fit one column on
+narrow screens without horizontal overflow. Ordered article lists use
+native list-item counters and shared styles across the dashboard and maintenance
+pages. Homepage cards show titles and inline assessments, smaller
+full-width introductions with equal card insets, and very small bottom-aligned
+source metadata aligned with the title text. Popularity
+and DYK display up to twelve articles, retaining shorter actual results.
+Other supplied article lists render directly, without remaining-record
+expanders or truncated previews.
+Preserve article ordering, display limits, inline unsqueezed chips,
+and catalogue subsection order. Maintenance pages sort the complete saved
+group before fifty-row pagination, with stable page-ID ties and unknown
+dates/grades last in both directions. Seeded random order stays stable across pages and
+can be reversed. Maintenance tags link to their saved wiki sources; month
+links use the exact retained category that supplied the earliest date.
+Keep the 37 verified task definitions and their category/template evidence
+in `backend/website/maintenance.json` and the collector. Page requests never
+query wiki sources.
 
 Popular titles link to Wikipedia. View counts link to Pageviews Analysis
-with the actual article, Chinese Wikipedia, date, all-access, and user
-agent settings. Display article-only site ranks as separate plain text,
+with the actual article, Chinese Wikipedia, all-access, and user-agent
+settings over thirty inclusive days ending on the actual source date.
+The card's count still represents that single source day.
+Display article-only site ranks as separate plain text,
 never as project positions. Derive site rank from the full filtered daily
 top list before joining membership; retain raw ranks as tie breakers,
 measured zeroes, nulls, and the verified non-article exclusions.
 
 Routine cards show localized state text, status time, measured/elapsed
 duration, configured report links, and the actual next execution from the
-monitor snapshot. Missing, stale, paused, and stopped schedules remain
-explicit. The three interface languages, logs, Chinese highlights, DYK,
-popularity, maintenance, and normal rendered-page caching remain available.
+monitor snapshot. The status text opens a keyboard-accessible modal table
+of per-destination outcomes, linked page titles, and UTC timestamps, with
+the routine duration alongside the trigger. A local interaction script
+only opens dialogs; it fetches nothing and cannot change runtime state.
+Narrow screens scroll the table inside its dialog. The footer combines
+source version and continuous runtime in one line. Missing, stale, paused, and stopped
+schedules remain explicit. The three interface languages, logs, Chinese
+highlights, DYK, popularity, maintenance, and normal rendered-page caching
+remain available.
 Cache each locale for up to sixty seconds; source snapshot, routine state,
 scheduler and report state, PHP, version, and configuration changes
 invalidate it.
 Keep browser responses no-store, negotiate compression, and preserve
 original source timestamps during failed-refresh fallback.
+
+### Regional article-title conversion (planned)
+
+Regional display titles should let readers recognize the same game under
+their preferred Chinese name. This is an implementation contract and
+Toolforge maintenance plan; the current frontend still displays canonical
+article titles. Conversion-table acquisition and updates run on Toolforge,
+following [the administration workflow](administration.md#prepare-chinese-conversion-tables-on-toolforge).
+Do not fetch or update conversion tables on the development computer.
+
+Fork all three requested source layers as separate, reproducible runtime
+datasets: MediaWiki's software-level Chinese tables, Chinese Wikipedia's
+local-site `MediaWiki:Conversiontable/*` tables, and `Module:CGroup/Games`.
+Each layer retains its own source identities, hashes, attribution, and
+update outcome; a Games fork does not replace the local-site fork.
+Follow Chinese Wikipedia's [conversion layers][zh-conversion-guide],
+which also define article-local manual rules. Compile target mappings in
+the order software defaults < local-site tables < Games rules. These
+are table overrides: Games definitions replace conflicting source/target
+pairs. Preserve source order; later definitions for the same source and
+target replace earlier ones, as in
+[MediaWiki's manual-rule handling][mediawiki-language-converter].
+Keep character conversion distinct from regional vocabulary conversion.
+
+Apply the combined mapping to the complete original title, scanning left
+to right and consuming the longest matching source at each position.
+Continue through the entire title: several separate Games rules may all
+apply. Emit replacements without scanning their output again. This is
+the associative replacement behavior described by [PHP's strtr][php-strtr],
+not a per-title choice of one rule. For example, the Games definitions
+convert both parts of 合金装备 和平行者 to 潛龍諜影 和平先驅 for Taiwan.
+For overlapping sources, 生化危机 启示录 uses its full-title rule to become
+惡靈古堡 啟示, ahead of the shorter 生化危机 match. These examples use
+[Games revision 94329950][games-conversion-audit].
+
+Read the actual Games source and [CGroup/core][games-conversion-core]
+contract before implementing extraction. `Item(original, rule)` stores a
+description and a conversion rule; `original` is not automatically another
+source alias. Preserve repeated items, one-way `source=>variant:target`
+rules, explicitly supported variants, and the source's rule order. Do not
+execute downloaded PHP or Lua during collection or page rendering. Reject
+unsupported syntax instead of silently activating an incomplete table.
+
+Keep the full Chinese region preference separately from the three
+interface locales. Use MediaWiki's [Chinese variant fallbacks][mediawiki-zh-converter]
+for `zh-cn`, `zh-tw`, `zh-hk`, `zh-mo`, `zh-sg`, `zh-my`, `zh-hans`, and
+`zh-hant`; a generic script preference must not silently select a regional
+game name. Backend preparation owns conversion data and localized labels.
+PHP selects and escapes prepared labels. Preserve canonical titles, page
+IDs, article URLs, Pageviews query titles, membership, ordering, and
+statistics. Apply labels consistently to dashboard and maintenance cards,
+including accessible title text, without translating URLs or query keys.
+
+Store downloaded and compiled tables outside `app/`, as disposable runtime
+data. Record the exact upstream commit/revision, source URLs, UTC fetch
+time, hashes, rule counts, and upstream attribution/license notices.
+Validate a complete generation before atomically selecting it; failed
+updates retain the last validated generation, or canonical titles when no
+generation exists. A changed table generation must refresh prepared labels
+and invalidate affected rendered pages without changing source observation
+times. Deduplicate labels by canonical identity and preserve the snapshot's
+8 MiB bound. The local-site fork must include the conversion tables and
+their referenced subpages, not just their parent names. Article-local
+title overrides and NoteTA rules require their own verified extraction and
+take priority in that article's context; the three requested source layers alone do not
+establish full Chinese Wikipedia title equivalence.
 
 ## Polars and Parquet
 
@@ -276,6 +395,10 @@ uploaded source tree or `site-packages`:
   Retain the latest 90 completed dates alongside the current day. Do not
   configure the root logger at import time. Backend logging owns terminal
   and file handlers; the website only displays those saved messages.
+  Log the hub's graceful shutdown reason before waiting for active work,
+  then record its stopped state after scheduler, collector, and HTTP cleanup,
+  while the daily handler remains open. Recent logs display at most one
+  hundred matching lines; forced termination cannot guarantee a final record.
 - `state/` holds the authoritative routine, schedule, and report-update
   observations described above. Keep it separate from diagnostic logs
   and disposable source caches.
@@ -340,8 +463,19 @@ queried articles have no observation for that date, skip the edit and leave
 both the wiki date marker
 and healthy cache unchanged so the next call retries. Explicit zeroes remain valid.
 Its Parquet cache keeps an 800-day history by default, reuses sufficient
-coverage, fetches only missing tails, and rebuilds histories that do not
-cover the required report intervals. New articles receive their own history
+coverage, fetches missing tails, and rebuilds histories that do not
+cover the required report intervals. Every build also checks each title's
+daily continuity from its earliest retained measurement through the target
+date. Refetch from the earliest missing date, merge newly returned measurements,
+and reject the entire staged daily batch if any previously measured title
+still lacks a date. Discard its pending checkpoint, leave the healthy file
+and report date unchanged, and retry on the next invocation. Do not perform
+the ranking join or publish a partial batch. A missing cache causes a fresh
+800-day download by default, not an incremental target-day-only request.
+Still-unreturned dates remain unknown, never invented zeroes.
+Unobserved leading dates and completely empty successful responses do not
+establish when an article began receiving traffic.
+New articles receive their own history
 fetch. Coverage metadata distinguishes an observed empty interval from an
 interval that was never queried.
 
@@ -377,10 +511,18 @@ ranks remain null in results and empty in generated comparison parameters,
 which does not establish a new entry. Rendering behavior is maintained on
 the wiki. This repository does not ship or deploy a local Lua module.
 
+Limit all Pageviews network attempts to fifty requests per second across
+the hub process, spacing starts by at least twenty milliseconds. Article
+observations, site top lists, website popularity reads, and retries share
+this allowance. Cached observations consume no allowance, and idle time
+does not permit a later burst.
+
 Keep the source adapter's one-attempt contract. The Pageviews routine skips
-an article immediately after HTTP 504, excluding it from the current rankings
-and availability check without changing its cached history or coverage.
-Skipped articles remain eligible for requests in later invocations. Retry
+an unmeasured article immediately after HTTP 504, excluding it from the current
+rankings and availability check without changing its cached history or coverage.
+A 504 for a previously measured title rejects the entire daily batch under
+the continuity rule instead of dropping that title from the report.
+Skipped unmeasured articles remain eligible for later requests. Retry
 502/503 responses up to three times; exhausted retries defer publication
 until a later invocation. Preserve completed requests in a separate pending
 Parquet checkpoint for the target date, leaving the healthy snapshot intact.
@@ -502,6 +644,11 @@ the completed list fails.
 Unchanged historical completion dates cannot distinguish failed repeats
 from delayed candidate cleanup, so they do not imply either outcome.
 Keep removed historical completed entries separate from failed nominees.
+Reuse DYK talk-page states by revision ID. Once current completed/candidate
+membership, assessments, and dates match the published items, keep the exact
+destination text and skip page rendering. A new sampling date or count in the
+hidden statistical comment alone does not justify a wiki edit; reusable
+backend result tables may still record the latest observation.
 Dry runs may seed the original membership but must not advance it to the
 proposed report. Missing or stale snapshots fall back to title matching,
 or existing Wikidata IDs for English reports, without changing the report
@@ -559,3 +706,12 @@ deployment authority and recovery remain in [Administration](administration.md).
 [hot-item]: https://zh.wikipedia.org/w/index.php?title=WikiProject:VG/HOT/item&oldid=91242270
 [hot-module]: https://zh.wikipedia.org/w/index.php?title=Module:PJ:VG/HOT&oldid=95139258
 [pageviews-top]: https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/examples/project-metrics.html#most-viewed-pages
+[games-conversion]: https://zh.wikipedia.org/wiki/Module:CGroup/Games
+[games-conversion-audit]: https://zh.wikipedia.org/w/index.php?title=Module:CGroup/Games&oldid=94329950
+[games-conversion-core]: https://zh.wikipedia.org/w/index.php?title=Module:CGroup/core&oldid=71541497
+[mediawiki-conversion]: https://github.com/wikimedia/mediawiki/blob/master/includes/Languages/Data/ZhConversion.php
+[mediawiki-zh-converter]: https://github.com/wikimedia/mediawiki/blob/master/includes/Language/Converters/ZhConverter.php
+[mediawiki-language-converter]: https://github.com/wikimedia/mediawiki/blob/master/includes/Language/LanguageConverter.php
+[zh-conversion-guide]: https://zh.wikipedia.org/wiki/Wikipedia:字詞轉換處理#转换技术
+[php-strtr]: https://www.php.net/manual/en/function.strtr.php
+[page-summaries]: https://www.mediawiki.org/wiki/Page_Content_Service#/page/summary

@@ -7,7 +7,7 @@ require __DIR__ . '/i18n.php';
 const LOG_MAX_FILE_BYTES = 128 * 1024 * 1024;
 const LOG_SCAN_BYTES = 1024 * 1024;
 const LOG_LINE_BYTES = 16 * 1024;
-const LOG_MAX_LINES = 500;
+const LOG_MAX_LINES = 100;
 const LOG_DISPLAY_BYTES = 256 * 1024;
 const LOG_QUERY_BYTES = 1024;
 
@@ -244,7 +244,6 @@ function serveLogs(string $directory = '/data/project/aranami/logs'): void
     :root { color-scheme: light; font-family: system-ui, sans-serif; background: #fcfffe; color: #2d4b42; }
     body { max-width: 1100px; box-sizing: border-box; margin: 2rem auto; padding: 0 1.25rem; line-height: 1.6; }
     a { color: #316e5e; text-underline-offset: 0.2em; }
-    .intro, footer { opacity: 0.75; }
     form { display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; margin: 1.5rem 0; }
     label { display: grid; gap: 0.3rem; }
     select, input, button { box-sizing: border-box; max-width: 100%; padding: 0.5rem; font: inherit; }
@@ -252,7 +251,6 @@ function serveLogs(string $directory = '/data/project/aranami/logs'): void
     pre { padding: 1rem; border: 1px solid #d9ebe4; border-radius: 0.5rem; background: white; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
     table { width: 100%; border-collapse: collapse; margin: 2rem 0; }
     th, td { text-align: left; padding: 0.6rem 0.4rem; border-bottom: 1px solid #d9ebe4; }
-    footer { margin-top: 2rem; }
     @media (max-width: 36rem) { .filename { display: none; } }
   </style>
 </head>
@@ -260,7 +258,6 @@ function serveLogs(string $directory = '/data/project/aranami/logs'): void
 <main>
   <a href="/"><?= logEscape(uiText('logs.back')) ?></a>
   <h1><?= logEscape(uiText('logs.heading')) ?></h1>
-  <p class="intro"><?= logEscape(uiText('logs.intro')) ?></p>
 <?php if ($logs === []): ?>
   <p><?= logEscape(uiText('logs.empty')) ?></p>
 <?php else: ?>
@@ -277,16 +274,11 @@ function serveLogs(string $directory = '/data/project/aranami/logs'): void
     </label>
     <button type="submit"><?= logEscape(uiText('logs.apply')) ?></button>
   </form>
-  <p><a href="<?= logEscape(uiUrl('/logs/', ['date' => $selection['date'], 'download' => '1'])) ?>"><?= logEscape(uiText('logs.download')) ?></a>
-    · <?= logEscape(readableLogSize((int) $logs[$filename]['size'])) ?></p>
-  <p class="intro"><?= logEscape(uiText('logs.excerpt_note')) ?></p>
+  <h2><?= logEscape(uiText('logs.recent')) ?></h2>
 <?php if ($excerpt['lines'] === []): ?>
   <p><?= logEscape(uiText('logs.no_matches')) ?></p>
 <?php else: ?>
   <pre><?= logEscape(implode("\n", $excerpt['lines'])) ?></pre>
-<?php endif; ?>
-<?php if ($excerpt['truncated']): ?>
-  <p><?= logEscape(uiText('logs.truncated')) ?></p>
 <?php endif; ?>
   <table>
     <thead><tr><th><?= logEscape(uiText('logs.column_date')) ?></th><th class="filename"><?= logEscape(uiText('logs.column_file')) ?></th><th><?= logEscape(uiText('logs.column_size')) ?></th></tr></thead>
@@ -301,7 +293,6 @@ function serveLogs(string $directory = '/data/project/aranami/logs'): void
     </tbody>
   </table>
 <?php endif; ?>
-  <footer><?= logEscape(uiText('logs.footer')) ?></footer>
 </main>
 </body>
 </html>
