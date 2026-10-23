@@ -10,10 +10,12 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING
 
 import polars as pl
+
+from shared.support.cache import write_parquet_cache
+from shared.support.titles import title_sort_key
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -166,29 +168,10 @@ def save_membership(
         members: Titles and source IDs belonging to that exact text.
     """
     path = _cache_path(site, report_title)
-    temporary: Path | None = None
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with NamedTemporaryFile(
-            dir=path.parent,
-            prefix=f".{path.stem}-",
-            suffix=".parquet",
-            delete=False,
-        ) as handle:
-            temporary = Path(handle.name)
-        _membership_frame(text, members).write_parquet(temporary)
-        temporary.replace(path)
+        write_parquet_cache(path, _membership_frame(text, members))
     except OSError, pl.exceptions.PolarsError:
         _LOGGER.warning("Could not write report membership cache: %s", path)
-    finally:
-        if temporary is not None:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError:
-                _LOGGER.warning(
-                    "Could not remove temporary cache: %s",
-                    temporary,
-                )
 
 
 def membership_changes(
@@ -228,6 +211,6 @@ def membership_changes(
         and (identifier is None or identifier not in current_ids)
     ]
     return (
-        sorted(added, key=lambda title: (title.casefold(), title)),
-        sorted(removed, key=lambda title: (title.casefold(), title)),
+        sorted(added, key=title_sort_key),
+        sorted(removed, key=title_sort_key),
     )

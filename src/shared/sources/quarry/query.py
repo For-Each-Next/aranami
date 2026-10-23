@@ -2,7 +2,7 @@
 
 Use :class:`Replica` to bind a SQLAlchemy ``select()`` statement to a
 Wiki Replica database. The resulting :class:`QueryFrame` defers the
-query until ``collect()`` and supports eager Polars postprocessing.
+query until ``collect()``, returning an eager Polars frame.
 
 Examples:
     >>> from shared.sources.quarry import QueryFrame, Replica
@@ -19,8 +19,7 @@ from __future__ import annotations
 
 __all__ = ("QueryFrame", "Replica")
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Self
 
@@ -31,9 +30,10 @@ from sqlalchemy import URL, Engine, create_engine
 from sqlalchemy.sql.selectable import CompoundSelect, Select
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from pywikibot.site import BaseSite
 
-type FramePostprocessor = Callable[[pl.DataFrame], pl.DataFrame]
 type PolarsDataType = DataTypeClass | DataType
 type ReplicaStatement = Select[Any] | CompoundSelect[Any]
 
@@ -171,24 +171,13 @@ class Replica:
 
 @dataclass(frozen=True, slots=True)
 class QueryFrame:
-    """Defer one replica select and its eager Polars postprocessors.
+    """Defer one replica select and return its typed Polars result.
 
     Attributes:
         replica: Wiki Replica on which to execute the statement.
         statement: SQLAlchemy select expression to execute.
         parameters: Values for named bind parameters.
         schema_overrides: Polars dtypes keyed by result column name.
-
-    Examples:
-        >>> from sqlalchemy import literal, select
-        >>> frame = Replica("zhwiki").query(
-        ...     select(literal(1).label("value")),
-        ... )
-        >>> piped = frame.pipe(
-        ...     lambda data_frame: data_frame.select("value"),
-        ... )
-        >>> piped is frame
-        False
 
     """
 
@@ -198,33 +187,12 @@ class QueryFrame:
     schema_overrides: Mapping[str, PolarsDataType] = field(
         default_factory=dict,
     )
-    _postprocessors: tuple[FramePostprocessor, ...] = field(
-        default=(),
-        repr=False,
-    )
-
-    def pipe(self, postprocessor: FramePostprocessor) -> Self:
-        """Append an eager Polars postprocessor.
-
-        Args:
-            postprocessor: Function that accepts and returns a
-                DataFrame.
-
-        Returns:
-            A new frame containing the appended postprocessor.
-
-        """
-        return replace(
-            self,
-            _postprocessors=(*self._postprocessors, postprocessor),
-        )
 
     def collect(self) -> pl.DataFrame:
-        """Execute the query and apply its Polars postprocessors.
+        """Execute the read-only query with the declared result schema.
 
         Returns:
-            The eager query result after applying each postprocessor in
-            registration order.
+            Eager query result ready for native Polars expressions.
 
         """
         names, rows = _fetch(
@@ -232,15 +200,12 @@ class QueryFrame:
             self.statement,
             self.parameters,
         )
-        frame = pl.DataFrame(
+        return pl.DataFrame(
             rows,
             schema=names,
             schema_overrides=dict(self.schema_overrides),
             orient="row",
         )
-        for postprocessor in self._postprocessors:
-            frame = postprocessor(frame)
-        return frame
 
 
 def _create_engine(replica: Replica) -> Engine:

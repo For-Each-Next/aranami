@@ -15,7 +15,6 @@ import json
 import os
 import re
 import shutil
-import stat
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -27,6 +26,7 @@ from uuid import uuid4
 import polars as pl
 
 from shared.deployment import project_version
+from shared.support.files import read_json_object
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -155,22 +155,10 @@ def _read_json(path: Path) -> dict[str, object]:
         Decoded metadata object.
 
     Raises:
-        ValueError: The file is irregular, oversized, or not an object.
-    """
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(descriptor, "rb") as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            message = "Report metadata must be a regular file."
-            raise ValueError(message)
-        content = stream.read(_MAX_MANIFEST_BYTES + 1)
-    if len(content) > _MAX_MANIFEST_BYTES:
-        message = "Report metadata exceeds the supported size."
-        raise ValueError(message)
-    value = json.loads(content)
-    if isinstance(value, dict):
-        return value
-    message = "Report metadata must be a JSON object."
-    raise ValueError(message)
+        OSError: The file is irregular, unsafe, or unreadable.
+        ValueError: The file is oversized, malformed, or not an object.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    return read_json_object(path, _MAX_MANIFEST_BYTES)
 
 
 def _atomic_json(path: Path, value: Mapping[str, object]) -> None:

@@ -22,6 +22,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from threading import RLock
 
+from shared.support.files import read_json_object
+
 _LOGGER = logging.getLogger(__name__)
 _STATUS_LOCK = RLock()
 _MAX_BYTES = 1024 * 1024
@@ -129,36 +131,20 @@ def _validated_record(value: object) -> dict[str, object]:
     return record
 
 
-def _read_routines(path: Path) -> dict[str, dict[str, object]]:
-    """Read a bounded snapshot without following a file symlink.
+def read_routine_status(path: Path) -> dict[str, object]:
+    """Read a validated snapshot for writers and read-only consumers.
 
     Args:
-        path: Durable routine status snapshot inside the log directory.
+        path: Durable routine snapshot inside the state directory.
 
     Returns:
-        Validated routine records, or an empty map for a missing file.
+        Complete envelope with normalized, validated routine records.
 
     Raises:
-        OSError: The snapshot is unsafe or cannot be read.
+        OSError: The snapshot is missing, unsafe, or cannot be read.
         ValueError: Existing data is malformed and must be preserved.
-    """
-    try:
-        descriptor = os.open(
-            path,
-            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
-        )
-    except FileNotFoundError:
-        return {}
-    with os.fdopen(descriptor, "rb") as stream:
-        metadata = os.fstat(stream.fileno())
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > _MAX_BYTES:
-            message = "Routine status must be a bounded regular file."
-            raise OSError(message)
-        content = stream.read(_MAX_BYTES + 1)
-    if len(content) > _MAX_BYTES:
-        message = "The routine status snapshot exceeds its size limit."
-        raise ValueError(message)
-    snapshot = json.loads(content)
+    """  # ruff: ignore[docstring-extraneous-exception]
+    snapshot = read_json_object(path, _MAX_BYTES)
     if (
         not isinstance(snapshot, dict)
         or set(snapshot) != {"schema", "updated_at", "routines"}
@@ -176,7 +162,7 @@ def _read_routines(path: Path) -> dict[str, dict[str, object]]:
     if any(key != record["routine"] for key, record in routines.items()):
         message = "A routine status key does not match its record."
         raise ValueError(message)
-    return routines
+    return {**snapshot, "routines": routines}
 
 
 def _replace_snapshot(
@@ -305,7 +291,10 @@ def _write_record(
             raise OSError(message)
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         path = directory / "routine-status.json"
-        routines = _read_routines(path)
+        try:
+            routines = read_routine_status(path)["routines"]
+        except FileNotFoundError:
+            routines = {}
         name = incoming["routine"]
         if not _newer_record(routines.get(name), incoming):
             return False

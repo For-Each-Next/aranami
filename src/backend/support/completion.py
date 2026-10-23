@@ -9,12 +9,12 @@ import json
 import logging
 import os
 import re
-import stat
 import tempfile
 from pathlib import Path
 from threading import RLock
 
 from shared.config import TASK_DEFINITIONS
+from shared.support.files import read_json_object
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_BYTES = 16 * 1024
@@ -99,25 +99,11 @@ def _load_record(path: Path, key: str) -> dict[str, object] | None:
         Parsed valid evidence, or null when revalidation is required.
     """
     try:
-        record = _read_record(path)
+        record = read_json_object(path, _MAX_BYTES)
         validated = _validated_record(record, key)
     except OSError, ValueError, KeyError, TypeError, AttributeError:
         return None
     return validated
-
-
-def _read_record(path: Path) -> object:
-    """Read a bounded regular JSON file without following symlinks.
-
-    Returns:
-        Decoded evidence, or null for an unsafe or oversized file.
-    """
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(descriptor, "rb") as stream:
-        metadata = os.fstat(stream.fileno())
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > _MAX_BYTES:
-            return None
-        return json.loads(stream.read(_MAX_BYTES + 1))
 
 
 def _validated_record(record: object, key: str) -> dict[str, object] | None:

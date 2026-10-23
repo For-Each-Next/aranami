@@ -25,16 +25,8 @@ for path in app app.previous deployment-backups deployment-envs; do
     test ! -L "$path"
     if [ -e "$path" ]; then test -d "$path"; fi
 done
-for path in .lighttpd.conf active-deployment.json; do
-    test ! -L "$path"
-    if [ -e "$path" ]; then test -f "$path"; fi
-done
-if [ -L public_html ]; then
-    test "$(readlink public_html)" = app/src/webservice/public_html
-fi
-test ! -L public_html.previous
-if [ -e public_html.previous ]; then test -d public_html.previous; fi
-if [ -e public_html ] && [ ! -L public_html ]; then test -d public_html; fi
+test ! -L active-deployment.json
+if [ -e active-deployment.json ]; then test -f active-deployment.json; fi
 mkdir deployment.lock || { printf '%s\n' 'Another deployment holds deployment.lock.' >&2; exit 1; }
 backup=
 setup_started=false
@@ -43,11 +35,6 @@ saved_app=false
 rotated_previous=false
 environment_changed=false
 environment_kind=absent
-public_changed=false
-public_kind=absent
-rotated_public=false
-configuration_changed=false
-configuration_existed=false
 active_changed=false
 active_existed=false
 
@@ -81,20 +68,6 @@ finish() {
                 rm -f active-deployment.json
             fi
         fi
-        if [ "$configuration_changed" = true ]; then
-            if [ "$configuration_existed" = true ]; then
-                cp -p "$backup/lighttpd.conf.before" .lighttpd.conf
-            else
-                rm -f .lighttpd.conf
-            fi
-        fi
-        if [ "$public_changed" = true ]; then
-            if [ -L public_html ] && [ "$(readlink public_html)" = app/src/webservice/public_html ]; then
-                rm public_html
-            fi
-            if [ "$public_kind" = directory ]; then mv public_html.previous public_html; fi
-        fi
-        if [ "$rotated_public" = true ]; then mv "$backup/older-public-html" public_html.previous; fi
         if [ "$environment_changed" = true ]; then
             if [ -L pyvenv-3.15 ]; then rm pyvenv-3.15; fi
             if [ "$environment_kind" = directory ]; then
@@ -130,10 +103,10 @@ toolforge jobs run "$setup_job" --image python3.13 --mount=all \
 # --wait is not evidence of a successful container exit: require exact proof.
 python3 "$validator" receipt "$stage" "$receipt"
 setup_started=false
-for job in aranami-hub aranami aranami-dashboard aranami-logs; do
+for job in aranami-hub aranami-web aranami aranami-dashboard aranami-logs; do
     if toolforge jobs show "$job" >/dev/null 2>&1; then toolforge jobs delete "$job"; fi
 done
-wait_stopped 'app.kubernetes.io/name in (aranami-hub,aranami,aranami-dashboard,aranami-logs)'
+wait_stopped 'app.kubernetes.io/name in (aranami-hub,aranami-web,aranami,aranami-dashboard,aranami-logs)'
 if [ -e app.previous ]; then
     mv app.previous "$backup/older-app"
     rotated_previous=true
@@ -155,27 +128,6 @@ elif [ -e pyvenv-3.15 ]; then
 fi
 environment_changed=true
 ln -s "deployment-envs/${environment##*/}" pyvenv-3.15
-if [ -e public_html ] && [ ! -L public_html ]; then
-    test -d public_html
-    public_kind=directory
-    if [ -e public_html.previous ]; then
-        mv public_html.previous "$backup/older-public-html"
-        rotated_public=true
-    fi
-    mv public_html public_html.previous
-    public_changed=true
-elif [ -L public_html ]; then
-    public_kind=link
-fi
-if [ ! -L public_html ]; then
-    public_changed=true
-    ln -s app/src/webservice/public_html public_html
-fi
-if [ -e .lighttpd.conf ]; then configuration_existed=true; fi
-# The validator keeps a byte-for-byte backup before atomic routing replacement.
-if [ "$configuration_existed" = true ]; then cp -p .lighttpd.conf "$backup/lighttpd.conf.before"; fi
-configuration_changed=true
-python3 app/scripts/toolforge/validate-source.py configure-web "$tool_dir" "$backup"
 if [ -e active-deployment.json ]; then
     cp -p active-deployment.json "$backup/active-deployment.before"
     active_existed=true
@@ -183,17 +135,7 @@ fi
 active_changed=true
 cp "$receipt" active-deployment.json
 python3 app/scripts/toolforge/validate-source.py receipt "$tool_dir/app" "$tool_dir/active-deployment.json"
-# Archive only exact obsolete feature caches, preserving unrelated runtime data.
-mkdir "$backup/retired-cache"
-for obsolete in cache/toolforge/quality-video-games-all.parquet \
-    cache/toolforge/recognition-observations.parquet cache/toolforge/quality-refresh.lock; do
-    if [ -f "$obsolete" ] && [ ! -L "$obsolete" ]; then
-        if ! mv "$obsolete" "$backup/retired-cache/$(basename "$obsolete")"; then
-            printf 'Could not archive obsolete cache: %s\n' "$obsolete" >&2
-        fi
-    fi
-done
 printf '%s\n' 'Validated source and isolated Python 3.15 environment promoted. Applications remain stopped.' \
     "Backup: $backup" \
-    'Start website: toolforge jobs run aranami-logs --image php8.4 --webservice --mount=all' \
+    "Start website: toolforge jobs run aranami-web --image python3.13 --continuous --mount=all --port 8000 --publish --command 'exec sh $tool_dir/app/scripts/toolforge/run-web.sh'" \
     "Start data hub and publication explicitly: toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --command 'exec sh $tool_dir/app/scripts/toolforge/run-hub.sh'"

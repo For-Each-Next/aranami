@@ -4,6 +4,25 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.7
 
+### 0.6.2 (2026-10-23 12:38 UTC)
+
+Overview: Replaced the PHP website with Python-rendered HTML and CSS,
+consolidated reusable runtime behavior, and removed obsolete code and
+operational documentation.
+
+- Replaced all PHP pages, helpers, fixtures, and runtime configuration with
+  Python presentation, preserving dashboard, maintenance, status, and logs.
+- Served validated saved data and bounded log downloads through a separate
+  published Toolforge Python job without initiating collection or edits.
+- Shared localization, cards, assessments, sorting, and native HTML status
+  disclosures across pages without requiring browser JavaScript.
+- Centralized safe file reads, HTTP responses, title sorting, replica text
+  decoding, prose rules, and atomic Parquet replacement for their consumers.
+- Removed unused wrappers, obsolete directories, and PHP ignore rules while
+  retaining documented APIs and dynamically selected source collectors.
+- Replaced retired routing, cache migration, and future conversion runbooks
+  with current deployment instructions and complete offline Python checks.
+
 ### 0.6.1 (2026-10-21 06:28 UTC)
 
 Overview: Unified article cards with cached introductions, simplified report

@@ -10,8 +10,9 @@ repository-wide instructions.
   account authentication and runtime data outside the uploaded source tree.
 - `python -m backend` starts the central hub for on-wiki and website
   updates. Keep one `aranami-hub` background job through `run-hub.sh`.
-  The PHP webservice presents saved data. Do not restore retired launchers
-  or import aliases.
+  `python -m backend.public` serves saved data and Python-rendered pages through
+  the separate `aranami-web` job and `run-web.sh` launcher. Do not restore
+  retired launchers or import aliases.
 - `backend.run(dry=False)` starts the report monitor defined in
   `monitor.py` and returns its scheduler. Use shared configuration and
   independent per-routine UTC cron triggers, coalesce missed executions,
@@ -52,10 +53,12 @@ Keep dependencies flowing down through these layers:
   using the same read-only source data. An hourly website callback covers
   periods without wiki work. Keep output success, source timestamps, and
   retries independent; a failed output must not roll back another output.
-- `server.py` serves saved data at local read-only HTTP endpoints for
-  diagnostics and local readers. PHP reads backend snapshots through the
-  shared runtime directory. Requests must not initialize clients, collect
-  wiki data, or trigger publication.
+- `server.py` serves local read-only diagnostics. `public.py` reads validated
+  snapshots/status/logs and passes saved facts to `webservice` renderers.
+  Only this HTTP orchestration layer imports the presentation package.
+  Share HTTP response handling through `support/http.py` and
+  bounded file readers through `shared.support.files`. Requests must not
+  initialize clients, collect wiki data, write files, or trigger publication.
 - `runner.py` starts monitoring or coordinates an immediate selected pass.
   It contains no report implementation or scheduling loop.
 - `monitor.py` owns scheduler lifecycle, postponement, and actual schedule

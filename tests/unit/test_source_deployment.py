@@ -125,7 +125,7 @@ class TestSourcePayload(TestCase):
             *(f"scripts/toolforge/{name}" for name in self.uploader._SCRIPTS),
         }
         assert set(self.payload) == expected
-        assert "src/webservice/public_html/dialogs.js" in self.payload
+        assert "src/webservice/pages.py" in self.payload
         assert {
             Path(name).parts[1]
             for name in self.payload
@@ -139,6 +139,20 @@ class TestSourcePayload(TestCase):
             "umask 077\n"
             in self.payload["scripts/toolforge/run-hub.sh"].decode()
         )
+        assert not any(
+            Path(name).suffix in {".php", ".js", ".mjs"}
+            for name in self.payload
+        )
+        assert (
+            "-m backend.public --host 0.0.0.0 --port 8000 "
+            '--runtime "$tool_dir"'
+            in self.payload["scripts/toolforge/run-web.sh"].decode()
+        )
+        for name in ("run-hub.sh", "run-web.sh"):
+            assert (
+                '. "$tool_dir/app/scripts/toolforge/runtime-env.sh"'
+                in self.payload[f"scripts/toolforge/{name}"].decode()
+            )
         manifest = json.loads(self.payload["deployment.json"])
         assert manifest["files"] == {
             name: hashlib.sha256(content).hexdigest()
@@ -393,6 +407,11 @@ class TestSourceImports(TestCase):
             forbidden = _PACKAGES - allowed
             forbidden |= {"aranami", "toolforge", "wiki_report_updater"}
             for path in (_ROOT / "src" / package).rglob("*.py"):
+                path_forbidden = (
+                    forbidden - {"webservice"}
+                    if path == _ROOT / "src/backend/public.py"
+                    else forbidden
+                )
                 tree = ast.parse(path.read_text(), filename=str(path))
                 for node in ast.walk(tree):
                     names = (
@@ -403,7 +422,8 @@ class TestSourceImports(TestCase):
                         else []
                     )
                     assert (
-                        not {name.split(".")[0] for name in names} & forbidden
+                        not {name.split(".")[0] for name in names}
+                        & path_forbidden
                     ), path
         public = ast.parse(
             (_ROOT / "src/backend/__init__.py").read_text(),
@@ -450,7 +470,9 @@ for name in TASK_DEFINITIONS:
 import backend.__main__
 import backend.monitor as monitor
 import backend.server
+import backend.public
 import backend.hub
+import webservice.pages
 for name in ("logs", "routine_status", "schedule_status"):
     importlib.import_module(f"backend.support.{name}")
     assert importlib.util.find_spec(f"shared.support.{name}") is None

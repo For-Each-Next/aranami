@@ -18,11 +18,13 @@ import threading
 import time
 from contextlib import ExitStack
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import HTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from backend.support.http import ReadOnlyRequestHandler
 from backend.support.logs import open_run_log
+from shared.support.files import read_regular
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,7 +56,7 @@ class DashboardUpdater:
         """Configure an updater without starting collection.
 
         Args:
-            output: Snapshot path shared with the PHP homepage.
+            output: Snapshot path shared with the read-only website.
             collect: Read-only callback returning the next snapshot.
             save: Atomic writer called only after collection succeeds.
             log_dir: Directory for the shared daily diagnostic log.
@@ -140,15 +142,8 @@ class DashboardUpdater:
             Saved JSON bytes, or None for unavailable or invalid data.
         """
         try:
-            descriptor = os.open(self.output, os.O_RDONLY | os.O_NOFOLLOW)
-            with os.fdopen(descriptor, "rb") as stream:
-                metadata = os.fstat(stream.fileno())
-                if not stat.S_ISREG(metadata.st_mode):
-                    return None
-                content = stream.read(_MAX_SNAPSHOT_BYTES + 1)
+            content = read_regular(self.output, _MAX_SNAPSHOT_BYTES)
         except OSError, ValueError:
-            return None
-        if len(content) > _MAX_SNAPSHOT_BYTES:
             return None
         try:
             valid = isinstance(json.loads(content), dict)
@@ -292,51 +287,12 @@ class DashboardHTTPServer(HTTPServer):
         super().__init__(address, DashboardRequestHandler)
 
 
-class DashboardRequestHandler(BaseHTTPRequestHandler):
+class DashboardRequestHandler(ReadOnlyRequestHandler):
     """Serve saved JSON without triggering collection from requests."""
 
     server: DashboardHTTPServer
 
-    def log_message(self, _format: str, *_args: object) -> None:
-        """Keep request strings out of operational logs."""
-
-    def do_GET(self) -> None:
-        """Read health or the last snapshot from a fixed route."""
-        self._read()
-
-    def do_HEAD(self) -> None:
-        """Return the same read-only headers without a response body."""
-        self._read()
-
-    def send_error(
-        self,
-        code: int,
-        message: str | None = None,
-        explain: str | None = None,
-    ) -> None:
-        """Return JSON errors and reject unsupported methods."""
-        del message, explain
-        status = (
-            HTTPStatus.METHOD_NOT_ALLOWED
-            if code == HTTPStatus.NOT_IMPLEMENTED
-            else HTTPStatus(code)
-        )
-        self._respond(status, json.dumps({"error": status.phrase}).encode())
-
-    def _respond(self, status: HTTPStatus, content: bytes) -> None:
-        """Send a bounded JSON body or its HEAD metadata."""
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        if status == HTTPStatus.METHOD_NOT_ALLOWED:
-            self.send_header("Allow", "GET, HEAD")
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(content)
-
-    def _read(self) -> None:
+    def read(self) -> None:
         """Read health or saved JSON without external requests."""
         if self.path == "/healthz":
             state = self.server.updater.health()
@@ -345,18 +301,18 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 if state["healthy"]
                 else HTTPStatus.SERVICE_UNAVAILABLE
             )
-            self._respond(status, json.dumps(state).encode())
+            self.respond(status, json.dumps(state).encode())
         elif self.path == "/dashboard.json":
             content = self.server.updater.snapshot_bytes()
             if content is None:
-                self._respond(
+                self.respond(
                     HTTPStatus.SERVICE_UNAVAILABLE,
                     b'{"error":"Snapshot unavailable"}',
                 )
             else:
-                self._respond(HTTPStatus.OK, content)
+                self.respond(HTTPStatus.OK, content)
         else:
-            self._respond(HTTPStatus.NOT_FOUND, b'{"error":"Not found"}')
+            self.respond(HTTPStatus.NOT_FOUND, b'{"error":"Not found"}')
 
 
 def collect_dashboard_pass(

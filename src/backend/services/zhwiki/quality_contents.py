@@ -4,9 +4,9 @@ The shared workflow consumes ``PROFILE`` to select video-game articles
 and normalize Chinese assessments before applying local template rules.
 """
 
+from backend.services.prose import PROFILE as PROSE_PROFILE
 from backend.services.quality_profile import QualityAnalysisProfile
 from backend.services.zhwiki import quality_dates
-from backend.services.zhwiki.prose import PROFILE as PROSE_PROFILE
 
 PROFILE = QualityAnalysisProfile(
     project_title="电子游戏",

@@ -20,11 +20,11 @@ cd /data/project/aranami
 toolforge jobs list
 toolforge jobs show aranami-hub
 toolforge jobs logs aranami-hub
-toolforge jobs logs aranami-logs
+toolforge jobs logs aranami-web
 ```
 
-`aranami-hub` prepares data and publishes wiki reports. `aranami-logs` is
-the PHP webservice for the complete [website](https://aranami.toolforge.org/),
+`aranami-hub` prepares data and publishes wiki reports. `aranami-web`
+serves the [website](https://aranami.toolforge.org/) and saved data,
 including the [daily-log viewer](https://aranami.toolforge.org/logs/).
 The website shows routine outcomes and actual scheduled next executions;
 missing, stale, paused, or stopped scheduling metadata remains explicit.

@@ -24,6 +24,7 @@ from shared.sources.quarry.projects import (
 )
 from shared.sources.wiki import read_pages
 from shared.support.regions import region_content, region_options
+from shared.support.titles import title_sort_key
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -83,18 +84,6 @@ REVIEW_INFO = {
     ),
     "ppr": ReviewInfo((r"",)),
 }
-
-
-def _sort_key(title: str) -> tuple[str, str]:
-    """Return a stable case-insensitive title ordering.
-
-    Args:
-        title: Normalized article title.
-
-    Returns:
-        Folded title and exact title for deterministic tie breaking.
-    """
-    return title.casefold(), title
 
 
 def _review_info(grade: str) -> ReviewInfo:
@@ -315,7 +304,7 @@ def prepare_data(
     }
     titles = sorted(
         member_ids,
-        key=_sort_key,
+        key=title_sort_key,
     )
     logger.info("Found %d articles in %s", len(titles), config.category_title)
     targets: dict[str, str] = {}

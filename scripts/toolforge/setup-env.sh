@@ -65,13 +65,15 @@ assert sys.version_info.releaselevel == "final", sys.version
 root = Path(os.environ["PYTHONPATH"]).parent
 from shared.config import TASK_DEFINITIONS, routine_configuration
 from shared.deployment import project_version
-assert json.loads((root / "src/shared/routines.json").read_text()) == json.loads(json.dumps(routine_configuration()))
+json.dumps(routine_configuration(), allow_nan=False)
 assert json.loads((root / "src/shared/version.json").read_text())["version"] == project_version()
 for name in TASK_DEFINITIONS:
     importlib.import_module(f"updater.jobs.{name}")
 import backend.hub
+import backend.public
 import backend.server
 import backend.website.collect
+import webservice.pages
 print(f"Validated Aranami {project_version()} on Python {sys.version.split()[0]}; publication was not started.")
 PY
 # This unique proof is emitted only after hashes, dependencies, and imports pass.

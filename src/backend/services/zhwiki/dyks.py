@@ -32,6 +32,7 @@ from shared.sources.quarry.projects import (
 )
 from shared.sources.wiki import template_aliases
 from shared.support.regions import region_content
+from shared.support.titles import title_sort_key
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -465,7 +466,7 @@ def _compare_states(previous: _DykState, current: _DykState) -> DykChanges:
     _, unrelated = membership_changes(updated, previous.nominated)
     passed = sorted(
         set(passed) | (updated.keys() - set(unrelated)),
-        key=lambda title: (title.casefold(), title),
+        key=title_sort_key,
     )
     _, failed = membership_changes(
         {title: previous.nominated[title] for title in departed},

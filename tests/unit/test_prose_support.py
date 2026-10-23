@@ -10,8 +10,8 @@ from unittest.mock import Mock, patch
 
 from wiki_fixtures import OfflineSite
 
-from backend.services.enwiki.prose import PROFILE as EN_PROFILE
-from backend.services.zhwiki.prose import PROFILE as ZH_PROFILE
+from backend.services.enwiki.quality_contents import PROFILE as EN_PROFILE
+from backend.services.zhwiki.quality_contents import PROFILE as ZH_PROFILE
 from shared.support import words
 from shared.support.prose import ProseProfile, extract_prose
 
@@ -61,11 +61,11 @@ class TestProseSupport(TestCase):
             "{{Custom|label=Additional value}}"
         )
         site = OfflineSite("en", "wikipedia")
-        standard = extract_prose(text, site=site, profile=EN_PROFILE)
+        standard = extract_prose(text, site=site, profile=EN_PROFILE.prose)
         expanded = extract_prose(
             text,
             site=site,
-            profile=EN_PROFILE,
+            profile=EN_PROFILE.prose,
             include_template_values=True,
         )
         assert standard == "Introduction. Shared prose"
@@ -81,7 +81,7 @@ class TestProseSupport(TestCase):
             extract_prose(
                 text,
                 site=OfflineSite("zh", "wikipedia"),
-                profile=ZH_PROFILE,
+                profile=ZH_PROFILE.prose,
             )
             == "故事開始。 接著發生。"
         )

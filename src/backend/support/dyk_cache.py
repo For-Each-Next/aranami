@@ -12,6 +12,8 @@ from pathlib import Path
 
 import polars as pl
 
+from shared.support.cache import write_parquet_cache
+
 SCHEMA = {
     "talk_page_id": pl.Int64,
     "oldid": pl.Int64,
@@ -48,7 +50,9 @@ def save(frame: pl.DataFrame) -> None:
     """
     path = Path.cwd() / "cache" / "vg_dyks_talk_pages-v2.parquet"
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        frame.select(list(SCHEMA)).sort("talk_page_id").write_parquet(path)
+        write_parquet_cache(
+            path,
+            frame.select(list(SCHEMA)).sort("talk_page_id"),
+        )
     except OSError, pl.exceptions.PolarsError:
         _LOGGER.warning("Could not write disposable DYK cache: %s", path)

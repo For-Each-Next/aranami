@@ -5,7 +5,7 @@ and interpret English assessment names, templates, and prose.
 """
 
 from backend.services.enwiki import quality_dates
-from backend.services.enwiki.prose import PROFILE as PROSE_PROFILE
+from backend.services.prose import PROFILE as PROSE_PROFILE
 from backend.services.quality_profile import QualityAnalysisProfile
 
 PROFILE = QualityAnalysisProfile(

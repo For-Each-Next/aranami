@@ -55,8 +55,8 @@ Text outside those ranges is preserved.
 Complete report tables and metadata are retained before publication,
 including assessment review targets and change information used in edit
 summaries. English importance and quality reports have separate renderers
-for their different section structures. The PHP webservice presents saved
-backend data without fetching Wikipedia pages itself.
+for their different section structures. A separate read-only Python
+webservice renders saved backend data as complete HTML pages.
 
 Logs are ordinary, readable English diagnostics showing what data was
 collected and which wiki pages were checked or edited. Structured status
@@ -96,17 +96,16 @@ source tree.
 ├── app/                         Active validated source deployment
 │   ├── src/backend/             Collection, preparation, scheduling, state
 │   ├── src/updater/             Wiki rendering and publication
-│   ├── src/webservice/          PHP presentation and public assets
+│   ├── src/webservice/          Python page rendering and static assets
 │   ├── src/shared/              Configuration and low-level contracts
 │   └── scripts/toolforge/       Deployment and startup commands
-├── public_html -> app/src/webservice/public_html
 ├── python/                      Managed Python 3.15 interpreter
 ├── deployment-envs/             Isolated, locked runtime environments
 ├── pyvenv-3.15 -> deployment-envs/<deployment-id>
 ├── active-deployment.json       Validated source/environment receipt
 ├── reports/                     Complete report generations and manifests
 ├── state/                       Routine, scheduler, and page-update metadata
-├── cache/                       Disposable source and rendered-page caches
+├── cache/                       Disposable source data and website snapshots
 ├── logs/                        aranami.YYYY-MM-DD.log, in UTC
 ├── dry-run/                     Preview summaries, wikitext, and datasets
 └── user-config.py, user-password.cfg, replica.my.cnf, …  Private credentials

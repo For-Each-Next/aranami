@@ -10,13 +10,13 @@ after transient outages without replacing the healthy snapshot.
 from __future__ import annotations
 
 import logging
-from contextlib import suppress
 from hashlib import sha256
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING, cast
 
 import polars as pl
+
+from shared.support.cache import write_parquet_cache
 
 if TYPE_CHECKING:
     import datetime as dt
@@ -105,25 +105,11 @@ def _write_snapshot(path: Path, frame: pl.DataFrame) -> bool:
     Returns:
         Whether the snapshot was atomically committed.
     """
-    temporary: Path | None = None
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with NamedTemporaryFile(
-            dir=path.parent,
-            prefix=".pageviews-",
-            suffix=".parquet",
-            delete=False,
-        ) as handle:
-            temporary = Path(handle.name)
-        frame.write_parquet(temporary)
-        temporary.replace(path)
+        write_parquet_cache(path, frame)
     except OSError, pl.exceptions.PolarsError:
         logger.warning("Could not write Pageviews cache: %s", path)
         return False
-    finally:
-        if temporary is not None:
-            with suppress(OSError):
-                temporary.unlink(missing_ok=True)
     return True
 
 
