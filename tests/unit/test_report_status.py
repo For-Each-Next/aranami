@@ -36,7 +36,7 @@ def _record(
         started_at: Actual start used to order concurrent observations.
 
     Returns:
-        Record accepted by the backend writer and PHP consumer.
+        Record accepted by the backend writer and Python web consumer.
     """
     return {
         "update_id": update_id,

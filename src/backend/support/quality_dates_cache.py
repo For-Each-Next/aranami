@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 import polars as pl
+
+from shared.support.cache import write_parquet_cache
 
 SCHEMA = {
     "page_id": pl.Int64,
@@ -69,26 +70,7 @@ def save(frame: pl.DataFrame) -> None:
         frame: Valid results for the current selected articles.
     """
     path = Path.cwd() / "cache" / _FILENAME
-    temporary: Path | None = None
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with NamedTemporaryFile(
-            dir=path.parent,
-            prefix=f".{path.stem}-",
-            suffix=".parquet",
-            delete=False,
-        ) as handle:
-            temporary = Path(handle.name)
-        frame.select(list(SCHEMA)).sort("page_id").write_parquet(temporary)
-        temporary.replace(path)
+        write_parquet_cache(path, frame.select(list(SCHEMA)).sort("page_id"))
     except OSError, pl.exceptions.PolarsError:
         _LOGGER.warning("Could not write quality-date cache: %s", path)
-    finally:
-        if temporary is not None:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError:
-                _LOGGER.warning(
-                    "Could not remove temporary cache: %s",
-                    temporary,
-                )

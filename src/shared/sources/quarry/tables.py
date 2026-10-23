@@ -131,16 +131,8 @@ class Base(DeclarativeBase):
     """Provide metadata for read-only Wiki Replica mappings."""
 
 
-class StringDecoder(TypeDecorator[str]):
-    """Normalize values from character columns as strings.
-
-    Wiki Replicas can return bytes for character columns.
-    This decorator preserves string query parameters and
-    decodes byte results for callers.
-    """
-
-    impl = String
-    cache_ok = True
+class _TextResultDecoder(TypeDecorator[str]):
+    """Decode replica character and binary results consistently."""
 
     _encoding_config: ClassVar[MappingProxyType[str, str]] = MappingProxyType(
         {
@@ -148,6 +140,31 @@ class StringDecoder(TypeDecorator[str]):
             "errors": "backslashreplace",
         },
     )
+
+    def process_result_value(
+        self,
+        value: str | bytes | None,
+        dialect: Dialect,  # ruff: ignore[unused-method-argument]
+    ) -> str | None:
+        """Normalize a character or binary column result as text.
+
+        Args:
+            value: String or byte value returned by the driver.
+            dialect: Database dialect handling the value.
+
+        Returns:
+            Decoded text, or ``None`` for a null value.
+        """
+        if value is None or isinstance(value, str):
+            return value
+        return value.decode(**self._encoding_config)
+
+
+class StringDecoder(_TextResultDecoder):
+    """Preserve character-column parameters and decode byte results."""
+
+    impl = String
+    cache_ok = True
 
     @override
     def process_bind_param(
@@ -165,24 +182,6 @@ class StringDecoder(TypeDecorator[str]):
             The original string, or ``None`` for a null value.
         """
         return value
-
-    def process_result_value(
-        self,
-        value: str | bytes | None,
-        dialect: Dialect,  # ruff: ignore[unused-method-argument]
-    ) -> str | None:
-        """Normalize a character-column result as text.
-
-        Args:
-            value: String or byte value returned by the driver.
-            dialect: Database dialect handling the value.
-
-        Returns:
-            Decoded text, or ``None`` for a null value.
-        """
-        if value is None or isinstance(value, str):
-            return value
-        return value.decode(**self._encoding_config)
 
 
 class TextDecoder(StringDecoder):
@@ -209,7 +208,7 @@ class EnumDecoder(StringDecoder):
         )
 
 
-class BinaryDecoder(TypeDecorator[str]):
+class BinaryDecoder(_TextResultDecoder):
     """Encode and decode text fields stored as binary values.
 
     MediaWiki uses binary columns for case-sensitive identifiers.
@@ -219,13 +218,6 @@ class BinaryDecoder(TypeDecorator[str]):
 
     impl = LargeBinary
     cache_ok = True
-
-    _encoding_config: ClassVar[MappingProxyType[str, str]] = MappingProxyType(
-        {
-            "encoding": "utf-8",
-            "errors": "backslashreplace",
-        },
-    )
 
     def process_bind_param(
         self,
@@ -244,24 +236,6 @@ class BinaryDecoder(TypeDecorator[str]):
         if value is None:
             return None
         return value.encode(**self._encoding_config)
-
-    def process_result_value(
-        self,
-        value: str | bytes | None,
-        dialect: Dialect,  # ruff: ignore[unused-method-argument]
-    ) -> str | None:
-        """Normalize a binary-column result as text.
-
-        Args:
-            value: String or byte value returned by the driver.
-            dialect: Database dialect handling the value.
-
-        Returns:
-            Decoded text, or ``None`` for a null value.
-        """
-        if value is None or isinstance(value, str):
-            return value
-        return value.decode(**self._encoding_config)
 
 
 class Actor(Base):

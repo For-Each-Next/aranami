@@ -16,6 +16,7 @@ from mwparserfromhell.nodes import Tag, Template, Wikilink
 from backend.support.report_membership import MembershipReport
 from shared.reports import ReportResult
 from shared.support.regions import replace_by_tag
+from shared.support.titles import title_sort_key
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -30,11 +31,6 @@ _REVIEW_ICONS = {
     "bpan": "Bplus candidate.svg",
     "ppr": "Cvg peerreview icon.png",
 }
-
-
-def _sort_key(title: str) -> tuple[str, str]:
-    """Return a stable case-insensitive title ordering."""
-    return title.casefold(), title
 
 
 def _review_icon(grade: str) -> str:
@@ -125,7 +121,7 @@ def update_text(
     Raises:
         ValueError: If the count or list markers are invalid.
     """  # ruff: ignore[docstring-extraneous-exception]
-    normalized = sorted(set(titles), key=_sort_key)
+    normalized = sorted(set(titles), key=title_sort_key)
     text = replace_by_tag(
         "assessment-count",
         str(len(normalized)),
@@ -183,16 +179,3 @@ def prepare_report(
             calculated_at=data.calculated_at,
         ),
     )
-
-
-def prepare_text(data: AssessmentData, original_text: str) -> str:
-    """Render the prepared members and reviews into destination ranges.
-
-    Args:
-        data: Complete backend-prepared list observations.
-        original_text: Current destination text to preserve and update.
-
-    Returns:
-        Updated content with all current article and review links.
-    """
-    return prepare_report(data, original_text).text

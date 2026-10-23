@@ -32,10 +32,6 @@ cache/
 dry-run/
 reports/
 state/
-!/src/webservice/public_html/logs/
-!/src/webservice/public_html/logs/index.php
-!/src/webservice/public_html/logs/aranami/
-!/src/webservice/public_html/logs/aranami/index.php
 
 # Tests, coverage, and tool caches
 apicache/

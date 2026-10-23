@@ -34,6 +34,7 @@ Use a focused change and add a regression test for changed behavior.
 | Source collection, parsing, report facts, comparisons, and caches | `src/backend/services/` |
 | Scheduling, execution, logs, status, and publication storage | `src/backend/` and `src/backend/support/` |
 | Website datasets and maintenance definitions | `src/backend/website/` |
+| Read-only website HTTP endpoints and saved-log reads | `src/backend/public.py` and `src/backend/support/public_data.py` |
 | Wiki destination selection, formatting, summaries, and intentional edits | `src/updater/` |
 | Website presentation, localization, public assets, and saved-log display | `src/webservice/` |
 | Low-level read-only adapters, configuration, generic mechanics, and storage primitives | `src/shared/` |
@@ -41,16 +42,16 @@ Use a focused change and add a regression test for changed behavior.
 
 The backend prepares and retains facts. The updater reads its edit
 destinations, renders backend data, and performs intentional publication.
-PHP displays saved backend outputs and never initiates collection. Do not
-move data processing or runtime file writes into either frontend. The
-[Architecture](architecture.md#runtime-and-architecture) describes
+Python presentation functions display saved backend outputs and never
+initiate collection. Keep data processing and runtime file writes in the
+backend. The [Architecture](architecture.md#runtime-and-architecture) describes
 the complete ownership rules.
 
 Routine destinations and UTC triggers are defined once in
-`src/shared/config.py`. The deployment builder generates the corresponding
-PHP-readable routine and version metadata; do not maintain a second PHP
-schedule. Website maintenance definitions live in
-`src/backend/website/maintenance.json`.
+`src/shared/config.py`. Setup validates its serialized contract and the
+generated version metadata. Renderers receive prepared configuration from the
+backend; do not maintain a separate website schedule. Maintenance definitions
+live in `src/backend/website/maintenance.json`.
 
 ## Implement and test a change
 
@@ -83,8 +84,9 @@ to live publication. Inspect their contracts with fake dependencies in
 offline tests; submit real previews only through the
 [Toolforge preview workflow](usage.md#preview-selected-routines).
 `python -m backend` is the normal central-hub entry point and also manages
-website updates. Imports and command-line help must not initialize clients
-or run reports.
+website updates. `python -m backend.public` serves saved public data and
+Python-rendered pages independently. Imports and command-line help must
+not initialize clients or run reports.
 
 If embedding the recurring monitor, `run(dry=True,
 run_immediately=False)` returns a background scheduler. Stop it with
@@ -113,22 +115,13 @@ failed saves, completion/readiness rules, preview isolation, and
 independent website refreshes. Socket tests need permission to bind local
 loopback ports; a sandbox denial is not an application failure.
 
-With a suitable PHP CLI, run the presentation fixtures:
-
-```shell
-php tests/toolforge/assessment.php
-php tests/toolforge/homepage.php
-php tests/toolforge/i18n.php
-php tests/toolforge/logs.php
-php tests/toolforge/page-cache.php
-php tests/toolforge/project.php
-php tests/toolforge/status.php
-```
+Presentation fixtures in `tests/toolforge/` cover localization, escaped
+HTML, ordering, pagination, and observed status using the same Python suite.
 
 Check each changed launcher with `sh -n scripts/toolforge/<name>.sh`.
 For website changes, check desktop and narrow layouts, long titles and
 chips, maintenance sorting/pagination, real source dates and site ranks,
-and all three localized scheduling states. Page requests must remain
+and scheduling states in all three interface languages. Page requests remain
 read-only, including when snapshots are missing or invalid.
 
 The uploader's dry run validates the exact source payload without

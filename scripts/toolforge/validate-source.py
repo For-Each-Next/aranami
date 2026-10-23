@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import stat
 import sys
 import tempfile
@@ -22,11 +21,13 @@ _SCRIPTS = {
     "setup-env.sh",
     "deploy-source.sh",
     "run-hub.sh",
+    "run-web.sh",
+    "runtime-env.sh",
     "source-files.json",
     "validate-source.py",
 }
 _PACKAGES = {"backend", "updater", "webservice", "shared"}
-_SUFFIXES = {".py", ".php", ".json", ".svg", ".conf", ".js"}
+_SUFFIXES = {".py", ".css", ".json", ".svg"}
 _MAX_JSON = 4 * 1024 * 1024
 _MAX_FILE = 32 * 1024 * 1024
 _MAX_TOTAL = 128 * 1024 * 1024
@@ -377,13 +378,12 @@ def receipt(
         raise ValueError(msg)
 
 
-def _atomic_write(path: Path, text: str, *, mode: int = 0o640) -> None:
-    """Atomically replace one deployment metadata or routing file.
+def _atomic_write(path: Path, text: str) -> None:
+    """Atomically write one setup receipt with private permissions.
 
     Args:
         path: Exact destination artifact.
         text: Complete replacement content.
-        mode: Destination permissions retained for local configuration.
     """
     descriptor, name = tempfile.mkstemp(prefix=".deployment-", dir=path.parent)
     temporary = Path(name)
@@ -392,63 +392,10 @@ def _atomic_write(path: Path, text: str, *, mode: int = 0o640) -> None:
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
-            os.fchmod(stream.fileno(), mode)
+            os.fchmod(stream.fileno(), 0o640)
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
-
-
-def configure_web(root: Path, backup: Path) -> None:
-    """Replace legacy routing includes and preserve other lines.
-
-    Args:
-        root: Canonical tool runtime directory.
-        backup: Transaction directory retaining the old configuration.
-
-    Raises:
-        ValueError: A configuration or backup path is unsafe.
-    """
-    if backup.parent != root / "deployment-backups" or not _canonical_below(
-        root,
-        backup,
-    ):
-        msg = "Expected the current deployment backup directory."
-        raise ValueError(msg)
-    path = root / ".lighttpd.conf"
-    if path.is_symlink() or (path.exists() and not path.is_file()):
-        msg = "Expected a regular lighttpd configuration file."
-        raise ValueError(msg)
-    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o640
-    if path.exists():
-        if path.stat().st_size > _MAX_JSON:
-            msg = "The lighttpd configuration exceeds its size bound."
-            raise ValueError(
-                msg,
-            )
-        shutil.copy2(path, backup / "lighttpd.conf.before")
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
-    destinations = (
-        root / "log-viewer.lighttpd.conf",
-        root / "app/src/webservice/log-viewer.lighttpd.conf",
-    )
-    aliases = {
-        *destinations,
-        root.resolve() / "log-viewer.lighttpd.conf",
-        root.resolve() / "app/src/webservice/log-viewer.lighttpd.conf",
-    }
-    known = re.compile(
-        r'^\s*include\s+"(?:'
-        + "|".join(re.escape(str(item)) for item in sorted(aliases))
-        + r')"\s*(?:#.*)?$',
-    )
-    retained = "".join(
-        line
-        for line in text.splitlines(keepends=True)
-        if not known.fullmatch(line.strip())
-    )
-    if retained and not retained.endswith("\n"):
-        retained += "\n"
-    _atomic_write(path, retained + f'include "{destinations[1]}"\n', mode=mode)
 
 
 def main() -> None:
@@ -456,7 +403,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=("verify", "record", "receipt", "configure-web"),
+        choices=("verify", "record", "receipt"),
     )
     parser.add_argument("root", type=Path)
     parser.add_argument("path", nargs="?", type=Path)
@@ -466,8 +413,6 @@ def main() -> None:
         verify(args.root)
     elif args.path is None:
         parser.error("This action requires a transaction-specific path.")
-    elif args.action == "configure-web":
-        configure_web(args.root, args.path)
     else:
         receipt(
             args.root,

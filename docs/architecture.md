@@ -43,9 +43,9 @@ The source tree contains four components:
   formatting helpers. It reads only its selected edit destinations and
   changes their managed ranges. It owns no source collection, data cache,
   file persistence, or scheduler.
-- `webservice` owns PHP presentation and public assets. It reads saved
-  backend snapshots through Toolforge's shared runtime directory and
-  renders web pages.
+- `webservice` owns Python page rendering and shared CSS. Its presentation
+  functions consume prepared backend observations and render complete
+  HTML for the dashboard, maintenance worklists, About page, and logs.
 - `shared` provides low-level read-only sources, report-storage primitives,
   generic text and date mechanics, configuration, and source deployment
   metadata. The backend decides when to use these primitives and owns
@@ -69,7 +69,8 @@ in the frontend.
 | Render prepared rows and difference metadata as wikitext or summary prose | Updater services and formatting support |
 | Retain results, advance caches, write previews, logs, and status | Backend execution and domain services |
 | Perform an intentional wiki save or delegated PexBot request | Updater publication adapter |
-| Display saved data, statuses, and logs | Read-only PHP webservice |
+| Serve validated saved snapshots, status, logs, and fixed assets | Backend public HTTP server |
+| Render saved data, statuses, and logs as HTML | Python webservice presentation |
 
 Backend services accept concrete definitions and existing destination text
 without selecting or loading the destination. They return typed facts,
@@ -77,8 +78,10 @@ rows, and metadata sufficient for rendering. The updater must not parse
 source templates, infer old membership, perform identity matching, or
 read and write data files. Shared managed-range mechanics may locate and
 replace comment-delimited spans; interpreting their input settings and
-content remains backend work. Keep backend imports independent of
-updater types.
+content remains backend work. Keep backend data and support modules
+independent of frontend types. Only HTTP orchestration in `backend.public`
+imports `webservice` renderers; they receive saved facts and do not load
+runtime data or source clients.
 
 Shared code imports neither backend nor presentation code. Website requests
 only read saved outputs and cannot trigger collection or publication.
@@ -88,11 +91,13 @@ sources must not initialize clients or execute reports. Application imports
 resolve directly from the deployed `src` directory on `PYTHONPATH`.
 
 `shared.config.TASK_DEFINITIONS` is the single definition of report targets
-and UTC cron schedules, including PexBot subscription roots. Deployment
-generates and validates its PHP-readable `shared/routines.json` contract.
+and UTC cron schedules, including PexBot subscription roots. Use
+`routine_configuration()` for the serializable contract, without a second
+generated copy of the schedules.
 Version metadata comes from `pyproject.toml`, with a generated
-`shared/version.json` for PHP. It controls user agents and
-rendered-page cache invalidation without distribution metadata lookups.
+`shared/version.json` for source deployment. The backend supplies both
+contracts to renderers and the read-only `/api/config` endpoint. Version lookup requires
+no installed distribution and also supplies application user agents.
 
 ## Scheduling and observed state
 
@@ -133,7 +138,7 @@ counts. Older starts cannot overwrite newer results. Preview activity is
 omitted. `state/schedule-status.json` separately records actual scheduler
 next-run times, configuration identity, and running/paused/stopped state.
 Scheduler events and a thirty-second local heartbeat refresh it without
-source requests. PHP treats missing or stale observations as unknown and
+source requests. The website treats missing or stale observations as unknown and
 never calculates cron predictions. Manual one-shot work does not rewrite
 the scheduler snapshot. Per-destination observations distinguish a
 confirmed update, no change, failure, deferral, and an unconfirmed external
@@ -198,12 +203,18 @@ the due set; nothing due means no source requests. Each successful result,
 including a valid empty result, advances independently. Failed reports
 retain their validated previous data and actual successful timestamps and
 retry hourly. Restarting never resets the refresh interval. The schema-2
-snapshot remains bounded to 8 MiB across Python, HTTP, and PHP.
+snapshot remains bounded to 8 MiB across storage and HTTP.
 
-PHP reads `cache/toolforge/dashboard.json` and the routine/schedule/report
-snapshots directly from the shared runtime directory. The hub also exposes
-local read-only `/dashboard.json` and `/healthz` endpoints for diagnostics
-and other local readers; PHP does not depend on those endpoints.
+The separate `backend.public` server reads `cache/toolforge/dashboard.json`,
+routine/schedule/report observations, and saved daily logs from the runtime
+directory. It validates each saved format through its owning backend
+reader before rendering pages or exposing `/api/dashboard`, `/api/status`,
+or `/api/logs`. Pages use normal links, GET forms, and native HTML controls;
+no browser application or JavaScript runtime is required. Fixed CSS and
+SVG assets come from `webservice/public_html/`. Requests accept only GET and HEAD,
+reject path traversal and unsafe files, and bound file sizes and concurrency.
+The hub also exposes local read-only `/dashboard.json` and `/healthz`
+diagnostics; the public server operates independently of those endpoints.
 Omit confirmed-empty presentation sections, without confusing source
 unavailability with zero items. Keep the saved observations and their
 refresh metadata even when an empty section is not displayed.
@@ -222,13 +233,13 @@ by Page Previews. The read-only shared adapter owns the REST request;
 backend website preparation requests original `zh`, native `zh-hans`,
 and `zh-hant` text with `Accept-Language`, normalizes up to three sentences,
 and caps each
-introduction at 360 characters plus an omission mark. PHP selects the
+introduction at 360 characters plus an omission mark. Python rendering selects the
 prepared text matching the browser preference. Generic `zh` keeps original
 text without a simplified/traditional fallback; English uses simplified
 introductions. Keep literal title spaces encoded as `%20` in REST
 requests: underscore-equivalent upstream paths can have different cached
 extracts. Article and Pageviews URLs are unchanged. Preparation escapes no
-HTML for reuse: PHP escapes all saved text on output. Display upstream
+HTML for reuse: the renderer escapes all saved text on output. Display upstream
 article links and CC BY-SA 4.0 attribution after each introduction
 section's update time, separately from Aranami's
 source license. Canonical titles and article identities remain unchanged.
@@ -280,86 +291,20 @@ measured zeroes, nulls, and the verified non-article exclusions.
 
 Routine cards show localized state text, status time, measured/elapsed
 duration, configured report links, and the actual next execution from the
-monitor snapshot. The status text opens a keyboard-accessible modal table
+monitor snapshot. Native expandable controls show a keyboard-accessible table
 of per-destination outcomes, linked page titles, and UTC timestamps, with
-the routine duration alongside the trigger. A local interaction script
-only opens dialogs; it fetches nothing and cannot change runtime state.
-Narrow screens scroll the table inside its dialog. The footer combines
+the routine duration alongside the trigger. Shared Python presentation
+functions handle localization, safe markup, and presentation order.
+Narrow screens scroll the expanded table within its container. The footer combines
 source version and continuous runtime in one line. Missing, stale, paused, and stopped
-schedules remain explicit. The three interface languages, logs, Chinese
-highlights, DYK, popularity, maintenance, and normal rendered-page caching
-remain available.
-Cache each locale for up to sixty seconds; source snapshot, routine state,
-scheduler and report state, PHP, version, and configuration changes
-invalidate it.
-Keep browser responses no-store, negotiate compression, and preserve
-original source timestamps during failed-refresh fallback.
-
-### Regional article-title conversion (planned)
-
-Regional display titles should let readers recognize the same game under
-their preferred Chinese name. This is an implementation contract and
-Toolforge maintenance plan; the current frontend still displays canonical
-article titles. Conversion-table acquisition and updates run on Toolforge,
-following [the administration workflow](administration.md#prepare-chinese-conversion-tables-on-toolforge).
-Do not fetch or update conversion tables on the development computer.
-
-Fork all three requested source layers as separate, reproducible runtime
-datasets: MediaWiki's software-level Chinese tables, Chinese Wikipedia's
-local-site `MediaWiki:Conversiontable/*` tables, and `Module:CGroup/Games`.
-Each layer retains its own source identities, hashes, attribution, and
-update outcome; a Games fork does not replace the local-site fork.
-Follow Chinese Wikipedia's [conversion layers][zh-conversion-guide],
-which also define article-local manual rules. Compile target mappings in
-the order software defaults < local-site tables < Games rules. These
-are table overrides: Games definitions replace conflicting source/target
-pairs. Preserve source order; later definitions for the same source and
-target replace earlier ones, as in
-[MediaWiki's manual-rule handling][mediawiki-language-converter].
-Keep character conversion distinct from regional vocabulary conversion.
-
-Apply the combined mapping to the complete original title, scanning left
-to right and consuming the longest matching source at each position.
-Continue through the entire title: several separate Games rules may all
-apply. Emit replacements without scanning their output again. This is
-the associative replacement behavior described by [PHP's strtr][php-strtr],
-not a per-title choice of one rule. For example, the Games definitions
-convert both parts of 合金装备 和平行者 to 潛龍諜影 和平先驅 for Taiwan.
-For overlapping sources, 生化危机 启示录 uses its full-title rule to become
-惡靈古堡 啟示, ahead of the shorter 生化危机 match. These examples use
-[Games revision 94329950][games-conversion-audit].
-
-Read the actual Games source and [CGroup/core][games-conversion-core]
-contract before implementing extraction. `Item(original, rule)` stores a
-description and a conversion rule; `original` is not automatically another
-source alias. Preserve repeated items, one-way `source=>variant:target`
-rules, explicitly supported variants, and the source's rule order. Do not
-execute downloaded PHP or Lua during collection or page rendering. Reject
-unsupported syntax instead of silently activating an incomplete table.
-
-Keep the full Chinese region preference separately from the three
-interface locales. Use MediaWiki's [Chinese variant fallbacks][mediawiki-zh-converter]
-for `zh-cn`, `zh-tw`, `zh-hk`, `zh-mo`, `zh-sg`, `zh-my`, `zh-hans`, and
-`zh-hant`; a generic script preference must not silently select a regional
-game name. Backend preparation owns conversion data and localized labels.
-PHP selects and escapes prepared labels. Preserve canonical titles, page
-IDs, article URLs, Pageviews query titles, membership, ordering, and
-statistics. Apply labels consistently to dashboard and maintenance cards,
-including accessible title text, without translating URLs or query keys.
-
-Store downloaded and compiled tables outside `app/`, as disposable runtime
-data. Record the exact upstream commit/revision, source URLs, UTC fetch
-time, hashes, rule counts, and upstream attribution/license notices.
-Validate a complete generation before atomically selecting it; failed
-updates retain the last validated generation, or canonical titles when no
-generation exists. A changed table generation must refresh prepared labels
-and invalidate affected rendered pages without changing source observation
-times. Deduplicate labels by canonical identity and preserve the snapshot's
-8 MiB bound. The local-site fork must include the conversion tables and
-their referenced subpages, not just their parent names. Article-local
-title overrides and NoteTA rules require their own verified extraction and
-take priority in that article's context; the three requested source layers alone do not
-establish full Chinese Wikipedia title equivalence.
+schedules remain explicit. Preserve all three interface languages, logs,
+Chinese highlights, DYK, popularity, and maintenance. Cache rendered views
+and locales in bounded process memory for up to sixty seconds; saved-input
+changes invalidate them without writing generated HTML to runtime files.
+Log views and unseeded random maintenance views bypass the cache. Source
+changes take effect when the validated deployment replaces the process.
+Keep responses no-store, negotiate compression, and preserve original
+source timestamps during failed-refresh fallback.
 
 ## Polars and Parquet
 
@@ -706,12 +651,4 @@ deployment authority and recovery remain in [Administration](administration.md).
 [hot-item]: https://zh.wikipedia.org/w/index.php?title=WikiProject:VG/HOT/item&oldid=91242270
 [hot-module]: https://zh.wikipedia.org/w/index.php?title=Module:PJ:VG/HOT&oldid=95139258
 [pageviews-top]: https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/examples/project-metrics.html#most-viewed-pages
-[games-conversion]: https://zh.wikipedia.org/wiki/Module:CGroup/Games
-[games-conversion-audit]: https://zh.wikipedia.org/w/index.php?title=Module:CGroup/Games&oldid=94329950
-[games-conversion-core]: https://zh.wikipedia.org/w/index.php?title=Module:CGroup/core&oldid=71541497
-[mediawiki-conversion]: https://github.com/wikimedia/mediawiki/blob/master/includes/Languages/Data/ZhConversion.php
-[mediawiki-zh-converter]: https://github.com/wikimedia/mediawiki/blob/master/includes/Language/Converters/ZhConverter.php
-[mediawiki-language-converter]: https://github.com/wikimedia/mediawiki/blob/master/includes/Language/LanguageConverter.php
-[zh-conversion-guide]: https://zh.wikipedia.org/wiki/Wikipedia:字詞轉換處理#转换技术
-[php-strtr]: https://www.php.net/manual/en/function.strtr.php
 [page-summaries]: https://www.mediawiki.org/wiki/Page_Content_Service#/page/summary

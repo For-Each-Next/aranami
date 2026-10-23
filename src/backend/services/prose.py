@@ -1,8 +1,8 @@
-"""Configure English Wikipedia article prose extraction.
+"""Share the matching English and Chinese prose extraction rules.
 
-Use ``PROFILE`` with the shared wikitext extractor for English articles.
-Accepted translated headings and imported episode templates retain the
-existing analysis behavior.
+Both quality-analysis profiles accept translated headings and imported
+episode templates. Site identity still controls template normalization;
+assessment selection and milestone interpretation remain per-wiki.
 """
 
 import re

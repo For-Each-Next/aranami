@@ -8,7 +8,8 @@ Terminal users running reports or previews should use the
 [Development](development.md).
 
 Aranami runs only on Toolforge. One Python 3.15 backend hub manages wiki
-and website data; one PHP webservice displays saved outputs. The source
+and website data; a separate read-only Python server renders saved outputs
+as HTML pages with shared CSS. The source
 deployment does not install a wheel or create separate report workers.
 
 ## Upload local src (source code) to Toolforge
@@ -78,9 +79,10 @@ both names refer to the same account; do not replace the alias, change
 ownership, or move runtime data to force a particular spelling.
 
 Keep credentials, `.my.cnf`, Pywikibot configuration, runtime data, and
-environments outside `app/`. The launcher changes to the tool home and
-sets `PYTHONPATH` to the deployed `app/src`, `PYWIKIBOT_DIR` to the existing
-account configuration, and the bytecode cache below `cache/`.
+environments outside `app/`. Both launchers verify the active deployment,
+change to the tool home, set `PYTHONPATH` to the deployed `app/src`, and
+place bytecode below `cache/`. The hub sets `PYWIKIBOT_DIR` to the existing
+account configuration; the public server does not initialize wiki clients.
 
 ## Runtime folder architecture
 
@@ -93,7 +95,7 @@ The following paths are relative to the tool home:
 | `app.previous/` | Previous complete source generation retained for recovery |
 | `pyvenv-3.15` | Stable link to the selected locked Python 3.15 environment |
 | `deployment-envs/` | Isolated environments prepared before promotion |
-| `deployment-backups/` | Transaction-specific job definitions, receipts, routing, and older generations |
+| `deployment-backups/` | Transaction-specific job definitions, receipts, environment references, and older generations |
 | `active-deployment.json` | Receipt matching the selected source and environment |
 | `deployment.lock/` | In-progress deployment guard; inspect an interrupted transaction before removing it |
 | `python/` | Managed Python 3.15.0 interpreter |
@@ -103,7 +105,6 @@ The following paths are relative to the tool home:
 | `cache/` | Disposable source data, completion evidence, bytecode, and website snapshots |
 | `logs/` | Natural-language UTC daily logs only: `aranami.YYYY-MM-DD.log` |
 | `dry-run/` | Preview summaries, exact proposed text, and isolated result bundles |
-| `public_html` | Link to `app/src/webservice/public_html`; private PHP helpers remain outside the public tree |
 
 The authoritative metadata files are `state/routine-status.json`,
 `state/schedule-status.json`, and `state/report-updates.json`. Do not
@@ -113,8 +114,10 @@ Deleting disposable caches requires later revalidation and collection;
 it is not a routine deployment step.
 
 Toolforge's `python3.13` image bootstraps uv and the managed Python 3.15.0
-interpreter. The hub explicitly executes `pyvenv-3.15/bin/python`, so
-application code runs on Python 3.15. The website uses the `php8.4` image.
+interpreter. Both runtime jobs use that image and explicitly execute
+`pyvenv-3.15/bin/python`, so application code runs on Python 3.15. The
+website server serves its browser assets directly from
+`app/src/webservice/public_html/`.
 
 ## Browse and view files
 
@@ -207,7 +210,7 @@ target may enforce `440` and reject permission changes. That mode permits
 only the tool owner and its tool group to read it, not other users.
 The hub starts with `umask 077` so newly created runtime files and private
 directories do not gain group or other-user access. Keep credentials outside
-`public_html`; source replacement must never upload or overwrite them.
+the source tree; source replacement must never upload or overwrite them.
 
 ## Validate and upload source
 
@@ -221,9 +224,9 @@ uv run python scripts/upload_toolforge.py --dry-run
 ```
 
 The dry run inspects the exact payload without contacting Toolforge. It
-includes backend, updater, shared Python code, public assets, private PHP
-helpers, dependency metadata, launchers, and generated version, routine,
-and hash manifests. It excludes credentials, runtime data, and tests.
+includes backend, updater, shared and presentation Python code, static assets,
+dependency metadata, launchers, and generated version and hash manifests.
+It excludes credentials, runtime data, and tests.
 Source symlinks and missing required files fail validation. Add
 `--archive <new-file.tar>` to retain an inspected payload; the archive path
 must not already exist.
@@ -257,7 +260,7 @@ the setup job finishing alone is not sufficient proof.
 
 Only after setup succeeds does deployment stop the Aranami jobs, wait for
 their pods to disappear, and replace the complete source directory,
-environment link, and website routing. It leaves both applications
+environment link, and active receipt. It leaves both applications
 stopped after validation. Start them explicitly after reviewing the result.
 
 Do not edit individual files inside the active source tree or mix files
@@ -270,15 +273,18 @@ Run on the bastion as the tool account:
 
 ```shell
 toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --command 'exec sh /data/project/aranami/app/scripts/toolforge/run-hub.sh'
-toolforge jobs run aranami-logs --image php8.4 --webservice --mount=all
+toolforge jobs run aranami-web --image python3.13 --continuous --mount=all --port 8000 --publish --command 'exec sh /data/project/aranami/app/scripts/toolforge/run-web.sh'
 ```
 
-Despite the retained `aranami-logs` job name, this PHP webservice serves
-the complete website as well as the log viewer.
+`aranami-web` publishes the read-only server on the tool's domain. It serves
+complete HTML pages, static assets, and `/api/config`, `/api/dashboard`,
+`/api/status`, and `/api/logs` without starting collection or publication. Toolforge routes
+public requests to port 8000 through its
+[published continuous job support][toolforge-publish].
 
-Keep the leading `exec` in the hub command. It replaces Toolforge's outer
-shell so Python receives the container's stop signal, records the shutdown
-request, and logs completion after cleanup. A forced kill or an expired
+Keep the leading `exec` in both commands so Python receives the container's
+stop signal directly. The hub records its shutdown request and logs
+completion after cleanup. A forced kill or an expired
 container termination grace period cannot guarantee the final log entry.
 
 The hub enables live wiki publication. By default it checks routines and
@@ -289,147 +295,8 @@ Do not add `--no-run-immediately` when the intention is to deploy and run
 due work immediately. Use that option on the `run-hub.sh` command only
 when startup should wait for scheduled callbacks.
 
-Without a valid website snapshot, PHP shows a preparing state until
+Without a valid website snapshot, the website shows a preparing state until
 collection succeeds. A frontend request never initiates collection.
-
-## Prepare Chinese conversion tables on Toolforge
-
-Use this workflow to prepare reproducible upstream data for regional
-article-title display. Fork all three sources independently:
-
-| Layer | Forked sources | Override priority |
-|---|---|---|
-| Software | MediaWiki Chinese tables, converter definitions, and license at one commit | Base |
-| Local site | Chinese Wikipedia `MediaWiki:Conversiontable/*`, including referenced subpages | Overrides software |
-| Video games | `Module:CGroup/Games` and its verified Item contract | Overrides local site and software |
-
-Games-specific rules from
-[Module:CGroup/Games](https://zh.wikipedia.org/wiki/Module:CGroup/Games)
-take precedence over MediaWiki's default Chinese conversion tables. The
-[architecture contract](architecture.md#regional-article-title-conversion-planned)
-defines extraction, variant selection, and unchanged article identities.
-This is preparation guidance: Aranami does not yet ship a conversion-table
-importer or activate these files for title rendering.
-
-Run acquisition and updates only on Toolforge as the `aranami` account,
-using `curl` and `jq`. Keep the inputs in the tool home's disposable cache,
-outside active source, credentials, and public files. Do not update tables
-from the development computer or during a website request.
-
-Create one isolated candidate and resolve an immutable MediaWiki commit:
-
-```shell
-cd /data/project/aranami
-mkdir -p cache/chinese-conversion
-conversion_stage=$(mktemp -d /data/project/aranami/cache/chinese-conversion/staging.XXXXXX)
-mkdir -p "$conversion_stage/software" "$conversion_stage/site" "$conversion_stage/games"
-conversion_agent='Aranami conversion maintenance (https://aranami.toolforge.org/)'
-curl --fail --silent --show-error --max-time 60 --retry 2 \
-  --user-agent "$conversion_agent" \
-  --output "$conversion_stage/software/mediawiki-revision.json" \
-  'https://api.github.com/repos/wikimedia/mediawiki/commits?path=includes/Languages/Data/ZhConversion.php&per_page=1'
-conversion_commit=$(jq -er '.[0].sha | select(test("^[0-9a-f]{40}$"))' "$conversion_stage/software/mediawiki-revision.json")
-```
-
-Stop if either command fails or the commit is empty. Fetch the default
-tables, converter fallback/rule definitions, and license from that same
-commit:
-
-```shell
-curl --fail --silent --show-error --max-time 60 --retry 2 \
-  --user-agent "$conversion_agent" \
-  --output "$conversion_stage/software/ZhConversion.php" \
-  "https://raw.githubusercontent.com/wikimedia/mediawiki/$conversion_commit/includes/Languages/Data/ZhConversion.php"
-curl --fail --silent --show-error --max-time 60 --retry 2 \
-  --user-agent "$conversion_agent" \
-  --output "$conversion_stage/software/ZhConverter.php" \
-  "https://raw.githubusercontent.com/wikimedia/mediawiki/$conversion_commit/includes/Language/Converters/ZhConverter.php"
-curl --fail --silent --show-error --max-time 60 --retry 2 \
-  --user-agent "$conversion_agent" \
-  --output "$conversion_stage/software/LanguageConverter.php" \
-  "https://raw.githubusercontent.com/wikimedia/mediawiki/$conversion_commit/includes/Language/LanguageConverter.php"
-curl --fail --silent --show-error --max-time 60 --retry 2 \
-  --user-agent "$conversion_agent" \
-  --output "$conversion_stage/software/COPYING" \
-  "https://raw.githubusercontent.com/wikimedia/mediawiki/$conversion_commit/COPYING"
-```
-
-Treat the PHP files as source data; do not `include`, `require`, or execute
-them. If upstream paths or declarations change, review the new format and
-adapt the importer before proceeding. Preserve the upstream license and
-attribution rather than treating imported data as Aranami's CC0 source.
-
-Fork the local site's conversion pages, including their raw content and
-revision identities. Start the read-only namespace listing with:
-
-```shell
-curl --fail --silent --show-error --max-time 60 --retry 2 \
-  --user-agent "$conversion_agent" --get \
-  --data-urlencode 'action=query' \
-  --data-urlencode 'format=json' \
-  --data-urlencode 'formatversion=2' \
-  --data-urlencode 'generator=allpages' \
-  --data-urlencode 'gapnamespace=8' \
-  --data-urlencode 'gapprefix=Conversiontable/' \
-  --data-urlencode 'gaplimit=50' \
-  --data-urlencode 'prop=revisions' \
-  --data-urlencode 'rvprop=ids|timestamp|content' \
-  --data-urlencode 'rvslots=main' \
-  --output "$conversion_stage/site/pages-001.json" \
-  'https://zh.wikipedia.org/w/api.php'
-```
-
-If a response contains `continue`, repeat the request with every returned
-continuation field and save each subsequent response under a new numbered
-filename. Do not compile or activate a partial listing. Select the parents
-for `zh-hans`, `zh-hant`, `zh-cn`, `zh-tw`, `zh-hk`, `zh-mo`, `zh-sg`, and
-`zh-my` and the conversion subpages they actually reference. Resolve any
-redirects or further references through revision-bearing read-only API
-requests. Follow the pinned converter's traversal and override semantics;
-distinguish a confirmed absent/empty local override from a failed request.
-
-Capture Games and its Item constructor through the read-only wiki API. The
-response retains the precise revision IDs and their corresponding content:
-
-```shell
-curl --fail --silent --show-error --max-time 60 --retry 2 \
-  --user-agent "$conversion_agent" --get \
-  --data-urlencode 'action=query' \
-  --data-urlencode 'format=json' \
-  --data-urlencode 'formatversion=2' \
-  --data-urlencode 'prop=revisions' \
-  --data-urlencode 'rvprop=ids|timestamp|content' \
-  --data-urlencode 'rvslots=main' \
-  --data-urlencode 'redirects=1' \
-  --data-urlencode 'titles=Module:CGroup/Games|Module:CGroup/core' \
-  --output "$conversion_stage/games/cgroup-revisions.json" \
-  'https://zh.wikipedia.org/w/api.php'
-```
-
-Keep all three forks together in the candidate manifest while retaining
-their separate provenance. Article-local NoteTA/title overrides need a
-separate implementation before claiming exact per-article parity.
-
-Reject API errors, missing pages/slots, empty Games sources, or unsupported
-rule syntax. Keep the source/history links and applicable upstream attribution
-with the compiled data. When the importer is implemented, validate all
-supported variants and Games-over-default conflicts before activation.
-Include the 生化危机 / 惡靈古堡 / 生化危機 example, a title with several
-Games matches such as 合金装备 和平行者, a one-way rule, a repeated phrase,
-overlapping short/full-title rules, duplicate definitions, Latin text with
-no applicable rule, and unchanged article/Pageviews URLs. Merge rules into
-each target's table in the verified layer/source order, then apply all
-non-overlapping longest matches without reconverting replacement output.
-
-Record each layer's UTC fetch time, commit and revision IDs, SHA-256 hashes,
-rule counts, and the conversion implementation version in the candidate manifest.
-Activate only a complete validated generation through an atomic runtime
-selector, retaining its predecessor for rollback. Refresh affected display
-labels and rendered pages after selection; do not relabel source
-observation timestamps as new collection. A failed fetch, parse, or
-validation leaves the selected generation and website data intact. Without
-a validated generation, keep canonical article titles visible. Do not add
-a schedule until the updater and its failure handling have been deployed.
 
 ## Inspect operation
 
@@ -437,14 +304,14 @@ a schedule until the updater and its failure handling have been deployed.
 toolforge jobs list
 toolforge jobs show aranami-hub
 toolforge jobs logs aranami-hub
-toolforge jobs logs aranami-logs
+toolforge jobs logs aranami-web
 ```
 
 Inspect the [website](https://aranami.toolforge.org/) and
 [saved daily logs](https://aranami.toolforge.org/logs/). The hub also serves
 local read-only diagnostic `/healthz` and `/dashboard.json` endpoints at
-`127.0.0.1:8765` by default. PHP reads the shared snapshot directly and
-does not depend on those endpoints.
+`127.0.0.1:8765` by default. The public server reads saved runtime files
+independently and remains available while the hub is stopped.
 
 The website shows observed routine results and actual next execution
 times, not predictions calculated from cron. Missing or stale metadata
@@ -464,7 +331,7 @@ Restart the existing definitions without replacing source:
 
 ```shell
 toolforge jobs restart aranami-hub
-toolforge jobs restart aranami-logs
+toolforge jobs restart aranami-web
 ```
 
 The hub's configured startup behavior applies again. For maintenance,
@@ -472,8 +339,8 @@ delete the two job definitions and inspect their remaining pods:
 
 ```shell
 toolforge jobs delete aranami-hub
-toolforge jobs delete aranami-logs
-kubectl get pods -l 'app.kubernetes.io/name in (aranami-hub,aranami-logs)'
+toolforge jobs delete aranami-web
+kubectl get pods -l 'app.kubernetes.io/name in (aranami-hub,aranami-web)'
 ```
 
 Wait until no matching pods remain before changing active source,
@@ -486,24 +353,22 @@ creation, inspection, restart, and deletion.
 
 Promotion prints its exact transaction directory under
 `deployment-backups/`. It contains the previous job definitions in
-`jobs.yaml`, the successful setup receipt, and replaced routing or
-environment references. The immediate prior source remains in
-`app.previous/`; an existing public directory is retained as
-`public_html.previous/` when replaced by the managed link. Later
-promotions archive older predecessors in their own transaction directory.
+`jobs.yaml`, the successful setup receipt, and replaced environment
+references. The immediate prior source remains in `app.previous/`.
+Later promotions archive older predecessors in their transaction directory.
 Each generation retains its independent environment under
 `deployment-envs/`.
 
 A failed setup leaves existing applications running. If an error occurs
 after promotion, deployment restores the previous source, environment
-link, and routing when safe, and leaves applications stopped. If shutdown
-could not be confirmed, inspect the job/pod state before recovery; do not
+link, and active receipt when safe, and leaves applications stopped. If
+shutdown could not be confirmed, inspect the job/pod state before recovery; do not
 assume rollback was safe. Review the deployment output and retained files
 before restarting.
 
 For manual recovery after a completed deployment, stop both applications
 and confirm their pods have disappeared. Select matching source,
-environment, routing, and active-deployment receipt from the same
+environment, and active-deployment receipt from the same
 generation, then review the saved job definitions before restoring service.
 Do not overwrite credentials or durable outputs to recover application code.
 
@@ -516,3 +381,4 @@ confirming that no deployment/setup process remains and the generation
 is consistent.
 
 [toolforge-jobs]: https://wikitech.wikimedia.org/wiki/Help:Toolforge/Running_jobs
+[toolforge-publish]: https://wikitech.wikimedia.org/wiki/Help:Toolforge/Running_jobs#Exposing_continuous_jobs_to_the_internet

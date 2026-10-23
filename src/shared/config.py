@@ -77,7 +77,7 @@ def routine_configuration() -> dict[str, object]:
     """Return the serializable destination and UTC schedule contract.
 
     Returns:
-        Versioned metadata also read by the PHP website.
+        Versioned metadata shared with the read-only website.
     """
     return {
         "schema": 1,

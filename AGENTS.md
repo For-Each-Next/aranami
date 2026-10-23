@@ -147,7 +147,7 @@ publication in `src/updater/`.
 
 ## Verification
 
-Before handing off a material change, run relevant offline Python/PHP
+Before handing off a material change, run relevant offline Python
 suites, source import/boundary/upload checks, and the checks below:
 
 ```text

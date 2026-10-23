@@ -14,7 +14,6 @@ import logging
 import math
 import os
 import re
-import stat
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -28,6 +27,7 @@ from backend.website import backlog, homepage, pageviews
 from backend.website.extracts import MAX_EXTRACT_BYTES, ExtractCache
 from shared.sources.quarry.projects import query_pages_by_wikiproject
 from shared.sources.summaries import fetch_summary
+from shared.support.files import read_json_object
 
 if TYPE_CHECKING:
     import argparse
@@ -37,6 +37,11 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
 _SNAPSHOT_SCHEMA = 2
 REPORT_KEYS = ("recognized", "dyk", "pageviews", "news_history", "backlog")
+_APPEARANCE_SECTIONS = {
+    "recognized": ("featured", "good", "upcoming"),
+    "dyk": ("dyk",),
+    "news_history": ("news", "history"),
+}
 _REPORT_LABELS = {
     "recognized": "recognized Chinese content",
     "dyk": "DYK highlights",
@@ -811,12 +816,7 @@ def _valid_appearance_cache(  # ruff: ignore[too-many-return-statements]
         or not isinstance(period["label"], str)
     ):
         return False
-    sections = {
-        "recognized": ("featured", "good", "upcoming"),
-        "dyk": ("dyk",),
-        "news_history": ("news", "history"),
-    }[name]
-    for section in sections:
+    for section in _APPEARANCE_SECTIONS[name]:
         records = value["homepage"][section]
         if (
             not isinstance(records, list)
@@ -878,7 +878,179 @@ def _valid_report_data(name: str, value: object, days: int) -> bool:
         return False
 
 
-def _read_report_cache(  # ruff: ignore[too-many-return-statements]
+def _valid_report_metadata(value: object) -> bool:
+    """Validate refresh observations independently of report contents.
+
+    Returns:
+        Whether configuration, intervals, and UTC attempts are valid.
+    """
+    if not isinstance(value, dict):
+        return False
+    for key in ("config_id", "source_config_id"):
+        identity = value.get(key)
+        if key == "source_config_id" and identity is None:
+            continue
+        if (
+            not isinstance(identity, str)
+            or re.fullmatch(
+                r"[0-9a-f]{64}",
+                identity,
+            )
+            is None
+        ):
+            return False
+    interval = value.get("refresh_interval_seconds")
+    if (
+        isinstance(interval, bool)
+        or not isinstance(interval, int | float)
+        or not math.isfinite(interval)
+        or interval <= 0
+        or type(value.get("failed")) is not bool
+    ):
+        return False
+    for key in ("last_success_at", "last_attempt_at"):
+        if key not in value or (
+            value[key] is not None and _cache_timestamp(value[key]) is None
+        ):
+            return False
+    success = _cache_timestamp(value["last_success_at"])
+    attempt = _cache_timestamp(value["last_attempt_at"])
+    return success is None or (attempt is not None and success <= attempt)
+
+
+def _period_days(period: object) -> int:
+    """Read a canonical bounded half-open display window.
+
+    Returns:
+        Window length, or zero when the period is invalid.
+    """
+    if not isinstance(period, dict) or not isinstance(
+        period.get("label"),
+        str,
+    ):
+        return 0
+    try:
+        start, end = (
+            dt.date.fromisoformat(period[key]) for key in ("start", "end")
+        )
+    except KeyError, TypeError, ValueError:
+        return 0
+    days = (end - start).days
+    return (
+        days
+        if start.isoformat() == period["start"]
+        and end.isoformat() == period["end"]
+        and 1 <= days <= _MAX_DAYS
+        else 0
+    )
+
+
+def _valid_dashboard_report(name: str, snapshot: dict[str, object]) -> bool:
+    """Reuse private report validators for their public observations.
+
+    Returns:
+        Whether an independent report is absent or completely valid.
+    """
+    metadata = snapshot["reports"][name]
+    if not _valid_report_metadata(metadata):
+        return False
+    if name in _APPEARANCE_SECTIONS:
+        sections = {
+            key: snapshot["homepage"][key]
+            for key in _APPEARANCE_SECTIONS[name]
+        }
+        if all(value is None for value in sections.values()):
+            return True
+        period = metadata.get("period")
+        days = _period_days(period)
+        return bool(days) and _valid_report_data(
+            name,
+            {"homepage": sections, "period": period, "sources": []},
+            days,
+        )
+    data = snapshot[name]
+    if data is None:
+        return True
+    if name == "pageviews":
+        success = _cache_timestamp(metadata["last_success_at"])
+        day = dt.date.fromisoformat(data["date"])
+        return (
+            _valid_report_data(name, data, 1)
+            and success is not None
+            and (success.date() - dt.timedelta(days=7) <= day < success.date())
+        )
+    return _valid_report_data(name, data, 1)
+
+
+def validate_dashboard_snapshot(value: object) -> bool:
+    """Validate the public saved dashboard without creating clients.
+
+    Public readers and private cache readers share the article, ranking,
+    maintenance, and date contracts. Missing observations remain null;
+    successful empty collections remain valid and distinguishable.
+
+    Args:
+        value: Decoded schema-two dashboard envelope.
+
+    Returns:
+        Whether the complete snapshot can be displayed safely.
+    """
+    if (
+        not isinstance(value, dict)  # ruff: ignore[too-many-boolean-expressions]
+        or type(value.get("schema")) is not int
+        or value["schema"] != _SNAPSHOT_SCHEMA
+        or not _period_days(value.get("period"))
+        or _cache_timestamp(value.get("updated_at")) is None
+        or not isinstance(value.get("reports"), dict)
+        or not isinstance(value.get("homepage"), dict)
+    ):
+        return False
+    try:  # ruff: ignore[too-many-statements-in-try-clause]
+        reports_valid = all(
+            _valid_dashboard_report(name, value) for name in REPORT_KEYS
+        )
+        sources, errors = value["sources"], value["errors"]
+        popular = value.get("pageviews")
+        popularity_url = popular["source_url"] if popular else None
+        sources_valid = (
+            isinstance(sources, list)
+            and len(sources) <= _SECTION_RECORD_LIMIT
+            and all(
+                isinstance(source, dict)
+                and isinstance(source.get("label"), str)
+                and (
+                    _cache_wiki_url(source.get("url"))
+                    or (
+                        popularity_url is not None
+                        and source.get("url") == popularity_url
+                    )
+                )
+                for source in sources
+            )
+        )
+        errors_valid = (
+            isinstance(errors, list)
+            and len(errors) <= _SECTION_RECORD_LIMIT
+            and all(
+                isinstance(error, dict)
+                and isinstance(error.get("section"), str)
+                and isinstance(error.get("message"), str)
+                for error in errors
+            )
+        )
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        AttributeError,
+        OverflowError,
+        RecursionError,
+    ):
+        return False
+    return reports_valid and sources_valid and errors_valid
+
+
+def _read_report_cache(
     path: Path | None,
     name: str,
     days: int,
@@ -895,17 +1067,10 @@ def _read_report_cache(  # ruff: ignore[too-many-return-statements]
     Returns:
         Validated envelope with original successful source data.
     """
-    if path is None or path.parent.is_symlink():
+    if path is None:
         return None
     try:  # ruff: ignore[too-many-statements-in-try-clause]
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(descriptor, "rb") as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                return None
-            content = stream.read(_MAX_SNAPSHOT_BYTES + 1)
-        if len(content) > _MAX_SNAPSHOT_BYTES:
-            return None
-        record = json.loads(content)
+        record = read_json_object(path, _MAX_SNAPSHOT_BYTES)
         required = {
             "schema",
             "config_id",
@@ -1132,13 +1297,8 @@ def _collect_report(
     elif name == "backlog":
         data = backlog.collect_backlog(read.site, membership)
     else:
-        sections = {
-            "recognized": ("featured", "good", "upcoming"),
-            "dyk": ("dyk",),
-            "news_history": ("news", "history"),
-        }[name]
         displays = {}
-        for section in sections:
+        for section in _APPEARANCE_SECTIONS[name]:
             bounds = (
                 (end, end + dt.timedelta(days=30))
                 if section == "upcoming"

@@ -10,15 +10,16 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING
 
 import polars as pl
 
+from shared.support.cache import write_parquet_cache
+
 if TYPE_CHECKING:
     import datetime as dt
     from collections.abc import Callable
+    from pathlib import Path
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_ROWS = 10_000
@@ -115,37 +116,6 @@ def _load(path: Path | None, now: int) -> pl.DataFrame:  # ruff: ignore[too-many
         _LOGGER.warning("Ignoring unreadable article-introduction cache.")
         return empty
     return frame
-
-
-def _write(path: Path, frame: pl.DataFrame) -> None:
-    """Atomically replace one regular Parquet cache.
-
-    Args:
-        path: Disposable destination outside the source tree.
-        frame: Bounded observations to retain.
-
-    Raises:
-        OSError: The destination is unsafe or cannot be replaced.
-        ValueError: The compressed cache exceeds the size limit.
-    """
-    if path.is_symlink() or path.parent.is_symlink():
-        message = "The introduction cache must not follow symbolic links."
-        raise OSError(message)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(dir=path.parent, delete=False) as stream:
-        temporary = Path(stream.name)
-    try:
-        frame.write_parquet(temporary)
-        if temporary.stat().st_size > _MAX_BYTES:
-            message = "The introduction cache exceeds its size limit."
-            raise ValueError(message)
-        temporary.chmod(0o640)
-        temporary.replace(path)
-    finally:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            _LOGGER.warning("Could not remove temporary introduction cache.")
 
 
 class ExtractCache:
@@ -290,6 +260,11 @@ class ExtractCache:
                 .sort(["used_at", "title"], descending=[True, False])
                 .head(_MAX_ROWS)
             )
-            _write(self.path, self._frame)
+            write_parquet_cache(
+                self.path,
+                self._frame,
+                max_bytes=_MAX_BYTES,
+                mode=0o640,
+            )
         except OSError, ValueError, pl.exceptions.PolarsError:
             _LOGGER.warning("Could not save the article-introduction cache.")

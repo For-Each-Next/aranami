@@ -27,6 +27,8 @@ from time import perf_counter
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from shared.support.files import read_json_object
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -112,7 +114,7 @@ def report_update_key(site: str, title: str) -> str:
         title: Exact destination title selected by the publication job.
 
     Returns:
-        Stable SHA-256 identity shared with the read-only PHP consumer.
+        Stable SHA-256 identity shared with read-only website consumers.
 
     Raises:
         ValueError: The wiki or title is not a bounded valid identity.
@@ -216,30 +218,20 @@ def _terminal_record(
     return record
 
 
-def _read_records(path: Path) -> dict[str, dict[str, object]]:
-    """Read a bounded regular snapshot without following symlinks.
+def read_report_status(path: Path) -> dict[str, object]:
+    """Read a validated snapshot for writers and read-only consumers.
+
+    Args:
+        path: Durable per-destination update snapshot.
 
     Returns:
-        Validated report records, or an empty map for an absent file.
+        Complete envelope with normalized, validated report records.
 
     Raises:
-        OSError: The snapshot is unsafe or unreadable.
+        OSError: The snapshot is missing, unsafe, or unreadable.
         ValueError: Existing metadata is malformed.
-    """
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except FileNotFoundError:
-        return {}
-    with os.fdopen(descriptor, "rb") as stream:
-        metadata = os.fstat(stream.fileno())
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > _MAX_BYTES:
-            message = "Report metadata must be a bounded regular file."
-            raise OSError(message)
-        content = stream.read(_MAX_BYTES + 1)
-    if len(content) > _MAX_BYTES:
-        message = "Report metadata exceeds its snapshot size bound."
-        raise ValueError(message)
-    snapshot = json.loads(content)
+    """  # ruff: ignore[docstring-extraneous-exception]
+    snapshot = read_json_object(path, _MAX_BYTES)
     if not isinstance(snapshot, dict) or set(snapshot) != {
         "schema",
         "updated_at",
@@ -264,7 +256,7 @@ def _read_records(path: Path) -> dict[str, dict[str, object]]:
             message = "Report metadata keys must match their destinations."
             raise ValueError(message)
         records[key] = record
-    return records
+    return {**snapshot, "reports": records}
 
 
 def _newer_record(
@@ -388,7 +380,10 @@ def _write_record(directory: Path, incoming: dict[str, object]) -> bool:
             raise OSError(message)
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         path = directory / "report-updates.json"
-        records = _read_records(path)
+        try:
+            records = read_report_status(path)["reports"]
+        except FileNotFoundError:
+            records = {}
         key = report_update_key(incoming["site"], incoming["title"])
         if not _newer_record(records.get(key), incoming):
             return False

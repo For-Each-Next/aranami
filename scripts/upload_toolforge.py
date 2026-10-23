@@ -15,7 +15,6 @@ import os
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
-import sys
 import tarfile
 import tempfile
 import tomllib
@@ -28,15 +27,15 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-from shared import config  # ruff: ignore[module-import-not-at-top-of-file]
 
 _PACKAGES = ("backend", "updater", "webservice", "shared")
-_SUFFIXES = {".py", ".php", ".json", ".svg", ".conf", ".js"}
+_SUFFIXES = {".py", ".css", ".json", ".svg"}
 _SCRIPTS = (
     "setup-env.sh",
     "deploy-source.sh",
     "run-hub.sh",
+    "run-web.sh",
+    "runtime-env.sh",
     "source-files.json",
     "validate-source.py",
 )
@@ -185,7 +184,7 @@ def source_payload(root: Path = ROOT) -> dict[str, bytes]:
     """Return the exact validated upload, excluding all runtime data.
 
     Args:
-        root: Repository root containing both applications.
+        root: Repository root containing the runtime source components.
 
     Returns:
         Relative archive filenames and their validated bytes.
@@ -225,8 +224,8 @@ def source_payload(root: Path = ROOT) -> dict[str, bytes]:
     ):
         payload[name] = _read_regular(root, name)
     for name in (
-        "src/webservice/public_html/index.php",
-        "src/webservice/status.php",
+        "src/webservice/pages.py",
+        "src/backend/public.py",
         "src/backend/website/maintenance.json",
         "src/shared/config.py",
     ):
@@ -237,10 +236,6 @@ def source_payload(root: Path = ROOT) -> dict[str, bytes]:
         "schema": 1,
         "version": version,
     }).encode()
-    payload["src/shared/routines.json"] = json.dumps(
-        config.routine_configuration(),
-        ensure_ascii=False,
-    ).encode()
     payload["deployment.json"] = json.dumps(
         {
             "schema": 1,

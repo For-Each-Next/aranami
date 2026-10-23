@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 _ROOT = Path(__file__).resolve().parents[2]
-_OBSOLETE_CACHE = "cache/toolforge/quality-video-games-all.parquet"
 _FAKE_COMMAND = r'''
 """Emulate only the deployment's offline Toolforge and Kubernetes calls."""
 import json
@@ -35,8 +34,9 @@ args = sys.argv[1:]
 with (root / "commands.jsonl").open("a") as stream:
     stream.write(json.dumps([name, *args]) + "\n")
 if name == "python3":
-    if (len(args) > 1 and args[1] == "configure-web"
-            and os.environ.get("FAKE_CONFIG_FAILURE")):
+    if (len(args) > 3 and args[1] == "receipt"
+            and args[3] == str(root / "active-deployment.json")
+            and os.environ.get("FAKE_RECEIPT_FAILURE")):
         raise SystemExit(17)
     os.execv(os.environ["TEST_PYTHON"], [os.environ["TEST_PYTHON"], *args])
 if name == "kubectl":
@@ -71,7 +71,8 @@ assert name == "toolforge", name
 if args[:2] == ["jobs", "dump"]:
     Path(args[args.index("-f") + 1]).write_text("jobs-before-promotion\n")
 elif args[:2] == ["jobs", "show"]:
-    assert args[2] in {"aranami", "aranami-dashboard", "aranami-logs"}
+    assert args[2] in {"aranami-hub", "aranami-web", "aranami",
+                        "aranami-dashboard", "aranami-logs"}
 elif args[:2] == ["jobs", "delete"]:
     pass
 elif args[:2] == ["jobs", "run"]:
@@ -134,23 +135,14 @@ class TestDeploymentShell(TestCase):
             "app/old-source.txt": "current source",
             "app.previous/older-source.txt": "older source",
             "pyvenv-3.15/old-environment.txt": "prepared old environment",
-            "public_html/old-index.txt": "previous website",
             "logs/keep.log": "retained log",
             "reports/keep.parquet": "retained report",
             "cache/keep.parquet": "retained cache",
-            _OBSOLETE_CACHE: "obsolete badges",
             "user-config.py": "# private account configuration\n",
         }.items():
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
-        self.routing = (
-            "# unrelated local configuration\nserver.max-connections = 25\n"
-            f'include "{self.root}/log-viewer.lighttpd.conf"\n'
-            f'  include "{self.root}/app/src/webservice/'
-            'log-viewer.lighttpd.conf"\n'
-        )
-        (self.root / ".lighttpd.conf").write_text(self.routing)
 
     def _stage(self, token: str = "a" * 32) -> Path:
         """Materialize one exact staged source payload.
@@ -218,13 +210,14 @@ class TestDeploymentShell(TestCase):
         assert result.returncode != 0
         assert (self.root / "app/old-source.txt").exists()
         assert (self.root / "app.previous/older-source.txt").exists()
-        assert (self.root / ".lighttpd.conf").read_text() == self.routing
         deleted = [
             command[-1]
             for command in self._commands()
             if command[:3] == ["toolforge", "jobs", "delete"]
         ]
         assert not {
+            "aranami-hub",
+            "aranami-web",
             "aranami",
             "aranami-dashboard",
             "aranami-logs",
@@ -250,10 +243,7 @@ class TestDeploymentShell(TestCase):
         assert result.returncode == 0, result.stderr
         assert (self.root / "app/deployment.json").is_file()
         assert (self.root / "app.previous/old-source.txt").exists()
-        assert (self.root / "public_html.previous/old-index.txt").exists()
-        assert (self.root / "public_html").readlink() == Path(
-            "app/src/webservice/public_html",
-        )
+        assert (self.root / "app/src/webservice/pages.py").is_file()
         assert (self.root / "pyvenv-3.15").is_symlink()
         assert (self.root / "logs/keep.log").read_text() == "retained log"
         assert (
@@ -262,17 +252,6 @@ class TestDeploymentShell(TestCase):
         assert (
             self.root / "user-config.py"
         ).read_text() == "# private account configuration\n"
-        routing = (self.root / ".lighttpd.conf").read_text()
-        assert routing.count("include ") == 1
-        assert "server.max-connections = 25" in routing
-        assert not (
-            self.root / "cache/toolforge/quality-video-games-all.parquet"
-        ).exists()
-        assert list(
-            (self.root / "deployment-backups").glob(
-                "*/retired-cache/quality-video-games-all.parquet",
-            ),
-        )
         commands = self._commands()
         run = next(
             index
@@ -282,9 +261,14 @@ class TestDeploymentShell(TestCase):
         stopped = next(
             index
             for index, command in enumerate(commands)
-            if command == ["toolforge", "jobs", "delete", "aranami"]
+            if command[:3] == ["toolforge", "jobs", "delete"]
         )
         assert run < stopped
+        assert {"aranami-hub", "aranami-web", "aranami-logs"} <= {
+            command[3]
+            for command in commands
+            if command[:3] == ["toolforge", "jobs", "delete"]
+        }
         started = [
             command
             for command in commands
@@ -293,28 +277,56 @@ class TestDeploymentShell(TestCase):
         assert len(started) == 1
         assert started[0][3].startswith("aranami-setup-")
         assert "Applications remain stopped" in result.stdout
+        assert "--port 8000 --publish" in result.stdout
+        assert (
+            f"--command 'exec sh {self.root}/app/scripts/toolforge/run-web.sh'"
+            in result.stdout
+        )
         assert (
             f"--command 'exec sh {self.root}/app/scripts/toolforge/run-hub.sh'"
             in result.stdout
         )
 
-    def test_post_promotion_failure_restores_source_environment_and_routing(
+    def test_post_promotion_failure_restores_source_and_environment(
         self,
     ) -> None:
         """Restore predecessors without starting applications."""
-        result = self._deploy(self._stage(), FAKE_CONFIG_FAILURE="1")
+        result = self._deploy(self._stage(), FAKE_RECEIPT_FAILURE="1")
         assert result.returncode != 0
         assert (self.root / "app/old-source.txt").exists()
         assert (self.root / "app.previous/older-source.txt").exists()
         assert (self.root / "pyvenv-3.15/old-environment.txt").exists()
-        assert (self.root / "public_html/old-index.txt").exists()
-        assert (self.root / ".lighttpd.conf").read_text() == self.routing
         assert not (self.root / "active-deployment.json").exists()
         assert list(
             (self.root / "deployment-backups").glob(
                 "*/rejected-app/deployment.json",
             ),
         )
+
+    def test_both_launchers_reject_changed_source_before_application_start(
+        self,
+    ) -> None:
+        """Guard both runtime processes with the source receipt."""
+        result = self._deploy(self._stage())
+        assert result.returncode == 0, result.stderr
+        (self.root / "app/src/shared/config.py").write_text("changed source")
+        for name in ("run-hub.sh", "run-web.sh"):
+            with self.subTest(launcher=name):
+                result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                    [
+                        "/bin/sh",
+                        str(self.root / "app/scripts/toolforge" / name),
+                        "--help",
+                    ],
+                    env=self.env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=30,
+                )
+                assert result.returncode != 0
+                assert "hash" in result.stderr
+                assert "usage:" not in result.stdout
 
     def test_repeated_promotions_keep_current_and_older_predecessors(
         self,
@@ -333,9 +345,6 @@ class TestDeploymentShell(TestCase):
                 "*/older-app/old-source.txt",
             ),
         )
-        assert (self.root / ".lighttpd.conf").read_text().count(
-            "include ",
-        ) == 1
 
     def test_stuck_application_pods_prevent_source_promotion(self) -> None:
         """Require applications to stop before promotion."""
@@ -364,9 +373,6 @@ class TestDeploymentShell(TestCase):
         )
         assert Path(evidence["source"]).parent == home
         assert Path(evidence["environment"]).parent == home / "deployment-envs"
-        assert (self.root / ".lighttpd.conf").read_text().count(
-            "include ",
-        ) == 1
 
     def test_source_symlink_inside_tool_home_is_rejected(self) -> None:
         """Reject staged source symlinks inside the tool home."""

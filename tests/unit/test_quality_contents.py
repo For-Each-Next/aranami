@@ -14,12 +14,10 @@ from wiki_fixtures import OfflineSite
 
 from backend.services import quality_contents as contents
 from backend.services.enwiki import (
-    prose as en_prose,
     quality_contents as en_contents,
     quality_dates as en_dates,
 )
 from backend.services.zhwiki import (
-    prose as zh_prose,
     quality_contents as zh_contents,
     quality_dates as zh_dates,
 )
@@ -198,7 +196,7 @@ class TestQualityProse(TestCase):
         prose = extract_prose(
             text,
             site=OfflineSite("en", "wikipedia"),
-            profile=en_prose.PROFILE,
+            profile=en_contents.PROFILE.prose,
         )
         expected_words = 4
         assert words.count_words(prose, language="en") == expected_words
@@ -221,7 +219,7 @@ class TestQualityProse(TestCase):
             prose = extract_prose(
                 "中文游戏!",
                 site=OfflineSite("zh", "wikipedia"),
-                profile=zh_prose.PROFILE,
+                profile=zh_contents.PROFILE.prose,
             )
             count = words.count_words(prose, language="zh")
         expected_words = 2

@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import Mock, call, patch
@@ -18,6 +19,7 @@ from backend.website.collect import (
     REPORT_KEYS,
     collect_dashboard,
     report_intervals,
+    validate_dashboard_snapshot,
 )
 
 
@@ -118,6 +120,45 @@ class TestDashboardReportCache(TestCase):
             now=now,
             **kwargs,
         )
+
+    def test_public_validation_reuses_complete_report_contracts(self) -> None:
+        """Accept empty successful reports and reject damaged data."""
+        snapshot = self._collect()
+        assert validate_dashboard_snapshot(snapshot)
+        for path, invalid in (
+            (("schema",), True),
+            (("period", "start"), "2026-02-30"),
+            (("reports", "recognized", "refresh_interval_seconds"), True),
+            (("reports", "recognized", "refresh_interval_seconds"), 10**1000),
+            (("reports", "recognized", "last_success_at"), "not a date"),
+            (("homepage", "upcoming"), [{}]),
+            (("pageviews", "date"), "2026-10-18"),
+            (("backlog", "total"), 1),
+            (("sources",), [{"label": "bad", "url": "javascript:bad"}]),
+            (("errors",), [{}]),
+        ):
+            with self.subTest(path=path):
+                damaged = deepcopy(snapshot)
+                target = damaged
+                for field in path[:-1]:
+                    target = target[field]
+                target[path[-1]] = invalid
+                assert not validate_dashboard_snapshot(damaged)
+
+    def test_public_validation_preserves_fallbacks(self) -> None:
+        """Keep null failures and older successful data valid."""
+        self.membership.side_effect = RuntimeError("offline")
+        with self.assertLogs("backend.website.collect", level="ERROR"):
+            unavailable = self._collect()
+        assert validate_dashboard_snapshot(unavailable)
+        self.membership.side_effect = None
+        current = self._collect(dt.timedelta(hours=1))
+        assert validate_dashboard_snapshot(current)
+        self.popularity.side_effect = RuntimeError("offline")
+        with self.assertLogs("backend.website.collect", level="ERROR"):
+            fallback = self._collect(dt.timedelta(days=30))
+        assert validate_dashboard_snapshot(fallback)
+        assert fallback["pageviews"] == current["pageviews"]
 
     def test_maintenance_month_source_survives_cache_and_bad_refresh(
         self,
