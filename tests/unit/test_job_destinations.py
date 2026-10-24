@@ -27,6 +27,7 @@ def _context() -> Mock:
     context = Mock(today=date(2026, 10, 3), dry=False)
     context.site.dbName.return_value = "zhwiki"
     context.publish.return_value = True
+    context.report_attempt.side_effect = lambda _title: nullcontext()
     return context
 
 

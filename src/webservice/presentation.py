@@ -384,6 +384,39 @@ def utc_time(value: object, *, seconds: bool = False) -> str:
     )
 
 
+def relative_time(
+    value: object,
+    interface: Interface,
+    now: dt.datetime,
+) -> str:
+    """Describe an observed time with whole elapsed or remaining units.
+
+    Args:
+        value: An aware source timestamp, or an unavailable value.
+        interface: Locale for the parenthesized annotation.
+        now: Aware rendering time shared with the absolute timestamp.
+
+    Returns:
+        Whole minutes below one hour, otherwise whole hours, rounded
+        down. Sub-minute intervals have short explicit labels. Invalid
+        or missing timestamps produce no annotation.
+    """
+    instant = timestamp(value)
+    if instant is None:
+        return ""
+    seconds = (instant - now).total_seconds()
+    minutes = int(abs(seconds) // _MINUTE)
+    if minutes == 0:
+        return interface.text("time.soon" if seconds > 0 else "time.just_now")
+    unit, count = (
+        ("hours", minutes // _HOUR_MINUTES)
+        if minutes >= _HOUR_MINUTES
+        else ("minutes", minutes)
+    )
+    direction = "ahead" if seconds > 0 else "ago"
+    return interface.text(f"time.{unit}_{direction}", count=count)
+
+
 def assessment_code(value: object, dimension: str) -> str | None:
     """Normalize verified names without assigning missing grades.
 
@@ -652,12 +685,12 @@ def duration(
     interface: Interface,
     *,
     running: bool = False,
-    exact: bool = False,
 ) -> str:
     """Localize durations without conflating unknown and zero.
 
     Returns:
-        A localized duration or the explicit unknown marker.
+        Whole seconds, or two decimals below one second, with an
+        ellipsis for active work. Unknown observations remain explicit.
     """
     if (
         not isinstance(seconds, (int, float))
@@ -665,15 +698,8 @@ def duration(
         or seconds < 0
     ):
         return "—"
-    if exact and not running:
-        return interface.text("duration.seconds", seconds=f"{seconds:.3f}")
-    rounded = (
-        math.floor(seconds)
-        if running
-        else math.floor(seconds * 100 + 0.5) / 100
-    )
-    if rounded >= _MINUTE:
-        whole = math.floor(seconds) if running else math.floor(seconds + 0.5)
+    whole = math.floor(seconds) if running else math.floor(seconds + 0.5)
+    if whole >= _MINUTE:
         label = interface.text(
             "duration.minutes",
             minutes=whole // _MINUTE,
@@ -682,7 +708,7 @@ def duration(
     else:
         label = interface.text(
             "duration.seconds",
-            seconds=str(rounded) if running else f"{rounded:.2f}",
+            seconds=f"{seconds:.2f}" if seconds < 1 else str(whole),
         )
     return label + ("…" if running else "")
 
@@ -691,21 +717,21 @@ def event_duration(
     event: Record | None,
     interface: Interface,
     now: dt.datetime,
-    *,
-    exact: bool = False,
 ) -> str:
-    """Display measured completion or unfinished elapsed time.
+    """Display waiting, measured completion, or active elapsed time.
 
     Returns:
-        Localized measured or elapsed duration, possibly unknown.
+        Localized waiting label or duration, possibly unknown.
     """
     if event is None:
         return "—"
+    if event.get("status") == "queued":
+        return interface.text("state.Queued")
     started = timestamp(event.get("started_at"))
     if event.get("status") == "running":
         seconds = max(0, (now - started).total_seconds()) if started else None
         return duration(seconds, interface, running=True)
-    return duration(event.get("duration_seconds"), interface, exact=exact)
+    return duration(event.get("duration_seconds"), interface)
 
 
 def schedule_state(
@@ -827,6 +853,7 @@ def uptime(
         days=minutes // _DAY_MINUTES,
         hours=minutes % _DAY_MINUTES // _HOUR_MINUTES,
         minutes=minutes % _HOUR_MINUTES,
+        seconds=int((now - started).total_seconds()) % _MINUTE,
         since=utc_time(schedule["started_at"]).removesuffix(" UTC"),
     )
 

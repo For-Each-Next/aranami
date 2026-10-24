@@ -221,6 +221,11 @@ class RuntimeContext[EditT: Publication]:
         init=False,
         repr=False,
     )
+    _report_generations: dict[tuple[str, str], str] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
 
     @property
     def report_run_id(self) -> str:
@@ -228,7 +233,7 @@ class RuntimeContext[EditT: Publication]:
         return self._active_task.run_id if self._active_task else self._run_id
 
     def register_targets(self, titles: Iterable[str]) -> None:
-        """Record each destination before reading or preparing its data.
+        """Queue each destination before reading or preparing its data.
 
         Args:
             titles: Configured destinations attempted by this routine.
@@ -237,7 +242,7 @@ class RuntimeContext[EditT: Publication]:
             self._report_update(self.site.dbName(), title)
 
     def _report_update(self, site: str, title: str) -> ReportUpdate:
-        """Start or retrieve a destination's current lifecycle.
+        """Register or retrieve a destination's current lifecycle.
 
         Returns:
             Backend-owned update handle for this routine and target.
@@ -255,6 +260,29 @@ class RuntimeContext[EditT: Publication]:
             self._report_updates[key] = update
             update.start()
         return update
+
+    @contextmanager
+    def report_attempt(self, title: str) -> Iterator[None]:
+        """Measure one destination's preparation and publication.
+
+        Start after shared preparation or another destination's work.
+        Preserve explicit publication outcomes when later cleanup fails;
+        otherwise record preparation failures when they occur.
+
+        Args:
+            title: Registered destination on this context's wiki.
+
+        Yields:
+            Control while this destination is prepared and published.
+        """
+        update = self._report_update(self.site.dbName(), title)
+        update.start_attempt()
+        try:
+            yield
+        except BaseException:
+            if not update.finished:
+                update.finish("failed", confirmed_edits=0)
+            raise
 
     def finish_report(
         self,
@@ -477,6 +505,8 @@ class RuntimeContext[EditT: Publication]:
 
         """
         update = self._report_update(edit.site.dbName(), edit.title)
+        if not update.attempt_started:
+            update.start_attempt()
         try:
             confirmed = self._store_and_publish(edit, save)
         except BaseException:
@@ -511,6 +541,7 @@ class RuntimeContext[EditT: Publication]:
                 msg = "Structured report publication requires an internal key."
                 raise ValueError(msg)
             store = ReportStore(dry=self.dry)
+            generation_key = self.report_run_id, edit.report_key
             with store.locked(edit.report_key):
                 bundle = store.write(
                     edit.report_key,
@@ -520,12 +551,18 @@ class RuntimeContext[EditT: Publication]:
                     started_at=self.started_at,
                     target={"site": edit.site.dbName(), "title": edit.title},
                     locked=True,
+                    previous_generation=self._report_generations.get(
+                        generation_key,
+                    ),
                 )
                 if not bundle.selected:
                     self.notes.append(
                         f"Superseded report generation: {edit.title}.",
                     )
                     return False
+                self._report_generations[generation_key] = str(
+                    bundle.manifest["generation"],
+                )
                 if self.dry:
                     _LOGGER.info(
                         "Would update %s on %s: %s",
@@ -648,9 +685,10 @@ def routine_run[EditT: Publication](
                     "failed": logging.ERROR,
                     "deferred": logging.WARNING,
                 }.get(task.status, logging.INFO),
-                "Finished %s: %s. Confirmed edits: %s. "
+                "Finished %s%s: %s. Confirmed edits: %s. "
                 "Duration: %.3f seconds.",
                 name,
+                " preview" if active.dry else "",
                 {
                     "updated": "updated",
                     "no_update": "no changes needed",

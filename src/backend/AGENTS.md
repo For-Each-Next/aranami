@@ -33,7 +33,7 @@ repository-wide instructions.
   routine/schedule/report metadata, `cache/` for disposable cached data,
   `dry-run/` for proposed-edit artifacts, and `reports/` for durable results.
 - Append all runs on one UTC date to one file under `logs/` and retain
-  the latest 90 completed UTC-dated archives.
+  the current UTC date and previous 29 dates, pruning older regular daily files.
 - Keep `logs/`, `cache/`, and `dry-run/` visible; do not rename them to
   hidden paths.
 - Treat `cache/` as an optimization only. Deleting it must never lose

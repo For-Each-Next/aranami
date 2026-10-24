@@ -123,6 +123,11 @@ For website changes, check desktop and narrow layouts, long titles and
 chips, maintenance sorting/pagination, real source dates and site ranks,
 and scheduling states in all three interface languages. Page requests remain
 read-only, including when snapshots are missing or invalid.
+For live status changes, also verify one-second refreshes, running and completed
+timers, open popovers and focus, hidden-tab pause/resume, and recovery from
+failed or malformed responses. Dashboard content and native controls must still
+work with JavaScript disabled. `/api/live` reads only saved status and renders
+fresh fragments independently of the full-page cache and website datasets.
 
 The uploader's dry run validates the exact source payload without
 contacting Toolforge. Add `--archive <new-file.tar>` to retain that payload;

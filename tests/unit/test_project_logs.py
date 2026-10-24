@@ -73,8 +73,8 @@ class TestProjectLogs(TestCase):
             assert "Work after midnight." not in first.read_text()
 
     @staticmethod
-    def test_retention_preserves_ninety_completed_dates_and_metadata() -> None:
-        """Prune only recognized diagnostic files beyond retention."""
+    def test_retention_preserves_thirty_calendar_dates_and_metadata() -> None:
+        """Keep today and its preceding twenty-nine UTC dates."""
         today = dt.date(2026, 10, 18)
         instant = dt.datetime.combine(today, dt.time(), tzinfo=dt.UTC)
         with TemporaryDirectory() as directory:
@@ -102,7 +102,7 @@ class TestProjectLogs(TestCase):
                 logger.info("Current diagnostic.")
             expected = {
                 f"aranami.{today - dt.timedelta(days=age)}.log"
-                for age in range(91)
+                for age in range(30)
             }
             assert {path.name for path in destination.iterdir()} == (
                 expected | preserved
@@ -111,6 +111,31 @@ class TestProjectLogs(TestCase):
                 (destination / name).read_text() == "preserved"
                 for name in preserved
             )
+
+    @staticmethod
+    def test_sparse_archives_expire_by_date_instead_of_file_count() -> None:
+        """Expire old dates even when fewer than thirty files exist."""
+        today = dt.date(2026, 10, 18)
+        instant = dt.datetime.combine(today, dt.time(), tzinfo=dt.UTC)
+        with TemporaryDirectory() as directory:
+            destination = Path(directory)
+            for age in (1, 29, 30, 60):
+                (
+                    destination
+                    / f"aranami.{today - dt.timedelta(days=age)}.log"
+                ).write_text("Earlier diagnostic.\n")
+            with (
+                open_run_log(destination) as logger,
+                patch(
+                    "logging.time.time_ns",
+                    return_value=int(instant.timestamp() * 1e9),
+                ),
+            ):
+                logger.info("Current diagnostic.")
+            assert {path.name for path in destination.iterdir()} == {
+                f"aranami.{today - dt.timedelta(days=age)}.log"
+                for age in (0, 1, 29)
+            }
 
     @staticmethod
     def test_overlapping_thread_contexts_share_one_handler() -> None:

@@ -19,6 +19,7 @@ import polars as pl
 from pywikibot.site import BaseSite, Namespace
 
 from backend.services.zhwiki import pexbot as service
+from backend.support.report_status import read_report_status
 from shared.reports import ReportStore, report_key
 from updater.jobs import JobContext, pexbot as job
 
@@ -363,6 +364,125 @@ class TestPexbotJob(TestCase):
         assert saved.manifest["publication"]["state"] == "delegated"
         assert saved.manifest["publication"]["confirmed_edits"] is None
 
+    def test_individual_timings_include_request_completion_not_cooldown(
+        self,
+    ) -> None:
+        """Measure history and requests through their outcomes."""
+        for fail_first in (False, True):
+            with self.subTest(fail_first=fail_first):
+                self._check_individual_timings(fail_first=fail_first)
+
+    def _check_individual_timings(self, *, fail_first: bool) -> None:
+        """Check request timing through success or failure.
+
+        Args:
+            fail_first: Whether the first delegated request raises.
+        """
+        elapsed = [0.0]
+        started = dt.datetime(2026, 10, 24, tzinfo=dt.UTC)
+        context = JobContext(_site(), started.date(), dry=False)
+
+        def select(*_args: object) -> list[str]:
+            """Spend seven seconds discovering subscribed reports.
+
+            Returns:
+                The two subscribed test destinations.
+            """
+            elapsed[0] += 7
+            return ["A", "B"]
+
+        def history(_site: object, title: str, **_kwargs: object) -> bool:
+            """Simulate separate history reads before publication.
+
+            Returns:
+                False because both reports need a delegated request.
+            """
+            elapsed[0] += 2 if title == "A" else 4
+            return False
+
+        def refresh(_site: object, title: str) -> None:
+            """Keep the attempt running until the request completes.
+
+            Raises:
+                RuntimeError: The first request fails in one case.
+            """
+            records = read_report_status(
+                Path.cwd() / "state" / "report-updates.json",
+            )["reports"].values()
+            current = next(row for row in records if row["title"] == title)
+            assert current["status"] == "running"
+            assert current["finished_at"] is None
+            if title == "A":
+                waiting = next(row for row in records if row["title"] == "B")
+                assert waiting["status"] == "queued"
+                assert waiting["duration_seconds"] is None
+                assert waiting["finished_at"] is None
+            elapsed[0] += 3 if title == "A" else 5
+            if title == "A" and fail_first:
+                message = "The delegated request failed."
+                raise RuntimeError(message)
+
+        def cooldown(seconds: float) -> None:
+            """Advance time without performing an actual sleep."""
+            elapsed[0] += seconds
+            records = read_report_status(
+                Path.cwd() / "state" / "report-updates.json",
+            )["reports"].values()
+            waiting = next(row for row in records if row["title"] == "B")
+            assert waiting["status"] == "queued"
+            assert waiting["duration_seconds"] is None
+
+        with (
+            TemporaryDirectory() as temporary,
+            patch("pathlib.Path.cwd", return_value=Path(temporary)),
+            patch(
+                "backend.support.execution.perf_counter",
+                side_effect=lambda: elapsed[0],
+            ),
+            patch(
+                "backend.support.report_status.perf_counter",
+                side_effect=lambda: elapsed[0],
+            ),
+            patch(
+                "backend.support.report_status._utc_now",
+                side_effect=lambda: started + dt.timedelta(seconds=elapsed[0]),
+            ),
+            patch.object(job, "subscribed_titles", side_effect=select),
+            patch.object(service, "edited_by_on_date", side_effect=history),
+            patch.object(job, "_refresh", side_effect=refresh),
+            patch.object(job.time, "sleep", side_effect=cooldown) as pause,
+            self.assertLogs("backend.support.execution", level="INFO"),
+            self.assertLogs(job._LOGGER, level="INFO"),
+        ):
+            with (
+                self.assertRaises(ExceptionGroup)
+                if fail_first
+                else nullcontext()
+            ):
+                job.run(context=context)
+            records = {
+                row["title"]: row
+                for row in read_report_status(
+                    Path(temporary) / "state" / "report-updates.json",
+                )["reports"].values()
+            }
+        pause.assert_called_once_with(15)
+        assert [
+            records[title]["duration_seconds"] for title in ("A", "B")
+        ] == [5, 9]
+        assert records["A"]["status"] == (
+            "failed" if fail_first else "unconfirmed"
+        )
+        assert records["B"]["status"] == "unconfirmed"
+        assert all(row["confirmed_edits"] is None for row in records.values())
+        assert records["A"]["started_at"] == "2026-10-24T00:00:07.000000Z"
+        assert records["A"]["finished_at"] == "2026-10-24T00:00:12.000000Z"
+        assert records["B"]["started_at"] == "2026-10-24T00:00:27.000000Z"
+        assert records["B"]["finished_at"] == "2026-10-24T00:00:36.000000Z"
+        expected_total = 36
+        assert context.tasks[0].elapsed_seconds == expected_total
+        assert context.tasks[0].updated is None
+
     @staticmethod
     def test_dry_run_reads_source_defaults_without_refreshing() -> None:
         """Use configured defaults and record proposed actions."""
@@ -528,8 +648,8 @@ class TestPexbotJob(TestCase):
             assert context.notes[0] in logs.output[-1]
 
     @staticmethod
-    def test_skips_do_not_add_cooldowns_between_live_attempts() -> None:
-        """Pause between requests without extra sleeps for skips."""
+    def test_each_live_attempt_adds_one_cooldown_before_next_report() -> None:
+        """Consume each pause once even before consecutive skips."""
         context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
         sequence = Mock()
         with (
@@ -541,6 +661,7 @@ class TestPexbotJob(TestCase):
                     "Skip first",
                     "A",
                     "Skip middle",
+                    "Skip middle again",
                     "B",
                     "Skip last",
                 ],
@@ -548,7 +669,7 @@ class TestPexbotJob(TestCase):
             patch.object(
                 service,
                 "edited_by_on_date",
-                side_effect=[True, False, True, False, True],
+                side_effect=[True, False, True, True, False, True],
             ),
             patch.object(job, "_refresh") as refresh,
             patch.object(job.time, "sleep") as pause,
@@ -560,6 +681,7 @@ class TestPexbotJob(TestCase):
             call.refresh(context.site, "A"),
             call.pause(15),
             call.refresh(context.site, "B"),
+            call.pause(15),
         ]
 
     def test_history_failure_suppresses_refresh_and_continues(self) -> None:

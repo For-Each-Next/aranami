@@ -159,7 +159,7 @@ def _validated_record(value: object) -> dict[str, object]:
             raise ValueError(message)
     status = record["status"]
     if (
-        status not in (_TERMINAL - {"preview"}) | {"running"}
+        status not in (_TERMINAL - {"preview"}) | {"queued", "running"}
         or record["dry"] is not False
     ):
         message = "Live report metadata has an invalid outcome."
@@ -169,12 +169,12 @@ def _validated_record(value: object) -> dict[str, object]:
         message = "Confirmed report edits must be nonnegative integers."
         raise ValueError(message)
     started, record["started_at"] = _timestamp(record["started_at"])
-    if status == "running":
+    if status in {"queued", "running"}:
         if any(
             record[name] is not None
             for name in ("finished_at", "duration_seconds", "confirmed_edits")
         ):
-            message = "Running reports cannot claim completed outcomes."
+            message = "Unfinished reports cannot claim completed outcomes."
             raise ValueError(message)
         return record
     return _terminal_record(record, started)
@@ -276,7 +276,8 @@ def _newer_record(
         return proposed > previous
     if current["run_id"] != incoming["run_id"]:
         return False
-    if current["status"] != "running" and incoming["status"] == "running":
+    phases = {"queued": 0, "running": 1}
+    if phases.get(incoming["status"], 2) < phases.get(current["status"], 2):
         return False
     old_finish, new_finish = current["finished_at"], incoming["finished_at"]
     return old_finish is None or (
@@ -324,6 +325,7 @@ def write_report_update(
     record: Mapping[str, object],
     *,
     directory: Path | None = None,
+    expected_attempt: tuple[str, str] | None = None,
 ) -> bool:
     """Merge report metadata without changing publication behavior.
 
@@ -333,8 +335,10 @@ def write_report_update(
     Preview records are omitted before filesystem access.
 
     Args:
-        record: Complete running or terminal report-update observation.
+        record: Complete queued, running, or terminal observation.
         directory: Defaults to ``state/`` under the working directory.
+        expected_attempt: Registered update and run identities that must
+            still own the destination before resetting its start time.
 
     Returns:
         Whether the public snapshot was replaced.
@@ -347,7 +351,7 @@ def write_report_update(
             directory if directory is not None else Path.cwd() / "state"
         )
         with _LOCK:
-            return _write_record(destination, incoming)
+            return _write_record(destination, incoming, expected_attempt)
     except Exception:
         _LOGGER.warning(
             "Could not save report update metadata.",
@@ -356,7 +360,11 @@ def write_report_update(
         return False
 
 
-def _write_record(directory: Path, incoming: dict[str, object]) -> bool:
+def _write_record(
+    directory: Path,
+    incoming: dict[str, object],
+    expected_attempt: tuple[str, str] | None,
+) -> bool:
     """Merge one validated destination under an exclusive process lock.
 
     Returns:
@@ -385,7 +393,14 @@ def _write_record(directory: Path, incoming: dict[str, object]) -> bool:
         except FileNotFoundError:
             records = {}
         key = report_update_key(incoming["site"], incoming["title"])
-        if not _newer_record(records.get(key), incoming):
+        current = records.get(key)
+        if (
+            expected_attempt is not None
+            and current is not None
+            and (current["update_id"], current["run_id"]) != expected_attempt
+        ):
+            return False
+        if not _newer_record(current, incoming):
             return False
         records[key] = incoming
         _replace_snapshot(path, records)
@@ -411,9 +426,10 @@ class ReportUpdate:
     started_at: dt.datetime = field(init=False)
     _started_monotonic: float = field(init=False)
     _finished: bool = field(default=False, init=False)
+    _attempt_started: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
-        """Capture the actual wall and monotonic start times."""
+        """Capture registration times before an individual attempt."""
         self.started_at = _utc_now()
         self._started_monotonic = perf_counter()
 
@@ -422,9 +438,35 @@ class ReportUpdate:
         """Whether an explicit terminal outcome was recorded."""
         return self._finished
 
+    @property
+    def attempt_started(self) -> bool:
+        """Whether this destination has reached its work boundary."""
+        return self._attempt_started
+
     def start(self) -> None:
-        """Record running before storage or publication begins."""
-        write_report_update(self._record())
+        """Register queued work or persist its running state."""
+        write_report_update(
+            self._record(),
+            expected_attempt=(self.update_id, self.run_id)
+            if self._attempt_started
+            else None,
+        )
+
+    def start_attempt(self) -> None:
+        """Measure this destination from its individual work boundary.
+
+        Registration identifies every planned destination before shared
+        preparation. Replace its observation only while that registered
+        attempt still owns the destination. Guard later writes too, so
+        superseded handles cannot reclaim it with a newer timestamp and
+        transient persistence failures can recover at completion.
+        Preview attempts remain isolated from live observations.
+        """
+        self.started_at = _utc_now()
+        self._started_monotonic = perf_counter()
+        self._finished = False
+        self._attempt_started = True
+        self.start()
 
     def finish(self, outcome: str, confirmed_edits: int | None) -> None:
         """Record terminal metadata using actual measured elapsed time.
@@ -450,11 +492,14 @@ class ReportUpdate:
             ),
             confirmed_edits=0 if self.dry else confirmed_edits,
         )
-        write_report_update(record)
+        write_report_update(
+            record,
+            expected_attempt=(self.update_id, self.run_id),
+        )
         self._finished = True
 
     def _record(self) -> dict[str, object]:
-        """Describe the running attempt without inferring an outcome.
+        """Describe queued or running work without inferring an outcome.
 
         Returns:
             Complete metadata fields shared by every lifecycle state.
@@ -465,7 +510,7 @@ class ReportUpdate:
             "routine": self.routine,
             "site": self.site,
             "title": self.title,
-            "status": "running",
+            "status": "running" if self._attempt_started else "queued",
             "dry": self.dry,
             "started_at": _iso(self.started_at),
             "finished_at": None,
@@ -501,6 +546,7 @@ def track_report_update(
     """
     update = ReportUpdate(site, title, run_id, routine, dry)
     update.start()
+    update.start_attempt()
     try:
         yield update
     except BaseException:

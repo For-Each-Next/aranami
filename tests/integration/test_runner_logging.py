@@ -427,12 +427,10 @@ class TestRunLogManagerIntegration(TestCase):
             assert len(list(root.iterdir())) == 2  # ruff: ignore[magic-value-comparison]
 
     @staticmethod
-    def test_retains_latest_ninety_completed_dates_and_unrelated_files() -> (
-        None
-    ):
-        """Prune recognized archives on today's first log record."""
+    def test_retains_thirty_calendar_dates_including_today() -> None:
+        """Keep today and twenty-nine prior dates on first use."""
         now = datetime(2026, 10, 3, 0, 30, tzinfo=UTC)
-        retained = 90
+        retained = 29
         with TemporaryDirectory() as directory:
             root = Path(directory)
             archives = [
@@ -445,13 +443,52 @@ class TestRunLogManagerIntegration(TestCase):
             unrelated.write_text("unrelated\n", encoding="utf-8")
             with (
                 open_run_log(root) as logger,
-                patch("logging.time.time", return_value=now.timestamp()),
+                patch(
+                    "logging.time.time_ns",
+                    return_value=int(now.timestamp() * 1e9),
+                ),
             ):
                 logger.info("Current day.")
             assert all(path.exists() for path in archives[:retained])
             assert not any(path.exists() for path in archives[retained:])
             assert unrelated.read_text(encoding="utf-8") == "unrelated\n"
             assert len(list(root.iterdir())) == retained + 2
+
+    @staticmethod
+    def test_prunes_sparse_old_dates_without_touching_unsafe_paths() -> None:
+        """Expire sparse old dates while preserving other paths."""
+        now = datetime(2026, 10, 3, 0, 30, tzinfo=UTC)
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "aranami.2026-09-03.log"
+            old.write_text("expired\n", encoding="utf-8")
+            retained = root / "aranami.2026-09-04.log"
+            retained.write_text("retained\n", encoding="utf-8")
+            future = root / "aranami.2026-10-04.log"
+            future.write_text("future\n", encoding="utf-8")
+            invalid = root / "aranami.2026-02-30.log"
+            invalid.write_text("invalid date\n", encoding="utf-8")
+            target = root / "private.txt"
+            target.write_text("untouched\n", encoding="utf-8")
+            linked = root / "aranami.2026-09-01.log"
+            linked.symlink_to(target)
+            subdirectory = root / "aranami.2026-09-02.log"
+            subdirectory.mkdir()
+            with (
+                open_run_log(root) as logger,
+                patch(
+                    "logging.time.time_ns",
+                    return_value=int(now.timestamp() * 1e9),
+                ),
+            ):
+                logger.info("Current day.")
+            assert not old.exists()
+            assert retained.read_text(encoding="utf-8") == "retained\n"
+            assert future.read_text(encoding="utf-8") == "future\n"
+            assert invalid.read_text(encoding="utf-8") == "invalid date\n"
+            assert linked.is_symlink()
+            assert target.read_text(encoding="utf-8") == "untouched\n"
+            assert subdirectory.is_dir()
 
     @staticmethod
     def test_nested_contexts_capture_descendants_once() -> None:

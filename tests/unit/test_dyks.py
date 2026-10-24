@@ -405,6 +405,7 @@ class TestDykUnchangedStatus(TestCase):
         """Keep published text and membership on a no-op pass."""
         site = _OfflineSite("zh", "wikipedia")
         context = Mock(site=site, today=date(2024, 5, 2), dry=False)
+        context.report_attempt.side_effect = lambda _title: nullcontext()
         context.publish.return_value = True
         report = _prepared_fixture(self.text, {"Game": 1, "Candidate": 2})
         report.content_unchanged = True
@@ -1016,6 +1017,7 @@ class TestDykEdit(TestCase):
         )
         site = _OfflineSite("zh", "wikipedia")
         context = Mock(site=site, today=date(2024, 5, 1), dry=False)
+        context.report_attempt.side_effect = lambda _title: nullcontext()
         context.publish.return_value = True
         with (
             patch.object(
@@ -1073,6 +1075,7 @@ class TestDykEdit(TestCase):
         """Keep original identities through repeated previews."""
         site = _OfflineSite("zh", "wikipedia")
         context = Mock(site=site, today=date(2024, 5, 1), dry=True)
+        context.report_attempt.side_effect = lambda _title: nullcontext()
         original = (
             '<!-- aranami begin="dyk" -->\n'
             "# {{PJ:VG/DYK/item|Game|初级}}\n"
@@ -1140,6 +1143,7 @@ class TestDykEdit(TestCase):
         """Preserve cached identities when publication fails."""
         site = _OfflineSite("zh", "wikipedia")
         context = Mock(site=site, today=date(2024, 5, 1), dry=False)
+        context.report_attempt.side_effect = lambda _title: nullcontext()
         context.publish.return_value = True
         context.publish.side_effect = RuntimeError("publication failed")
         original = (

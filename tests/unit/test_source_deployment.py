@@ -140,9 +140,11 @@ class TestSourcePayload(TestCase):
             in self.payload["scripts/toolforge/run-hub.sh"].decode()
         )
         assert not any(
-            Path(name).suffix in {".php", ".js", ".mjs"}
-            for name in self.payload
+            Path(name).suffix in {".php", ".mjs"} for name in self.payload
         )
+        assert {
+            name for name in self.payload if Path(name).suffix == ".js"
+        } == {"src/webservice/public_html/live.js"}
         assert (
             "-m backend.public --host 0.0.0.0 --port 8000 "
             '--runtime "$tool_dir"'

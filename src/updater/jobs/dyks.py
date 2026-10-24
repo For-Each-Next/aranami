@@ -70,8 +70,10 @@ def run(
         dry: Write proposed edits locally without wiki publication.
         context: Shared context, or ``None`` for a standalone run.
     """
-    with job_run("dyks", dry=dry, context=context) as active:
-        active.register_targets([title])
+    with (
+        job_run("dyks", dry=dry, context=context) as active,
+        active.report_attempt(title),
+    ):
         page = read_pages(active.site, [title])[0]
         original_text = page.text
         report = data.prepare_report(

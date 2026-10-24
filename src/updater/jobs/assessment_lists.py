@@ -216,7 +216,14 @@ def run(
         for (title, config), page in zip(selected_lists, pages, strict=True):
             logger.info("Starting assessment list %s", title)
             try:
-                _publish_list(active, title, config, page.text, assessments)
+                with active.report_attempt(title):
+                    _publish_list(
+                        active,
+                        title,
+                        config,
+                        page.text,
+                        assessments,
+                    )
             except Exception as error:  # Continue independent list updates.
                 logger.exception(
                     "Assessment list failed: %s",

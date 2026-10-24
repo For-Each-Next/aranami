@@ -20,7 +20,7 @@ import polars as pl
 from backend.services.zhwiki.new_pages import build_result
 from shared.deployment import project_version
 from shared.reports import ReportResult, ReportStore, report_key
-from updater.jobs import JobContext, ProposedEdit
+from updater.jobs import JobContext, ProposedEdit, job_run
 
 if TYPE_CHECKING:
     from shared.reports import ReportBundle
@@ -131,6 +131,52 @@ class TestReportStore(TestCase):
             )
 
     @staticmethod
+    def test_same_run_can_advance_only_its_current_generation() -> None:
+        """Accept ordered successors while rejecting stale data."""
+        with TemporaryDirectory() as directory:
+            store = ReportStore(Path(directory))
+            first = _write(store, 1)
+            assert not _write(store, 1).selected
+            successor = store.write(
+                "test-zhwiki-main",
+                _result(2),
+                "successor",
+                run_id=first.manifest["run_id"],
+                started_at=_START + dt.timedelta(days=1),
+                target={"site": "zhwiki", "title": "Wikipedia:Report"},
+                previous_generation=first.manifest["generation"],
+            )
+            assert successor.selected
+            assert store.read("test-zhwiki-main").wikitext == "successor"
+            assert (
+                store.read("test-zhwiki-main", previous=True).path
+                == first.path
+            )
+            stale = store.write(
+                "test-zhwiki-main",
+                _result(3),
+                "stale successor",
+                run_id=first.manifest["run_id"],
+                started_at=_START + dt.timedelta(days=1),
+                target={"site": "zhwiki", "title": "Wikipedia:Report"},
+                previous_generation=first.manifest["generation"],
+            )
+            assert not stale.selected
+            assert store.read("test-zhwiki-main").path == successor.path
+            newest = _write(store, 2)
+            late = store.write(
+                "test-zhwiki-main",
+                _result(4),
+                "late old-run successor",
+                run_id=first.manifest["run_id"],
+                started_at=_START + dt.timedelta(days=1),
+                target={"site": "zhwiki", "title": "Wikipedia:Report"},
+                previous_generation=successor.manifest["generation"],
+            )
+            assert not late.selected
+            assert store.read("test-zhwiki-main").path == newest.path
+
+    @staticmethod
     def test_concurrent_late_finisher_cannot_replace_newer_start() -> None:
         """Serialize writes while comparing original start times."""
         with TemporaryDirectory() as directory:
@@ -201,6 +247,43 @@ class TestReportStore(TestCase):
 
 class TestStoredPublication(TestCase):
     """Keep calculated data independent of save and preview outcomes."""
+
+    @staticmethod
+    def test_one_routine_publishes_successive_complete_results() -> None:
+        """Retain and publish each day under one routine identity."""
+        site = Mock()
+        site.dbName.return_value = "zhwiki"
+        page = Mock(text="old")
+        with (
+            TemporaryDirectory() as directory,
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+            patch("updater.jobs._execution.pywikibot.Page", return_value=page),
+        ):
+            context = JobContext(site, _START.date(), dry=False)
+            with job_run("pageviews", context=context):
+                context.register_targets(["Wikipedia:Report"])
+                for old, new in (("old", "first"), ("first", "second")):
+                    with context.report_attempt("Wikipedia:Report"):
+                        assert context.publish(
+                            ProposedEdit(
+                                site,
+                                "Wikipedia:Report",
+                                new,
+                                "summary",
+                                original_text=old,
+                                report_key="test-zhwiki-main",
+                                result=_result(),
+                            ),
+                        )
+            latest = ReportStore().read("test-zhwiki-main")
+            previous = ReportStore().read("test-zhwiki-main", previous=True)
+        assert latest.wikitext == "second"
+        assert previous.wikitext == "first"
+        assert latest.manifest["run_id"] == previous.manifest["run_id"]
+        assert latest.manifest["publication"]["state"] == "saved"
+        expected_saves = 2
+        assert page.save.call_count == expected_saves
+        assert context.tasks[0].updated == expected_saves
 
     def test_failed_save_preserves_complete_unconfirmed_result(self) -> None:
         """Store complete data before a potentially ambiguous save."""

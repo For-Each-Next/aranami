@@ -29,8 +29,9 @@ complete retained window through yesterday is confirmed. Missing retained
 dates are filled when needed.
 
 Pageviews uses an **18:00 UTC reporting boundary**, not midnight. It
-processes at most one missing date per invocation, retries incomplete or
-unavailable data hourly, and waits for the next cycle once current.
+fetches available history once and saves each missing daily report in order
+through the latest eligible complete day. It retries incomplete or
+unavailable data hourly and waits for the next cycle once current.
 Confirmed completion survives server restarts.
 
 English comparisons and database reports refresh current state on their
@@ -63,6 +64,9 @@ collected and which wiki pages were checked or edited. Structured status
 is stored separately: routine and per-page starts, finishes, durations,
 outcomes, and confirmed edit counts. The website reads those records;
 it never parses log text to determine status.
+The dashboard refreshes running times and routine/page statuses every second
+while open, keeping status popups in place. Execution times use whole seconds,
+with two decimal places for subsecond results.
 
 Report destinations and UTC schedules are defined centrally in
 [src/shared/config.py](src/shared/config.py). Maintenance worklists are

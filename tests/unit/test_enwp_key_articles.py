@@ -12,7 +12,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import mwparserfromhell
 import polars as pl
@@ -31,8 +31,9 @@ from backend.support.report_membership import (
     load_membership,
     save_membership,
 )
+from backend.support.report_status import read_report_status
 from shared.sources.quarry import enwp
-from updater.jobs import enwp_key_articles as job
+from updater.jobs import JobContext, enwp_key_articles as job
 from updater.services.zhwiki import enwp_key_articles as reports
 
 if TYPE_CHECKING:
@@ -258,7 +259,10 @@ class TestEnglishReportService(TestCase):
                 compare_articles({}, members),
                 data.linked_titles,
             )
-            assert summary.startswith(f"1 item total. {verb} «[[:en:")
+            breakdown = "0 FA, 0 FL, 1 GA" if dated else "1 Top, 0 High"
+            assert summary.startswith(
+                f"1 article: {breakdown}. {verb} «[[:en:",
+            )
             assert ("Example" in data.old_articles[spec.name]) is not dated
             if dated:
                 dates.assert_called_once()
@@ -366,7 +370,7 @@ class TestEnglishReportService(TestCase):
             {8: "舊", 9: "新"},
         )
         assert summary == (
-            "1 item total. Added «[[:en:New]]» ([[新]]); "
+            "1 article. Added «[[:en:New]]» ([[新]]); "
             "removed «[[:en:Old]]» ([[舊]])."
         )
         long_rows = pl.DataFrame({
@@ -380,7 +384,7 @@ class TestEnglishReportService(TestCase):
         )
         summary_budget = 50
         assert len(short.encode()) <= summary_budget
-        assert short == "1 item total. Added 1 more."
+        assert short == "1 article. Added 1 more."
 
     @staticmethod
     def test_summary_only_formats_prepared_metadata() -> None:
@@ -392,6 +396,8 @@ class TestEnglishReportService(TestCase):
             added=(current,),
             removed=(previous,),
             quality_changes=(QualityChange(None, current),),
+            quality_counts=(("FA", 1), ("FL", 0), ("GA", 0)),
+            importance_counts=(("Top", 0), ("High", 1)),
         )
         links = {1: "前", 2: "後"}
         with (
@@ -413,11 +419,12 @@ class TestEnglishReportService(TestCase):
             summary = reports.build_edit_summary(changes, links)
             quality = reports.build_edit_summary(changes, links, quality=True)
         assert summary == (
-            "1 item total. Added «[[:en:After]]» ([[後]]); "
+            "1 article: 0 Top, 1 High. Added «[[:en:After]]» ([[後]]); "
             "removed «[[:en:Before]]» ([[前]])."
         )
         assert quality == (
-            "1 item total. FA prompted «[[:en:After]]» ([[後]]); "
+            "1 article: 1 FA, 0 FL, 0 GA. "
+            "FA prompted «[[:en:After]]» ([[後]]); "
             "GA delisted «[[:en:Before]]» ([[前]])."
         )
         compare.assert_not_called()
@@ -471,7 +478,7 @@ class TestEnglishReportService(TestCase):
             "en_importance": ["Top"],
         })
         assert reports.build_edit_summary(compare_articles(old, new), {}) == (
-            "1 item total."
+            "1 article: 1 Top, 0 High."
         )
 
     @staticmethod
@@ -484,7 +491,7 @@ class TestEnglishReportService(TestCase):
             "item_id": [8],
         })
         assert reports.build_edit_summary(compare_articles(old, new), {}) == (
-            "1 item total. Added «[[:en:Same]]»; removed «[[:en:Same]]»."
+            "1 article. Added «[[:en:Same]]»; removed «[[:en:Same]]»."
         )
 
     @staticmethod
@@ -497,7 +504,7 @@ class TestEnglishReportService(TestCase):
             "item_id": [8],
         })
         assert reports.build_edit_summary(compare_articles(old, new), {}) == (
-            "1 item total."
+            "1 article."
         )
         count = 1234
         titles = [f"Article {index}" for index in range(count)]
@@ -511,8 +518,31 @@ class TestEnglishReportService(TestCase):
             for index, title in enumerate(titles, start=1)
         }
         assert reports.build_edit_summary(compare_articles(old, new), {}) == (
-            "1,234 items total."
+            "1,234 articles."
         )
+
+    @staticmethod
+    def test_summary_formats_all_assessment_counts_and_attribution() -> None:
+        """Keep count order and thousands separators when saving."""
+        changes = ArticleChanges(
+            current_total=3032,
+            added=(),
+            removed=(),
+            quality_changes=(),
+            quality_counts=(("FA", 100), ("FL", 32), ("GA", 2900)),
+            importance_counts=(("Top", 32), ("High", 3000)),
+        )
+        for quality, expected in (
+            (True, "3,032 articles: 100 FA, 32 FL, 2,900 GA."),
+            (False, "3,032 articles: 32 Top, 3,000 High."),
+        ):
+            summary = reports.build_edit_summary(changes, {}, quality=quality)
+            assert summary == expected
+            attributed = reports.EditSummary.with_attribution(summary)
+            assert attributed == (
+                expected + " ([[toolforge:Aranami|Aranami]])"
+            )
+            assert len(attributed.encode()) <= reports.MAX_EDIT_SUMMARY_BYTES
 
     @staticmethod
     def test_summary_caps_utf8_bytes_and_preserves_complete_links() -> None:
@@ -531,7 +561,7 @@ class TestEnglishReportService(TestCase):
                 max_bytes=requested,
             )
             assert len(summary.encode("utf-8")) <= budget
-            assert summary.startswith("10 items total.")
+            assert summary.startswith("10 articles.")
             assert summary.count("[[") == summary.count("]]")
             assert summary.count("«") == summary.count("»")
             assert summary.count("(") == summary.count(")")
@@ -764,9 +794,104 @@ class TestEnglishReportJob(TestCase):
     """Check that jobs delegate publication through their context."""
 
     @staticmethod
+    def test_each_target_excludes_shared_reads_and_previous_target() -> None:
+        """Measure independent target preparation after shared reads."""
+        elapsed = [0.0]
+        started = dt.datetime(2026, 10, 24, tzinfo=dt.UTC)
+        context = JobContext(
+            OfflineSite("zh", "wikipedia"),
+            started.date(),
+            dry=False,
+        )
+        existing = {spec.name: _old_text(spec) for spec in job.REPORT_SPECS}
+        data = data_service.ReportData(
+            rows=data_service.normalize_en_pages(_english_rows()),
+            old_articles={name: {} for name in job.REPORT_TARGETS},
+            linked_titles={},
+        )
+
+        def shared_reads(*_args: object) -> data_service.ReportData:
+            """Spend ten seconds collecting the shared facts.
+
+            Returns:
+                Deterministic prepared article facts.
+            """
+            elapsed[0] += 10
+            return data
+
+        def prepare(
+            data: data_service.ReportData,
+            definition: data_service.ReportDefinition,
+            site: object,
+            title: str,
+            text: str,
+        ) -> data_service.PreparedPublication:
+            """Spend a separate duration comparing each target's facts.
+
+            Returns:
+                Real publication preparation using offline source facts.
+            """
+            elapsed[0] += 2 if definition.name == "important" else 3
+            return data_service.prepare_publication(
+                data,
+                definition,
+                site,
+                title,
+                text,
+            )
+
+        with (
+            TemporaryDirectory() as temporary,
+            patch("pathlib.Path.cwd", return_value=Path(temporary)),
+            patch(
+                "backend.support.execution.perf_counter",
+                side_effect=lambda: elapsed[0],
+            ),
+            patch(
+                "backend.support.report_status.perf_counter",
+                side_effect=lambda: elapsed[0],
+            ),
+            patch(
+                "backend.support.report_status._utc_now",
+                side_effect=lambda: started + dt.timedelta(seconds=elapsed[0]),
+            ),
+            patch.object(
+                job,
+                "read_pages",
+                return_value=[
+                    Mock(text=existing[name]) for name in job.REPORT_TARGETS
+                ],
+            ),
+            patch.object(job, "prepare_reports", side_effect=shared_reads),
+            patch.object(job, "prepare_publication", side_effect=prepare),
+            patch.object(reports, "build_reports", return_value=existing),
+            patch.object(data_service, "load_membership", return_value={}),
+            patch.object(job, "record_publication"),
+        ):
+            job.run(context=context)
+            records = {
+                row["title"]: row
+                for row in read_report_status(
+                    Path(temporary) / "state" / "report-updates.json",
+                )["reports"].values()
+            }
+        first, second = [
+            records[title] for title in job.REPORT_TARGETS.values()
+        ]
+        assert [first["duration_seconds"], second["duration_seconds"]] == [
+            2,
+            3,
+        ]
+        assert first["started_at"] == "2026-10-24T00:00:10.000000Z"
+        assert second["started_at"] == "2026-10-24T00:00:12.000000Z"
+        assert all(row["status"] == "no_update" for row in records.values())
+        expected_total = 15
+        assert context.tasks[0].elapsed_seconds == expected_total
+
+    @staticmethod
     def test_job_publishes_proposed_edits_through_context() -> None:
         """Read targets and wrap processed text for publication."""
-        context = Mock()
+        context = MagicMock()
         context.site = OfflineSite("zh", "wikipedia")
         context.dry = True
         existing = {spec.name: _old_text(spec) for spec in job.REPORT_SPECS}
@@ -832,12 +957,17 @@ class TestEnglishReportJob(TestCase):
             assert edit.original_text == existing[name]
             assert edit.tags == ("enwp-key-articles", name)
             verb = "GA listed" if name == "quality" else "Added"
-            assert edit.summary.startswith(f"1 item total. {verb} «[[:en:")
+            breakdown = (
+                "0 FA, 0 FL, 1 GA" if name == "quality" else "1 Top, 0 High"
+            )
+            assert edit.summary.startswith(
+                f"1 article: {breakdown}. {verb} «[[:en:",
+            )
 
     @staticmethod
     def test_both_reports_cache_ids_and_summarize_english_membership() -> None:
         """List English changes and suppress same-ID renames."""
-        context = Mock(site=OfflineSite("zh", "wikipedia"), dry=False)
+        context = MagicMock(site=OfflineSite("zh", "wikipedia"), dry=False)
         context.publish.return_value = True
         existing = _old_change_reports()
         old_members = {"Old title": 101, "Gone": 102}
@@ -863,8 +993,14 @@ class TestEnglishReportJob(TestCase):
                 added_title = f"New {spec.name}"
                 verb = "GA listed" if spec.name == "quality" else "Added"
                 removed = "Removed" if spec.name == "quality" else "removed"
+                breakdown = (
+                    "0 FA, 0 FL, 2 GA"
+                    if spec.name == "quality"
+                    else "1 Top, 1 High"
+                )
                 assert edit.summary == (
-                    f"2 items total. {verb} «[[:en:{added_title}]]»; "
+                    f"2 articles: {breakdown}. "
+                    f"{verb} «[[:en:{added_title}]]»; "
                     f"{removed} «[[:en:Gone]]»."
                 )
                 assert "page-id" not in edit.text
@@ -892,7 +1028,7 @@ class TestEnglishReportJob(TestCase):
     @staticmethod
     def test_dry_run_keeps_original_cached_report_membership() -> None:
         """Preserve live membership and text hashes during previews."""
-        context = Mock(site=OfflineSite("zh", "wikipedia"), dry=True)
+        context = MagicMock(site=OfflineSite("zh", "wikipedia"), dry=True)
         existing = _old_change_reports()
         old_members = {"Old title": 101, "Gone": 102}
         with (
@@ -931,7 +1067,7 @@ class TestEnglishReportJob(TestCase):
     @staticmethod
     def test_dry_run_seeds_only_exact_original_titles() -> None:
         """Seed IDs for exact original titles during previews."""
-        context = Mock(site=OfflineSite("zh", "wikipedia"), dry=True)
+        context = MagicMock(site=OfflineSite("zh", "wikipedia"), dry=True)
         existing = _old_change_reports()
         existing = {
             name: text.replace("en=Old title|wd=1", "en=Renamed|wd=9")
@@ -956,7 +1092,7 @@ class TestEnglishReportJob(TestCase):
     @staticmethod
     def test_failed_publication_preserves_cached_report_membership() -> None:
         """Keep the live snapshot after publication fails."""
-        context = Mock(site=OfflineSite("zh", "wikipedia"), dry=False)
+        context = MagicMock(site=OfflineSite("zh", "wikipedia"), dry=False)
         context.publish.return_value = True
         context.publish.side_effect = RuntimeError("Publication failed.")
         existing = _old_change_reports()

@@ -18,6 +18,7 @@ from webservice.pages import (
     render_about,
     render_dashboard,
     render_error,
+    render_live_status,
     render_logs,
     render_maintenance,
 )
@@ -41,6 +42,7 @@ from webservice.presentation import (
     next_run,
     pageviews_url,
     readable_size,
+    relative_time,
     schedule_state,
     select_locale,
     timestamp,
@@ -305,7 +307,19 @@ class PresentationTests(unittest.TestCase):
         assert duration(0.25, self.en) == "0.25 sec"
         assert duration(59.999, self.en) == "1 min 0 sec"
         assert duration(65.1, self.en) == "1 min 5 sec"
-        assert duration(5, self.en, exact=True) == "5.000 sec"
+        for seconds, expected in (
+            (0, "0.00 sec"),
+            (0.004, "0.00 sec"),
+            (0.48, "0.48 sec"),
+            (1, "1 sec"),
+            (5, "5 sec"),
+            (32.89, "33 sec"),
+            (32.49, "32 sec"),
+        ):
+            assert duration(seconds, self.en) == expected
+        assert duration(32.89, self.en, running=True) == "32 sec…"
+        assert duration(0.48, Interface("zh-hans")) == "0.48秒"
+        assert duration(32.89, Interface("zh-hant")) == "33秒"
         assert duration(None, self.en) == "—"
         assert (
             event_duration(
@@ -321,10 +335,62 @@ class PresentationTests(unittest.TestCase):
                 self.en,
                 self.now,
             )
-            == "0 sec…"
+            == "0.00 sec…"
         )
         assert readable_size(1024) == "1.0 KiB"
         assert readable_size(10) == "10 B"
+
+    def test_relative_times_use_whole_minutes_or_hours(self) -> None:
+        """Keep directions, unit boundaries, and timezones exact."""
+        for seconds, expected in (
+            (0, "(just now)"),
+            (-59, "(just now)"),
+            (59, "(within 1 min)"),
+            (-60, "(1 min ago)"),
+            (60, "(in 1 min)"),
+            (-3599, "(59 min ago)"),
+            (3599, "(in 59 min)"),
+            (-3600, "(1 hr ago)"),
+            (3600, "(in 1 hr)"),
+            (-7199, "(1 hr ago)"),
+            (7199, "(in 1 hr)"),
+            (172800, "(in 48 hr)"),
+        ):
+            with self.subTest(seconds=seconds):
+                value = (self.now + dt.timedelta(seconds=seconds)).isoformat()
+                assert relative_time(value, self.en, self.now) == expected
+        assert (
+            relative_time(
+                "2026-10-18T20:01:30+08:00",
+                self.en,
+                self.now,
+            )
+            == "(in 1 min)"
+        )
+        for invalid in (None, "", "invalid", "2026-10-18T12:00:00"):
+            assert not relative_time(invalid, self.en, self.now)
+        for locale, past, future in (
+            ("zh", "13分钟前", "3小时后"),
+            ("zh-hans", "13分钟前", "3小时后"),
+            ("zh-hant", "13分鐘前", "3小時後"),
+        ):
+            interface = Interface(locale)
+            assert (
+                relative_time(
+                    (self.now - dt.timedelta(minutes=13)).isoformat(),
+                    interface,
+                    self.now,
+                )
+                == f"\uff08{past}\uff09"
+            )
+            assert (
+                relative_time(
+                    (self.now + dt.timedelta(hours=3)).isoformat(),
+                    interface,
+                    self.now,
+                )
+                == f"\uff08{future}\uff09"
+            )
 
     def test_assessment_aliases(self) -> None:
         """Rank equivalent grades together and leave unknowns last."""
@@ -532,7 +598,7 @@ class PresentationTests(unittest.TestCase):
             assert next_run(selected, key, self.en) == "2026-10-20 18:59 UTC"
 
     def test_all_localized_dashboards(self) -> None:
-        """Build escaped pages with native accessible details."""
+        """Build escaped pages with native accessible status popups."""
         for locale, deferred, extract in (
             ("en", "Waiting to retry", "简介"),
             ("zh-hans", "待重试", "简介"),
@@ -550,15 +616,22 @@ class PresentationTests(unittest.TestCase):
                 f"{extract} &lt;script&gt;never execute&lt;/script&gt;"
                 " &amp; 中文" in output
             )
-            assert "<script" not in output
+            assert output.count('<script src="/live.js" defer></script>') == 1
             assert "DYK game 13" not in output
             assert "News game 7" in output
             assert output.count('class="article-extract"') == 24
             assert output.count('class="extract-attribution"') == 4
             assert output.count('scope="col"') == 5
-            assert '<details class="page-updates">' in output
-            assert '<summary class="status-link">' in output
-            assert "5.000" in output
+            assert "<details" not in output
+            assert 'popovertarget="report-details-pageviews"' in output
+            assert 'popover="auto" role="dialog"' in output
+            assert (
+                'aria-labelledby="report-details-pageviews-heading"' in output
+            )
+            assert 'popovertargetaction="hide" autofocus' in output
+            assert '<span aria-hidden="true">⏸️</span>' in output
+            assert 'class="routine-status"' in output
+            assert "5.000" not in output
             assert "&lt;Latest &amp; safe&gt;" in output
             assert "2026-10-20 18:59 UTC" in output
             assert "https://creativecommons.org/licenses/by-sa/4.0/" in output
@@ -573,6 +646,216 @@ class PresentationTests(unittest.TestCase):
         missing = render_dashboard(None, None, None, "en", self.now)
         assert "Project data is being prepared" in missing
         assert "temporarily unavailable" in missing
+
+    def test_status_line_labels_and_independent_timing(self) -> None:
+        """Keep summaries inline and report timing independent."""
+        for locale, updated, next_label, duration_label in (
+            ("en", "Last run: ", "Next run: ", "(13 sec)"),
+            (
+                "zh-hans",
+                "最近执行\uff1a",
+                "下次执行\uff1a",
+                "\uff08执行时间13秒\uff09",
+            ),
+            (
+                "zh-hant",
+                "最近執行\uff1a",
+                "下次執行\uff1a",
+                "\uff08執行時間13秒\uff09",
+            ),
+        ):
+            output = render_dashboard(
+                self.data["snapshot"],
+                self.data["status"],
+                self.data["config"],
+                locale,
+                self.now,
+            )
+            line = re.search(r'<li class="routine-status">(.*?)</li>', output)
+            assert line is not None
+            assert duration_label in line[1]
+            assert '<button type="button" class="status-link"' in line[1]
+            assert "<div" not in line[1]
+            assert "<br" not in line[1]
+            assert updated in output
+            assert next_label in output
+            assert "5.000" not in output
+        self.data["status"]["reports"] = None
+        output = render_dashboard(
+            self.data["snapshot"],
+            self.data["status"],
+            self.data["config"],
+            "en",
+            self.now,
+        )
+        assert 'popover="auto" role="dialog"' in output
+        assert '<p class="empty">No record</p>' in output
+
+    def test_queued_reports_wait_until_individual_execution_starts(
+        self,
+    ) -> None:
+        """Hide registration clocks until each report actually runs."""
+        status = self.data["status"]
+        report = status["reports"]["reports"]["first"]
+        routine = status["routines"]["routines"]["pageviews"]
+        routine.update(
+            status="running",
+            started_at=self.now.isoformat(),
+            finished_at=None,
+            duration_seconds=None,
+        )
+        for locale, waiting, total, running, completed in (
+            ("en", "Waiting to run…", "(30 sec…)", "2 sec…", "5 sec"),
+            (
+                "zh-hans",
+                "等待执行…",
+                "\uff08执行时间30秒…\uff09",
+                "2秒…",
+                "5秒",
+            ),
+            (
+                "zh-hant",
+                "等待執行…",
+                "\uff08執行時間30秒…\uff09",
+                "2秒…",
+                "5秒",
+            ),
+        ):
+            report.update(
+                status="queued",
+                started_at=self.now.isoformat(),
+                finished_at=None,
+                duration_seconds=None,
+                confirmed_edits=None,
+            )
+            later = self.now + dt.timedelta(seconds=30)
+            for now in (self.now, later):
+                output = render_live_status(
+                    status,
+                    self.data["config"],
+                    locale,
+                    now,
+                )
+                row = re.search(r'<tr data-key="[^"]*">(.*?)</tr>', output)
+                assert row is not None
+                assert row[1].count(waiting) == 2
+                assert "<time" not in row[1]
+            assert total in output
+            page = render_dashboard(
+                self.data["snapshot"],
+                status,
+                self.data["config"],
+                locale,
+                later,
+            )
+            assert row[0] in page
+            report.update(status="running", started_at=later.isoformat())
+            output = render_live_status(
+                status,
+                self.data["config"],
+                locale,
+                later + dt.timedelta(seconds=2),
+            )
+            assert waiting not in output
+            assert f"<td>{running}</td>" in output
+            assert "2026-10-18 12:01:00 UTC" in output
+            report.update(
+                status="updated",
+                finished_at=(later + dt.timedelta(seconds=5)).isoformat(),
+                duration_seconds=5,
+                confirmed_edits=1,
+            )
+            output = render_live_status(
+                status,
+                self.data["config"],
+                locale,
+                later + dt.timedelta(seconds=30),
+            )
+            assert f"<td>{completed}</td>" in output
+
+    def test_live_fragments_advance_timers_and_expire_schedules(self) -> None:
+        """Refresh clocks and observed states with the server's time."""
+        status = self.data["status"]
+        event = status["routines"]["routines"]["pageviews"]
+        event.update(
+            status="running",
+            started_at=self.now.isoformat(),
+            finished_at=None,
+            duration_seconds=None,
+        )
+        for locale, elapsed in (
+            ("en", "(1 sec…)"),
+            ("zh-hans", "\uff08执行时间1秒…\uff09"),
+            ("zh-hant", "\uff08執行時間1秒…\uff09"),
+        ):
+            now = self.now + dt.timedelta(seconds=1)
+            live = render_live_status(status, self.data["config"], locale, now)
+            assert elapsed in live
+            assert "&lt;Latest &amp; safe&gt;" in live
+            assert 'id="tool-status"' in live
+            assert 'id="live-uptime"' in live
+            assert "<script" not in live
+            assert "<html" not in live
+        fresh = render_live_status(
+            status,
+            self.data["config"],
+            "en",
+            self.now + dt.timedelta(seconds=1),
+        )
+        assert "2d 3h 4m 31s" in fresh
+        stale = render_live_status(
+            status,
+            self.data["config"],
+            "en",
+            self.now + dt.timedelta(seconds=121),
+        )
+        assert "uptime: unavailable" in stale
+        assert "2026-10-20 18:59 UTC" not in stale
+
+    def test_routine_time_annotations_preserve_absolute_observations(
+        self,
+    ) -> None:
+        """Append small labels only to observed timestamps."""
+        status = self.data["status"]
+        event = status["routines"]["routines"]["pageviews"]
+        event["finished_at"] = (
+            self.now - dt.timedelta(hours=3, minutes=35)
+        ).isoformat()
+        schedule = status["schedule"]
+        schedule["routines"]["pageviews"]["next_run_at"] = (
+            self.now + dt.timedelta(minutes=23, seconds=40)
+        ).isoformat()
+        output = render_dashboard(
+            self.data["snapshot"],
+            status,
+            self.data["config"],
+            "zh-hans",
+            self.now,
+        )
+        assert (
+            '2026-10-18 08:25 UTC</time><small class="relative-time">'
+            "\uff083小时前\uff09</small>" in output
+        )
+        assert (
+            '2026-10-18 12:24 UTC<small class="relative-time">'
+            "\uff0823分钟后\uff09</small>" in output
+        )
+        assert output.count('class="relative-time"') == 2
+        status["routines"] = None
+        for change in (
+            {"state": "paused"},
+            {"state": "stopped"},
+            {"updated_at": "2026-10-18T11:00:00Z"},
+        ):
+            status["schedule"] = {**schedule, **change}
+            output = render_dashboard(
+                self.data["snapshot"],
+                status,
+                self.data["config"],
+                "zh-hans",
+                self.now,
+            )
+            assert 'class="relative-time"' not in output
 
     def test_confirmed_empty_sections_are_omitted(self) -> None:
         """Omit empty headings and retain unavailable observations."""
@@ -628,8 +911,13 @@ class PresentationTests(unittest.TestCase):
         assert "list-style: decimal inside" in styles
         assert "overflow-x: auto" in styles
         assert "margin-top: auto" in styles
+        assert ".routine-status {\n    white-space: nowrap;" in styles
+        assert ".page-updates::backdrop" in styles
+        assert "max-height: calc(100dvh - 48px)" in styles
+        assert ".relative-time {" in styles
+        assert "font-size: .85em" in styles
         assert not list(root.rglob("*.php"))
-        assert not list(root.rglob("*.js"))
+        assert list(root.rglob("*.js")) == [root / "public_html" / "live.js"]
         assert not list(root.rglob("*.mjs"))
 
 

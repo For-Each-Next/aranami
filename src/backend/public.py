@@ -46,6 +46,7 @@ _MAX_PORT = 65535
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
     ".svg": "image/svg+xml",
 }
 
@@ -302,6 +303,16 @@ class PublicRequestHandler(ReadOnlyRequestHandler):
             self._json(self._configuration())
         elif path == "/api/status":
             self._json(saved_status(self.server.runtime))
+        elif path == "/api/live":
+            locale = select_locale(self.headers.get("Accept-Language", ""))
+            self._html(
+                pages.render_live_status(
+                    saved_status(self.server.runtime),
+                    self._configuration(),
+                    locale,
+                ),
+                locale,
+            )
         elif path == "/api/dashboard":
             value = self._dashboard()
             if value is not None:

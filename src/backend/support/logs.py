@@ -1,8 +1,8 @@
 """Write natural-language backend diagnostics to UTC daily files.
 
 Every run shares ``logs/aranami.YYYY-MM-DD.log`` beneath the caller's
-current directory. Keep the current day and the latest 90 completed
-UTC-dated files. Importing the package does not configure logging.
+current directory. Keep the current UTC date and the preceding 29 dates.
+Importing the package does not configure logging.
 Execution metadata is stored separately in status snapshots and report
 manifests; diagnostics are ordinary Python logging messages.
 """
@@ -24,18 +24,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-_ARCHIVE_COUNT = 90
+_RETENTION_DAYS = 30
 _FILENAME = re.compile(r"aranami\.(\d{4}-\d{2}-\d{2})\.log")
 
 
 def _prune_daily_logs(directory: Path, today: dt.date) -> None:
-    """Retain completed dates without touching other log families.
+    """Remove daily files older than the thirty-date UTC window.
 
     Args:
         directory: Existing directory containing daily files.
-        today: UTC date whose current file is retained separately.
+        today: Latest UTC date in the inclusive retention window.
     """
-    archives: list[tuple[dt.date, Path]] = []
+    oldest = today - dt.timedelta(days=_RETENTION_DAYS - 1)
     for path in directory.glob("aranami.*.log"):
         match = _FILENAME.fullmatch(path.name)
         if match is None or path.is_symlink() or not path.is_file():
@@ -44,10 +44,8 @@ def _prune_daily_logs(directory: Path, today: dt.date) -> None:
             day = dt.date.fromisoformat(match[1])
         except ValueError:
             continue
-        if day < today:
-            archives.append((day, path))
-    for _, path in sorted(archives, reverse=True)[_ARCHIVE_COUNT:]:
-        path.unlink(missing_ok=True)
+        if day < oldest:
+            path.unlink(missing_ok=True)
 
 
 class _DailyLogHandler(logging.FileHandler):

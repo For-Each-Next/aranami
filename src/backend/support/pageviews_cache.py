@@ -1,10 +1,10 @@
-"""Store healthy Pageviews coverage and resumable request checkpoints.
+"""Retain healthy Pageviews observations as disposable Parquet data.
 
 Each article has a null-date coverage row plus its observed daily rows.
 Missing observations are never filled with zeroes. Removing this cache
-only causes subsequent requests to fetch the same report inputs again.
-A separate target-date pending snapshot preserves completed requests
-after transient outages without replacing the healthy snapshot.
+does not change report results derived from identical fresh responses.
+Reports download full histories on every run; this snapshot never
+substitutes for fresh responses or resumes interrupted downloads.
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def _read_snapshot(path: Path) -> pl.DataFrame:
     """Read validated disposable coverage or return an empty frame.
 
     Args:
-        path: Healthy snapshot or pending checkpoint to inspect.
+        path: Healthy snapshot to inspect.
 
     Returns:
         Valid data, or an empty typed frame for missing or damaged data.
@@ -120,19 +120,14 @@ class PageviewsCache:
         self,
         path: Path,
         frame: pl.DataFrame | None = None,
-        *,
-        pending_path: Path | None = None,
     ) -> None:
         """Index validated data by article for request-boundary lookups.
 
         Args:
             path: Snapshot path under the visible cache directory.
             frame: Already validated observations and coverage rows.
-            pending_path: Target-date checkpoint for interrupted work.
         """
         self.path = path
-        self.pending_path = pending_path
-        self._pending_titles: set[str] = set()
         data = pl.DataFrame(schema=SCHEMA) if frame is None else frame
         self._histories = cast(
             "dict[tuple[str], pl.DataFrame]",
@@ -140,65 +135,19 @@ class PageviewsCache:
         )
 
     @classmethod
-    def load(
-        cls,
-        project: str,
-        *,
-        data_date: dt.date | None = None,
-    ) -> PageviewsCache:
-        """Read a disposable cache, ignoring missing or malformed files.
+    def load(cls, project: str) -> PageviewsCache:
+        """Read a healthy snapshot without resuming prior requests.
 
         Args:
             project: Wikimedia hostname identifying cached observations.
-            data_date: Target report date whose interrupted requests may
-                resume. Omit to read only the healthy snapshot.
 
         Returns:
-            Validated snapshot or an empty cache for fresh requests.
+            Validated snapshot or an empty cache for missing or damaged
+            files. Readers must still obtain fresh report inputs.
         """
         identity = sha256(project.strip().lower().encode()).hexdigest()[:16]
         path = Path.cwd() / "cache" / f"pageviews-{identity}-v1.parquet"
-        pending_path = (
-            path.with_name(
-                f"{path.stem}-pending-{data_date.isoformat()}.parquet",
-            )
-            if data_date is not None
-            else None
-        )
-        cache = cls(path, _read_snapshot(path), pending_path=pending_path)
-        if pending_path is not None:
-            pending = _read_snapshot(pending_path)
-            restored = cast(
-                "dict[tuple[str], pl.DataFrame]",
-                pending.partition_by("page", as_dict=True),
-            )
-            for (title,), history in restored.items():
-                healthy = cache.get(title)
-                start = history.item(0, "coverage_start")
-                stop = history.item(0, "coverage_stop")
-                if (
-                    healthy is not None
-                    and healthy.item(0, "coverage_start") <= start
-                    and healthy.item(0, "coverage_stop") >= stop
-                ):
-                    # Healthy coverage supersedes pending work.
-                    continue
-                cache.replace(
-                    title,
-                    start,
-                    stop,
-                    history.filter(pl.col("date").is_not_null()).select(
-                        "date",
-                        "pageview",
-                    ),
-                )
-            if cache._pending_titles:
-                logger.info(
-                    "Resuming Pageviews checkpoint for %s (%d articles)",
-                    data_date,
-                    len(cache._pending_titles),
-                )
-        return cache
+        return cls(path, _read_snapshot(path))
 
     def get(self, title: str) -> pl.DataFrame | None:
         """Look up one article's coverage and observations.
@@ -265,37 +214,6 @@ class PageviewsCache:
             .select(list(SCHEMA))
         )
         self._histories[title,] = pl.concat([marker, rows])
-        self._pending_titles.add(title)
-
-    def save_pending(self) -> None:
-        """Save only completed article requests for the target report.
-
-        The healthy snapshot remains unchanged. Failed requests never
-        call ``replace`` and therefore cannot acquire false coverage.
-        Restored completed requests remain in this checkpoint.
-        """
-        if self.pending_path is None or not self._pending_titles:
-            return
-        frame = pl.concat([
-            self._histories[title,] for title in self._pending_titles
-        ]).sort("page", "date", nulls_last=False)
-        if _write_snapshot(self.pending_path, frame):
-            logger.info(
-                "Saved pending Pageviews checkpoint (%d completed articles)",
-                len(self._pending_titles),
-            )
-
-    def discard_pending(self) -> None:
-        """Discard checkpoints after rejection or healthy commit."""
-        if self.pending_path is not None:
-            try:
-                self.pending_path.unlink(missing_ok=True)
-            except OSError:
-                logger.warning(
-                    "Could not discard Pageviews checkpoint: %s",
-                    self.pending_path,
-                )
-        self._pending_titles.clear()
 
     def save(
         self,
@@ -332,5 +250,4 @@ class PageviewsCache:
             )
             .sort("page", "date", nulls_last=False)
         )
-        if _write_snapshot(self.path, frame):
-            self.discard_pending()
+        _write_snapshot(self.path, frame)

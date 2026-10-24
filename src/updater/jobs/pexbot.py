@@ -117,11 +117,6 @@ def _record_action(
     ) as publish:
         if publish:
             active.mark_updates_unknown()
-            active.finish_report(
-                report.title,
-                "unconfirmed",
-                confirmed_edits=None,
-            )
             try:
                 _refresh(active.site, report.title)
             except BaseException:
@@ -131,6 +126,11 @@ def _record_action(
                     confirmed_edits=None,
                 )
                 raise
+            active.finish_report(
+                report.title,
+                "unconfirmed",
+                confirmed_edits=None,
+            )
         else:
             active.finish_report(
                 report.title,
@@ -143,6 +143,38 @@ def _record_action(
             )
 
 
+def _prepare_action(active: JobContext, title: str) -> PexBotReport | None:
+    """Check history and retain skipped or previewed report metadata.
+
+    Args:
+        active: Context selecting live publication or preview.
+        title: Subscribed destination whose current history is checked.
+
+    Returns:
+        Prepared evidence requiring a live refresh, or null after a skip
+        or preview has been retained and its outcome recorded.
+    """
+    today = _utc_today()
+    report = prepare_report(active.site, title, today)
+    if report.already_updated:
+        note = (
+            f"Skipped PexBot refresh: {title}. PexBot already "
+            f"edited this page on {today} UTC."
+        )
+        active.notes.append(note)
+        _LOGGER.info("%s", note)
+    elif active.dry:
+        active.notes.append(
+            f"PexBot refresh proposed: {title}. External generation "
+            "was not triggered; proposed wikitext is unavailable.",
+        )
+        _LOGGER.info("Dry run: skipped delegated refresh of %s.", title)
+    else:
+        return report
+    _record_action(active, report, attempt=False)
+    return None
+
+
 def run(
     *,
     dry: bool = False,
@@ -153,8 +185,9 @@ def run(
 
     Skip reports edited by PexBot on the current UTC date, even when
     another editor has since changed them. Apply this check to dry-run
-    proposals too. Live requests pause for 15 seconds between attempted
-    refreshes; skipped reports and dry runs do not pause.
+    proposals too. After a live refresh attempt, pause for 15 seconds
+    before checking the next report. Skips schedule no further pause;
+    previews never pause.
 
     Args:
         dry: Suppress external requests for a standalone run.
@@ -176,69 +209,19 @@ def run(
         active.register_targets(titles)
         _LOGGER.info("Selected %d subscribed PexBot reports.", len(titles))
         failures: list[Exception] = []
-        attempted = False
+        needs_cooldown = False
         for title in titles:
-            today = _utc_today()
-            try:
-                report = prepare_report(active.site, title, today)
-            except Exception as error:
-                _LOGGER.exception("PexBot history check failed: %s.", title)
-                active.finish_report(title, "failed", confirmed_edits=0)
-                failures.append(error)
-                continue
-            if report.already_updated:
-                note = (
-                    f"Skipped PexBot refresh: {title}. PexBot already "
-                    f"edited this page on {today} UTC."
-                )
-                active.notes.append(note)
-                _LOGGER.info("%s", note)
-                try:
-                    _record_action(
-                        active,
-                        report,
-                        attempt=False,
-                    )
-                except Exception as error:
-                    _LOGGER.exception(
-                        "Could not store delegated report metadata: %s.",
-                        title,
-                    )
-                    failures.append(error)
-                continue
-            if active.dry:
-                active.notes.append(
-                    f"PexBot refresh proposed: {title}. External generation "
-                    "was not triggered; proposed wikitext is unavailable.",
-                )
-                _LOGGER.info(
-                    "Dry run: skipped delegated refresh of %s.",
-                    title,
-                )
-                try:
-                    _record_action(
-                        active,
-                        report,
-                        attempt=False,
-                    )
-                except Exception as error:
-                    _LOGGER.exception(
-                        "Could not store delegated preview metadata: %s.",
-                        title,
-                    )
-                    failures.append(error)
-                continue
-            if attempted:
+            if needs_cooldown:
                 time.sleep(_COOLDOWN_SECONDS)
-            attempted = True
+                needs_cooldown = False
             try:
-                _record_action(
-                    active,
-                    report,
-                    attempt=True,
-                )
+                with active.report_attempt(title):
+                    report = _prepare_action(active, title)
+                    if report is not None:
+                        needs_cooldown = True
+                        _record_action(active, report, attempt=True)
             except Exception as error:
-                _LOGGER.exception("Delegated refresh failed: %s.", title)
+                _LOGGER.exception("PexBot report failed: %s.", title)
                 failures.append(error)
         if failures:
             msg = "PexBot report history checks or refreshes failed."

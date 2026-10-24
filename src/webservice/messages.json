@@ -309,6 +309,16 @@
     "zh-hans": "{routine}：页面更新",
     "zh-hant": "{routine}：頁面更新"
   },
+  "ops.close": {
+    "en": "Close",
+    "zh-hans": "关闭",
+    "zh-hant": "關閉"
+  },
+  "ops.timing_note": {
+    "en": "The card shows the whole routine's elapsed time. Each row shows that report's own execution time, excluding time waiting for earlier reports.",
+    "zh-hans": "卡片显示整项任务的执行时间；下表显示各报告本次执行的独立用时，不包含等待前序报告的时间。",
+    "zh-hant": "卡片顯示整項任務的執行時間；下表顯示各報告本次執行的獨立用時，不包含等待前序報告的時間。"
+  },
   "ops.column_status": {
     "en": "Status",
     "zh-hans": "状态",
@@ -469,6 +479,16 @@
     "zh-hans": "站内报告更新状态",
     "zh-hant": "站內報告更新狀態"
   },
+  "ops.live": {
+    "en": "Status refreshes automatically every second.",
+    "zh-hans": "状态每秒自动刷新。",
+    "zh-hant": "狀態每秒自動重新整理。"
+  },
+  "ops.reconnecting": {
+    "en": "Live updates are unavailable. Showing the last received status; retrying automatically.",
+    "zh-hans": "暂时无法实时刷新，当前显示上次获取的状态，将自动重试。",
+    "zh-hant": "暫時無法即時重新整理，目前顯示上次取得的狀態，將自動重試。"
+  },
   "ops.unavailable": {
     "en": "Unavailable",
     "zh-hans": "未获取",
@@ -480,19 +500,49 @@
     "zh-hant": "執行時間"
   },
   "ops.state_duration": {
-    "en": "(Execution time: {duration})",
+    "en": "({duration})",
     "zh-hans": "（执行时间{duration}）",
     "zh-hant": "（執行時間{duration}）"
   },
   "ops.column_time": {
-    "en": "Updated",
-    "zh-hans": "更新时间",
-    "zh-hant": "更新時間"
+    "en": "Last run: ",
+    "zh-hans": "最近执行：",
+    "zh-hant": "最近執行："
   },
   "ops.next_run": {
-    "en": "Next run",
-    "zh-hans": "下次执行时间",
-    "zh-hant": "下次執行時間"
+    "en": "Next run: ",
+    "zh-hans": "下次执行：",
+    "zh-hant": "下次執行："
+  },
+  "time.minutes_ago": {
+    "en": "({count} min ago)",
+    "zh-hans": "（{count}分钟前）",
+    "zh-hant": "（{count}分鐘前）"
+  },
+  "time.hours_ago": {
+    "en": "({count} hr ago)",
+    "zh-hans": "（{count}小时前）",
+    "zh-hant": "（{count}小時前）"
+  },
+  "time.minutes_ahead": {
+    "en": "(in {count} min)",
+    "zh-hans": "（{count}分钟后）",
+    "zh-hant": "（{count}分鐘後）"
+  },
+  "time.hours_ahead": {
+    "en": "(in {count} hr)",
+    "zh-hans": "（{count}小时后）",
+    "zh-hant": "（{count}小時後）"
+  },
+  "time.just_now": {
+    "en": "(just now)",
+    "zh-hans": "（刚刚）",
+    "zh-hant": "（剛剛）"
+  },
+  "time.soon": {
+    "en": "(within 1 min)",
+    "zh-hans": "（1分钟内）",
+    "zh-hant": "（1分鐘內）"
   },
   "ops.schedule_stale": {
     "en": "Scheduler state is stale",
@@ -579,10 +629,15 @@
     "zh-hans": "更新中",
     "zh-hant": "更新中"
   },
+  "state.Queued": {
+    "en": "Waiting to run…",
+    "zh-hans": "等待执行…",
+    "zh-hant": "等待執行…"
+  },
   "footer.uptime": {
-    "en": "Aranami ({version}) uptime: {days}d {hours}h {minutes}m · since {since} UTC",
-    "zh-hans": "Aranami ({version}) 已连续运行{days}天{hours}小时{minutes}分钟（始于{since} UTC）",
-    "zh-hant": "Aranami ({version}) 已連續運行{days}天{hours}小時{minutes}分鐘（始於{since} UTC）"
+    "en": "Aranami ({version}) uptime: {days}d {hours}h {minutes}m {seconds}s · since {since} UTC",
+    "zh-hans": "Aranami ({version}) 已连续运行{days}天{hours}小时{minutes}分钟{seconds}秒（始于{since} UTC）",
+    "zh-hant": "Aranami ({version}) 已連續運行{days}天{hours}小時{minutes}分鐘{seconds}秒（始於{since} UTC）"
   },
   "footer.uptime_unknown": {
     "en": "Aranami ({version}) uptime: unavailable",
@@ -618,6 +673,11 @@
     "en": "Recent logs",
     "zh-hans": "最近日志",
     "zh-hant": "最近日誌"
+  },
+  "logs.reader_note": {
+    "en": "Starts, outcomes, and server lifecycle events. Logs are retained for 30 days; downloads include detailed diagnostics.",
+    "zh-hans": "这里只显示任务开始、执行结果和服务启停。日志保留30天；下载文件包含详细诊断信息。",
+    "zh-hant": "這裡只顯示任務開始、執行結果和服務啟停。日誌保留30天；下載檔案包含詳細診斷資訊。"
   },
   "logs.no_matches": {
     "en": "No matching lines in the displayed portion.",

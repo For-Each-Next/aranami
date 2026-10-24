@@ -16,6 +16,7 @@ from unittest.mock import patch
 from backend.public import PublicHTTPServer
 from backend.support.http import accepts_gzip
 from backend.support.public_data import read_schedule_status
+from backend.support.routine_status import write_routine_status
 from shared.config import configuration_id, routine_configuration
 
 
@@ -33,6 +34,7 @@ class PublicWebsiteTests(unittest.TestCase):
             "<!doctype html>" + "a" * 2048,
         )
         (self.assets / "styles.css").write_text("body { color: green; }")
+        (self.assets / "live.js").write_text('"use strict";')
         self.server = PublicHTTPServer(
             ("127.0.0.1", 0),
             self.runtime,
@@ -87,13 +89,17 @@ class PublicWebsiteTests(unittest.TestCase):
         assert headers["Content-Encoding"] == "gzip"
         assert headers["Cache-Control"] == "no-store"
         assert "default-src 'none'" in headers["Content-Security-Policy"]
-        assert "script-src" not in headers["Content-Security-Policy"]
+        assert "script-src 'self'" in headers["Content-Security-Policy"]
+        assert "unsafe-inline" not in headers["Content-Security-Policy"]
         head = self.request("/fixture.html", "HEAD", "gzip")
         assert head[0] == 200
         assert head[1]["Content-Length"] == headers["Content-Length"]
         assert head[2] == b""
         assert self.request("/styles.css")[1]["Content-Type"].startswith(
             "text/css",
+        )
+        assert self.request("/live.js")[1]["Content-Type"].startswith(
+            "text/javascript",
         )
         for method in ("POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"):
             with self.subTest(method=method):
@@ -159,8 +165,8 @@ class PublicWebsiteTests(unittest.TestCase):
         assert b"secret" not in self.request("/api/dashboard")[2]
         assert not (self.runtime / "state").exists()
 
-    def test_python_pages_render_without_browser_scripts(self) -> None:
-        """Render localized documents with no client application."""
+    def test_python_pages_render_before_optional_live_updates(self) -> None:
+        """Keep complete HTML with optional dashboard status updates."""
         with patch("pywikibot.Site", side_effect=AssertionError("No sources")):
             for target in ("/", "/about/", "/logs/"):
                 with self.subTest(target=target):
@@ -170,7 +176,9 @@ class PublicWebsiteTests(unittest.TestCase):
                     assert headers["Content-Language"] == "en"
                     assert "Accept-Language" in headers["Vary"]
                     assert b"Aranami" in body
-                    assert b"<script" not in body
+                    assert (b'<script src="/live.js" defer>' in body) == (
+                        target == "/"
+                    )
                     assert b"Enable JavaScript" not in body
             head = self.request("/", "HEAD")
             assert head[0] == 200
@@ -182,13 +190,63 @@ class PublicWebsiteTests(unittest.TestCase):
             assert self.request("/logs/?q=one&q=two")[0] == 400
         assert not (self.runtime / "state").exists()
 
+    def test_live_status_bypasses_page_cache_and_never_collects(self) -> None:
+        """Refresh saved status without reading dashboard datasets."""
+        now = dt.datetime.now(dt.UTC)
+        record = {
+            "routine": "pageviews",
+            "status": "running",
+            "dry": False,
+            "updated": None,
+            "duration_seconds": None,
+            "started_at": (now - dt.timedelta(seconds=33)).isoformat(),
+            "finished_at": None,
+            "run_id": "a" * 32,
+        }
+        directory = self.runtime / "state"
+        assert write_routine_status(record, directory=directory)
+        with (
+            patch("pywikibot.Site", side_effect=AssertionError("No sources")),
+            patch(
+                "backend.public.PublicRequestHandler._dashboard",
+                side_effect=AssertionError("No dataset reads"),
+            ),
+        ):
+            status, headers, body = self.request("/api/live")
+            assert status == 200
+            assert headers["Cache-Control"] == "no-store"
+            assert "Accept-Language" in headers["Vary"]
+            assert b">Running</button>" in body
+            assert b'id="live-uptime"' in body
+            record.update(
+                status="updated",
+                updated=1,
+                finished_at=now.isoformat(),
+                duration_seconds=32.89,
+            )
+            assert write_routine_status(record, directory=directory)
+            body = self.request("/api/live")[2]
+            assert b">Updated</button>" in body
+            assert b"(33 sec)" in body
+            assert b"32.89" not in body
+            translated = self.request("/api/live", language="zh-TW")
+            assert translated[1]["Content-Language"] == "zh-hant"
+            assert "執行時間33秒" in translated[2].decode()
+            assert self.request("/api/live", "HEAD")[2] == b""
+            assert self.request("/api/live", "POST")[0] == 405
+            (directory / "routine-status.json").write_text("invalid")
+            assert b">No record</button>" in self.request("/api/live")[2]
+        assert not (self.runtime / "cache").exists()
+
     def test_log_selection_filter_limits_and_full_download(self) -> None:
         """Preserve filtering, dates, bounded tails, and downloads."""
         directory = self.runtime / "logs"
         directory.mkdir()
         filename = "aranami.2026-10-23.log"
         content = "".join(
-            f"Line {index} <script> [x]\n" for index in range(150)
+            "2026-10-23 12:00:00Z INFO [updater.jobs._execution._save_edit]: "
+            f"Saved Line {index} <script> [x] on zhwiki.\n"
+            for index in range(150)
         )
         (directory / filename).write_text(content)
         (directory / "aranami.2026-02-30.log").write_text("invalid date")
@@ -205,12 +263,14 @@ class PublicWebsiteTests(unittest.TestCase):
             },
         ]
         assert len(value["lines"]) == 100
-        assert value["lines"][0] == "Line 50 <script> [x]"
+        assert value["lines"][0] == (
+            "2026-10-23 12:00:00Z Updated Line 50 <script> [x] on zhwiki."
+        )
         assert value["truncated"]
         assert json.loads(self.request("/api/logs?q=LINE+149")[2])[
             "lines"
         ] == [
-            "Line 149 <script> [x]",
+            "2026-10-23 12:00:00Z Updated Line 149 <script> [x] on zhwiki.",
         ]
         downloaded = self.request("/api/logs?date=2026-10-23&download=1")
         assert downloaded[2] == content.encode()
@@ -256,7 +316,7 @@ class PublicWebsiteTests(unittest.TestCase):
         directory.mkdir()
         (directory / "aranami.2026-10-23.log").write_bytes(b"x" * 20000)
         value = json.loads(self.request("/api/logs")[2])
-        assert len(value["lines"][0]) == 16384
+        assert value["lines"] == []
         assert value["truncated"]
 
     def test_scheduler_validation_preserves_observed_configuration(

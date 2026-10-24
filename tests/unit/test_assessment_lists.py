@@ -4,6 +4,7 @@
 # ruff: file-ignore[ambiguous-unicode-character-string, private-member-access]
 # ruff: file-ignore[pytest-unittest-raises-assertion]
 
+import datetime as dt
 from contextlib import nullcontext
 from dataclasses import fields
 from functools import partial
@@ -16,7 +17,8 @@ import polars as pl
 
 from backend.services.zhwiki import assessment_lists as source
 from backend.support.report_membership import MembershipReport
-from updater.jobs import assessment_lists as job
+from backend.support.report_status import read_report_status
+from updater.jobs import JobContext, assessment_lists as job
 from updater.services.zhwiki import assessment_lists as service
 from updater.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
 
@@ -608,6 +610,95 @@ class TestAssessmentJob(TestCase):
         assert prepare.call_count == len(job.ASSESSMENT_LISTS)
         assert context.publish.call_count == len(job.ASSESSMENT_LISTS) - 1
         assert save.call_count == len(job.ASSESSMENT_LISTS) - 1
+
+    def test_each_list_measures_its_own_preparation_and_failure(self) -> None:
+        """Measure each list independently of shared reads."""
+        elapsed = [0.0]
+        started = dt.datetime(2026, 10, 24, tzinfo=dt.UTC)
+        site = MagicMock()
+        site.dbName.return_value = "zhwiki"
+        context = JobContext(site, started.date(), dry=False)
+
+        def preload(*_args: object) -> list[MagicMock]:
+            """Spend ten seconds on the shared destination preload.
+
+            Returns:
+                The two destinations' existing contents.
+            """
+            elapsed[0] += 10
+            return [MagicMock(text=_TEXT), MagicMock(text=_TEXT)]
+
+        def prepare(
+            site: object,
+            config: source.AssessmentList,
+            text: str,
+            **kwargs: object,
+        ) -> source.AssessmentData:
+            """Spend a distinct duration on each list's source read.
+
+            Returns:
+                Prepared members for the first destination.
+
+            Raises:
+                RuntimeError: The second destination's source is down.
+            """
+            if config == _A_CONFIG:
+                elapsed[0] += 2
+                return _source_data({"Old": 1}, site, config, text, **kwargs)
+            elapsed[0] += 3
+            message = "The second list source failed."
+            raise RuntimeError(message)
+
+        with (
+            TemporaryDirectory() as temporary,
+            patch("pathlib.Path.cwd", return_value=Path(temporary)),
+            patch(
+                "backend.support.execution.perf_counter",
+                side_effect=lambda: elapsed[0],
+            ),
+            patch(
+                "backend.support.report_status.perf_counter",
+                side_effect=lambda: elapsed[0],
+            ),
+            patch(
+                "backend.support.report_status._utc_now",
+                side_effect=lambda: started + dt.timedelta(seconds=elapsed[0]),
+            ),
+            patch.object(job, "read_pages", side_effect=preload),
+            patch.object(job, "prepare_data", side_effect=prepare),
+            patch.object(
+                job,
+                "prepare_report",
+                return_value=MembershipReport(_TEXT, {"Old": 1}),
+            ),
+            patch.object(job, "load_membership", return_value={}),
+            patch.object(job, "save_membership"),
+            self.assertLogs(job.logger, level="ERROR"),
+            self.assertLogs("backend.support.execution", level="INFO"),
+        ):
+            with self.assertRaises(ExceptionGroup):
+                job.run(
+                    lists=(("First", _A_CONFIG), ("Second", _ACC_CONFIG)),
+                    context=context,
+                )
+            records = {
+                record["title"]: record
+                for record in read_report_status(
+                    Path(temporary) / "state" / "report-updates.json",
+                )["reports"].values()
+            }
+        assert records["First"]["status"] == "no_update"
+        assert [
+            records[title]["duration_seconds"] for title in ("First", "Second")
+        ] == [2, 3]
+        assert records["First"]["started_at"] == "2026-10-24T00:00:10.000000Z"
+        assert records["Second"]["status"] == "failed"
+        assert records["Second"]["started_at"] == "2026-10-24T00:00:12.000000Z"
+        assert (
+            records["Second"]["finished_at"] == "2026-10-24T00:00:15.000000Z"
+        )
+        expected_total = 15
+        assert context.tasks[0].elapsed_seconds == expected_total
 
     def test_cached_ids_suppress_rename_and_save_only_after_publication(
         self,

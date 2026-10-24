@@ -27,7 +27,7 @@ _SCRIPTS = {
     "validate-source.py",
 }
 _PACKAGES = {"backend", "updater", "webservice", "shared"}
-_SUFFIXES = {".py", ".css", ".json", ".svg"}
+_SUFFIXES = {".py", ".css", ".js", ".json", ".svg"}
 _MAX_JSON = 4 * 1024 * 1024
 _MAX_FILE = 32 * 1024 * 1024
 _MAX_TOTAL = 128 * 1024 * 1024

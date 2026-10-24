@@ -37,9 +37,12 @@ tail -n 100 logs/aranami.YYYY-MM-DD.log
 ```
 
 Replace `YYYY-MM-DD` with the required UTC date. The current date and the
-latest 90 completed dates are retained. Messages describe the data being
+previous 29 UTC calendar dates are retained. Messages describe the data being
 prepared, the page being edited, counts, completion, skips, and failures.
 They are not a machine-readable status database.
+The public log viewer shows concise starts, results, and server lifecycle
+events, omitting per-article fetch failures and other diagnostic noise.
+Daily downloads retain the full diagnostics for troubleshooting.
 
 Backend metadata is separate:
 
@@ -63,7 +66,7 @@ Use the routine identifiers below with the `tasks` argument:
 | `dyks` | Completed DYK entries, active nominees, and statistics | Every hour at `:00` |
 | `new_pages` | Retained daily keyword-matched new/conversion entries | Daily at `00:07` |
 | `assessment_lists` | Project assessment and review lists | Every hour at `:31` |
-| `pageviews` | Popularity rankings for the next eligible report date | Every hour at `:59` while behind/deferred |
+| `pageviews` | Separate daily popularity rankings for all missing eligible dates | Every hour at `:59` while behind/deferred |
 | `enwp_key_articles` | Current English importance and quality comparisons | Daily at `23:24` |
 | `pexbot` | Refresh requests for subscribed PexBot reports | Daily at `00:00` |
 
@@ -74,9 +77,21 @@ window. Website datasets have independent refresh intervals.
 
 New pages retains 100 complete UTC dates through yesterday by default.
 Once the whole retained window is verified complete, automatic work waits
-for the next daily trigger. Pageviews processes at most one missing report
-date per call. Yesterday becomes eligible at the actual 18:00 UTC
-readiness boundary; its hourly schedule first attempts that day at 18:59.
+for the next daily trigger.
+
+Pageviews first downloads full histories through the latest eligible complete
+day. If too many articles lack that day's record, it retries a fresh full
+download ending one day earlier, without going back to an already-published
+date. It then analyzes and saves each missing day's report in order through
+the usable endpoint. For example, a report on the 15th catches up with
+separate saves for the 16th, 17th, and 18th; if only the download through the
+17th passes, it saves the 16th and 17th and retries the 18th later.
+Each report keeps its actual data date. An incomplete intermediate day or
+unsuccessful save stops publication, preserving earlier confirmed progress.
+If no unpublished endpoint passes, the task fails and retries later.
+Today's incomplete totals are excluded. Yesterday becomes eligible at the
+actual 18:00 UTC readiness boundary; its hourly schedule first attempts
+that day at 18:59.
 Once current, it waits for 18:59 following the next readiness boundary.
 Failed saves and previews do not establish completion. Missing or invalid
 disposable evidence causes on-wiki revalidation. Manual runs always
@@ -146,6 +161,11 @@ PexBot actions are limited to Chinese Wikipedia and configured
 slash-delimited report roots; an empty root list disables selection.
 Reports already edited by PexBot during the actual current UTC day are
 skipped. A delegated response does not prove a confirmed local edit count.
+After a live refresh request, a fifteen-second cooldown precedes the next
+report attempt, including its history check. A skipped report consumes that
+pending cooldown but does not schedule another wait. Card timing covers the
+whole routine; popup rows measure each report's own attempt without prior
+reports or cooldowns.
 
 ## Managed report settings
 
@@ -157,7 +177,7 @@ paired markers and text outside them:
 ...retained daily records...
 <!-- aranami end="new-pages" -->
 
-<!-- aranami begin="page_views" history-days="800" missing-percent="95" -->
+<!-- aranami begin="page_views" history-days="800" missing-percent="1" -->
 ...popularity report...
 <!-- aranami end="page_views" -->
 ```
@@ -168,6 +188,18 @@ the managed ranges. The Pageviews checkpoint remains
 `<!-- report date YYYY-MM-DD -->`. Source categories for assessment lists
 also use supported opening-marker settings. Backend services validate and
 interpret settings; the updater only renders within the managed ranges.
+
+Every Pageviews run and earlier-endpoint retry downloads full article
+histories again; catch-up dates share only the successful batch's fresh
+responses. A download stops immediately when more than 1% of selected
+articles lack its final day's daily record, then retries the previous
+unpublished endpoint. Each daily report must also pass the same guard.
+Failed attempts leave the report and healthy cache unchanged. A shorter
+successful catch-up does not mark the routine current; hourly retries
+continue for the remaining dates. Exactly 1% missing is allowed and measured
+zeroes are valid.
+Older historical gaps do not fail the task or produce per-article warnings.
+Larger legacy `missing-percent` values cannot raise the one-percent limit.
 
 Changing target titles, UTC schedules, subscription roots, or maintenance
 catalogue definitions requires a source change and validated deployment.

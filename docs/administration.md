@@ -103,7 +103,7 @@ The following paths are relative to the tool home:
 | `reports/` | Durable complete result bundles, manifests, Parquet data, and generated wikitext |
 | `state/` | Observed routine, schedule, and per-destination publication metadata |
 | `cache/` | Disposable source data, completion evidence, bytecode, and website snapshots |
-| `logs/` | Natural-language UTC daily logs only: `aranami.YYYY-MM-DD.log` |
+| `logs/` | Natural-language UTC daily logs: current date plus previous 29 dates |
 | `dry-run/` | Preview summaries, exact proposed text, and isolated result bundles |
 
 The authoritative metadata files are `state/routine-status.json`,
@@ -148,7 +148,9 @@ tail -f "logs/aranami.$(date -u +%F).log"
 Press `Ctrl-C` to stop following. A file appears after the backend first
 logs on that date. Around midnight UTC, reopen the newly dated file.
 The [web log viewer](https://aranami.toolforge.org/logs/) is a read-only
-alternative for browsing saved dates and searching messages.
+alternative for browsing saved dates and searching concise lifecycle
+summaries. Download a daily file for full diagnostics, including individual
+source-request failures omitted from the public reader view.
 
 Inspect formatted status metadata with `jq`:
 
@@ -272,7 +274,7 @@ metadata, and active receipt from the same generation.
 Run on the bastion as the tool account:
 
 ```shell
-toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --command 'exec sh /data/project/aranami/app/scripts/toolforge/run-hub.sh'
+toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --mem 2Gi --command 'exec sh /data/project/aranami/app/scripts/toolforge/run-hub.sh'
 toolforge jobs run aranami-web --image python3.13 --continuous --mount=all --port 8000 --publish --command 'exec sh /data/project/aranami/app/scripts/toolforge/run-web.sh'
 ```
 
@@ -281,6 +283,10 @@ complete HTML pages, static assets, and `/api/config`, `/api/dashboard`,
 `/api/status`, and `/api/logs` without starting collection or publication. Toolforge routes
 public requests to port 8000 through its
 [published continuous job support][toolforge-publish].
+
+Give the hub 2 GiB of memory for concurrent report preparation and Pageviews
+history. The default 512 MiB limit caused repeated out-of-memory restarts.
+Inspect `kubectl top pods` and the tool quota when sizing larger workloads.
 
 Keep the leading `exec` in both commands so Python receives the container's
 stop signal directly. The hub records its shutdown request and logs

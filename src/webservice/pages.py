@@ -2,7 +2,8 @@
 
 The public server selects and validates observations, then calls these
 renderers. All output uses shared escaped HTML builders, authored locale
-messages, responsive CSS, and native controls without JavaScript.
+messages, responsive CSS, and native controls. Optional browser updates
+refresh status and timers without requiring a page reload.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from webservice.presentation import (
     next_run,
     pageviews_url,
     readable_size,
+    relative_time,
     schedule_state,
     uptime,
     utc_time,
@@ -43,6 +45,7 @@ if TYPE_CHECKING:
 from webservice.presentation import title_url
 
 _STATES = {
+    "queued": "Queued",
     "running": "Running",
     "updated": "Updated",
     "no_update": "NoUpdate",
@@ -50,6 +53,15 @@ _STATES = {
     "deferred": "Deferred",
     "unknown": "Result unavailable",
     "unconfirmed": "Result unavailable",
+}
+_STATE_ICONS = {
+    "running": "⏳",
+    "updated": "✅",
+    "no_update": "\u2796",
+    "failed": "❌",
+    "deferred": "⏸️",
+    "unknown": "❔",
+    "unconfirmed": "❔",
 }
 
 
@@ -73,7 +85,27 @@ class _Page:
         self.interface = Interface(locale)
         self.text = self.interface.text
 
-    def document(self, heading: str, body: Markup, footer: str = "") -> str:
+    def relative_note(self, value: object, now: dt.datetime) -> Markup:
+        """Render a small relative annotation for a known timestamp.
+
+        Returns:
+            A localized small element, or nothing for unknown times.
+        """
+        label = relative_time(value, self.interface, now)
+        return (
+            tag("small", label, class_="relative-time")
+            if label
+            else fragment()
+        )
+
+    def document(
+        self,
+        heading: str,
+        body: Markup,
+        footer: str | Markup = "",
+        *,
+        live: bool = False,
+    ) -> str:
         """Wrap content with shared metadata, navigation, and styles.
 
         Returns:
@@ -112,6 +144,7 @@ class _Page:
             ),
             tag("link", rel="icon", href="/aranami.svg", type="image/svg+xml"),
             tag("link", rel="stylesheet", href="/styles.css"),
+            tag("script", src="/live.js", defer=True) if live else fragment(),
             tag("title", f"{heading} · Aranami"),
         )
         header = tag(
@@ -562,11 +595,11 @@ class _Page:
     def report_details(
         self,
         routine: str,
-        label: str,
+        popup_id: str,
         records: list[Record],
         now: dt.datetime,
     ) -> Markup:
-        """Build a keyboard-accessible native disclosure.
+        """Build a keyboard-accessible native popup without JavaScript.
 
         Returns:
             Escaped HTML for the selected presentation content.
@@ -590,17 +623,21 @@ class _Page:
                     scope="row",
                 ),
                 tag("td", self.text(f"state.{_STATES[record['status']]}")),
-                tag("td", _time(record.get("started_at"), seconds=True)),
+                tag(
+                    "td",
+                    _time(
+                        None
+                        if record["status"] == "queued"
+                        else record.get("started_at"),
+                        seconds=True,
+                    ),
+                ),
                 tag("td", _time(record.get("finished_at"), seconds=True)),
                 tag(
                     "td",
-                    event_duration(
-                        record,
-                        self.interface,
-                        now,
-                        exact=True,
-                    ),
+                    event_duration(record, self.interface, now),
                 ),
+                data_key=f"{record['site']}:{record['title']}",
             )
             for record in records
         ]
@@ -617,9 +654,21 @@ class _Page:
         )
         heading = self.text("ops.details", routine=routine)
         return tag(
-            "details",
-            tag("summary", label, class_="status-link"),
-            tag("h4", heading),
+            "div",
+            tag(
+                "div",
+                tag("h3", heading, id=f"{popup_id}-heading"),
+                tag(
+                    "button",
+                    self.text("ops.close"),
+                    type="button",
+                    popovertarget=popup_id,
+                    popovertargetaction="hide",
+                    autofocus=True,
+                ),
+                class_="popup-heading",
+            ),
+            tag("p", self.text("ops.timing_note"), class_="context"),
             tag(
                 "div",
                 table,
@@ -627,7 +676,13 @@ class _Page:
                 tabindex=0,
                 role="region",
                 aria_label=heading,
-            ),
+            )
+            if records
+            else tag("p", self.text("ops.no_record"), class_="empty"),
+            id=popup_id,
+            popover="auto",
+            role="dialog",
+            aria_labelledby=f"{popup_id}-heading",
             class_="page-updates",
         )
 
@@ -663,33 +718,63 @@ class _Page:
                 ),
                 key=operator.itemgetter("title"),
             )
-            state = (
-                self.report_details(name, label, pages, now)
-                if pages
-                else fragment(label)
-            )
-            duration_label = self.text(
-                "ops.state_duration",
-                duration=event_duration(event, self.interface, now),
+            popup_id = f"report-details-{identifier}"
+            state = tag(
+                "button",
+                label,
+                type="button",
+                class_="status-link",
+                popovertarget=popup_id,
+                aria_haspopup="dialog",
             )
             observed = (
-                _time(
-                    event["started_at"]
+                event[
+                    "started_at"
                     if event["status"] == "running"
-                    else event["finished_at"],
-                )
+                    else "finished_at"
+                ]
                 if event
-                else fragment("—")
+                else None
             )
+            scheduled = schedule["routines"].get(identifier, {})
+            upcoming = scheduled.get("next_run_at")
             metadata = tag(
                 "ul",
-                tag("li", state, " ", duration_label),
-                tag("li", self.text("ops.column_time"), ": ", observed),
+                tag(
+                    "li",
+                    tag(
+                        "span",
+                        _STATE_ICONS.get((event or {}).get("status"), "❔"),
+                        aria_hidden="true",
+                    ),
+                    " ",
+                    state,
+                    " " if self.interface.locale == "en" else "",
+                    tag(
+                        "span",
+                        self.text(
+                            "ops.state_duration",
+                            duration=event_duration(
+                                event,
+                                self.interface,
+                                now,
+                            ),
+                        ),
+                        title=self.text("ops.column_duration"),
+                    ),
+                    class_="routine-status",
+                ),
+                tag(
+                    "li",
+                    self.text("ops.column_time"),
+                    _time(observed),
+                    self.relative_note(observed, now),
+                ),
                 tag(
                     "li",
                     self.text("ops.next_run"),
-                    ": ",
                     next_run(schedule, identifier, self.interface),
+                    self.relative_note(upcoming, now),
                 ),
                 class_="routine-meta",
             )
@@ -698,7 +783,9 @@ class _Page:
                     "article",
                     tag("h3", self.routine_links(name, definition)),
                     metadata,
+                    self.report_details(name, popup_id, pages, now),
                     class_="routine-card",
+                    id=f"routine-{identifier}",
                 ),
             )
         missing = (
@@ -709,6 +796,16 @@ class _Page:
         return tag(
             "section",
             tag("h2", self.text("ops.heading"), id="tool-status-heading"),
+            tag(
+                "p",
+                self.text("ops.live"),
+                id="live-notice",
+                class_="context",
+                role="status",
+                hidden=True,
+                data_live=self.text("ops.live"),
+                data_reconnecting=self.text("ops.reconnecting"),
+            ),
             missing,
             tag("div", *cards, class_="card-grid"),
             class_="section-flat",
@@ -962,6 +1059,28 @@ class _Page:
         )
 
 
+def _live_status(
+    page: _Page,
+    status: Record,
+    config: Record,
+    now: dt.datetime,
+) -> tuple[Markup, Markup]:
+    """Share status cards and uptime between initial and live views.
+
+    Returns:
+        Independently replaceable status and footer fragments.
+    """
+    definitions = (config.get("routines") or {}).get("routines", {})
+    schedule = schedule_state(status.get("schedule"), definitions, now)
+    version = config.get("version") or page.text("ops.unavailable")
+    footer = tag(
+        "span",
+        uptime(schedule, version, page.interface, now),
+        id="live-uptime",
+    )
+    return page.routine_cards(status, definitions, schedule, now), footer
+
+
 def render_dashboard(
     snapshot: Record | None,
     status: Record | None,
@@ -984,8 +1103,7 @@ def render_dashboard(
     page = _Page(locale)
     now = now or dt.datetime.now(dt.UTC)
     status, config = status or {}, config or {}
-    definitions = (config.get("routines") or {}).get("routines", {})
-    schedule = schedule_state(status.get("schedule"), definitions, now)
+    status_cards, footer = _live_status(page, status, config, now)
     notice = fragment()
     if snapshot is None:
         notice = tag("p", page.text("notice.preparing"), class_="notice")
@@ -996,15 +1114,43 @@ def render_dashboard(
         notice,
         page.highlights(snapshot),
         page.backlog(snapshot.get("backlog")),
-        page.routine_cards(status, definitions, schedule, now),
+        status_cards,
     )
-    footer = uptime(
-        schedule,
-        config.get("version") or page.text("ops.unavailable"),
-        page.interface,
-        now,
+    return page.document(
+        page.text("page.heading"),
+        body,
+        footer,
+        live=True,
     )
-    return page.document(page.text("page.heading"), body, footer)
+
+
+def render_live_status(
+    status: Record | None,
+    config: Record | None,
+    locale: str,
+    now: dt.datetime | None = None,
+) -> str:
+    """Render fresh status and uptime without loading website datasets.
+
+    Args:
+        status: Validated routine, schedule, and page observations.
+        config: Current source version and routine definitions.
+        locale: The language of the existing page.
+        now: Optional aware server clock for deterministic elapsed time.
+
+    Returns:
+        Escaped fragments with the same identities as the full page.
+    """
+    return str(
+        fragment(
+            *_live_status(
+                _Page(locale),
+                status or {},
+                config or {},
+                now or dt.datetime.now(dt.UTC),
+            ),
+        ),
+    )
 
 
 def render_maintenance(
@@ -1141,6 +1287,7 @@ def render_logs(data: Record, locale: str) -> str:
     body = fragment(
         page.log_controls(data),
         tag("h2", page.text("logs.recent")),
+        tag("p", page.text("logs.reader_note"), class_="context"),
         notice,
         excerpt,
         page.log_files(data["files"]),

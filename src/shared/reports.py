@@ -396,6 +396,7 @@ class ReportStore:
         started_at: dt.datetime,
         target: Mapping[str, str],
         locked: bool = False,
+        previous_generation: str | None = None,
     ) -> ReportBundle:
         """Persist calculated data before selecting it for publication.
 
@@ -407,6 +408,9 @@ class ReportStore:
             started_at: Original run start for concurrent-run ordering.
             target: Wiki identity and destination, retained as metadata.
             locked: Caller already holds this key's publication lock.
+            previous_generation: Last generation selected by this run.
+                Allows its next result only while that predecessor is
+                still current; omit for the first result in a run.
 
         Returns:
             Complete bundle; ``selected`` is false for superseded runs.
@@ -424,6 +428,7 @@ class ReportStore:
                     started_at=started_at,
                     target=target,
                     locked=True,
+                    previous_generation=previous_generation,
                 )
         _validate_key(key)
         _validate_key(result.family)
@@ -441,7 +446,10 @@ class ReportStore:
                 str(current.manifest["started_at"]),
                 str(current.manifest["run_id"]),
             )
-            if order <= current_order:
+            if order < current_order or (
+                order == current_order
+                and previous_generation != current.manifest["generation"]
+            ):
                 return ReportBundle(
                     current.path,
                     current.manifest,

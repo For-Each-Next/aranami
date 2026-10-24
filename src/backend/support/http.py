@@ -62,7 +62,7 @@ class ReadOnlyRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'none'; style-src 'self'; "
+            "default-src 'none'; style-src 'self'; script-src 'self'; "
             "img-src 'self'; connect-src 'self'; base-uri 'none'; "
             "form-action 'self'; frame-ancestors 'none'",
         )

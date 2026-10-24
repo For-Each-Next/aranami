@@ -154,7 +154,7 @@ class TestReportLifecycle(TestCase):
                 routine_run("pageviews", context),
             ):
                 context.register_targets([title])
-                assert self._status(title)["status"] == "running"
+                assert self._status(title)["status"] == "queued"
                 if outcome == "deferred":
                     context.defer("Source not ready")
             record = self._status(title)
