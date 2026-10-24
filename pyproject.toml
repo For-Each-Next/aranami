@@ -1,7 +1,7 @@
 [project]
 name = "aranami"
-version = "0.6.4"
-description = "A tool for maintaining on-wiki reports."
+version = "0.7.0"
+description = "Toolforge automation for Wikipedia reports and a read-only dashboard."
 readme = "README.md"
 authors = [
     { name = "For Each ... Next", email = "for_each_next@outlook.com" },
@@ -9,24 +9,27 @@ authors = [
 license = "CC0-1.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.15"
-keywords = ["mediawiki", "pywikibot", "wikipedia"]
+keywords = ["dashboard", "mediawiki", "pywikibot", "toolforge", "wikipedia"]
 classifiers = [
-    "Development Status :: 1 - Planning",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
+    "Environment :: Web Environment",
+    "Framework :: Flask",
     "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.15",
     "Topic :: Internet :: WWW/HTTP :: Dynamic Content :: Wiki",
-    "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Utilities",
     "Private :: Do Not Upload",
 ]
 dependencies = [
     "apscheduler",
     "dateparser",
+    "flask",
     "jieba",
     "mwparserfromhell",
     "opencc-python-reimplemented",
@@ -36,7 +39,11 @@ dependencies = [
     "python-dateutil",
     "sqlalchemy",
     "tqdm",
+    "waitress",
 ]
+
+[project.urls]
+Homepage = "https://aranami.toolforge.org/"
 
 [dependency-groups]
 dev = [

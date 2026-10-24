@@ -57,9 +57,7 @@ each output retains its own success state, source timestamps, and retry
 rules. Keep data preparation in `backend`, including website processing
 in `backend/website/`. Both frontends consume backend-prepared data;
 formatting and publication belong to `updater`, and web rendering belongs
-to `webservice`. A facade in the backend does not satisfy this boundary
-if the real collection, parsing, comparison, or persistence still happens
-in the frontend.
+to `webservice`.
 
 | Operation | Owner |
 |---|---|
@@ -74,9 +72,9 @@ in the frontend.
 
 Backend services accept concrete definitions and existing destination text
 without selecting or loading the destination. They return typed facts,
-rows, and metadata sufficient for rendering. The updater must not parse
-source templates, infer old membership, perform identity matching, or
-read and write data files. Shared managed-range mechanics may locate and
+rows, and metadata sufficient for rendering. Source-template interpretation,
+retained membership, identity matching, and persistence remain backend work.
+Shared managed-range mechanics may locate and
 replace comment-delimited spans; interpreting their input settings and
 content remains backend work. Keep backend data and support modules
 independent of frontend types. Only HTTP orchestration in `backend.public`
@@ -125,8 +123,8 @@ advice; only the monitor changes scheduler state.
 
 The backend owns three separate observed-state snapshots:
 
-- `state/routine-status.json`: routine-level starts, results, durations,
-  and confirmed save counts.
+- `state/routine-status.json`: routine-level starts, optional active progress,
+  results, durations, and confirmed save counts.
 - `state/schedule-status.json`: the monitor's actual next execution
   times, configuration identity, and running/paused/stopped state.
 - `state/report-updates.json`: per-destination update starts, finishes,
@@ -135,11 +133,24 @@ The backend owns three separate observed-state snapshots:
 `state/routine-status.json` is a bounded atomic schema-1 snapshot of actual
 routine starts and results, with measured durations and confirmed save
 counts. Older starts cannot overwrite newer results. Preview activity is
-omitted. `state/schedule-status.json` separately records actual scheduler
+omitted. An optional nullable `progress` object contains `phase`, `report_date`,
+`current`, and `total`. Phases are `preparing`, `publishing`,
+`pageviews_readiness`, `pageviews_download`, and `pageviews_aggregate`.
+The report date identifies the report being built; shared Pageviews downloads
+retain the first unpublished report date rather than the candidate endpoint.
+The counters are both null or observed integers satisfying
+`0 <= current <= total <= 1_000_000_000`. Phase changes and readiness probes
+update progress; article counters are recorded every hundred items and at
+completion. These callbacks add no source reads and use the same locked
+stale-run protections as other status updates. Completed outcomes clear
+progress; older records remain readable, with a generic preparing state while
+running. Previews remain isolated from production observations.
+
+`state/schedule-status.json` separately records actual scheduler
 next-run times, configuration identity, and running/paused/stopped state.
 Scheduler events and a thirty-second local heartbeat refresh it without
-source requests. The website treats missing or stale observations as unknown and
-never calculates cron predictions. Manual one-shot work does not rewrite
+source requests. The website shows the observed next execution and treats
+missing or stale observations as unknown. Manual one-shot work does not rewrite
 the scheduler snapshot. Per-destination observations distinguish a
 confirmed update, no change, failure, deferral, and an unconfirmed external
 write; an unknown edit count must not become zero. Older attempts cannot
@@ -152,8 +163,8 @@ only: the website hides that timestamp and displays a localized waiting
 label instead of elapsed time. Starting work replaces it with the actual
 start and changes the state to `running`. Reset an attempt only while its
 registered identity still owns the saved row,
-so a superseded handle cannot overwrite a newer observation.
-Never derive these observations by parsing human-readable log text.
+so a superseded handle cannot overwrite a newer observation. Read status from
+these structured snapshots; human-readable logs remain a separate diagnostic view.
 
 ## Reusable report results
 
@@ -217,17 +228,29 @@ retain their validated previous data and actual successful timestamps and
 retry hourly. Restarting never resets the refresh interval. The schema-2
 snapshot remains bounded to 8 MiB across storage and HTTP.
 
-The separate `backend.public` server reads `cache/toolforge/dashboard.json`,
-routine/schedule/report observations, and saved daily logs from the runtime
-directory. It validates each saved format through its owning backend
-reader before rendering pages or exposing `/api/dashboard`, `/api/status`,
-or `/api/logs`. Pages use normal links, GET forms, and native HTML controls;
+The separate `backend.public` Flask application reads
+`cache/toolforge/dashboard.json`, routine/schedule/report observations, and
+saved daily logs from the runtime directory. It validates each saved format
+through its owning backend reader before rendering pages or exposing
+`/api/dashboard`, `/api/status`, or `/api/logs`.
+Pages use normal links, GET forms, and native HTML controls;
 the complete initial page works without JavaScript. An optional same-origin
-script refreshes dashboard status through `/api/live`, which renders only
-validated status and uptime fragments without reading website datasets.
+script refreshes the dashboard and log page through `/api/live`, which renders
+validated routine, server-state, and uptime fragments without reading website
+datasets or log contents. Each page updates only its existing live regions.
+The log page shows compact server state and its last observed timestamp,
+plus the shared version/uptime footer, including when no logs are saved.
+Its server state comes from the validated schedule snapshot with a 120-second
+freshness limit; missing, stale, paused, and stopped states remain explicit.
+The routine-card grid belongs to the dashboard.
 Fixed CSS, JavaScript, and SVG assets come from `webservice/public_html/`.
 Requests accept only GET and HEAD,
 reject path traversal and unsafe files, and bound file sizes and concurrency.
+Waitress serves the application with bounded workers, connections, and request
+sizes. Keep the production debugger and automatic reloader disabled. The Flask
+`create_app` factory creates request routing and caches only.
+Share response security and compression policy with local diagnostics
+through `backend.support.http`.
 The hub also exposes local read-only `/dashboard.json` and `/healthz`
 diagnostics; the public server operates independently of those endpoints.
 Omit confirmed-empty presentation sections, without confusing source
@@ -271,8 +294,7 @@ seconds for source/attempt/use metadata, bound cache size and row count,
 and drop observations unused for 30 days. Nothing due still means no
 clients or source requests; cached report rows keep their introductions
 across restarts. A changed introduction contract invalidates the four
-affected report identities, without resetting maintenance data. Adding original
-text reuses existing script observations and requests only missing variants.
+affected report identities while preserving maintenance data.
 
 Main sections and subsections stack vertically; only sibling article,
 maintenance-tag, and routine cards form columns. Cards have an 18em minimum,
@@ -304,27 +326,37 @@ never as project positions. Derive site rank from the full filtered daily
 top list before joining membership; retain raw ranks as tie breakers,
 measured zeroes, nulls, and the verified non-article exclusions.
 
-Routine cards show localized state text, status time, measured/elapsed
-duration, configured report links, and the actual next execution from the
-monitor snapshot. Hide the next-execution row while that routine is running;
+Routine cards show localized state text, the actual start time while running
+or finish time after completion, configured report links, and the scheduled
+next execution from the monitor snapshot. Hide the next-execution row while running;
 restore it after completion without changing the saved schedule.
-An emoji, linked-style status button, and whole-routine
-duration stay on one line. The button opens a native HTML popover with a
+Running result labels identify the task being updated or its backend-reported
+date. A separate progress row shows only the observed phase and optional
+record counters. Show these active details only while fresh observations confirm
+an active monitor session and the routine started within that session. Expired
+heartbeats hide the progress row and restore the generic result label without
+removing its popup button. Display observed progress without extrapolating it
+from elapsed time or logs, and never invent report dates for undated tasks.
+Eligible running records without progress identify their task and show generic
+preparing text.
+An emoji and linked-style status button form the result line. The button
+opens a native HTML popover with a
 keyboard-accessible table of per-destination outcomes, linked page titles,
 independent execution durations, and UTC timestamps. Close controls,
-Escape, and outside clicks dismiss it without JavaScript. Chinese timestamp
-labels use four characters followed by a fullwidth colon. Shared Python
+Escape, and outside clicks dismiss it without JavaScript. Timestamp labels
+distinguish execution started, execution finished, and next execution scheduled.
+Shared Python
 presentation functions handle localization, safe markup, and presentation order.
 Execution times use whole seconds, with two decimals for subsecond results;
 completed durations round to the nearest second and active durations count
 completed seconds. Stored measurements retain their original precision.
-Last-run and next-run UTC times include small relative annotations in
+Execution and next-run UTC times include small relative annotations in
 whole minutes below an hour and whole hours thereafter, rounded down.
 Future times say how long remains; unavailable schedule times have no
 annotation. Running durations, relative times, and uptime advance locally
 every second using a monotonic browser clock anchored to the last server
-timestamp. Status and per-page outcomes synchronize every fifteen seconds
-while visible, bypassing the full-page cache. Requests never overlap, time out after
+timestamp. Routine, per-page, and server-state observations synchronize every
+five seconds while visible, bypassing the full-page cache. Requests never overlap, time out after
 ten seconds, and retry with delays up to thirty seconds after failures.
 Hidden tabs pause polling and local ticks; returning immediately synchronizes.
 Completed durations stay fixed and stale schedules expire locally. The browser
@@ -352,15 +384,14 @@ idioms literally:
 - Express selection, filtering, derived columns, joins, grouping, aggregation,
   ranking, and window calculations with native expressions. Combine independent
   expressions in a single context where possible.
-- Keep keys in explicit columns. Avoid index emulation, mutable column
-  assignment, row-wise `apply`, and conversions through Pandas.
+- Keep keys in explicit columns and transformations in native expression
+  contexts throughout the Polars pipeline.
 - Keep explicit schemas, including empty results. A missing observation is
   `null`; a measured zero is valid data.
 - Use lazy scans when they benefit file-backed work, and retain the existing
   eager contracts of source adapters.
 - Iterate in Python at network-request and wikitext-parser boundaries, or
-  for small scalar mappings. Do not implement tabular joins or aggregates
-  with Python row loops.
+  for small scalar mappings; use native expressions for tabular operations.
 - Save disposable tabular caches as Parquet and read, merge, deduplicate,
   and trim them with Polars.
 
@@ -372,11 +403,10 @@ uploaded source tree or `site-packages`:
 - `logs/aranami.YYYY-MM-DD.log` is the one universal file for a UTC date.
   All routines append natural-language diagnostics identifying the data
   being refreshed, destination being edited, counts, starts, completion,
-  elapsed time, skips, and failures. Keep messages readable in a terminal;
-  do not encode lifecycle JSON or internal metadata dumps in log lines.
-  Retain the current UTC date and previous 29 calendar dates. Do not
-  configure the root logger at import time. Backend logging owns terminal
-  and file handlers; the website reads those saved messages.
+  elapsed time, skips, and failures. Keep messages readable in a terminal and
+  structured metadata in its owning snapshots. Retain the current UTC date and
+  previous 29 calendar dates. Backend logging configures terminal and file
+  handlers at runtime; imports remain inert. The website reads saved messages.
   Log the hub's graceful shutdown reason before waiting for active work,
   then record its stopped state after scheduler, collector, and HTTP cleanup,
   while the daily handler remains open. Recent logs display at most one
@@ -436,9 +466,8 @@ identities leave the row unchanged with a diagnostic.
 ### Pageviews
 
 Use the Wikimedia Pageviews API exclusively for daily observations and
-history, treating its returned measurements as authoritative. Do not read
-Pageviews dumps, including Toolforge's shared files, or substitute dump
-counts for API observations. Keep Polars processing and Parquet caching.
+history, treating its returned measurements as authoritative. Keep Polars
+processing and Parquet caching.
 
 Pageviews processes missing report dates in order, publishing each day's list
 separately. First probe the candidate day's top list and up to three leading
@@ -450,8 +479,8 @@ within the batch for publication. Download each article's full required history
 through the latest eligible ready UTC day and validate that final day's coverage.
 If missing daily records exceed the limit, stop that download,
 shorten its end by one day, and download the full histories afresh. Discard
-the failed attempt's responses; never resume prior downloads from memory
-or disk across endpoint retries. Try only endpoints later than the published
+the failed attempt's responses and start each endpoint retry afresh.
+Try only endpoints later than the published
 checkpoint, and fail the task if none passes.
 
 Once an endpoint passes, share only that successful batch's fresh responses
@@ -459,8 +488,8 @@ for daily analysis and saves from the next unpublished day through that
 endpoint, in chronological order. For example, a checkpoint on the 15th and
 an eligible target on the 18th produce separate reports for the 16th, 17th,
 and 18th. If the 18th is unavailable but a fresh download through the 17th
-passes, publish the 16th and 17th only. Do not skip intervening reports,
-roll back the checkpoint, or label older observations with a newer date.
+passes, publish the 16th and 17th only. Advance the checkpoint monotonically
+through consecutive confirmed reports, retaining each observation's actual date.
 Stop at the first required source failure, failed/unconfirmed save,
 or superseded result; resume from the last confirmed on-wiki marker on the
 next call. A shortened endpoint leaves the routine behind and eligible for
@@ -478,9 +507,9 @@ invocations, using the context's actual `started_at` rather than the chosen repo
 anchor for readiness. Report dates must also be before the requested anchor;
 a supplied anchor cannot bypass the actual cutoff. Reject a candidate
 endpoint as soon as more than 1% of the full distinct article population
-lacks that day's daily record. Count absence while downloading and stop
-before the next request once the limit is crossed; do not use only the
-processed prefix as the denominator. Exactly 1% missing is allowed.
+lacks that day's daily record. Count absence against the full population
+while downloading and stop before the next request once the limit is crossed.
+Exactly 1% missing is allowed.
 Explicit zeroes are valid records, while empty responses and HTTP 504 count
 as missing at this endpoint check. A failed guard prevents publication and
 further top-list requests for that candidate. Failed
@@ -498,14 +527,15 @@ calendar days. Bind this permission to the accepted batch's site, project,
 membership, history bounds, and threshold; arbitrary prefetched or cached
 data cannot enable it. Retain current/previous observation flags with rankings
 so provisional zeroes do not inflate observed-article counts. Raw histories
-never gain synthetic measurements. Later full downloads retry gaps and use
-recovered values in future calculations without rewinding published reports.
+never gain synthetic measurements. Normal downloads for later report dates
+can recover gaps for future calculations without rewinding published reports.
+Historical gaps alone never schedule additional same-day requests.
 Direct preparation without an accepted batch retains its strict daily guard
 and null unavailable totals. HTTP 504 articles remain excluded and count
 toward the failure limit. Keep successful snapshots atomically after the
-required guards and top lists pass; retain known observations in those disposable
-snapshots without treating them as fresh inputs. Do not create or read
-pending request checkpoints. Log batch progress and concise endpoint-fallback
+required guards and top lists pass. These snapshots retain known observations;
+fresh requests, rather than cached coverage or partial-download checkpoints,
+establish each batch. Log progress and concise endpoint-fallback
 or final-failure summaries without per-article unknown-date warnings.
 Individual HTTP attempt details belong at debug level.
 
@@ -518,13 +548,10 @@ Exclude namespace pages, the full and namespace-stripped main-page
 titles, and verified global false positives, then number the remaining
 articles from one with Polars. Classify titles from shared site metadata
 without reading individual pages. Emit that
-article-only rank in [PJ:VG/HOT/item][hot-item]'s `top` parameter as `daily/<rank>`
-or `monthly/<rank>`. These ranks cover
-articles present in the API's top-1,000 pages; do not imply coverage of
-articles outside that source list.
-Omit `top` for yearly and all other unsupported intervals and for unlisted
-titles. Do not request annual datasets from other sources or estimate
-annual rankings from truncated monthly lists.
+article-only rank in the HOT v2 item's optional `site_rank`; its list metadata
+identifies the `daily` or `monthly` duration. These ranks cover only articles
+present in the API's top-1,000 pages. Preserve null unavailable ranks in retained
+tables, and omit the JSON key for unlisted titles and unsupported intervals.
 An applicable list must be fetched successfully before publication or
 healthy-cache replacement. HTTP 404, empty or malformed results, and
 transport failures defer the complete report. Log its date, required
@@ -533,13 +560,45 @@ handler; retry the same report date with fresh full article downloads at
 the next invocation.
 An available raw list containing only non-articles is a valid empty
 article result and does not defer publication.
-Keep the existing daily availability guard ahead of the top-list lookup.
-The Chinese item wrapper invokes the [on-wiki report module][hot-module]. Python supplies
-explicit `daily/<rank>` or `monthly/<rank>` parameters and ISO dates; report
-list numbering remains outside the inline item wrapper. Missing previous
-ranks remain null in results and empty in generated comparison parameters,
-which does not establish a new entry. Rendering behavior is maintained on
-the wiki. This repository does not ship or deploy a local Lua module.
+Require the full daily availability guard before publishing top-list rankings.
+Python emits one `{{#invoke:PJ:VG/HOT/v2|main|data=...}}` per list inside the
+managed range, with ordinary wikitext headings outside each invocation.
+JSON contains `metadata` and `items`. Metadata holds the Chinese `project`,
+`duration`, inclusive UTC `start`/`end` dates as `[year, month, day]` arrays,
+population `total_pages`, and `total_views`. Python supplies actual task-force
+identities such as `电子游戏/我的世界`, independently of display headings.
+The upstream project template currently uses that Minecraft identity without
+the `工作组` suffix; the visible heading remains `我的世界工作组`.
+Each item contains `title`, a two-string `assessments` array ordered
+quality/importance, `views`, `rank`, `previous_rank`, and optional `site_rank`.
+Absent assessments use `未评` and `未知`; arrays never contain null holes.
+Previous ranks always have a key, with JSON null for unknown values; an unknown
+previous rank does not prove a new entry. An item with no actual observations
+in its interval emits `views: null`; an observed zero remains zero. This display
+distinction leaves the backend's provisional-zero calculations unchanged.
+Unknown population totals also remain null.
+Display limits leave complete retained result tables unchanged. Escape wikitext
+delimiters inside JSON strings without changing their decoded values, and keep
+structural closing braces separated by whitespace. Emit each metadata field on
+its own line, keep date and assessment arrays inline, and emit each item object on
+one line for readable wiki diffs.
+
+The on-wiki `Module:PJ:VG/HOT/v2` renders bot-generated
+data directly using `mw.text.jsonDecode`, without a second validation or alias
+compatibility layer. Canonical Chinese assessment names map to CSS class names.
+Its `Module:PJ:VG/HOT/v2/styles.css` stylesheet owns CSS background assessment
+icons, horizontal-list formatting, columns, and trends. Unique `vg-hot-*`
+classes identify elements directly. Project visibility comes from explicit Lua
+configuration sets, and Pageviews links use Scribunto's URI library.
+Lua selects one surge class when the rank gain reaches the displayed list size.
+Daily rows omit redundant averages; multi-day rows retain them. A daily or
+monthly site rank adds bold styling and a tooltip to the total-view figure,
+not the average. Empty observations remain visibly unknown, distinct from zero.
+Lua omits importance badges for every task force and also omits class badges
+for `电子游戏/宝可梦工作组`; the stylesheet needs no hiding selectors.
+Install and preview both wiki pages before enabling this publisher; the CSS
+page requires the `sanitized-css` content model. The wiki owns both pages;
+temporary paste artifacts are outside the repository and Toolforge source payload.
 
 Limit all Pageviews network attempts to fifty requests per second across
 the hub process, spacing starts by at least twenty milliseconds. Article
@@ -577,8 +636,8 @@ Preserve the attributes when replacing content and validate values before
 requests or publication. Code supplies documented defaults. Current settings
 include new-page retention, Pageviews history and availability threshold,
 and assessment-list source categories.
-Pageviews caps the availability threshold at 1%; larger legacy
-`missing-percent` attributes remain preserved but cannot relax the guard.
+Pageviews caps the effective availability threshold at 1%, preserving stored
+`missing-percent` attributes when replacing managed content.
 
 Only `aranami` comments delimit managed ranges. Keep functional
 `<section begin="..."/>` and `<section end="..."/>` tags used by labeled
@@ -596,12 +655,12 @@ wiki syntax. Plain fixed text does not need unnecessary parsing.
 Before adding or changing a template call, read that wiki's actual template
 source, documentation, redirects, and invoked Lua module/configuration.
 Record the source and revision used when a contract or extractor mapping
-needs to be audited. Do not guess parameter names, action aliases, or
-whether a template already emits list markup.
+needs to be audited. Verify parameter names, action aliases, and whether
+the template emits list markup against those sources.
 
 Use `pywikibot.Page(site, name, ns=...)` and the site's namespace/title rules
-for template identity and talk-page conversion. Do not maintain regex lists
-of translated namespace prefixes. On Chinese Wikipedia, `PJ:` can resolve
+for template identity and talk-page conversion, including localized namespace
+prefixes. On Chinese Wikipedia, `PJ:` can resolve
 to the WikiProject namespace; it is not necessarily a Template title.
 
 Keep Article history and DYK interpretation separate by wiki. Chinese rules
@@ -612,8 +671,7 @@ result spellings supported by the appropriate configuration. A rule for
 one wiki is not evidence for another.
 
 Unknown dates are `None` in Python and null in Polars. Sort them deliberately,
-label them clearly in reports, and omit them from dated statistics. Do not
-invent sentinel calendar dates such as year 8888.
+label them clearly in reports, and omit them from dated statistics.
 
 Use high-level Pywikibot reads only for information replicas cannot supply,
 such as current text. Preload collections of pages. Backend services
@@ -648,8 +706,8 @@ seasonal (quarterly), and yearly periods under each leading title in a
 titles with semicolons. Keep places gained beside the corresponding period,
 omitting movement when the leader remains first or has no previous rank.
 If the complete summary and attribution exceed 255 bytes, omit yearly
-first, then seasonal, and then the remaining longest periods as needed.
-Do not add omission counts to this sentence. New-page summaries use a date
+first, then seasonal, and then the remaining longest periods as needed,
+retaining only the selected complete mentions. New-page summaries use a date
 and matched article/non-article counts only when the latest daily list was
 filled during the run. When only older dates were filled, use
 `Updated class icons.` and mention the older daily records backfilled.
@@ -715,8 +773,8 @@ turn that metadata into text.
 ## System-change review
 
 Before changing a shared contract, trace every producer, persisted format,
-reader, and failure path. Update the actual ownership boundary rather than
-adding a wrapper around old behavior. Preserve complete source facts,
+reader, and failure path. Keep implementation in its owning component and
+preserve complete source facts,
 unknown observations, source timestamps, preview isolation, lifecycle
 serialization, and storage-before-publication ordering.
 
@@ -724,8 +782,7 @@ Add offline regression coverage for affected readers and writers, including
 empty results, stale or malformed files, concurrent ordering, failed saves,
 and restarts where relevant. Exercise independent output failures without
 rolling back another output. For public API or storage-schema changes,
-update all callers and validation fixtures in the same cohesive change;
-do not add retired compatibility imports.
+update all callers and validation fixtures in the same cohesive change.
 
 Run the practical [verification workflow](development.md#verification-and-releases)
 before handoff. Release and changelog authority remains in `AGENTS.md`;
@@ -735,7 +792,5 @@ deployment authority and recovery remain in [Administration](administration.md).
 [2]: https://docs.pola.rs/user-guide/migration/pandas/
 [3]: https://zh.wikipedia.org/wiki/Module:Article_history/config
 [4]: https://en.wikipedia.org/wiki/Module:Article_history/config
-[hot-item]: https://zh.wikipedia.org/w/index.php?title=WikiProject:VG/HOT/item&oldid=91242270
-[hot-module]: https://zh.wikipedia.org/w/index.php?title=Module:PJ:VG/HOT&oldid=95139258
 [pageviews-top]: https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/examples/project-metrics.html#most-viewed-pages
 [page-summaries]: https://www.mediawiki.org/wiki/Page_Content_Service#/page/summary

@@ -14,6 +14,7 @@ import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tarfile
+import tomllib
 from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -110,6 +111,28 @@ class TestSourcePayload(TestCase):
         self.uploader = _uploader()
         self.payload = self.uploader.source_payload()
 
+    def test_metadata_declares_locked_production_web_dependencies(
+        self,
+    ) -> None:
+        """Declare locked web dependencies and project metadata."""
+        metadata = tomllib.loads(self.payload["pyproject.toml"].decode())
+        project = metadata["project"]
+        assert {"flask", "waitress"} <= set(project["dependencies"])
+        assert {
+            "Development Status :: 4 - Beta",
+            "Environment :: Web Environment",
+            "Framework :: Flask",
+        } <= set(project["classifiers"])
+        assert (
+            "Development Status :: 1 - Planning"
+            not in (project["classifiers"])
+        )
+        assert metadata["tool"]["uv"]["package"] is False
+        lock = tomllib.loads(self.payload["uv.lock"].decode())
+        assert {"flask", "waitress"} <= {
+            package["name"] for package in lock["package"]
+        }
+
     def test_payload_matches_reviewed_manifest_and_recorded_hashes(
         self,
     ) -> None:
@@ -138,6 +161,10 @@ class TestSourcePayload(TestCase):
         assert (
             "umask 077\n"
             in self.payload["scripts/toolforge/run-hub.sh"].decode()
+        )
+        assert (
+            "--mem 4Gi"
+            in self.payload["scripts/toolforge/deploy-source.sh"].decode()
         )
         assert not any(
             Path(name).suffix in {".php", ".mjs"} for name in self.payload

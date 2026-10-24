@@ -8,56 +8,27 @@ Terminal users running reports or previews should use the
 [Development](development.md).
 
 Aranami runs only on Toolforge. One Python 3.15 backend hub manages wiki
-and website data; a separate read-only Python server renders saved outputs
-as HTML pages with shared CSS. The source
-deployment does not install a wheel or create separate report workers.
+and website data; a separate read-only Flask application renders saved outputs
+as HTML pages with shared CSS, served by Waitress. Both jobs run directly
+from one validated source deployment and its locked environment.
 
-## Upload local src (source code) to Toolforge
+## Deployment workflow
 
-Use this four-step workflow to upload the local `src/` and run the new
-deployment. Detailed validation and recovery are explained below.
+Use the following workflow for releases and hotfixes:
 
-1. On the development computer, open a terminal in this repository and
-   validate the source payload:
+1. Complete the [offline checks](development.md#verification-and-releases)
+   on the development computer, then [validate and upload](#validate-and-upload-source)
+   the complete source payload.
+2. [Connect as the tool account](#maintain-on-toolforge) and
+   [promote the exact uploaded generation](#promote-the-uploaded-generation).
+3. [Start both applications](#start-the-applications) and
+   [inspect operation](#inspect-operation). Normal hub startup checks due work
+   immediately and enables live wiki publication.
 
-   ```shell
-   cd /path/to/Aranami
-   uv sync --locked
-   uv run python scripts/upload_toolforge.py --dry-run
-   ```
-
-   Replace `/path/to/Aranami` with your actual local checkout. Complete
-   the [offline checks](development.md#verification-and-releases) before
-   proceeding with a changed application.
-
-2. From that same local repository, upload:
-
-   ```shell
-   uv run python scripts/upload_toolforge.py
-   ```
-
-   This uploads all four `src/` packages (`backend`, `updater`,
-   `webservice`, and `shared`) together with locked dependency metadata,
-   launchers, and generated manifests. It stages the new generation;
-   it does not replace the running application. Do not use `scp` to copy
-   individual source files into active `app/`.
-
-3. Connect to Toolforge, become the tool account, and run the exact
-   promotion command printed by the uploader:
-
-   ```shell
-   ssh <maintainer>@login.toolforge.org
-   become aranami
-   cd /data/project/aranami
-   ```
-
-   The printed command names that upload's unique staging directory.
-   Promotion validates it, prepares the environment, and replaces source
-   only after stopping the old applications. It leaves them stopped.
-
-4. Run the [start commands](#start-the-applications), then
-   [inspect operation](#inspect-operation). The normal hub startup checks
-   due work immediately and enables live wiki publication.
+Uploads and dependency preparation can run while existing jobs execute.
+Activation stops both jobs before replacing their shared source and environment;
+plan that transition around long-running work. Each deployment remains a complete,
+recoverable generation, including for a small website hotfix.
 
 ## Maintain on Toolforge
 
@@ -74,9 +45,8 @@ cd /data/project/aranami
 `/data/project/aranami` is the convenient user-facing tool-home path. On
 this account its physical location is
 `/mnt/nfs/labstore-secondary-tools-project/aranami`. Toolforge may expose
-that physical path as `HOME`. Deployment validates resolved paths so
-both names refer to the same account; do not replace the alias, change
-ownership, or move runtime data to force a particular spelling.
+that physical path as `HOME`. Both names refer to the same account;
+deployment preserves the platform's mount alias and validates resolved paths.
 
 Keep credentials, `.my.cnf`, Pywikibot configuration, runtime data, and
 environments outside `app/`. Both launchers verify the active deployment,
@@ -90,7 +60,7 @@ The following paths are relative to the tool home:
 
 | Location | Purpose and retention |
 |---|---|
-| `app/` | Complete validated active source payload; never write runtime data here |
+| `app/` | Complete validated active source payload, kept separate from runtime data |
 | `app-staging-<id>/` | Unique uploaded generation awaiting promotion |
 | `app.previous/` | Previous complete source generation retained for recovery |
 | `pyvenv-3.15` | Stable link to the selected locked Python 3.15 environment |
@@ -107,22 +77,27 @@ The following paths are relative to the tool home:
 | `dry-run/` | Preview summaries, exact proposed text, and isolated result bundles |
 
 The authoritative metadata files are `state/routine-status.json`,
-`state/schedule-status.json`, and `state/report-updates.json`. Do not
-derive status from diagnostic log text or move these files into `logs/`.
+`state/schedule-status.json`, and `state/report-updates.json`. Use these
+observations for status; `logs/` holds human-readable diagnostics separately.
 Preserve state and durable reports during normal source replacement.
 Deleting disposable caches requires later revalidation and collection;
 it is not a routine deployment step.
 
 Toolforge's `python3.13` image bootstraps uv and the managed Python 3.15.0
 interpreter. Both runtime jobs use that image and explicitly execute
-`pyvenv-3.15/bin/python`, so application code runs on Python 3.15. The
-website server serves its browser assets directly from
+`pyvenv-3.15/bin/python`, so application code runs on Python 3.15.0.
+The Toolforge image catalogue currently offers `python3.11` and `python3.13`,
+not a `python3.15` image; the image name and application interpreter are
+separate choices. Retain `--image python3.13` with the managed interpreter.
+The website server serves its browser assets directly from
 `app/src/webservice/public_html/`.
+The locked environment includes Flask and Waitress. `run-web.sh` starts the
+production server with debugging and automatic reloading disabled. Source changes
+take effect through the validated deployment and restart workflow.
 
 ## Browse and view files
 
-After connecting and becoming the tool account, browse files directly in
-the terminal. You do not need an editor just to read them:
+After connecting and becoming the tool account, inspect selected files read-only:
 
 ```shell
 cd /data/project/aranami
@@ -161,11 +136,11 @@ jq . state/report-updates.json
 ```
 
 If `jq` is unavailable, use `less` on the same files. A missing file means
-there is no saved observation yet, not a successful run. Never edit these
-snapshots to change displayed status.
+there is no saved observation yet. The backend owns these snapshots;
+diagnostics inspect them without modifying displayed outcomes.
 
-To inspect a complete retained result, first identify its actual safe
-report key and generation; do not use a wiki title as a filesystem path:
+To inspect a complete retained result, identify its stored report key and
+generation:
 
 ```shell
 ls reports/
@@ -195,24 +170,23 @@ if bundle is not None:
 
 Replace `REPORT_KEY` with the existing key identified above. Pass
 `previous=True` to `read` for the retained predecessor, or construct
-`ReportStore(dry=True)` for preview bundles. The reader validates hashes
-and schemas; do not open Parquet in `less` or modify bundles by hand.
+`ReportStore(dry=True)` for preview bundles. This read-only API validates
+hashes and schemas before exposing the binary Parquet tables.
 
-Do not display, paste, or attach credential files while inspecting the
-account. In particular, keep `user-password.py`, `user-password.cfg`,
-`.my.cnf`, replica credentials, and OAuth secrets private. Avoid broad
-commands that print every hidden file or recursively dump account contents.
+Keep `user-password.py`, `user-password.cfg`, `.my.cnf`, replica credentials,
+and OAuth secrets private. Inspect only selected non-secret files; shared
+diagnostics must exclude credential contents and broad account dumps.
 
 Keep private credential directories owner-only (`700`, or `2700` where
 Toolforge retains directory group inheritance). Use `600` for writable
 OAuth/Pywikibot and Kubernetes configuration, and `400` for read-only
 private keys. Verify ownership and modes without displaying file contents.
-Do not change `.my.cnf` as though it were a regular file: its platform-managed
-target may enforce `440` and reject permission changes. That mode permits
-only the tool owner and its tool group to read it, not other users.
-The hub starts with `umask 077` so newly created runtime files and private
-directories do not gain group or other-user access. Keep credentials outside
-the source tree; source replacement must never upload or overwrite them.
+Preserve `.my.cnf` and its platform-managed target's permissions, which may
+be enforced as `440`. That mode permits only the tool owner and its tool
+group to read it, not other users.
+The hub starts with `umask 077` for owner-only runtime files and private
+directories. Credentials stay outside the source tree and are excluded from
+uploads and source replacement.
 
 ## Validate and upload source
 
@@ -265,16 +239,16 @@ their pods to disappear, and replace the complete source directory,
 environment link, and active receipt. It leaves both applications
 stopped after validation. Start them explicitly after reviewing the result.
 
-Do not edit individual files inside the active source tree or mix files
-from different uploads. Keep the source, selected environment, generated
-metadata, and active receipt from the same generation.
+Keep active source immutable between deployments. The source, selected
+environment, generated metadata, and active receipt must belong to the same
+validated generation.
 
 ## Start the applications
 
 Run on the bastion as the tool account:
 
 ```shell
-toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --mem 2Gi --command 'exec sh /data/project/aranami/app/scripts/toolforge/run-hub.sh'
+toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --mem 4Gi --command 'exec sh /data/project/aranami/app/scripts/toolforge/run-hub.sh'
 toolforge jobs run aranami-web --image python3.13 --continuous --mount=all --port 8000 --publish --command 'exec sh /data/project/aranami/app/scripts/toolforge/run-web.sh'
 ```
 
@@ -284,8 +258,8 @@ complete HTML pages, static assets, and `/api/config`, `/api/dashboard`,
 public requests to port 8000 through its
 [published continuous job support][toolforge-publish].
 
-Give the hub 2 GiB of memory for concurrent report preparation and Pageviews
-history. The default 512 MiB limit caused repeated out-of-memory restarts.
+Give the hub 4 GiB of memory for concurrent report preparation and full-history
+Pageviews catch-up. Monitor its peak usage as the article population grows.
 Inspect `kubectl top pods` and the tool quota when sizing larger workloads.
 
 Keep the leading `exec` in both commands so Python receives the container's
@@ -297,12 +271,11 @@ The hub enables live wiki publication. By default it checks routines and
 due website outputs on startup, then follows the configured schedules and
 refresh intervals. Valid completion evidence skips current daily work;
 saved website outputs retain their successful refresh times across restarts.
-Do not add `--no-run-immediately` when the intention is to deploy and run
-due work immediately. Use that option on the `run-hub.sh` command only
-when startup should wait for scheduled callbacks.
+Use `--no-run-immediately` on `run-hub.sh` only when startup should wait for
+scheduled callbacks; the default runs due work immediately.
 
 Without a valid website snapshot, the website shows a preparing state until
-collection succeeds. A frontend request never initiates collection.
+collection succeeds. Frontend requests remain read-only.
 
 ## Inspect operation
 
@@ -319,10 +292,18 @@ local read-only diagnostic `/healthz` and `/dashboard.json` endpoints at
 `127.0.0.1:8765` by default. The public server reads saved runtime files
 independently and remains available while the hub is stopped.
 
-The website shows observed routine results and actual next execution
-times, not predictions calculated from cron. Missing or stale metadata
-must remain unknown. Per-destination metadata distinguishes a confirmed
-edit from no change, failure, deferral, or an unconfirmed delegated write.
+The website shows observed routine results and the scheduler's actual next
+execution times. Cards label the actual start while running and the actual
+finish after completion. The next-execution row is hidden while its routine runs.
+Running cards identify the task or observed report date in their result label,
+with the execution phase and available counters on a separate line. These
+details expire with the monitor heartbeat rather than implying continued work.
+The log page shows compact server state and uptime from saved schedule
+observations, alongside the source version. Both pages synchronize live status
+every five seconds while visible.
+Missing or stale metadata must remain unknown. Per-destination metadata
+distinguishes a confirmed edit from no change, failure, deferral, or an
+unconfirmed delegated write.
 Use the terminal [inspection workflow](usage.md#inspect-results-and-logs)
 for the individual runtime files.
 
@@ -351,9 +332,9 @@ kubectl get pods -l 'app.kubernetes.io/name in (aranami-hub,aranami-web)'
 
 Wait until no matching pods remain before changing active source,
 environments, or caches. Use the [start commands](#start-the-applications)
-to recreate the definitions. Do not run a second continuous hub alongside
-the existing one. Toolforge's [jobs guide][toolforge-jobs] documents job
-creation, inspection, restart, and deletion.
+to recreate the definitions, keeping exactly one continuous hub.
+Toolforge's [jobs guide][toolforge-jobs] documents job creation, inspection,
+restart, and deletion.
 
 ## Recovery and cleanup
 
@@ -368,23 +349,21 @@ Each generation retains its independent environment under
 A failed setup leaves existing applications running. If an error occurs
 after promotion, deployment restores the previous source, environment
 link, and active receipt when safe, and leaves applications stopped. If
-shutdown could not be confirmed, inspect the job/pod state before recovery; do not
-assume rollback was safe. Review the deployment output and retained files
-before restarting.
+shutdown could not be confirmed, inspect the job/pod state and establish that
+rollback is safe. Review the deployment output and retained files before restarting.
 
 For manual recovery after a completed deployment, stop both applications
 and confirm their pods have disappeared. Select matching source,
 environment, and active-deployment receipt from the same
 generation, then review the saved job definitions before restoring service.
-Do not overwrite credentials or durable outputs to recover application code.
+Recovery replaces application code while preserving credentials and durable outputs.
 
-Cleanup must name the exact obsolete generation or disposable artifact.
 Preserve account configuration, `reports/`, `state/`, and `logs/`; keep
 the current source/environment and a verified recovery generation.
-Never recursively delete the tool home, broad runtime directories, or an
-unresolved alias. Remove an interrupted `deployment.lock/` only after
-confirming that no deployment/setup process remains and the generation
-is consistent.
+Limit removals to exact, validated obsolete artifact paths outside the preserved
+runtime data and recovery generation. Remove an interrupted `deployment.lock/`
+only after confirming that no deployment/setup process remains and the
+generation is consistent.
 
 [toolforge-jobs]: https://wikitech.wikimedia.org/wiki/Help:Toolforge/Running_jobs
 [toolforge-publish]: https://wikitech.wikimedia.org/wiki/Help:Toolforge/Running_jobs#Exposing_continuous_jobs_to_the_internet

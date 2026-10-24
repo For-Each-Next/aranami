@@ -138,4 +138,4 @@ python3 app/scripts/toolforge/validate-source.py receipt "$tool_dir/app" "$tool_
 printf '%s\n' 'Validated source and isolated Python 3.15 environment promoted. Applications remain stopped.' \
     "Backup: $backup" \
     "Start website: toolforge jobs run aranami-web --image python3.13 --continuous --mount=all --port 8000 --publish --command 'exec sh $tool_dir/app/scripts/toolforge/run-web.sh'" \
-    "Start data hub and publication explicitly: toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --mem 2Gi --command 'exec sh $tool_dir/app/scripts/toolforge/run-hub.sh'"
+    "Start data hub and publication explicitly: toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --mem 4Gi --command 'exec sh $tool_dir/app/scripts/toolforge/run-hub.sh'"

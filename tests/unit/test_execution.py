@@ -736,7 +736,33 @@ class TestRoutineStatusLifecycle(TestCase):
                     observed_error = caught
                 assert observed_error is (primary if fail else None)
             page.save.assert_called_once()
-            expected_writes = 2
-            assert writer.call_count == expected_writes
+            action.assert_called_once()
+            started, publishing, finished = (
+                call.args[0] for call in writer.call_args_list
+            )
+            for record, phase in (
+                (started, "preparing"),
+                (publishing, "publishing"),
+            ):
+                assert record["status"] == "running"
+                assert record["updated"] is None
+                assert record["duration_seconds"] is None
+                assert record["finished_at"] is None
+                assert record["progress"] == {
+                    "phase": phase,
+                    "report_date": None,
+                    "current": None,
+                    "total": None,
+                }
+            assert all(
+                record["run_id"] == context.tasks[0].run_id
+                and record["started_at"] == started["started_at"]
+                for record in (started, publishing, finished)
+            )
+            assert finished["status"] == ("failed" if fail else "updated")
+            assert finished["updated"] == 1
+            assert finished["progress"] is None
+            assert finished["finished_at"] is not None
+            assert finished["duration_seconds"] >= 0
             assert context.tasks[0].updated == 1
             assert context.tasks[0].status == ("failed" if fail else "success")

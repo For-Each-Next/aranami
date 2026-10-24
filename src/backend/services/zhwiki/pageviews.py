@@ -26,6 +26,7 @@ from backend.support.pageviews_cache import (
     HISTORY_DAYS,
     PageviewsCache,
 )
+from backend.support.routine_status import report_progress
 from shared.reports import ReportResult
 from shared.sources import pageviews
 from shared.sources.quarry.projects import query_pages_by_wikiproject
@@ -371,6 +372,12 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
     total = len(unique_titles)
     missing = 0
     unavailable = 0
+    report_progress(
+        "pageviews_aggregate",
+        report_date=data_date,
+        current=0,
+        total=total,
+    )
     logger.info("Preparing full Pageviews histories for %d articles", total)
     for index, title in enumerate(unique_titles, start=1):
         observations = _article_observations(
@@ -425,8 +432,14 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
                     pl.col("views").fill_null(0),
                 )
             frames.append(frame)
-        if index % 100 == 0:
+        if index % 100 == 0 or index == total:
             logger.info("Aggregated %d/%d articles", index, total)
+            report_progress(
+                "pageviews_aggregate",
+                report_date=data_date,
+                current=index,
+                total=total,
+            )
     logger.info(
         "Prepared Pageviews for %s: %d/%d articles have daily observations",
         data_date,
@@ -436,7 +449,7 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
     if zero_missing and missing > unavailable:
         logger.info(
             "Counted %d missing article records as zero for %s; "
-            "later full downloads will retry these gaps",
+            "downloads for later report dates can fill these gaps",
             missing - unavailable,
             data_date,
         )
@@ -532,6 +545,7 @@ def prepare_downloads(  # ruff: ignore[too-many-arguments]
     if first_date > target_date:
         message = "The download target precedes the first unpublished date."
         raise ValueError(message)
+    report_progress("pageviews_readiness", report_date=first_date)
     articles = _project_articles(site, settings.project).filter(
         pl.col("importance") != "不适用",
     )
@@ -633,6 +647,7 @@ def _require_day_ready(site: BaseSite, data_date: dt.date) -> None:
         PageviewsDeferredError: A source request or response failed.
     """
     stop = data_date + dt.timedelta(days=1)
+    report_progress("pageviews_readiness")
     logger.info("Checking Pageviews readiness for %s", data_date)
     try:
         top = _top_ranks(site, data_date, stop)
@@ -651,7 +666,9 @@ def _require_day_ready(site: BaseSite, data_date: dt.date) -> None:
             PageviewsUnavailableError if missing else PageviewsDeferredError
         )
         raise exception(message) from error
-    for title in top.sort("top").head(_READINESS_PROBES).get_column("title"):
+    probes = top.sort("top").head(_READINESS_PROBES).get_column("title")
+    report_progress("pageviews_readiness", current=0, total=len(probes))
+    for index, title in enumerate(probes, start=1):
         try:
             observations = _fetch_article_data(site, title, data_date, stop)
         except (OSError, TypeError, ValueError) as error:
@@ -676,6 +693,11 @@ def _require_day_ready(site: BaseSite, data_date: dt.date) -> None:
                 "has no daily record; full histories were not requested."
             )
             raise PageviewsUnavailableError(message)
+        report_progress(
+            "pageviews_readiness",
+            current=index,
+            total=len(probes),
+        )
 
 
 def _download_candidate(
@@ -702,6 +724,7 @@ def _download_candidate(
     missing = 0
     _require_daily_count(data_date, missing, total, missing_percent)
     stop = data_date + dt.timedelta(days=1)
+    report_progress("pageviews_download", current=0, total=total)
     logger.info(
         "Downloading full Pageviews histories for %d articles through %s",
         total,
@@ -724,8 +747,13 @@ def _download_candidate(
         ):
             missing += 1
             _require_daily_count(data_date, missing, total, missing_percent)
-        if index % 100 == 0:
+        if index % 100 == 0 or index == total:
             logger.info("Downloaded %d/%d article histories", index, total)
+            report_progress(
+                "pageviews_download",
+                current=index,
+                total=total,
+            )
     logger.info(
         "Downloaded Pageviews through %s: %d/%d articles have "
         "daily observations",
@@ -1136,6 +1164,7 @@ def _report_observations(  # ruff: ignore[too-many-arguments]
         PageviewsDeferredError: A required source is temporarily absent.
         PageviewsUnavailableError: Target-day coverage fails its guard.
     """  # ruff: ignore[docstring-extraneous-exception]
+    report_progress("preparing", report_date=stop - dt.timedelta(days=1))
     articles = _project_articles(site, settings.project).filter(
         pl.col("importance") != "不适用",
     )
@@ -1211,7 +1240,8 @@ def prepare_report(  # ruff: ignore[too-many-arguments]
     omitted from rankings and count as missing target-day records.
     A validated batch supplies provisional zeroes for missing daily
     calculations, retaining observation flags and unfilled raw history.
-    Later runs retry those gaps through fresh full downloads.
+    Normal downloads for later report dates can fill those gaps; the
+    gaps themselves do not request additional same-day downloads.
     Supported calendar intervals include site-wide article ranks for
     pages appearing in Wikimedia's top list.
 

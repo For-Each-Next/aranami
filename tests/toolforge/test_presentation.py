@@ -648,20 +648,20 @@ class PresentationTests(unittest.TestCase):
         assert "temporarily unavailable" in missing
 
     def test_status_line_labels_and_independent_timing(self) -> None:
-        """Keep summaries inline and report timing independent."""
-        for locale, updated, next_label, duration_label in (
-            ("en", "Last run: ", "Next run: ", "(13 sec)"),
+        """Show finish times and retain durations in details."""
+        for locale, finished, next_label, report_duration in (
+            ("en", "Finished at ", "Next run scheduled for ", "5 sec"),
             (
                 "zh-hans",
-                "最近执行\uff1a",
-                "下次执行\uff1a",
-                "\uff08执行时间13秒\uff09",
+                "执行完毕于",
+                "下次执行预定于",
+                "5秒",
             ),
             (
                 "zh-hant",
-                "最近執行\uff1a",
-                "下次執行\uff1a",
-                "\uff08執行時間13秒\uff09",
+                "執行完畢於",
+                "下次執行預定於",
+                "5秒",
             ),
         ):
             output = render_dashboard(
@@ -673,12 +673,16 @@ class PresentationTests(unittest.TestCase):
             )
             line = re.search(r'<li class="routine-status">(.*?)</li>', output)
             assert line is not None
-            assert duration_label in line[1]
+            assert line[1].endswith("</button>")
+            assert "data-clock" not in line[1]
+            assert "(" not in line[1]
+            assert "\uff08" not in line[1]
             assert '<button type="button" class="status-link"' in line[1]
             assert "<div" not in line[1]
             assert "<br" not in line[1]
-            assert updated in output
+            assert finished in output
             assert next_label in output
+            assert f"<td>{report_duration}</td>" in output
             assert "5.000" not in output
         self.data["status"]["reports"] = None
         output = render_dashboard(
@@ -704,19 +708,17 @@ class PresentationTests(unittest.TestCase):
             finished_at=None,
             duration_seconds=None,
         )
-        for locale, waiting, total, running, completed in (
-            ("en", "Waiting to run…", "(30 sec…)", "2 sec…", "5 sec"),
+        for locale, waiting, running, completed in (
+            ("en", "Waiting to run…", "2 sec…", "5 sec"),
             (
                 "zh-hans",
                 "等待执行…",
-                "\uff08执行时间30秒…\uff09",
                 "2秒…",
                 "5秒",
             ),
             (
                 "zh-hant",
                 "等待執行…",
-                "\uff08執行時間30秒…\uff09",
                 "2秒…",
                 "5秒",
             ),
@@ -740,7 +742,7 @@ class PresentationTests(unittest.TestCase):
                 assert row is not None
                 assert row[1].count(waiting) == 2
                 assert "<time" not in row[1]
-            assert total in output
+            assert 'data-clock="elapsed"' not in output
             page = render_dashboard(
                 self.data["snapshot"],
                 status,
@@ -784,14 +786,20 @@ class PresentationTests(unittest.TestCase):
             finished_at=None,
             duration_seconds=None,
         )
+        status["reports"]["reports"]["first"].update(
+            status="running",
+            started_at=self.now.isoformat(),
+            finished_at=None,
+            duration_seconds=None,
+        )
         for locale, elapsed in (
-            ("en", "(1 sec…)"),
-            ("zh-hans", "\uff08执行时间1秒…\uff09"),
-            ("zh-hant", "\uff08執行時間1秒…\uff09"),
+            ("en", "1 sec…"),
+            ("zh-hans", "1秒…"),
+            ("zh-hant", "1秒…"),
         ):
             now = self.now + dt.timedelta(seconds=1)
             live = render_live_status(status, self.data["config"], locale, now)
-            assert elapsed in live
+            assert f">{elapsed}</td>" in live
             assert "&lt;Latest &amp; safe&gt;" in live
             assert 'id="tool-status"' in live
             assert 'id="live-uptime"' in live
@@ -929,7 +937,8 @@ class PresentationTests(unittest.TestCase):
                 },
                 locale,
             )
-            assert "<script" not in output
+            assert output.count('<script src="/live.js" defer>') == 1
+            assert "<script>never execute</script>" not in output
             assert "&lt;script&gt;never execute&lt;/script&gt;" in output
             assert "1.0 KiB" in output
             assert "/logs/?date=2026-10-18&amp;download=1" in output
@@ -962,17 +971,425 @@ class LiveVisibilityTests(unittest.TestCase):
         self.data = _fixtures()
         self.now = dt.datetime(2026, 10, 18, 12, 0, 30, tzinfo=dt.UTC)
 
-    def test_running_routines_hide_next_run_until_finished(self) -> None:
-        """Hide the next-run row only during an observed active run."""
+    def _outputs(self, locale: str) -> tuple[str, str]:
+        """Render full and live pages from the same saved observations.
+
+        Args:
+            locale: Interface language for both renderers.
+
+        Returns:
+            Complete dashboard followed by its live status fragments.
+        """
+        return (
+            render_dashboard(
+                self.data["snapshot"],
+                self.data["status"],
+                self.data["config"],
+                locale,
+                self.now,
+            ),
+            render_live_status(
+                self.data["status"],
+                self.data["config"],
+                locale,
+                self.now,
+            ),
+        )
+
+    @staticmethod
+    def _card(output: str, routine: str = "pageviews") -> str:
+        """Select one routine card without matching report-popup states.
+
+        Args:
+            output: Rendered dashboard or live status fragments.
+            routine: Stable routine identifier of the expected card.
+
+        Returns:
+            Contents of the selected routine card.
+        """
+        card = re.search(
+            rf'<article[^>]*id="routine-{re.escape(routine)}"[^>]*>'
+            r"(.*?)</article>",
+            output,
+        )
+        assert card is not None
+        return card[1]
+
+    def test_running_progress_uses_saved_dates_and_counts(self) -> None:
+        """Separate dated status labels from phase and counters."""
         status = self.data["status"]
         event = status["routines"]["routines"]["pageviews"]
-        scheduled = copy.deepcopy(status["schedule"])
-        for locale, label in (
-            ("en", "Next run: "),
-            ("zh-hans", "下次执行\uff1a"),
-            ("zh-hant", "下次執行\uff1a"),
+        event.update(
+            status="running",
+            progress={
+                "phase": "pageviews_download",
+                "report_date": "2026-10-20",
+                "current": 2000,
+                "total": 13500,
+            },
+        )
+        for locale, label, note, fallback in (
+            (
+                "en",
+                "Updating pageviews for October 20, 2026",
+                "Fetching pageviews (2,000/13,500)",
+                "Running",
+            ),
+            (
+                "zh-hans",
+                "更新2026年10月20日记录",
+                "抓取浏览量\uff082,000/13,500\uff09",
+                "更新中",
+            ),
+            (
+                "zh-hant",
+                "更新2026年10月20日紀錄",
+                "擷取瀏覽量\uff082,000/13,500\uff09",
+                "更新中",
+            ),
         ):
-            for state in ("running", "updated", "failed", "deferred"):
+            for output in self._outputs(locale):
+                card = self._card(output)
+                button = re.search(
+                    r'<button[^>]*class="status-link"[^>]*>(.*?)</button>',
+                    card,
+                )
+                line = re.search(
+                    r'<li class="routine-progress context"[^>]*>(.*?)</li>',
+                    card,
+                )
+                assert button is not None
+                assert button[1] == label
+                assert f'data-progress-label="{label}"' in button[0]
+                assert f'data-progress-fallback="{fallback}"' in button[0]
+                assert line is not None
+                assert line[1] == note
+                assert "data-progress-active" in line[0]
+                assert "2026" not in line[1]
+                assert "2,000/13,500" not in button[1]
+
+    def test_progress_phases_and_unknown_counters_remain_explicit(
+        self,
+    ) -> None:
+        """Preserve fallback phases and distinguish zero from null."""
+        status = self.data["status"]
+        event = status["routines"]["routines"]["pageviews"]
+        event["status"] = "running"
+        for phase, expected in (
+            ("preparing", "Preparing"),
+            ("publishing", "Publishing"),
+            ("pageviews_readiness", "Checking daily availability"),
+            ("pageviews_aggregate", "Calculating rankings"),
+            ("unknown", "Preparing"),
+        ):
+            event["progress"] = {"phase": phase}
+            output = render_live_status(
+                status,
+                self.data["config"],
+                "en",
+                self.now,
+            )
+            assert f"data-progress-active>{expected}</li>" in output
+            assert ">Updating pageview records</button>" in output
+        for current, total, expected in (
+            (None, None, "Fetching pageviews"),
+            (None, 13500, "Fetching pageviews"),
+            (0, None, "Fetching pageviews"),
+            (0, 13500, "Fetching pageviews (0/13,500)"),
+            (0, 0, "Fetching pageviews (0/0)"),
+        ):
+            event["progress"] = {
+                "phase": "pageviews_download",
+                "current": current,
+                "total": total,
+            }
+            for output in self._outputs("en"):
+                assert f"data-progress-active>{expected}</li>" in output
+        event.pop("progress")
+        assert "data-progress-active>Preparing</li>" in render_live_status(
+            status,
+            self.data["config"],
+            "en",
+            self.now,
+        )
+
+    def test_undated_running_labels_name_each_task(self) -> None:
+        """Localize active task labels independently of phase notes."""
+        status = self.data["status"]
+        config = self.data["config"]["routines"]
+        definition = config["routines"]["pageviews"]
+        schedule = status["schedule"]["routines"]["pageviews"]
+        event = status["routines"]["routines"]["pageviews"]
+        for routine, labels in (
+            (
+                "dyks",
+                (
+                    "Updating DYK recommendations",
+                    "更新新条目推荐",
+                    "更新新條目推薦",
+                ),
+            ),
+            (
+                "new_pages",
+                (
+                    "Updating new-page records",
+                    "更新新进条目记录",
+                    "更新新進條目紀錄",
+                ),
+            ),
+            (
+                "assessment_lists",
+                (
+                    "Updating assessment lists",
+                    "更新条目评级列表",
+                    "更新條目評級列表",
+                ),
+            ),
+            (
+                "pageviews",
+                ("Updating pageview records", "更新浏览记录", "更新瀏覽紀錄"),
+            ),
+            (
+                "enwp_key_articles",
+                (
+                    "Updating English Wikipedia comparisons",
+                    "更新英文维基比较报告",
+                    "更新英文維基比較報告",
+                ),
+            ),
+            (
+                "pexbot",
+                (
+                    "Updating database reports",
+                    "更新数据库报告",
+                    "更新資料庫報告",
+                ),
+            ),
+        ):
+            config["routines"] = {routine: definition}
+            status["schedule"]["routines"] = {routine: schedule}
+            status["routines"]["routines"] = {
+                routine: {**event, "routine": routine, "status": "running"},
+            }
+            for locale, label in zip(
+                ("en", "zh-hans", "zh-hant"),
+                labels,
+                strict=True,
+            ):
+                for output in self._outputs(locale):
+                    card = self._card(output, routine)
+                    assert f">{label}</button>" in card
+                    assert f'data-progress-label="{label}"' in card
+                    assert "data-progress-active" in card
+
+    def test_dated_other_routines_keep_generic_report_labels(self) -> None:
+        """Keep other report dates on buttons, not phase notes."""
+        status = self.data["status"]
+        config = self.data["config"]["routines"]
+        config["routines"] = {"new_pages": config["routines"]["pageviews"]}
+        status["schedule"]["routines"] = {
+            "new_pages": status["schedule"]["routines"]["pageviews"],
+        }
+        event = status["routines"]["routines"]["pageviews"]
+        status["routines"]["routines"] = {"new_pages": event}
+        event.update(
+            routine="new_pages",
+            status="running",
+            progress={"phase": "publishing", "report_date": "2026-10-20"},
+        )
+        for locale, label, note in (
+            ("en", "Updating report for October 20, 2026", "Publishing"),
+            ("zh-hans", "更新2026年10月20日报告", "发布中"),
+            ("zh-hant", "更新2026年10月20日報告", "發布中"),
+        ):
+            for output in self._outputs(locale):
+                card = self._card(output, "new_pages")
+                assert f">{label}</button>" in card
+                assert f"data-progress-active>{note}</li>" in card
+
+    def test_progress_requires_fresh_active_observations(self) -> None:
+        """Hide progress for completed tasks and stale server state."""
+        status = self.data["status"]
+        event = status["routines"]["routines"]["pageviews"]
+        event["progress"] = {
+            "phase": "pageviews_download",
+            "report_date": "2026-10-20",
+        }
+        for state in ("updated", "no_update", "failed", "deferred"):
+            event["status"] = state
+            for output in self._outputs("en"):
+                card = self._card(output)
+                assert "data-progress-active" not in card
+                assert "data-progress-label" not in card
+                assert "Updating pageviews for" not in card
+        event["status"] = "running"
+        schedule = copy.deepcopy(status["schedule"])
+        for change in (
+            {"state": "paused"},
+            {"state": "stopped"},
+            {"updated_at": "2026-10-18T11:00:00Z"},
+            None,
+        ):
+            status["schedule"] = (
+                {**schedule, **change} if change is not None else None
+            )
+            for locale, fallback in (
+                ("en", "Running"),
+                ("zh-hans", "更新中"),
+                ("zh-hant", "更新中"),
+            ):
+                for output in self._outputs(locale):
+                    card = self._card(output)
+                    assert "data-progress-active" not in card
+                    assert "data-progress-label" not in card
+                    assert "data-progress-fallback" not in card
+                    assert f">{fallback}</button>" in card
+
+    def test_progress_requires_the_current_monitor_session(self) -> None:
+        """Hide old running records after a monitor restart."""
+        status = self.data["status"]
+        event = status["routines"]["routines"]["pageviews"]
+        event["status"] = "running"
+        event["progress"] = {
+            "phase": "pageviews_download",
+            "report_date": "2026-10-20",
+        }
+        status["schedule"]["started_at"] = "2026-10-18T11:59:48Z"
+        for started_at, visible in (
+            ("2026-10-18T11:59:47Z", False),
+            ("2026-10-18T11:59:48Z", True),
+            ("2026-10-18T11:59:49Z", True),
+        ):
+            event["started_at"] = started_at
+            for output in self._outputs("en"):
+                card = self._card(output)
+                label = (
+                    "Updating pageviews for October 20, 2026"
+                    if visible
+                    else "Running"
+                )
+                assert f">{label}</button>" in card
+                assert ("data-progress-active" in card) is visible
+                assert ("data-progress-label" in card) is visible
+
+    def test_logs_use_current_server_observations(self) -> None:
+        """Show compact live state independently of log availability."""
+        for locale, labels in (
+            (
+                "en",
+                (
+                    "Running",
+                    "Running; scheduled work is paused",
+                    "Stopped",
+                    "Unavailable; the last server observation is stale",
+                    "Unavailable; no current server observation",
+                ),
+            ),
+            (
+                "zh-hans",
+                (
+                    "运行中",
+                    "运行中\uff0c定时任务已暂停",
+                    "已停止",
+                    "无法确认\uff0c上次服务器状态记录已过期",
+                    "无法确认\uff0c尚无服务器状态记录",
+                ),
+            ),
+            (
+                "zh-hant",
+                (
+                    "運行中",
+                    "運行中\uff0c排程任務已暫停",
+                    "已停止",
+                    "無法確認\uff0c上次伺服器狀態紀錄已過期",
+                    "無法確認\uff0c尚無伺服器狀態紀錄",
+                ),
+            ),
+        ):
+            for state, label in zip(
+                ("running", "paused", "stopped", "stale", "missing"),
+                labels,
+                strict=True,
+            ):
+                status = copy.deepcopy(self.data["status"])
+                if state == "missing":
+                    status["schedule"] = None
+                elif state == "stale":
+                    status["schedule"]["updated_at"] = (
+                        self.now - dt.timedelta(seconds=121)
+                    ).isoformat()
+                else:
+                    status["schedule"]["state"] = state
+                output = render_logs(
+                    {"files": []},
+                    locale,
+                    status=status,
+                    config=self.data["config"],
+                    now=self.now,
+                )
+                line = re.search(
+                    r'<p id="server-state"[^>]*>(.*?)</p>',
+                    output,
+                )
+                assert line is not None
+                assert line[1] == label
+                assert 'id="live-server-status"' in output
+                assert 'id="live-uptime"' in output
+                assert 'id="tool-status"' not in output
+                assert 'class="routine-card"' not in output
+                assert 'src="/live.js"' in output
+                assert "0.6.0.dev1" in output
+                assert ('data-clock="uptime"' in output) == (
+                    state in {"running", "paused"}
+                )
+
+    def test_running_routines_hide_next_run_until_finished(self) -> None:
+        """Show actual timestamps and hide active schedules."""
+        status = self.data["status"]
+        event = status["routines"]["routines"]["pageviews"]
+        event["progress"] = {
+            "phase": "pageviews_download",
+            "report_date": "2026-10-20",
+        }
+        event["finished_at"] = (self.now - dt.timedelta(minutes=2)).isoformat()
+        event["started_at"] = (self.now - dt.timedelta(minutes=10)).isoformat()
+        status["schedule"]["routines"]["pageviews"]["next_run_at"] = (
+            self.now + dt.timedelta(minutes=35)
+        ).isoformat()
+        scheduled = copy.deepcopy(status["schedule"])
+        for locale, started, finished, label, ago, ahead in (
+            (
+                "en",
+                "Started at ",
+                "Finished at ",
+                "Next run scheduled for ",
+                "(2 min ago)",
+                "(in 35 min)",
+            ),
+            (
+                "zh-hans",
+                "执行开始于",
+                "执行完毕于",
+                "下次执行预定于",
+                "\uff082分钟前\uff09",
+                "\uff0835分钟后\uff09",
+            ),
+            (
+                "zh-hant",
+                "執行開始於",
+                "執行完畢於",
+                "下次執行預定於",
+                "\uff082分鐘前\uff09",
+                "\uff0835分鐘後\uff09",
+            ),
+        ):
+            for state in (
+                "running",
+                "updated",
+                "no_update",
+                "failed",
+                "deferred",
+            ):
                 event["status"] = state
                 live = render_live_status(
                     status,
@@ -985,7 +1402,24 @@ class LiveVisibilityTests(unittest.TestCase):
                     live,
                 )
                 assert card is not None
+                metadata = re.search(
+                    r'<ul class="routine-meta">(.*?)</ul>',
+                    card[1],
+                )
+                assert metadata is not None
                 assert (label in card[1]) == (state != "running")
+                if state == "running":
+                    assert started in metadata[1]
+                    assert finished not in metadata[1]
+                    assert event["started_at"] in metadata[1]
+                    assert event["finished_at"] not in metadata[1]
+                else:
+                    assert finished in metadata[1]
+                    assert started not in metadata[1]
+                    assert event["finished_at"] in metadata[1]
+                    assert event["started_at"] not in metadata[1]
+                    assert ago in metadata[1]
+                    assert ahead in metadata[1]
                 assert status["schedule"] == scheduled
 
     def test_connection_notice_only_describes_failures(self) -> None:

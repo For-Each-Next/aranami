@@ -1,4 +1,4 @@
-"""Render the Python website and serve saved backend data on Toolforge.
+"""Serve the read-only Flask website with Waitress on Toolforge.
 
 Run ``python -m backend.public`` as the published web job. Requests only
 read fixed source assets and validated runtime snapshots; they never
@@ -10,15 +10,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from contextlib import suppress
+from contextlib import ExitStack, suppress
+from functools import partial
 from http import HTTPStatus
-from http.server import ThreadingHTTPServer
 from pathlib import Path
-from threading import BoundedSemaphore
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlsplit
 
-from backend.support.http import ReadOnlyRequestHandler
+from flask import Flask, Response, request
+from werkzeug.exceptions import HTTPException
+lazy from waitress import serve
+
+from backend.support.http import encoded_response, read_only_headers
 from backend.support.page_cache import PageCache
 from backend.support.public_data import (
     MAX_LOG_BYTES,
@@ -36,13 +39,14 @@ lazy from webservice import pages
 lazy from webservice.presentation import select_locale
 
 if TYPE_CHECKING:
-    import socket
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
+    from typing import BinaryIO
 
 _ASSETS = Path(__file__).resolve().parents[1] / "webservice" / "public_html"
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_QUERY_BYTES = 4096
 _MAX_PORT = 65535
+_CHUNK_BYTES = 64 * 1024
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -51,97 +55,152 @@ _CONTENT_TYPES = {
 }
 
 
-class PublicHTTPServer(ThreadingHTTPServer):
-    """Serve saved files with bounded request concurrency."""
+def _json(value: object, status: HTTPStatus = HTTPStatus.OK) -> Response:
+    """Return validated metadata encoded as standard JSON."""
+    return Response(
+        json.dumps(value, ensure_ascii=False, allow_nan=False).encode(),
+        status=status,
+        content_type="application/json; charset=utf-8",
+    )
 
-    def __init__(
-        self,
-        address: tuple[str, int],
-        runtime: Path,
-        assets: Path = _ASSETS,
-    ) -> None:
-        """Bind the website without starting any background collection.
 
-        Args:
-            address: Bind interface and port, including zero in tests.
-            runtime: Tool home containing saved data, state, and logs.
-            assets: Source directory containing public browser assets.
-        """
+def _error(status: HTTPStatus) -> Response:
+    """Return a JSON error without framework HTML templates."""
+    return _json({"error": status.phrase}, status)
+
+
+def _http_error(error: HTTPException) -> Response:
+    """Return the public JSON error for a Flask routing failure."""
+    return _error(HTTPStatus(error.code or HTTPStatus.INTERNAL_SERVER_ERROR))
+
+
+def _unavailable(_exception: Exception) -> Response:
+    """Return a sanitized failure without private filesystem details."""
+    return _error(HTTPStatus.SERVICE_UNAVAILABLE)
+
+
+def _validate_request() -> Response | None:
+    """Return a rejection for unsafe requests, otherwise None."""
+    if request.method not in {"GET", "HEAD"}:
+        return _error(HTTPStatus.METHOD_NOT_ALLOWED)
+    target = urlsplit(
+        request.environ.get("RAW_URI")
+        or request.environ.get("REQUEST_URI")
+        or request.full_path,
+    )
+    if (
+        target.scheme
+        or target.netloc
+        or target.fragment
+        or len(request.query_string) > _MAX_QUERY_BYTES
+    ):
+        return _error(HTTPStatus.BAD_REQUEST)
+    if (
+        any(token in target.path for token in ("\\", "%", "//"))
+        or any(part in {".", ".."} for part in target.path.split("/"))
+        or (
+            request.url_rule is not None
+            and not request.url_rule.arguments
+            and request.path != request.url_rule.rule
+        )
+    ):
+        return _error(HTTPStatus.NOT_FOUND)
+    return None
+
+
+def _response_policy(response: Response) -> Response:
+    """Return shared headers and gzip without buffering log streams."""
+    response.headers.update(read_only_headers(response.status_code))
+    if (
+        not response.is_streamed
+        and "Content-Disposition" not in response.headers
+    ):
+        content, headers = encoded_response(
+            response.get_data(),
+            request.headers.get("Accept-Encoding", ""),
+        )
+        response.set_data(content)
+        response.vary.add("Accept-Encoding")
+        if "Content-Encoding" in headers:
+            response.headers["Content-Encoding"] = headers["Content-Encoding"]
+        # Small WSGI chunks keep Waitress below its spooling threshold.
+        response.response = (
+            content[offset : offset + _CHUNK_BYTES]
+            for offset in range(0, len(content), _CHUNK_BYTES)
+        )
+    return response
+
+
+def _html(
+    content: str,
+    locale: str,
+    status: HTTPStatus = HTTPStatus.OK,
+) -> Response:
+    """Return a complete localized server-rendered document."""
+    return Response(
+        content.encode(),
+        status=status,
+        content_type="text/html; charset=utf-8",
+        headers={"Content-Language": locale, "Vary": "Accept-Language"},
+    )
+
+
+def _page_error(key: str, locale: str, status: HTTPStatus) -> Response:
+    """Return the common localized document for request failures."""
+    return _html(pages.render_error(key, locale), locale, status)
+
+
+def _configuration() -> dict[str, object]:
+    """Return the source version and shared routine definitions."""
+    return {
+        "version": project_version(),
+        "routines": routine_configuration(),
+    }
+
+
+def _download_chunks(stream: BinaryIO, remaining: int) -> Iterator[bytes]:
+    """Yield at most the validated size even if a log keeps growing."""
+    while remaining:
+        chunk = stream.read(min(remaining, _CHUNK_BYTES))
+        if not chunk:
+            break
+        yield chunk
+        remaining -= len(chunk)
+
+
+def _download(path: Path) -> Response:
+    """Return a bounded log stream closed on completion or abort."""
+    with ExitStack() as resources:
+        stream = resources.enter_context(open_regular(path, MAX_LOG_BYTES))
+        size = os.fstat(stream.fileno()).st_size
+        response = Response(
+            () if request.method == "HEAD" else _download_chunks(stream, size),
+            content_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Length": str(size),
+                "Content-Disposition": f'attachment; filename="{path.name}"',
+            },
+        )
+        if request.method != "HEAD":
+            response.call_on_close(resources.pop_all().close)
+        return response
+
+
+class _PublicViews:
+    """Read validated saved inputs for one isolated Flask app."""
+
+    def __init__(self, runtime: Path, assets: Path) -> None:
         self.runtime = runtime
         self.assets = assets
         self.pages = PageCache()
-        self._workers = BoundedSemaphore(16)
-        super().__init__(address, PublicRequestHandler)
 
-    def process_request(
-        self,
-        request: socket.socket,
-        client_address: tuple[str, int],
-    ) -> None:
-        """Admit a worker or promptly close an excess connection."""
-        if not self._workers.acquire(blocking=False):
-            self.shutdown_request(request)
-            return
-        try:
-            super().process_request(request, client_address)
-        except BaseException:
-            self._workers.release()
-            raise
-
-    def process_request_thread(
-        self,
-        request: socket.socket,
-        client_address: tuple[str, int],
-    ) -> None:
-        """Return capacity after every completed or failed request."""
-        try:
-            super().process_request_thread(request, client_address)
-        finally:
-            self._workers.release()
-
-
-class PublicRequestHandler(ReadOnlyRequestHandler):
-    """Route fixed public assets and read-only saved-data endpoints."""
-
-    server: PublicHTTPServer
-    _cache_request: tuple[tuple[str, ...], tuple] | None = None
-
-    def read(self) -> None:
-        """Read a saved response while keeping private paths hidden."""
-        self._cache_request = None
-        try:
-            self._route()
-        except ConnectionError:
-            return
-        except OSError, ValueError, TypeError, RecursionError, OverflowError:
-            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE)
-
-    def _route(self) -> None:
-        """Dispatch a bounded URL to one fixed read-only route."""
-        target = urlsplit(self.path)
-        if (
-            target.scheme
-            or target.netloc
-            or target.fragment
-            or len(target.query.encode()) > _MAX_QUERY_BYTES
-        ):
-            self.send_error(HTTPStatus.BAD_REQUEST)
-        elif target.path == "/api/logs":
-            self._logs(target.query)
-        elif target.path.startswith("/api/"):
-            self._api(target.path)
-        elif target.path in {"/", "/about/", "/maintenance/", "/logs/"}:
-            self._page(target.path, target.query)
-        else:
-            self._asset(target.path)
-
-    def _page(self, path: str, query: str) -> None:
-        """Render one view from validated backend-owned observations."""
-        locale = select_locale(self.headers.get("Accept-Language", ""))
+    def page(self, path: str) -> Response:
+        """Return a page cached by locale and saved-input identity."""
+        locale = select_locale(request.headers.get("Accept-Language", ""))
         if path == "/logs/":
-            self._logs(query, locale=locale)
-            return
+            return self.logs(locale=locale)
         try:
+            query = request.query_string.decode("ascii")
             parameters = parse_qs(
                 query,
                 keep_blank_values=True,
@@ -149,93 +208,79 @@ class PublicRequestHandler(ReadOnlyRequestHandler):
                 max_num_fields=5,
             )
         except ValueError, UnicodeError:
-            self._page_error(
+            return _page_error(
                 "backlog.not_found",
                 locale,
                 HTTPStatus.BAD_REQUEST,
             )
-            return
         randomized = parameters.get("sort") == [
             "random",
-        ] and not parameters.get("seed")
+        ] and not parameters.get(
+            "seed",
+        )
+        key = (path, query if path == "/maintenance/" else "", locale)
+        identity = self._page_identity()
         if not randomized:
-            key = (path, query if path == "/maintenance/" else "", locale)
-            identity = self._page_identity()
-            content = self.server.pages.get(key, identity)
+            content = self.pages.get(key, identity)
             if content is not None:
-                self._html(content, locale)
-                return
-            self._cache_request = key, identity
+                return _html(content, locale)
         if path == "/about/":
-            self._html(
-                pages.render_about(self._configuration(), locale),
+            response = _html(
+                pages.render_about(_configuration(), locale),
                 locale,
             )
-            return
-        snapshot = self._dashboard()
-        if path == "/":
-            self._html(
-                pages.render_dashboard(
-                    snapshot,
-                    saved_status(self.server.runtime),
-                    self._configuration(),
+        else:
+            snapshot = self._dashboard()
+            response = (
+                _html(
+                    pages.render_dashboard(
+                        snapshot,
+                        saved_status(self.runtime),
+                        _configuration(),
+                        locale,
+                    ),
                     locale,
-                ),
-                locale,
+                )
+                if path == "/"
+                else self._maintenance_page(snapshot, parameters, locale)
             )
-            return
-        self._maintenance_page(snapshot, parameters, locale)
+        if not randomized and response.status_code == HTTPStatus.OK:
+            self.pages.put(key, identity, response.get_data(as_text=True))
+        return response
 
+    @staticmethod
     def _maintenance_page(
-        self,
         snapshot: dict[str, object] | None,
         parameters: dict[str, list[str]],
         locale: str,
-    ) -> None:
-        """Render a worklist or its localized selection error."""
+    ) -> Response:
+        """Return a worklist or its localized selection error."""
         try:
             content = pages.render_maintenance(snapshot, parameters, locale)
         except ValueError:
-            self._page_error(
+            return _page_error(
                 "backlog.not_found",
                 locale,
                 HTTPStatus.BAD_REQUEST,
             )
         except LookupError:
-            self._page_error("backlog.not_found", locale, HTTPStatus.NOT_FOUND)
+            return _page_error(
+                "backlog.not_found",
+                locale,
+                HTTPStatus.NOT_FOUND,
+            )
         except RuntimeError:
-            self._page_error(
+            return _page_error(
                 "backlog.unavailable",
                 locale,
                 HTTPStatus.SERVICE_UNAVAILABLE,
             )
-        else:
-            self._html(content, locale)
-
-    def _html(
-        self,
-        content: str,
-        locale: str,
-        status: HTTPStatus = HTTPStatus.OK,
-    ) -> None:
-        """Send a complete localized server-rendered document."""
-        if status == HTTPStatus.OK and self._cache_request is not None:
-            key, identity = self._cache_request
-            self.server.pages.put(key, identity, content)
-        self.respond(
-            status,
-            content.encode(),
-            "text/html; charset=utf-8",
-            headers={
-                "Content-Language": locale,
-                "Vary": "Accept-Encoding, Accept-Language",
-            },
-        )
+        return _html(content, locale)
 
     def _page_identity(self) -> tuple:
         """Return metadata identities for all saved page inputs."""
         paths = [
-            self.server.runtime / relative
+            self.runtime / relative
             for relative in (
                 "cache",
                 "cache/toolforge",
@@ -264,21 +309,9 @@ class PublicRequestHandler(ReadOnlyRequestHandler):
                 ))
         return tuple(identities)
 
-    def _page_error(self, key: str, locale: str, status: HTTPStatus) -> None:
-        """Use the common localized document for request failures."""
-        self._html(pages.render_error(key, locale), locale, status)
-
-    @staticmethod
-    def _configuration() -> dict[str, object]:
-        """Return the source version and shared routine definitions."""
-        return {
-            "version": project_version(),
-            "routines": routine_configuration(),
-        }
-
     def _dashboard(self) -> dict[str, object] | None:
         """Return saved dashboard data or None when unavailable."""
-        cache = self.server.runtime / "cache"
+        cache = self.runtime / "cache"
         if cache.is_symlink():
             return None
         try:
@@ -290,101 +323,87 @@ class PublicRequestHandler(ReadOnlyRequestHandler):
             return None
         return value if validate_dashboard_snapshot(value) else None
 
-    def _json(self, value: object, status: HTTPStatus = HTTPStatus.OK) -> None:
-        """Serialize validated metadata as standard JSON."""
-        self.respond(
-            status,
-            json.dumps(value, ensure_ascii=False, allow_nan=False).encode(),
-        )
-
-    def _api(self, path: str) -> None:
-        """Read data through its owning backend validation contract."""
-        if path == "/api/config":
-            self._json(self._configuration())
-        elif path == "/api/status":
-            self._json(saved_status(self.server.runtime))
-        elif path == "/api/live":
-            locale = select_locale(self.headers.get("Accept-Language", ""))
-            self._html(
+    def api(self, kind: str) -> Response:
+        """Return data through its backend validation contract."""
+        if kind == "config":
+            return _json(_configuration())
+        if kind == "status":
+            return _json(saved_status(self.runtime))
+        if kind == "live":
+            locale = select_locale(request.headers.get("Accept-Language", ""))
+            return _html(
                 pages.render_live_status(
-                    saved_status(self.server.runtime),
-                    self._configuration(),
+                    saved_status(self.runtime),
+                    _configuration(),
                     locale,
                 ),
                 locale,
             )
-        elif path == "/api/dashboard":
-            value = self._dashboard()
-            if value is not None:
-                self._json(value)
-            else:
-                self.send_error(HTTPStatus.SERVICE_UNAVAILABLE)
-        else:
-            self.send_error(HTTPStatus.NOT_FOUND)
+        value = self._dashboard()
+        return (
+            _json(value)
+            if value is not None
+            else _error(HTTPStatus.SERVICE_UNAVAILABLE)
+        )
 
-    def _asset(self, path: str) -> None:
-        """Serve assets without directory listing or path traversal."""
-        relative = Path(path.removeprefix("/"))
+    def asset(self, path: str) -> Response:
+        """Return fixed assets without traversal or listings."""
+        relative = Path(path)
         if (
-            not path.startswith("/")
-            or any(token in path for token in ("\\", "%", "//"))
-            or any(part in {".", ".."} for part in path.split("/"))
+            path.startswith("api/")
             or relative.suffix not in _CONTENT_TYPES
             or relative.is_absolute()
         ):
-            self.send_error(HTTPStatus.NOT_FOUND)
-            return
-        location = self.server.assets / relative
+            return _error(HTTPStatus.NOT_FOUND)
+        location = self.assets / relative
         if any(parent.is_symlink() for parent in location.parents):
-            self.send_error(HTTPStatus.NOT_FOUND)
-            return
+            return _error(HTTPStatus.NOT_FOUND)
         try:
             content = read_regular(location, _MAX_BYTES)
         except OSError, ValueError:
-            self.send_error(HTTPStatus.NOT_FOUND)
-            return
-        self.respond(HTTPStatus.OK, content, _CONTENT_TYPES[relative.suffix])
+            return _error(HTTPStatus.NOT_FOUND)
+        return Response(content, content_type=_CONTENT_TYPES[relative.suffix])
 
-    def _logs(self, query: str, *, locale: str | None = None) -> None:
+    def logs(self, *, locale: str | None = None) -> Response:
         """Return a bounded excerpt or stream one complete daily log."""
-        directory = self.server.runtime / "logs"
+        directory = self.runtime / "logs"
         files = available_logs(directory)
         try:
             selection = parse_qs(
-                query,
+                request.query_string.decode("ascii"),
                 keep_blank_values=True,
                 errors="strict",
                 max_num_fields=3,
             )
             filename, text, download = log_selection(selection, files)
         except ValueError, UnicodeError:
-            if locale is None:
-                self.send_error(HTTPStatus.BAD_REQUEST)
-            else:
-                self._page_error(
+            return (
+                _error(HTTPStatus.BAD_REQUEST)
+                if locale is None
+                else _page_error(
                     "logs.invalid_query",
                     locale,
                     HTTPStatus.BAD_REQUEST,
                 )
-            return
+            )
         if filename is not None and not any(
             row["name"] == filename for row in files
         ):
-            if locale is None:
-                self.send_error(HTTPStatus.NOT_FOUND)
-            else:
-                self._page_error(
+            return (
+                _error(HTTPStatus.NOT_FOUND)
+                if locale is None
+                else _page_error(
                     "logs.not_found",
                     locale,
                     HTTPStatus.NOT_FOUND,
                 )
-            return
+            )
         if download:
-            if filename is None:
-                self.send_error(HTTPStatus.NOT_FOUND)
-            else:
-                self._download(directory / filename)
-            return
+            return (
+                _error(HTTPStatus.NOT_FOUND)
+                if filename is None
+                else _download(directory / filename)
+            )
         excerpt = (
             {"lines": [], "truncated": False}
             if filename is None
@@ -396,33 +415,76 @@ class PublicRequestHandler(ReadOnlyRequestHandler):
             "query": text,
             **excerpt,
         }
-        if locale is None:
-            self._json(value)
-        else:
-            self._html(pages.render_logs(value, locale), locale)
-
-    def _download(self, path: Path) -> None:
-        """Stream at most the validated file size."""
-        with open_regular(path, MAX_LOG_BYTES) as stream:
-            remaining = os.fstat(stream.fileno()).st_size
-            self.response_headers(
-                HTTPStatus.OK,
-                remaining,
-                "text/plain; charset=utf-8",
-                {"Content-Disposition": f'attachment; filename="{path.name}"'},
+        return (
+            _json(value)
+            if locale is None
+            else _html(
+                pages.render_logs(
+                    value,
+                    locale,
+                    status=saved_status(self.runtime),
+                    config=_configuration(),
+                ),
+                locale,
             )
-            if self.command == "HEAD":
-                return
-            while remaining:
-                chunk = stream.read(min(remaining, 64 * 1024))
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                remaining -= len(chunk)
+        )
+
+
+def create_app(runtime: Path, assets: Path = _ASSETS) -> Flask:
+    """Create an isolated read-only website without starting any jobs.
+
+    Args:
+        runtime: Tool home containing saved data, state, and logs.
+        assets: Source directory containing public browser assets.
+
+    Returns:
+        Flask application ready for WSGI serving or offline tests.
+    """
+    app = Flask(__name__, static_folder=None)
+    app.url_map.merge_slashes = False
+    app.url_map.strict_slashes = False
+    app.config["MAX_CONTENT_LENGTH"] = _MAX_QUERY_BYTES
+    views = _PublicViews(runtime, assets)
+    for path in ("/", "/about/", "/maintenance/", "/logs/"):
+        app.add_url_rule(
+            path,
+            endpoint=path,
+            view_func=partial(views.page, path),
+            provide_automatic_options=False,
+        )
+    for kind in ("config", "status", "live", "dashboard"):
+        app.add_url_rule(
+            f"/api/{kind}",
+            endpoint=kind,
+            view_func=partial(views.api, kind),
+            provide_automatic_options=False,
+        )
+    app.add_url_rule(
+        "/api/logs",
+        view_func=views.logs,
+        provide_automatic_options=False,
+    )
+    app.add_url_rule(
+        "/<path:path>",
+        view_func=views.asset,
+        provide_automatic_options=False,
+    )
+    app.before_request(_validate_request)
+    app.after_request(_response_policy)
+    app.register_error_handler(HTTPException, _http_error)
+    for error in (
+        OSError,
+        ValueError,
+        TypeError,
+        RecursionError,
+        OverflowError,
+    ):
+        app.register_error_handler(error, _unavailable)
+    return app
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Run the public reader with explicit runtime and bind paths.
+    """Run Waitress with explicit runtime paths and bounded resources.
 
     Args:
         argv: Optional command-line arguments for offline verification.
@@ -434,14 +496,21 @@ def main(argv: Sequence[str] | None = None) -> None:
     options = parser.parse_args(argv)
     if not 0 <= options.port <= _MAX_PORT:
         parser.error("--port must be between 0 and 65535")
-    with (
-        PublicHTTPServer(
-            (options.host, options.port),
-            options.runtime,
-        ) as server,
-        suppress(KeyboardInterrupt),
-    ):
-        server.serve_forever()
+    with suppress(KeyboardInterrupt):
+        serve(
+            create_app(options.runtime),
+            host=options.host,
+            port=options.port,
+            threads=16,
+            connection_limit=64,
+            channel_timeout=15,
+            cleanup_interval=5,
+            max_request_header_size=64 * 1024,
+            max_request_body_size=_MAX_QUERY_BYTES,
+            outbuf_overflow=1024 * 1024,
+            outbuf_high_watermark=256 * 1024,
+            log_socket_errors=False,
+        )
 
 
 if __name__ == "__main__":

@@ -2,10 +2,13 @@
 (() => {
     "use strict";
 
-    const regionIds = ["tool-status", "live-uptime"];
-    if (!regionIds.every((id) => document.getElementById(id))) return;
+    const clockId = document.getElementById("tool-status")
+        ? "tool-status" : "live-server-status";
+    if (!document.getElementById(clockId) || !document.getElementById("live-uptime")) return;
+    const regionIds = ["tool-status", "live-uptime", "live-server-status"]
+        .filter((id) => document.getElementById(id));
 
-    const interval = 15000;
+    const interval = 5000;
     let timer;
     let clockTimer;
     let pending;
@@ -39,15 +42,22 @@
         // A delayed browser callback advances by actual elapsed time. Changing
         // the computer's wall clock cannot speed up or reverse these timers.
         const now = anchor.serverTime + performance.now() - anchor.receivedAt;
-        const root = document.getElementById("tool-status");
+        const root = document.getElementById(clockId);
         const expires = Date.parse(root.dataset.scheduleExpires);
         const stale = Number.isFinite(expires) && now > expires;
         if (stale) {
             root.querySelectorAll("[data-schedule-time]").forEach((node) => {
-                node.textContent = root.dataset.scheduleStale;
+                node.textContent = node.dataset.staleText || root.dataset.scheduleStale;
                 node.removeAttribute("data-schedule-time");
             });
+            root.querySelectorAll("[data-progress-active]").forEach((node) => {
+                node.hidden = true;
+            });
         }
+        root.querySelectorAll("[data-progress-label]").forEach((node) => {
+            const text = stale ? node.dataset.progressFallback : node.dataset.progressLabel;
+            if (node.textContent !== text) node.textContent = text;
+        });
         for (const id of regionIds) {
             const region = document.getElementById(id);
             const nodes = [...region.querySelectorAll("[data-clock]")];
@@ -152,8 +162,10 @@
     }
 
     function notice(connected) {
-        const label = document.getElementById("live-notice");
-        if (label) label.hidden = connected;
+        for (const id of ["live-notice", "live-server-notice"]) {
+            const label = document.getElementById(id);
+            if (label) label.hidden = connected;
+        }
     }
 
     async function refresh() {
@@ -175,7 +187,7 @@
             const next = new DOMParser().parseFromString(await response.text(), "text/html");
             const fragments = regionIds.map((id) => next.getElementById(id));
             if (fragments.some((fragment) => !fragment)) throw new Error("Incomplete status");
-            const nextAnchor = readClock(fragments[0]);
+            const nextAnchor = readClock(fragments[regionIds.indexOf(clockId)]);
             if (!active || document.hidden || controller.signal.aborted) return;
             fragments.forEach((fragment, index) => {
                 reconcile(document.getElementById(regionIds[index]), fragment);
@@ -224,7 +236,7 @@
     });
     window.addEventListener("online", resume);
     try {
-        anchor = readClock(document.getElementById("tool-status"));
+        anchor = readClock(document.getElementById(clockId));
     } catch {
         // The complete server-rendered page still works without local clocks.
     }

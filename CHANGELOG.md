@@ -2,6 +2,32 @@
 
 This file records major completed changes, grouped by package release line.
 
+## Until 0.8
+
+### 0.7.0 (2026-10-24 09:40 UTC)
+
+Overview: Moved the dashboard to Flask and Waitress, exposed live execution
+progress, and introduced per-list JSON data for CSS-rendered wiki reports.
+
+- Replaced the custom public HTTP server with a Flask application and production
+  Waitress server, preserving routes, bounded downloads, and source isolation.
+- Locked the web runtime dependencies, updated project metadata, and classified
+  the operational application as Beta with production transport regression tests.
+- Simplified routine result lines and labeled actual starts, finishes, and next
+  scheduled executions, retaining detailed timings in the status popovers.
+- Added task/date-specific running labels, separate observed phase counters, and
+  log-page server status, with five-second sync and one-second local clocks.
+- Replaced repeated HOT templates with per-list metadata and items, supplying
+  Lua/CSS rendering with assessment badges, scoped lists, and rank-rise styling.
+- Preserved actual task-force identities, including the upstream Minecraft name,
+  independently of display headings and without changing project templates.
+- Distinguished unavailable counts from measured zeroes, omitted daily averages,
+  and emphasized daily/monthly site ranks on total views with multi-day averages.
+- Consolidated deployment and Pageviews guidance, removed obsolete usage notes,
+  and rewrote the guides around current responsibilities and supported workflows.
+- Clarified that historical gaps wait for later report dates and raised the hub's
+  recommended memory to 4 GiB after a confirmed 2 GiB catch-up memory kill.
+
 ## Until 0.7
 
 ### 0.6.4 (2026-10-24 06:59 UTC)

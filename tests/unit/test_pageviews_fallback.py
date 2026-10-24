@@ -4,6 +4,7 @@
 # ruff: file-ignore[private-member-access, pytest-unittest-raises-assertion]
 
 import datetime as dt
+import json
 from contextlib import chdir
 from dataclasses import replace
 from tempfile import TemporaryDirectory
@@ -11,6 +12,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, call, patch
 from urllib.error import HTTPError
 
+import mwparserfromhell
 import polars as pl
 
 from backend.services.zhwiki import pageviews
@@ -25,6 +27,23 @@ _SETTINGS = replace(
     job.REPORT_SETTINGS.source_settings(),
     task_forces=(),
 )
+
+
+def _section(report: rendering.PageviewReport, index: int) -> dict:
+    """Read one JSON list produced for a fallback report.
+
+    Args:
+        report: Generated wikitext and its prepared ranking metadata.
+        index: Position of the selected project ranking interval.
+
+    Returns:
+        Inclusive metadata and ordered displayed observations.
+    """
+    templates = mwparserfromhell.parse(report.text).filter_templates()
+    invocation = templates[index]
+    assert str(invocation.name) == "#invoke:PJ:VG/HOT/v2"
+    assert str(invocation.get("1").value) == "main"
+    return json.loads(str(invocation.get("data").value))
 
 
 def _site() -> MagicMock:
@@ -313,7 +332,13 @@ class TestDownloadFallback(TestCase):
                 prepared,
                 settings=replace(job.REPORT_SETTINGS, task_forces=()),
             )
-            assert "|views=0|rank=1|old_rank=1" in report.text
+            section = _section(report, 0)
+            assert section["metadata"]["total_views"] == 0
+            assert [
+                (item["rank"], item["previous_rank"])
+                for item in section["items"]
+            ] == [(1, 1), (1, 1)]
+            assert [item["views"] for item in section["items"]] == [None, None]
             cache = pageviews.PageviewsCache.load(site.hostname())
             history = cache.get("A0")
             assert history is not None
@@ -431,9 +456,17 @@ class TestDownloadFallback(TestCase):
                 second,
                 settings=replace(job.REPORT_SETTINGS, task_forces=()),
             )
-            assert "|start=2026-10-13|end=2026-10-19|views=24|" in (
-                report.text
-            )
+            rendered = _section(report, 1)
+            assert rendered["metadata"] == {
+                "project": job.PROJECT,
+                "duration": "weekly",
+                "start": [2026, 10, 13],
+                "end": [2026, 10, 19],
+                "total_pages": 1,
+                "total_views": expected_total,
+            }
+            assert rendered["items"][0]["title"] == "A0"
+            assert rendered["items"][0]["views"] == expected_total
             history = pageviews.PageviewsCache.load(site.hostname()).get(
                 "A0",
             )

@@ -18,7 +18,12 @@ from uuid import uuid4
 
 from backend.support.logs import open_run_log
 from backend.support.report_status import ReportUpdate, report_update_key
-from backend.support.routine_status import write_routine_status
+from backend.support.routine_status import (
+    progress_updates,
+    report_progress,
+    validate_progress,
+    write_routine_status,
+)
 from shared.reports import ReportStore
 
 if TYPE_CHECKING:
@@ -79,6 +84,7 @@ class _TaskResult:
         updated: Successful saves, or unknown after delegated writes.
         started_monotonic: Clock start shared with publication timing.
         run_id: Unique identity guarding the latest routine status.
+        progress: Optional bounded activity for this running routine.
     """
 
     name: str
@@ -95,6 +101,14 @@ class _TaskResult:
         repr=False,
     )
     run_id: str = field(default_factory=lambda: uuid4().hex)
+    progress: dict[str, object] | None = field(
+        default_factory=lambda: {
+            "phase": "preparing",
+            "report_date": None,
+            "current": None,
+            "total": None,
+        },
+    )
 
 
 def _routine_result(task: _TaskResult, *, dry: bool) -> dict[str, object]:
@@ -140,6 +154,7 @@ def _save_task_status(task: _TaskResult, *, dry: bool) -> None:
             task.finished_at.isoformat() if task.finished_at else None
         ),
         "run_id": task.run_id,
+        "progress": task.progress if task.finished_at is None else None,
     })
     if task.finished_at is None:
         record.update({
@@ -155,6 +170,54 @@ def _save_task_status(task: _TaskResult, *, dry: bool) -> None:
             type(error).__name__,
             exc_info=True,
         )
+
+
+def _save_progress(
+    task: _TaskResult,
+    progress: dict[str, object],
+    *,
+    dry: bool,
+) -> None:
+    """Update activity without changing a run's lifecycle identity.
+
+    Args:
+        task: Exact routine whose execution installed this callback.
+        progress: Bounded stage and optional report/counter update.
+        dry: Whether the execution must omit live state writes.
+    """
+    if task.finished_at is not None or task.status != "running":
+        return
+    if progress["report_date"] is None and task.progress is not None:
+        progress = {**progress, "report_date": task.progress["report_date"]}
+    try:
+        progress = validate_progress(progress)
+    except ValueError:
+        _LOGGER.warning("Ignoring invalid routine activity", exc_info=True)
+        return
+    if progress == task.progress:
+        return
+    task.progress = progress
+    _save_task_status(task, dry=dry)
+
+
+def _publication_date(edit: Publication) -> dt.date | None:
+    """Read a report date without trusting arbitrary result metadata.
+
+    Args:
+        edit: Proposal whose prepared result may identify a report date.
+
+    Returns:
+        The calendar date, or none when absent or invalid.
+    """
+    if edit.result is None:
+        return None
+    value = edit.result.metadata.get("data_date")
+    if not isinstance(value, str):
+        return None
+    try:
+        return dt.date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _markdown_value(value: str) -> str:
@@ -277,6 +340,7 @@ class RuntimeContext[EditT: Publication]:
         """
         update = self._report_update(self.site.dbName(), title)
         update.start_attempt()
+        report_progress("preparing")
         try:
             yield
         except BaseException:
@@ -337,6 +401,7 @@ class RuntimeContext[EditT: Publication]:
             msg = "A completed result requires an active routine."
             raise RuntimeError(msg)
         self._active_task.finished_at = dt.datetime.now(dt.UTC)
+        self._active_task.progress = None
         self._active_task.elapsed_seconds = elapsed_seconds
         self._active_task.notes.extend(self.notes[self._task_notes_from :])
         for update in self._report_updates.values():
@@ -533,6 +598,7 @@ class RuntimeContext[EditT: Publication]:
         Raises:
             ValueError: Prepared report data has no stable storage key.
         """
+        report_progress("publishing", report_date=_publication_date(edit))
         self.edits.append(edit)
         if self._active_task is not None:
             self._active_task.edit_indices.append(len(self.edits) - 1)
@@ -665,7 +731,14 @@ def routine_run[EditT: Publication](
         logger.info("Started %s%s.", name, " preview" if active.dry else "")
         _save_task_status(task, dry=active.dry)
         try:
-            yield active
+            with progress_updates(
+                lambda progress: _save_progress(
+                    task,
+                    progress,
+                    dry=active.dry,
+                ),
+            ):
+                yield active
         except Exception as error:
             task.status = "failed"
             active.notes.append(

@@ -35,44 +35,38 @@ unavailable data hourly and waits for the next cycle once current.
 Confirmed completion survives server restarts.
 
 English comparisons and database reports refresh current state on their
-daily schedules; they do not generate missed historical daily reports.
+daily schedules.
 Database reports already edited by PexBot that UTC day are not requested
 again. Manual runs revalidate destinations rather than bypassing checks.
 
 The website's five datasets refresh independently, by default 24 hours
 after each successful collection. Failed refreshes retain the last valid
-data and retry hourly. Visiting the website does not trigger collection
-or Wikipedia edits.
+data and retry hourly. Website visits are read-only.
 
 ## How it works
 
 One Python 3.15 backend hub fetches source data, parses source pages,
 calculates changes, and manages stored results, caches, logs, and status.
-The wiki updater asks the backend for prepared data, formats it, and
-publishes only to its selected destinations. It reads no other Wikipedia
-pages and replaces only the configured `<!-- aranami ... -->` ranges.
-Text outside those ranges is preserved.
+The wiki updater formats prepared data and replaces only the configured
+`<!-- aranami ... -->` ranges on selected destinations, preserving surrounding
+text.
 
 Complete report tables and metadata are retained before publication,
-including assessment review targets and change information used in edit
-summaries. English importance and quality reports have separate renderers
-for their different section structures. A separate read-only Python
-webservice renders saved backend data as complete HTML pages.
+including review targets and changes used in edit summaries. A separate
+read-only Flask website renders saved backend data as complete HTML pages,
+served by Waitress.
 
 Logs are ordinary, readable English diagnostics showing what data was
 collected and which wiki pages were checked or edited. Structured status
 is stored separately: routine and per-page starts, finishes, durations,
-outcomes, and confirmed edit counts. The website reads those records;
-it never parses log text to determine status.
+outcomes, and confirmed edit counts. The website displays these saved
+observations.
 The dashboard advances running times locally every second and synchronizes
-routine/page statuses every fifteen seconds, keeping status popups in place.
+routine/page statuses every five seconds, keeping status popups in place.
 Execution times use whole seconds, with two decimal places for subsecond results.
-
-Report destinations and UTC schedules are defined centrally in
-[src/shared/config.py](src/shared/config.py). Maintenance worklists are
-defined in [maintenance.json](src/backend/website/maintenance.json).
-Backend `services` prepare report-specific data; backend `support`
-provides execution, storage coordination, status, cache, and logging helpers.
+While a routine is running, its card shows the current execution and available
+progress rather than a next-execution row. The log viewer includes a compact
+server-state display, uptime, and source version.
 
 ## Documentation
 
@@ -89,35 +83,10 @@ Choose the guide for your role:
 See the [documentation index](docs/README.md) and [change history](CHANGELOG.md)
 for the full reference.
 
-## Toolforge layout
-
 Aranami runs only on Toolforge; the local repository is for development,
 testing, and preparing deployments. Runtime files stay outside the uploaded
-source tree.
-
-```text
-/data/project/aranami/
-├── app/                         Active validated source deployment
-│   ├── src/backend/             Collection, preparation, scheduling, state
-│   ├── src/updater/             Wiki rendering and publication
-│   ├── src/webservice/          Python page rendering and static assets
-│   ├── src/shared/              Configuration and low-level contracts
-│   └── scripts/toolforge/       Deployment and startup commands
-├── python/                      Managed Python 3.15 interpreter
-├── deployment-envs/             Isolated, locked runtime environments
-├── pyvenv-3.15 -> deployment-envs/<deployment-id>
-├── active-deployment.json       Validated source/environment receipt
-├── reports/                     Complete report generations and manifests
-├── state/                       Routine, scheduler, and page-update metadata
-├── cache/                       Disposable source data and website snapshots
-├── logs/                        aranami.YYYY-MM-DD.log, in UTC
-├── dry-run/                     Preview summaries, wikitext, and datasets
-└── user-config.py, user-password.cfg, replica.my.cnf, …  Private credentials
-```
-
-Staged uploads and recoverable predecessor deployments are separate from
-`app/`. The [administrator guide](docs/administration.md) explains the
-validated upload and process-replacement workflow.
+source tree. The [administrator guide](docs/administration.md) covers the
+runtime layout, validated deployment, and recovery workflow.
 
 ## License
 

@@ -5,6 +5,8 @@
 Status is independent of diagnostic logs and disposable caches. Writers
 lock the full read/merge/replace operation. Older runs cannot replace a
 newer run of the same routine. Preview activity is never persisted.
+Services use ``report_progress`` inside an execution-owned scope to
+describe current work without owning lifecycle state or publication.
 """
 
 from __future__ import annotations
@@ -19,10 +21,16 @@ import re
 import stat
 import tempfile
 from collections.abc import Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from threading import RLock
+from typing import TYPE_CHECKING
 
 from shared.support.files import read_json_object
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 _LOGGER = logging.getLogger(__name__)
 _STATUS_LOCK = RLock()
@@ -47,6 +55,122 @@ _FIELDS = {
     "finished_at",
     "run_id",
 }
+_PROGRESS_FIELDS = {"phase", "report_date", "current", "total"}
+_PROGRESS_PHASES = {
+    "preparing",
+    "publishing",
+    "pageviews_readiness",
+    "pageviews_download",
+    "pageviews_aggregate",
+}
+_MAX_PROGRESS_COUNT = 1_000_000_000
+_PROGRESS_CALLBACK: ContextVar[Callable[[dict[str, object]], None] | None] = (
+    ContextVar("routine_progress_callback", default=None)
+)
+
+
+def validate_progress(value: object) -> dict[str, object] | None:
+    """Validate bounded routine activity independently of its display.
+
+    Args:
+        value: Optional phase, report date, and paired counters.
+
+    Returns:
+        A copied validated progress record, or none.
+
+    Raises:
+        ValueError: Progress fields, dates, or counters are invalid.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or set(value) != _PROGRESS_FIELDS:
+        message = "Routine progress requires its complete bounded fields."
+        raise ValueError(message)
+    progress = dict(value)
+    phase = progress["phase"]
+    if not isinstance(phase, str) or phase not in _PROGRESS_PHASES:
+        message = "Routine progress has an unsupported phase."
+        raise ValueError(message)
+    report_date = progress["report_date"]
+    if report_date is not None and (
+        not isinstance(report_date, str)
+        or dt.date.fromisoformat(report_date).isoformat() != report_date
+    ):
+        message = "Routine progress report dates must be ISO calendar dates."
+        raise ValueError(message)
+    current, total = progress["current"], progress["total"]
+    if (current is None) != (total is None) or (
+        current is not None
+        and (
+            type(current) is not int
+            or type(total) is not int
+            or not 0 <= current <= total <= _MAX_PROGRESS_COUNT
+        )
+    ):
+        message = "Routine progress counters require bounded whole counts."
+        raise ValueError(message)
+    return progress
+
+
+@contextmanager
+def progress_updates(
+    callback: Callable[[dict[str, object]], None],
+) -> Iterator[None]:
+    """Bind service progress to one live execution scope.
+
+    Nested scopes remain independent. Copied contexts stop forwarding
+    updates when their original scope closes.
+
+    Args:
+        callback: Backend lifecycle owner receiving activity records.
+
+    Yields:
+        Control while services report the current routine's activity.
+    """
+    active = True
+
+    def forward(progress: dict[str, object]) -> None:
+        """Forward activity only while its execution remains open."""
+        if active:
+            callback(progress)
+
+    token = _PROGRESS_CALLBACK.set(forward)
+    try:
+        yield
+    finally:
+        active = False
+        _PROGRESS_CALLBACK.reset(token)
+
+
+def report_progress(
+    phase: str,
+    *,
+    report_date: dt.date | None = None,
+    current: int | None = None,
+    total: int | None = None,
+) -> None:
+    """Describe service activity to the current backend execution.
+
+    Outside an execution-owned scope this does nothing. An omitted date
+    preserves the current report date; counters describe completed work
+    and should be emitted at bounded intervals, not for every article.
+
+    Args:
+        phase: Stable activity identifier localized by the presentation.
+        report_date: Actual report date being constructed, when known.
+        current: Completed source records or readiness probes.
+        total: Complete selected population for this activity.
+    """
+    callback = _PROGRESS_CALLBACK.get()
+    if callback is not None:
+        callback({
+            "phase": phase,
+            "report_date": (
+                report_date.isoformat() if report_date is not None else None
+            ),
+            "current": current,
+            "total": total,
+        })
 
 
 def _timestamp(value: object) -> tuple[dt.datetime, str]:
@@ -88,10 +212,15 @@ def _validated_record(value: object) -> dict[str, object]:
     Raises:
         ValueError: The record has an unsupported shape or value.
     """
-    if not isinstance(value, Mapping) or set(value) != _FIELDS:
+    if not isinstance(value, Mapping) or set(value) not in (
+        _FIELDS,
+        _FIELDS | {"progress"},
+    ):
         message = "Routine status records require their complete fields."
         raise ValueError(message)
     record = dict(value)
+    if "progress" in record:
+        record["progress"] = validate_progress(record["progress"])
     for name, pattern in (("routine", _ROUTINE_NAME), ("run_id", _RUN_ID)):
         if (
             not isinstance(record[name], str)
@@ -115,7 +244,27 @@ def _validated_record(value: object) -> dict[str, object]:
             message = "Running routines cannot report terminal outcomes."
             raise ValueError(message)
         return record
+    _validate_completion(record, started)
+    return record
+
+
+def _validate_completion(
+    record: dict[str, object],
+    started: dt.datetime,
+) -> None:
+    """Validate terminal timing and reject leftover running activity.
+
+    Args:
+        record: Lifecycle fields with normalized identity and start.
+        started: Parsed UTC start used to validate completion ordering.
+
+    Raises:
+        ValueError: Completed timing or activity fields are invalid.
+    """
     duration = record["duration_seconds"]
+    if record.get("progress") is not None:
+        message = "Completed routines cannot retain running activity."
+        raise ValueError(message)
     if (
         isinstance(duration, bool)
         or not isinstance(duration, (int, float))
@@ -128,7 +277,6 @@ def _validated_record(value: object) -> dict[str, object]:
     if finished < started:
         message = "Routine completion cannot precede its start."
         raise ValueError(message)
-    return record
 
 
 def read_routine_status(path: Path) -> dict[str, object]:
