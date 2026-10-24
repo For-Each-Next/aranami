@@ -789,6 +789,11 @@ def schedule_state(
         "state": snapshot["state"],
         "routines": routines,
         "updated_at": snapshot["updated_at"],
+        "expires_at": (
+            updated + dt.timedelta(seconds=_SCHEDULE_MAX_AGE)
+        ).isoformat()
+        if snapshot["state"] != "stopped"
+        else None,
         "started_at": snapshot["started_at"]
         if started is not None
         and started <= updated

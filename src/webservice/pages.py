@@ -9,6 +9,7 @@ refresh status and timers without requiring a page reload.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import operator
 import secrets
 from typing import TYPE_CHECKING
@@ -32,6 +33,7 @@ from webservice.presentation import (
     readable_size,
     relative_time,
     schedule_state,
+    timestamp,
     uptime,
     utc_time,
     wiki_link,
@@ -93,10 +95,44 @@ class _Page:
         """
         label = relative_time(value, self.interface, now)
         return (
-            tag("small", label, class_="relative-time")
+            tag(
+                "small",
+                label,
+                class_="relative-time",
+                data_clock="relative",
+                data_observed_at=value,
+            )
             if label
             else fragment()
         )
+
+    def _duration_attributes(
+        self,
+        event: Record | None,
+        *,
+        summary: bool = False,
+    ) -> Record:
+        """Expose running starts for optional browser clocks.
+
+        Returns:
+            Timer attributes for active observations with a valid start.
+        """
+        if (
+            not event
+            or event.get("status") != "running"
+            or timestamp(event.get("started_at")) is None
+        ):
+            return {}
+        return {
+            "data_clock": "elapsed",
+            "data_started_at": event["started_at"],
+            "data_duration_template": self.text(
+                "ops.state_duration",
+                duration="{duration}",
+            )
+            if summary
+            else "{duration}",
+        }
 
     def document(
         self,
@@ -636,6 +672,7 @@ class _Page:
                 tag(
                     "td",
                     event_duration(record, self.interface, now),
+                    **self._duration_attributes(record),
                 ),
                 data_key=f"{record['site']}:{record['title']}",
             )
@@ -761,6 +798,7 @@ class _Page:
                             ),
                         ),
                         title=self.text("ops.column_duration"),
+                        **self._duration_attributes(event, summary=True),
                     ),
                     class_="routine-status",
                 ),
@@ -773,9 +811,16 @@ class _Page:
                 tag(
                     "li",
                     self.text("ops.next_run"),
-                    next_run(schedule, identifier, self.interface),
-                    self.relative_note(upcoming, now),
-                ),
+                    tag(
+                        "span",
+                        next_run(schedule, identifier, self.interface),
+                        self.relative_note(upcoming, now),
+                        data_schedule_time=schedule.get("expires_at")
+                        is not None,
+                    ),
+                )
+                if (event or {}).get("status") != "running"
+                else fragment(),
                 class_="routine-meta",
             )
             cards.append(
@@ -798,12 +843,13 @@ class _Page:
             tag("h2", self.text("ops.heading"), id="tool-status-heading"),
             tag(
                 "p",
-                self.text("ops.live"),
+                self.text("ops.reconnecting"),
                 id="live-notice",
                 class_="context",
                 role="status",
                 hidden=True,
-                data_live=self.text("ops.live"),
+                # Older open tabs still read these connection labels.
+                data_live="",
                 data_reconnecting=self.text("ops.reconnecting"),
             ),
             missing,
@@ -811,6 +857,27 @@ class _Page:
             class_="section-flat",
             id="tool-status",
             aria_labelledby="tool-status-heading",
+            data_server_time=now.isoformat(),
+            data_schedule_expires=schedule.get("expires_at"),
+            data_schedule_stale=self.text("ops.schedule_stale"),
+            data_clock_messages=json.dumps({
+                key: self.text(
+                    key,
+                    count="{count}",
+                    seconds="{seconds}",
+                    minutes="{minutes}",
+                )
+                for key in (
+                    "duration.seconds",
+                    "duration.minutes",
+                    "time.minutes_ago",
+                    "time.hours_ago",
+                    "time.minutes_ahead",
+                    "time.hours_ahead",
+                    "time.soon",
+                    "time.just_now",
+                )
+            }),
         )
 
     def worklist_card(self, item: Record, groups: Record) -> Markup:
@@ -1073,10 +1140,28 @@ def _live_status(
     definitions = (config.get("routines") or {}).get("routines", {})
     schedule = schedule_state(status.get("schedule"), definitions, now)
     version = config.get("version") or page.text("ops.unavailable")
+    started = schedule.get("started_at")
     footer = tag(
         "span",
         uptime(schedule, version, page.interface, now),
         id="live-uptime",
+        data_clock="uptime" if started else None,
+        data_started_at=started,
+        data_uptime_template=page.text(
+            "footer.uptime",
+            version=version,
+            days="{days}",
+            hours="{hours}",
+            minutes="{minutes}",
+            seconds="{seconds}",
+            since=utc_time(started).removesuffix(" UTC"),
+        )
+        if started
+        else None,
+        data_uptime_unknown=page.text(
+            "footer.uptime_unknown",
+            version=version,
+        ),
     )
     return page.routine_cards(status, definitions, schedule, now), footer
 

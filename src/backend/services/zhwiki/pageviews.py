@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 REPORT_DATA_DATE_MARKER = "report date"
 _MISSING_PERCENT_LIMIT = 1
 _REQUEST_ATTEMPTS = 3
+_READINESS_PROBES = 3
 _TRANSIENT_HTTP_STATUSES = {
     HTTPStatus.BAD_GATEWAY,
     HTTPStatus.SERVICE_UNAVAILABLE,
@@ -130,7 +131,23 @@ class _DownloadBatch:
         tuple[dt.date, dt.date, pl.DataFrame | None],
     ] = field(default_factory=dict)
     projects: dict[tuple[str, str], pl.DataFrame] = field(default_factory=dict)
+    top_lists: dict[tuple[str, dt.date, dt.date], pl.DataFrame] = field(
+        default_factory=dict,
+    )
+    accepted: _AcceptedDownload | None = None
     active: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class _AcceptedDownload:
+    """Limit provisional zeroes to validated fresh histories."""
+
+    site: str
+    project: str
+    titles: frozenset[str]
+    start: dt.date
+    stop: dt.date
+    missing_percent: int
 
 
 _DOWNLOAD_BATCH: ContextVar[_DownloadBatch | None] = ContextVar(
@@ -158,6 +175,8 @@ def download_batch() -> Iterator[None]:
         batch.active = False
         batch.articles.clear()
         batch.projects.clear()
+        batch.top_lists.clear()
+        batch.accepted = None
         _DOWNLOAD_BATCH.reset(token)
 
 
@@ -304,14 +323,16 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
     history_days: int = HISTORY_DAYS,
     prefetch_stop: dt.date | None = None,
     missing_percent: int | None = None,
+    zero_missing: bool = False,
 ) -> pl.DataFrame:
     """Download full histories and return observed period totals.
 
     Saved coverage never suppresses a request or fills missing response
     dates. A download batch can reuse fresh full histories for later
-    reports in the same run. Periods without observations remain null;
-    measured zeroes stay zero. HTTP 504 omits the article from rankings
-    and counts toward the optional target-day failure limit.
+    reports in the same run. Validated batches may count absent records
+    as zero for calculations without storing synthetic observations.
+    Other periods without observations remain null. HTTP 504 omits the
+    article from rankings and counts toward the daily failure limit.
 
     Args:
         site: Authenticated site identifying the Wikimedia project.
@@ -323,9 +344,14 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
         missing_percent: Optional maximum target-day missing percentage.
             Stop immediately when missing articles exceed this fraction
             of the complete selected population.
+        zero_missing: Count gaps in successful histories as zero after
+            the caller has validated the complete download batch.
+            Transport failures still count toward the failure limit.
 
     Returns:
         Totals with title, start, stop, and nullable views columns.
+        Provisional-zero calculations also include an observed flag
+        indicating whether the interval contains any actual record.
 
     Raises:
         PageviewsUnavailableError: Target-day absence exceeds the limit.
@@ -344,6 +370,7 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
     unique_titles = tuple(dict.fromkeys(titles))
     total = len(unique_titles)
     missing = 0
+    unavailable = 0
     logger.info("Preparing full Pageviews histories for %d articles", total)
     for index, title in enumerate(unique_titles, start=1):
         observations = _article_observations(
@@ -361,10 +388,12 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
             ).is_empty()
         ):
             missing += 1
+            if observations is None or not zero_missing:
+                unavailable += 1
             if missing_percent is not None:
                 _require_daily_count(
                     data_date,
-                    missing,
+                    unavailable,
                     total,
                     missing_percent,
                 )
@@ -379,7 +408,7 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
                 .group_by("start", "stop")
                 .agg(pl.col("pageview").sum().alias("views"))
             )
-            frames.append(
+            frame = (
                 period_frame
                 .join(
                     totals,
@@ -388,8 +417,14 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
                     maintain_order="left",
                 )
                 .with_columns(pl.lit(title).alias("title"))
-                .select(list(_VIEWS_SCHEMA)),
+                .select(list(_VIEWS_SCHEMA))
             )
+            if zero_missing:
+                frame = frame.with_columns(
+                    pl.col("views").is_not_null().alias("observed"),
+                    pl.col("views").fill_null(0),
+                )
+            frames.append(frame)
         if index % 100 == 0:
             logger.info("Aggregated %d/%d articles", index, total)
     logger.info(
@@ -398,6 +433,13 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
         total - missing,
         total,
     )
+    if zero_missing and missing > unavailable:
+        logger.info(
+            "Counted %d missing article records as zero for %s; "
+            "later full downloads will retry these gaps",
+            missing - unavailable,
+            data_date,
+        )
     return pl.concat(frames) if frames else pl.DataFrame(schema=_VIEWS_SCHEMA)
 
 
@@ -435,6 +477,8 @@ def _article_observations(  # ruff: ignore[too-many-arguments]
     if saved is not None and saved[0] <= start and saved[1] >= stop:
         fetched = saved[2]
     else:
+        if batch is not None and batch.active:
+            batch.accepted = None
         fetched = _fetch_article_data(site, title, start, stop)
         if fetched is not None:
             fetched = fetched.select("date", "pageview").filter(
@@ -458,11 +502,11 @@ def prepare_downloads(  # ruff: ignore[too-many-arguments]
 ) -> dt.date:
     """Download a healthy catch-up range, shortening its end if needed.
 
-    Try the latest eligible date first, then one day earlier when more
-    than the allowed fraction of articles lacks that endpoint's daily
-    record. Every attempt starts fresh. The first healthy batch stays in
-    memory for chronological report preparation, which independently
-    checks each report day. This never writes a snapshot or a report.
+    Probe the latest eligible date before full downloads, then try an
+    earlier date if the probes or full-population endpoint check fail.
+    Every history attempt starts fresh. The first healthy batch stays
+    in memory for chronological reports, which count historical gaps
+    as provisional zeroes. This never writes a snapshot or a report.
 
     Args:
         site: Source wiki and replica identity.
@@ -512,7 +556,9 @@ def prepare_downloads(  # ruff: ignore[too-many-arguments]
     candidate = target_date
     while True:
         batch.articles.clear()
+        batch.accepted = None
         try:
+            _require_day_ready(site, candidate)
             _download_candidate(
                 site,
                 titles,
@@ -534,7 +580,102 @@ def prepare_downloads(  # ruff: ignore[too-many-arguments]
                 candidate,
             )
         else:
+            batch.accepted = _AcceptedDownload(
+                site.hostname(),
+                settings.project,
+                frozenset(titles),
+                start,
+                candidate + dt.timedelta(days=1),
+                min(missing_percent, _MISSING_PERCENT_LIMIT),
+            )
             return candidate
+
+
+def _top_ranks(
+    site: BaseSite,
+    start: dt.date,
+    stop: dt.date,
+) -> pl.DataFrame:
+    """Reuse successful top lists between readiness and report reads.
+
+    Args:
+        site: Wiki whose article ranks are requested.
+        start: Inclusive first day of the top-list interval.
+        stop: Exclusive interval end.
+
+    Returns:
+        Validated article ranks from this run's fresh source response.
+    """
+    batch = _DOWNLOAD_BATCH.get()
+    key = site.hostname(), start, stop
+    if batch is not None and batch.active and key in batch.top_lists:
+        return batch.top_lists[key].clone()
+    ranks = pageviews.fetch_top_dataframe(site, start, stop)
+    if batch is not None and batch.active:
+        batch.top_lists[key] = ranks.clone()
+    return ranks
+
+
+def _require_day_ready(site: BaseSite, data_date: dt.date) -> None:
+    """Probe daily publication before downloading project histories.
+
+    An available daily top list and up to three of its leading articles'
+    single-day records cheaply detect unpublished days. This is a
+    preflight, not a replacement for the full-population endpoint guard.
+    Probe responses never substitute for the full article histories.
+
+    Args:
+        site: Wiki whose Pageviews day is requested.
+        data_date: Candidate complete UTC date.
+
+    Raises:
+        PageviewsUnavailableError: The top list or a probe is absent.
+        PageviewsDeferredError: A source request or response failed.
+    """
+    stop = data_date + dt.timedelta(days=1)
+    logger.info("Checking Pageviews readiness for %s", data_date)
+    try:
+        top = _top_ranks(site, data_date, stop)
+    except (OSError, TypeError, ValueError) as error:
+        missing = (
+            isinstance(error, urllib.error.HTTPError)
+            and error.code == HTTPStatus.NOT_FOUND
+        )
+        if isinstance(error, urllib.error.HTTPError):
+            error.close()
+        message = (
+            f"Pageviews readiness for {data_date}: daily top list "
+            f"unavailable ({error}); full histories were not requested."
+        )
+        exception = (
+            PageviewsUnavailableError if missing else PageviewsDeferredError
+        )
+        raise exception(message) from error
+    for title in top.sort("top").head(_READINESS_PROBES).get_column("title"):
+        try:
+            observations = _fetch_article_data(site, title, data_date, stop)
+        except (OSError, TypeError, ValueError) as error:
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
+            message = (
+                f"Pageviews readiness for {data_date}: article probe "
+                f"failed ({error}); full histories were not requested."
+            )
+            raise PageviewsDeferredError(message) from error
+        if observations is None:
+            message = (
+                f"Pageviews readiness for {data_date}: article probe "
+                "timed out; full histories were not requested."
+            )
+            raise PageviewsDeferredError(message)
+        if observations.filter(
+            pl.col("date") == data_date,
+        ).is_empty():
+            message = (
+                f"Pageviews readiness for {data_date}: a leading article "
+                "has no daily record; full histories were not requested."
+            )
+            raise PageviewsUnavailableError(message)
 
 
 def _download_candidate(
@@ -668,6 +809,9 @@ def _ranked_data(
     start = stop - delta
     relevant = views.join(articles.select("title"), on="title", how="semi")
     columns = ["title", "views"]
+    observed = "observed" in relevant.columns
+    if observed:
+        columns.append("observed")
     if "top" in relevant.columns:
         columns.append("top")
     current = (
@@ -685,7 +829,11 @@ def _ranked_data(
         .filter(
             (pl.col("start") == start - delta) & (pl.col("stop") == start),
         )
-        .select("title", pl.col("views").alias("old_views"))
+        .select(
+            "title",
+            pl.col("views").alias("old_views"),
+            *([pl.col("observed").alias("old_observed")] if observed else []),
+        )
         .with_columns(
             pl.col("old_views").rank("min", descending=True).alias("old_rank"),
         )
@@ -758,7 +906,7 @@ def _site_top_ranks(
     )
     for start, end in intervals:
         try:
-            ranks = pageviews.fetch_top_dataframe(site, start, end)
+            ranks = _top_ranks(site, start, end)
         except (OSError, TypeError, ValueError) as error:
             if isinstance(error, urllib.error.HTTPError):
                 error.close()
@@ -907,10 +1055,19 @@ def _ranking_totals(
         Counts, current and previous measured totals, and period bounds.
     """
     keys = list(_RANKING_GROUP_SCHEMA)
+    observed = "observed" in rankings.columns
     totals = rankings.group_by(keys, maintain_order=True).agg(
         pl.len().alias("article_count"),
-        pl.col("views").count().alias("observed_articles"),
-        pl.col("old_views").count().alias("previous_observed_articles"),
+        (
+            pl.col("observed").fill_null(value=False).sum()
+            if observed
+            else pl.col("views").count()
+        ).alias("observed_articles"),
+        (
+            pl.col("old_observed").fill_null(value=False).sum()
+            if observed
+            else pl.col("old_views").count()
+        ).alias("previous_observed_articles"),
         pl
         .when(pl.col("views").count() > 0)
         .then(pl.col("views").sum())
@@ -993,6 +1150,21 @@ def _report_observations(  # ruff: ignore[too-many-arguments]
     intervals = report_periods(stop, configurations)
     # API health needs the target day independently of display periods.
     intervals = tuple(dict.fromkeys((*intervals, (data_date, stop))))
+    batch = _DOWNLOAD_BATCH.get()
+    accepted = batch.accepted if batch is not None and batch.active else None
+    start = min(
+        stop - dt.timedelta(days=history_days),
+        *(begin for begin, _ in intervals),
+    )
+    zero_missing = (
+        accepted is not None
+        and accepted.site == site.hostname()
+        and accepted.project == settings.project
+        and accepted.titles == frozenset(titles)
+        and accepted.start <= start
+        and accepted.stop >= max(stop, prefetch_stop or stop)
+        and accepted.missing_percent <= missing_percent
+    )
     views = aggregate_views(
         site,
         titles,
@@ -1001,12 +1173,14 @@ def _report_observations(  # ruff: ignore[too-many-arguments]
         history_days=history_days,
         prefetch_stop=prefetch_stop,
         missing_percent=missing_percent,
+        zero_missing=zero_missing,
     )
-    require_daily_observations(
-        views,
-        data_date,
-        missing_percent=missing_percent,
-    )
+    if not zero_missing:
+        require_daily_observations(
+            views,
+            data_date,
+            missing_percent=missing_percent,
+        )
     views = views.join(
         _site_top_ranks(site, stop, configurations),
         on=["title", "start", "stop"],
@@ -1035,6 +1209,9 @@ def prepare_report(  # ruff: ignore[too-many-arguments]
     Every run downloads full article histories. Saved observations do
     not replace missing fresh records. Articles returning HTTP 504 are
     omitted from rankings and count as missing target-day records.
+    A validated batch supplies provisional zeroes for missing daily
+    calculations, retaining observation flags and unfilled raw history.
+    Later runs retry those gaps through fresh full downloads.
     Supported calendar intervals include site-wide article ranks for
     pages appearing in Wikimedia's top list.
 
@@ -1045,8 +1222,8 @@ def prepare_report(  # ruff: ignore[too-many-arguments]
         history_days: Retained history for disposable Parquet data.
         missing_percent: Missing percentage that blocks reports.
         prefetch_stop: Optional later exclusive download end, bounded by
-            the caller's actual UTC readiness cutoff. Later days remain
-            independently validated before their reports are published.
+            the caller's UTC readiness cutoff. A matching accepted batch
+            permits provisional zeroes within its validated range.
 
     Returns:
         Full rankings, observed leaders, and reusable result tables.
@@ -1054,9 +1231,10 @@ def prepare_report(  # ruff: ignore[too-many-arguments]
     Raises:
         PageviewsDeferredError: Article retries were exhausted or a
             required top list is unavailable.
-        PageviewsUnavailableError: Target-day observations exceeded the
-            missing limit. No staged inputs are committed on failure;
-            the next invocation downloads full histories again.
+        PageviewsUnavailableError: Unvalidated daily observations or
+            failed requests exceeded the missing limit. No staged inputs
+            are committed on failure. The next invocation downloads full
+            histories again.
     """  # ruff: ignore[docstring-extraneous-exception]
     articles, views = _report_observations(
         site,
@@ -1128,6 +1306,11 @@ def prepare_report(  # ruff: ignore[too-many-arguments]
             metadata={
                 "data_date": data_date.isoformat(),
                 "project": settings.project,
+                "missing_daily_records": (
+                    "provisional_zero"
+                    if "observed" in complete.columns
+                    else "unknown"
+                ),
                 "leaders": [
                     {
                         "scope": ranking.scope,

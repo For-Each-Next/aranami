@@ -306,7 +306,9 @@ measured zeroes, nulls, and the verified non-article exclusions.
 
 Routine cards show localized state text, status time, measured/elapsed
 duration, configured report links, and the actual next execution from the
-monitor snapshot. An emoji, linked-style status button, and whole-routine
+monitor snapshot. Hide the next-execution row while that routine is running;
+restore it after completion without changing the saved schedule.
+An emoji, linked-style status button, and whole-routine
 duration stay on one line. The button opens a native HTML popover with a
 keyboard-accessible table of per-destination outcomes, linked page titles,
 independent execution durations, and UTC timestamps. Close controls,
@@ -319,13 +321,16 @@ completed seconds. Stored measurements retain their original precision.
 Last-run and next-run UTC times include small relative annotations in
 whole minutes below an hour and whole hours thereafter, rounded down.
 Future times say how long remains; unavailable schedule times have no
-annotation. Dashboard status, per-page outcomes, relative times, and uptime
-refresh every second while the tab is visible. Each refresh uses the server's
-time and bypasses the full-page cache. Requests never overlap, time out after
+annotation. Running durations, relative times, and uptime advance locally
+every second using a monotonic browser clock anchored to the last server
+timestamp. Status and per-page outcomes synchronize every fifteen seconds
+while visible, bypassing the full-page cache. Requests never overlap, time out after
 ten seconds, and retry with delays up to thirty seconds after failures.
-Hidden tabs pause polling; returning to the page resumes it. The browser
+Hidden tabs pause polling and local ticks; returning immediately synchronizes.
+Completed durations stay fixed and stale schedules expire locally. The browser
 updates existing elements to preserve open popovers, focus, and scroll.
-Failed refreshes retain the last received observations with an explicit notice.
+Failed refreshes retain the last received observations with an explicit notice;
+healthy synchronization shows no notice.
 Narrow screens scroll the popup table within its container. The footer combines
 source version and continuous runtime including seconds in one line.
 Missing, stale, paused, and stopped
@@ -436,8 +441,13 @@ Pageviews dumps, including Toolforge's shared files, or substitute dump
 counts for API observations. Keep Polars processing and Parquet caching.
 
 Pageviews processes missing report dates in order, publishing each day's list
-separately. First download each article's full required history through the
-latest eligible complete UTC day and validate that final day's coverage.
+separately. First probe the candidate day's top list and up to three leading
+articles' single-day records. Missing source dates try an earlier endpoint
+before any full-history requests; transport failures defer the invocation.
+A valid top list containing only non-articles still proceeds to the full guard.
+Probe observations never replace full histories. Reuse successful top lists
+within the batch for publication. Download each article's full required history
+through the latest eligible ready UTC day and validate that final day's coverage.
 If missing daily records exceed the limit, stop that download,
 shorten its end by one day, and download the full histories afresh. Discard
 the failed attempt's responses; never resume prior downloads from memory
@@ -451,7 +461,7 @@ an eligible target on the 18th produce separate reports for the 16th, 17th,
 and 18th. If the 18th is unavailable but a fresh download through the 17th
 passes, publish the 16th and 17th only. Do not skip intervening reports,
 roll back the checkpoint, or label older observations with a newer date.
-Stop at the first unavailable intermediate day, failed/unconfirmed save,
+Stop at the first required source failure, failed/unconfirmed save,
 or superseded result; resume from the last confirmed on-wiki marker on the
 next call. A shortened endpoint leaves the routine behind and eligible for
 hourly retries; it cannot establish current completion. The current incomplete
@@ -470,22 +480,30 @@ a supplied anchor cannot bypass the actual cutoff. Reject a candidate
 endpoint as soon as more than 1% of the full distinct article population
 lacks that day's daily record. Count absence while downloading and stop
 before the next request once the limit is crossed; do not use only the
-processed prefix as the denominator. Apply the same guard to each report
-day before publication. Exactly 1% missing is allowed. Explicit zeroes are
-valid records, while empty responses and HTTP 504 count as missing.
-Do not fetch top lists or publish a day after its guard fails. Failed
+processed prefix as the denominator. Exactly 1% missing is allowed.
+Explicit zeroes are valid records, while empty responses and HTTP 504 count
+as missing at this endpoint check. A failed guard prevents publication and
+further top-list requests for that candidate. Failed
 attempts leave the wiki marker and healthy snapshot unchanged, preserving
 any earlier confirmed catch-up reports. If no later endpoint is usable,
-or an intermediate report fails its guard, mark the task failed. The next
-hourly invocation downloads the full histories again and retries from the
-last published marker.
+mark the task failed. The next hourly invocation probes again and, once
+ready, downloads full histories from the last published marker.
 
 Fetch at least the configured 800-day history buffer by default, expanding
 it for the required comparisons and catch-up dates. Saved Parquet coverage
 never suppresses a request or fills missing fresh response dates in a report.
-Historical gaps do not reject a batch, and periods with no measurements
-remain null. Keep successful snapshots atomically after the daily guard
-and required top lists pass; retain known observations in those disposable
+After endpoint validation, gaps in successful histories contribute provisional
+zeroes to daily totals, ranks, and averages. Average denominators include all
+calendar days. Bind this permission to the accepted batch's site, project,
+membership, history bounds, and threshold; arbitrary prefetched or cached
+data cannot enable it. Retain current/previous observation flags with rankings
+so provisional zeroes do not inflate observed-article counts. Raw histories
+never gain synthetic measurements. Later full downloads retry gaps and use
+recovered values in future calculations without rewinding published reports.
+Direct preparation without an accepted batch retains its strict daily guard
+and null unavailable totals. HTTP 504 articles remain excluded and count
+toward the failure limit. Keep successful snapshots atomically after the
+required guards and top lists pass; retain known observations in those disposable
 snapshots without treating them as fresh inputs. Do not create or read
 pending request checkpoints. Log batch progress and concise endpoint-fallback
 or final-failure summaries without per-article unknown-date warnings.

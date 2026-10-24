@@ -64,9 +64,9 @@ collected and which wiki pages were checked or edited. Structured status
 is stored separately: routine and per-page starts, finishes, durations,
 outcomes, and confirmed edit counts. The website reads those records;
 it never parses log text to determine status.
-The dashboard refreshes running times and routine/page statuses every second
-while open, keeping status popups in place. Execution times use whole seconds,
-with two decimal places for subsecond results.
+The dashboard advances running times locally every second and synchronizes
+routine/page statuses every fifteen seconds, keeping status popups in place.
+Execution times use whole seconds, with two decimal places for subsecond results.
 
 Report destinations and UTC schedules are defined centrally in
 [src/shared/config.py](src/shared/config.py). Maintenance worklists are

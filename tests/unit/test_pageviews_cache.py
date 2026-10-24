@@ -384,6 +384,7 @@ class TestDailyQuickStop(TestCase):
             )
             with (
                 patch.object(job, "read_pages", return_value=[page]),
+                patch.object(pageviews, "_require_day_ready"),
                 patch.object(
                     pageviews,
                     "_project_articles",
@@ -416,6 +417,7 @@ class TestDailyQuickStop(TestCase):
             )
             with (
                 patch.object(job, "read_pages", return_value=[page]),
+                patch.object(pageviews, "_require_day_ready"),
                 patch.object(
                     pageviews,
                     "_project_articles",

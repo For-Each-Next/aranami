@@ -79,15 +79,18 @@ New pages retains 100 complete UTC dates through yesterday by default.
 Once the whole retained window is verified complete, automatic work waits
 for the next daily trigger.
 
-Pageviews first downloads full histories through the latest eligible complete
-day. If too many articles lack that day's record, it retries a fresh full
+Pageviews first checks the candidate day's top list and up to three leading
+articles' single-day records. An unpublished day is rejected before full
+histories are requested. It then downloads through the latest eligible
+ready day. If too many articles lack that day's record, it retries a fresh full
 download ending one day earlier, without going back to an already-published
 date. It then analyzes and saves each missing day's report in order through
 the usable endpoint. For example, a report on the 15th catches up with
 separate saves for the 16th, 17th, and 18th; if only the download through the
 17th passes, it saves the 16th and 17th and retries the 18th later.
-Each report keeps its actual data date. An incomplete intermediate day or
-unsuccessful save stops publication, preserving earlier confirmed progress.
+Each report keeps its actual data date. Gaps in the accepted histories count
+as zero in daily totals and averages, allowing older reports to catch up.
+Source failures and unsuccessful saves stop publication, preserving confirmed progress.
 If no unpublished endpoint passes, the task fails and retries later.
 Today's incomplete totals are excluded. Yesterday becomes eligible at the
 actual 18:00 UTC readiness boundary; its hourly schedule first attempts
@@ -189,16 +192,22 @@ the managed ranges. The Pageviews checkpoint remains
 also use supported opening-marker settings. Backend services validate and
 interpret settings; the updater only renders within the managed ranges.
 
-Every Pageviews run and earlier-endpoint retry downloads full article
-histories again; catch-up dates share only the successful batch's fresh
+Once readiness passes, each Pageviews run or earlier-endpoint retry downloads
+full article histories again; catch-up dates share only the successful batch's fresh
 responses. A download stops immediately when more than 1% of selected
 articles lack its final day's daily record, then retries the previous
-unpublished endpoint. Each daily report must also pass the same guard.
+unpublished endpoint. Single-day readiness probes do not replace full histories.
 Failed attempts leave the report and healthy cache unchanged. A shorter
 successful catch-up does not mark the routine current; hourly retries
 continue for the remaining dates. Exactly 1% missing is allowed and measured
 zeroes are valid.
-Older historical gaps do not fail the task or produce per-article warnings.
+After a batch passes, missing records in successful histories contribute zero
+to report calculations. Daily averages include every calendar day in the period.
+Saved rankings distinguish provisional zeroes from actual observations; raw
+cached histories keep the gaps absent. Later full downloads retry those dates
+and incorporate recovered counts in future reports and comparisons, without
+rewriting already published historical reports. HTTP failures are not zeroes.
+Older historical gaps do not produce per-article warnings.
 Larger legacy `missing-percent` values cannot raise the one-percent limit.
 
 Changing target titles, UTC schedules, subscription roots, or maintenance
