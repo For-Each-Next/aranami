@@ -185,7 +185,8 @@ def run(
     Hourly callers can check the date cheaply. Current reports make no
     Pageviews API requests. Each catch-up run probes day availability
     before full histories, trying earlier end dates if the probes or
-    final-day coverage fail. Share the accepted fresh observations
+    site-wide availability checks fail. Missing individual records
+    do not impose a percentage cutoff. Share accepted fresh observations
     between daily reports, saving in chronological order and counting
     missing historical values as provisional zeroes.
     Downloads for later report dates can fill these gaps. Historical

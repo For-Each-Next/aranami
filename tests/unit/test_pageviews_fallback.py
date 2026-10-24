@@ -104,7 +104,7 @@ class TestDownloadFallback(TestCase):
                 patch.object(
                     pageviews.pageviews,
                     "fetch_data_dataframe",
-                    side_effect=[_observations(_FIRST)] * (18 - healthy_day)
+                    side_effect=[_observations()] * ((18 - healthy_day) * 2)
                     + [_observations(*days)] * 2,
                 ) as fetch,
                 patch.object(
@@ -124,8 +124,9 @@ class TestDownloadFallback(TestCase):
                 )
                 assert end == candidate
                 expected = [
-                    call(site, "A0", _START, dt.date(2026, 10, day + 1))
+                    call(site, title, _START, dt.date(2026, 10, day + 1))
                     for day in range(18, healthy_day, -1)
+                    for title in ("A0", "A1")
                 ]
                 expected.extend(
                     call(site, title, _START, end + dt.timedelta(days=1))
@@ -167,53 +168,74 @@ class TestDownloadFallback(TestCase):
                 settings=_SETTINGS,
             )
         assert fetch.call_args_list == [
-            call(site, "A0", _START, dt.date(2026, 10, day))
+            call(site, title, _START, dt.date(2026, 10, day))
             for day in (19, 18, 17)
+            for title in ("A0", "A1")
         ]
         load.assert_not_called()
 
     @staticmethod
-    def test_exactly_one_percent_missing_accepts_measured_zeroes() -> None:
-        """Count distinct membership, retaining the strict threshold."""
+    def test_sparse_articles_do_not_block_a_verified_day() -> None:
+        """Accept sparse records while preserving observation flags."""
+        missing = 20
+        population = 100
         with (
+            TemporaryDirectory() as directory,
+            chdir(directory),
             pageviews.download_batch(),
             patch.object(
                 pageviews,
                 "_project_articles",
-                return_value=pl.concat([_members(100), _members(1)]),
+                return_value=_members(population),
             ),
             patch.object(
                 pageviews.pageviews,
                 "fetch_data_dataframe",
                 side_effect=lambda _site, title, _start, _stop: (
                     _observations()
-                    if title == "A0"
+                    if int(title[1:]) < missing
                     else _observations(_TARGET)
                 ),
             ) as fetch,
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=pl.DataFrame(
+                    schema={"title": pl.String, "top": pl.Int64},
+                ),
+            ),
         ):
+            site = _site()
             assert (
                 pageviews.prepare_downloads(
-                    _site(),
+                    site,
                     _FIRST,
                     _TARGET,
                     settings=_SETTINGS,
                 )
                 == _TARGET
             )
-        expected_count = 100
-        assert fetch.call_count == expected_count
+            prepared = pageviews.prepare_report(
+                site,
+                _TARGET + dt.timedelta(days=1),
+                settings=_SETTINGS,
+            )
+            rows = prepared.rankings[0].rows
+            assert rows.get_column("observed").sum() == population - missing
+            assert rows.get_column("views").null_count() == missing
+        assert fetch.call_count == population
 
-    def test_quick_stop_uses_full_population_not_processed_prefix(
+    def test_no_project_observations_fail_after_the_full_download(
         self,
     ) -> None:
-        """Stop on the second missing article out of one hundred."""
+        """Reject an absent day after inspecting every article."""
+        population = 100
         with (
             pageviews.download_batch(),
             patch.object(
                 pageviews,
                 "_project_articles",
-                return_value=_members(100),
+                return_value=_members(population),
             ),
             patch.object(
                 pageviews.pageviews,
@@ -228,10 +250,7 @@ class TestDownloadFallback(TestCase):
                 _TARGET,
                 settings=_SETTINGS,
             )
-        assert [request.args[1] for request in fetch.call_args_list] == [
-            "A0",
-            "A1",
-        ]
+        assert fetch.call_count == population
 
     def test_source_outage_defers_without_endpoint_fallback(self) -> None:
         """Distinguish exhausted HTTP retries from missing days."""
@@ -543,9 +562,14 @@ class TestDownloadFallback(TestCase):
     @staticmethod
     def test_accepted_batch_still_omits_gateway_timeout_articles() -> None:
         """Do not invent report zeroes for a failed article request."""
+        missing = 20
+        population = 100
         responses = [
-            HTTPError("https://example.test", 504, "", {}, None),
-            *[_observations(_TARGET)] * 99,
+            *[
+                HTTPError("https://example.test", 504, "", {}, None)
+                for _ in range(missing)
+            ],
+            *[_observations(_TARGET)] * (population - missing),
         ]
         with (
             TemporaryDirectory() as directory,
@@ -554,7 +578,7 @@ class TestDownloadFallback(TestCase):
             patch.object(
                 pageviews,
                 "_project_articles",
-                return_value=_members(100),
+                return_value=_members(population),
             ),
             patch.object(
                 pageviews.pageviews,
@@ -583,12 +607,11 @@ class TestDownloadFallback(TestCase):
                 prefetch_stop=_TARGET + dt.timedelta(days=1),
             )
             daily = report.rankings[0].rows
-            expected_articles = 99
+            expected_articles = population - missing
             assert daily.height == expected_articles
             assert "A0" not in daily.get_column("title").to_list()
             assert daily.get_column("views").to_list() == [None] * daily.height
-            expected_downloads = 100
-            assert fetch.call_count == expected_downloads
+            assert fetch.call_count == population
 
     def test_empty_population_fails_without_downloads(self) -> None:
         """Never classify an empty project as a healthy endpoint."""

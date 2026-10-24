@@ -74,9 +74,11 @@ class TestPageviewValues(TestCase):
         assert "pageviews" in sources.__all__
         assert pageviews.__all__ == (
             "DailyPageviews",
+            "IncompletePageviewsDayError",
             "article_rank_filter",
             "fetch_data",
             "fetch_data_dataframe",
+            "fetch_project_total",
             "fetch_top_dataframe",
             "massive",
         )

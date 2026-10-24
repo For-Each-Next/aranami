@@ -16,6 +16,7 @@ import operator
 import re
 from dataclasses import dataclass
 from functools import cmp_to_key, lru_cache
+from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlencode, urlsplit
@@ -31,6 +32,31 @@ _SCHEDULE_MAX_AGE = 120
 _PAGE_SIZE = 50
 _MAX_URL_LENGTH = 4096
 _DISPLAY_LIMIT = 6
+_FAILURE_REASONS = {
+    "TimeoutError": "timeout",
+    "ConnectionError": "connection",
+    "ConnectionRefusedError": "connection",
+    "ConnectionResetError": "connection",
+    "URLError": "connection",
+    "HTTPError": "http",
+    "ExceptionGroup": "multiple",
+    "BaseExceptionGroup": "multiple",
+    "MultipleFailures": "multiple",
+    "IncompletePageviewsDayError": "day_incomplete",
+    "PageviewsUnavailableError": "pageviews_unavailable",
+    "PageviewsDeferredError": "pageviews_deferred",
+    "PermissionError": "permission",
+    "NoUsernameError": "authentication",
+    "NoPasswordError": "authentication",
+    "ClientLoginTokenError": "authentication",
+    "EditConflictError": "edit_conflict",
+    "LockedPageError": "permission",
+    "NoPageError": "page_missing",
+    "FileNotFoundError": "file_missing",
+    "OSError": "storage",
+    "ValueError": "invalid_data",
+    "TypeError": "invalid_data",
+}
 _VOID_ELEMENTS = frozenset({"meta", "link", "img", "input"})
 _QUALITY = (
     ("FA", "fa", "典范", "典範"),
@@ -101,6 +127,45 @@ class Markup:
             The safely composed HTML text.
         """
         return self.value
+
+
+def failure_description(event: Record, interface: Interface) -> str | None:
+    """Translate safe failure facts into an explanation for readers.
+
+    Args:
+        event: Validated routine or destination observation.
+        interface: Locale used for the surrounding status view.
+
+    Returns:
+        A human-readable cause, or none when no cause was observed.
+        Unknown identifiers never expose diagnostic text.
+    """
+    reason = event.get("failure_reason")
+    if not reason:
+        return None
+    context = event.get("failure_context")
+    if reason == "PageviewsUnavailableError" and isinstance(context, dict):
+        return interface.text(
+            "failure.pageviews_missing",
+            missing=f"{context['missing']:,}",
+            total=f"{context['total']:,}",
+        )
+    if isinstance(reason, str) and re.fullmatch(r"HTTP[1-5][0-9]{2}", reason):
+        status = int(reason[4:])
+        key = (
+            "http_unavailable"
+            if status >= HTTPStatus.INTERNAL_SERVER_ERROR
+            else "http_permission"
+            if status in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}
+            else "http_rate_limit"
+            if status == HTTPStatus.TOO_MANY_REQUESTS
+            else "http_missing"
+            if status == HTTPStatus.NOT_FOUND
+            else "http_status"
+        )
+        return interface.text(f"failure.{key}", status=status)
+    key = _FAILURE_REASONS.get(reason, "unknown")
+    return interface.text(f"failure.{key}")
 
 
 def _escaped(value: object) -> str:

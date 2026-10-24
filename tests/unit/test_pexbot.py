@@ -13,6 +13,7 @@ from tempfile import TemporaryDirectory
 from typing import override
 from unittest import TestCase
 from unittest.mock import Mock, call, patch
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 
 import polars as pl
@@ -404,7 +405,7 @@ class TestPexbotJob(TestCase):
             """Keep the attempt running until the request completes.
 
             Raises:
-                RuntimeError: The first request fails in one case.
+                HTTPError: The first request fails in one case.
             """
             records = read_report_status(
                 Path.cwd() / "state" / "report-updates.json",
@@ -419,8 +420,14 @@ class TestPexbotJob(TestCase):
                 assert waiting["finished_at"] is None
             elapsed[0] += 3 if title == "A" else 5
             if title == "A" and fail_first:
-                message = "The delegated request failed."
-                raise RuntimeError(message)
+                url = "https://example.test/private"
+                raise HTTPError(
+                    url,
+                    503,
+                    "secret",
+                    {},
+                    None,
+                )
 
         def cooldown(seconds: float) -> None:
             """Advance time without performing an actual sleep."""
@@ -474,6 +481,11 @@ class TestPexbotJob(TestCase):
             "failed" if fail_first else "unconfirmed"
         )
         assert records["B"]["status"] == "unconfirmed"
+        if fail_first:
+            assert (
+                records["A"]["failure_reason"],
+                context.tasks[0].failure_reason,
+            ) == ("HTTP503", "HTTP503")
         assert all(row["confirmed_edits"] is None for row in records.values())
         assert records["A"]["started_at"] == "2026-10-24T00:00:07.000000Z"
         assert records["A"]["finished_at"] == "2026-10-24T00:00:12.000000Z"

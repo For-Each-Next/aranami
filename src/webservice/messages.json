@@ -779,6 +779,111 @@
     "zh-hans": "待重试",
     "zh-hant": "待重試"
   },
+  "failure.timeout": {
+    "en": "The request timed out",
+    "zh-hans": "请求超时",
+    "zh-hant": "請求逾時"
+  },
+  "failure.connection": {
+    "en": "Could not connect to the external service",
+    "zh-hans": "无法连接外部服务",
+    "zh-hant": "無法連線至外部服務"
+  },
+  "failure.http": {
+    "en": "The external service rejected the request; see run logs for details",
+    "zh-hans": "外部服务拒绝了请求，详情请查看运行日志",
+    "zh-hant": "外部服務拒絕了請求，詳情請查看執行日誌"
+  },
+  "failure.http_unavailable": {
+    "en": "The external service is temporarily unavailable (HTTP {status})",
+    "zh-hans": "外部服务暂时不可用（HTTP {status}）",
+    "zh-hant": "外部服務暫時無法使用（HTTP {status}）"
+  },
+  "failure.http_permission": {
+    "en": "The external service denied access (HTTP {status})",
+    "zh-hans": "外部服务拒绝访问（HTTP {status}）",
+    "zh-hant": "外部服務拒絕存取（HTTP {status}）"
+  },
+  "failure.http_rate_limit": {
+    "en": "The external service is limiting requests (HTTP {status})",
+    "zh-hans": "外部服务限制了请求频率（HTTP {status}）",
+    "zh-hant": "外部服務限制了請求頻率（HTTP {status}）"
+  },
+  "failure.http_missing": {
+    "en": "The requested source data or service was not found (HTTP {status})",
+    "zh-hans": "未找到请求的来源数据或服务（HTTP {status}）",
+    "zh-hant": "找不到請求的來源資料或服務（HTTP {status}）"
+  },
+  "failure.http_status": {
+    "en": "The external request failed (HTTP {status})",
+    "zh-hans": "外部请求失败（HTTP {status}）",
+    "zh-hant": "外部請求失敗（HTTP {status}）"
+  },
+  "failure.multiple": {
+    "en": "Several updates failed; see run logs for the individual causes",
+    "zh-hans": "多项更新失败，具体原因请查看运行日志",
+    "zh-hant": "多項更新失敗，個別原因請查看執行日誌"
+  },
+  "failure.day_incomplete": {
+    "en": "Wikimedia has not published all 24 hours of this day's pageviews",
+    "zh-hans": "维基媒体尚未发布这一天完整24小时的浏览量数据",
+    "zh-hant": "維基媒體尚未發布這一天完整24小時的瀏覽量資料"
+  },
+  "failure.pageviews_unavailable": {
+    "en": "Pageview data for this day is not available yet",
+    "zh-hans": "这一天的浏览量数据尚未就绪",
+    "zh-hant": "這一天的瀏覽量資料尚未就緒"
+  },
+  "failure.pageviews_deferred": {
+    "en": "Could not verify Wikimedia's pageview data; waiting to retry",
+    "zh-hans": "无法确认维基媒体浏览量数据是否就绪，等待重试",
+    "zh-hant": "無法確認維基媒體瀏覽量資料是否就緒，等待重試"
+  },
+  "failure.pageviews_missing": {
+    "en": "Daily observations are missing for {missing} of {total} articles",
+    "zh-hans": "{total}篇条目中有{missing}篇缺少当日浏览量记录",
+    "zh-hant": "{total}篇條目中有{missing}篇缺少當日瀏覽量紀錄"
+  },
+  "failure.permission": {
+    "en": "Permission to read or update the required resource was denied",
+    "zh-hans": "没有读取或更新所需资源的权限",
+    "zh-hant": "沒有讀取或更新所需資源的權限"
+  },
+  "failure.authentication": {
+    "en": "The wiki account could not authenticate",
+    "zh-hans": "维基账号无法通过身份验证",
+    "zh-hant": "維基帳號無法通過身分驗證"
+  },
+  "failure.edit_conflict": {
+    "en": "The destination changed during preparation; waiting for a fresh attempt",
+    "zh-hans": "目标页面在准备期间发生变化，等待重新尝试",
+    "zh-hant": "目標頁面在準備期間發生變更，等待重新嘗試"
+  },
+  "failure.page_missing": {
+    "en": "A required wiki page could not be found",
+    "zh-hans": "未找到所需的维基页面",
+    "zh-hant": "找不到所需的維基頁面"
+  },
+  "failure.file_missing": {
+    "en": "A required file could not be found",
+    "zh-hans": "未找到所需文件",
+    "zh-hant": "找不到所需檔案"
+  },
+  "failure.storage": {
+    "en": "A required file or resource could not be accessed; see run logs",
+    "zh-hans": "无法访问所需文件或资源，详情请查看运行日志",
+    "zh-hant": "無法存取所需檔案或資源，詳情請查看執行日誌"
+  },
+  "failure.invalid_data": {
+    "en": "Source data or report settings are invalid; see run logs for details",
+    "zh-hans": "来源数据或报告设置无效，详情请查看运行日志",
+    "zh-hant": "來源資料或報告設定無效，詳情請查看執行日誌"
+  },
+  "failure.unknown": {
+    "en": "The update could not be completed; see run logs for details",
+    "zh-hans": "无法完成更新，具体原因请查看运行日志",
+    "zh-hant": "無法完成更新，個別原因請查看執行日誌"
+  },
   "state.Running": {
     "en": "Running",
     "zh-hans": "更新中",

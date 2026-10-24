@@ -116,7 +116,7 @@ Preserve paired markers and text outside their managed ranges:
 ...retained daily records...
 <!-- aranami end="new-pages" -->
 
-<!-- aranami begin="page_views" history-days="800" missing-percent="1" -->
+<!-- aranami begin="page_views" history-days="800" -->
 ...popularity report...
 <!-- aranami end="page_views" -->
 ```
@@ -129,17 +129,21 @@ for settings; changing targets, schedules, or definitions requires deployment.
 
 ### Pageviews data readiness
 
-The routine probes the candidate date, then downloads fresh full histories.
-More than 1% missing final-day observations rejects that endpoint and retries
-an earlier unpublished date; transport failures defer work. Exactly 1% is allowed.
-Failed batches leave reports and healthy caches unchanged; partial catch-up
-continues hourly until current. Saved caches never substitute for fresh coverage.
+The routine checks that Wikimedia has published all 24 UTC hours of site-wide
+human traffic, a positive daily total, the day's top list, and up to three
+leading articles' daily observations. It then downloads fresh full histories.
+Missing individual article records do not block a verified day at a fixed
+percentage. A batch with no selected article's target-day observation is rejected.
+Missing days try an earlier unpublished date; failed requests defer work.
+Rejected batches leave reports and healthy caches unchanged; partial catch-up
+continues hourly until current. Saved caches never substitute for fresh evidence.
 
 After an accepted batch, gaps following an article's first observation may
 contribute provisional zeroes; continuous leading absence stays missing.
 Measured zeroes remain valid, HTTP failures are not zeroes, and averages include
 calendar days. Gaps stay absent in raw histories and do not trigger same-day
-retries or rewrite published reports. The effective `missing-percent` is at most 1.
+retries or rewrite published reports. Existing `missing-percent` attributes are
+preserved but do not override whole-day readiness for normal report runs.
 See [Pageviews contracts](architecture.md#pageviews) for comparison and ranking rules.
 
 ## Website refresh and retained data

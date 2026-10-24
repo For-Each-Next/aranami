@@ -317,6 +317,11 @@ class TestPageviewsProgress(TestCase):
             progress_updates(updates.append),
             patch.object(
                 pageviews.pageviews,
+                "fetch_project_total",
+                return_value=1_000_000,
+            ) as total,
+            patch.object(
+                pageviews.pageviews,
                 "fetch_top_dataframe",
                 return_value=pl.DataFrame({
                     "title": ["A", "B"],
@@ -335,5 +340,6 @@ class TestPageviewsProgress(TestCase):
         ):
             pageviews._require_day_ready(_context().site, _DAY)
         expected_requests = 2
+        total.assert_called_once()
         assert fetch.call_count == expected_requests
         assert [row["current"] for row in updates] == [None, 0, 1, 2]

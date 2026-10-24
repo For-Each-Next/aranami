@@ -6,6 +6,9 @@ DataFrame, and :func:`massive` to concatenate sequential requests for
 multiple pages. All date ranges are half-open and include ``start`` but
 exclude ``stop``.
 
+Use :func:`fetch_project_total` to verify all 24 UTC site-wide hours
+and return their measured human-traffic total for readiness checks.
+
 Use :func:`fetch_top_dataframe` to rank articles from the official daily
 or calendar-month top-1,000 list, excluding non-article pages.
 The verified source references are in ``docs/development.md``.
@@ -19,9 +22,11 @@ from __future__ import annotations
 
 __all__ = (
     "DailyPageviews",
+    "IncompletePageviewsDayError",
     "article_rank_filter",
     "fetch_data",
     "fetch_data_dataframe",
+    "fetch_project_total",
     "fetch_top_dataframe",
     "massive",
 )
@@ -79,6 +84,10 @@ class DailyPageviews:
 
     date: dt.date
     pageview: int
+
+
+class IncompletePageviewsDayError(ValueError):
+    """Signal site-wide observations missing one or more UTC hours."""
 
 
 def fetch_data(
@@ -178,6 +187,76 @@ def massive(
         for page in _track_progress(normalized_pages)
     ]
     return pl.concat(frames)
+
+
+def fetch_project_total(site: BaseSite, day: dt.date) -> int:
+    """Read a site's total only when all 24 UTC hours are published.
+
+    Use this publication signal alongside the daily top list and article
+    probes. It does not establish coverage for individual articles.
+    Make one rate-limited request and never substitute another date.
+
+    Args:
+        site: Wiki whose hostname identifies the requested project.
+        day: Complete UTC day to inspect.
+
+    Returns:
+        Measured site-wide human pageviews, including observed zero.
+
+    Raises:
+        urllib.error.URLError: The request failed or the day is absent.
+        urllib.error.HTTPError: The upstream request failed.
+        IncompletePageviewsDayError: Some UTC hours are not published.
+        TypeError: The payload has invalid containers.
+        ValueError: The payload is malformed or for another day.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    project = site.hostname().strip().lower()
+    stamp = day.strftime("%Y%m%d")
+    base = "https://wikimedia.org/api/rest_v1/metrics/pageviews/aggregate/"
+    # ruff: ignore[suspicious-url-open-usage]
+    request = urllib.request.Request(
+        f"{base}{project}/all-access/user/hourly/{stamp}00/{stamp}23",
+        headers={"Accept": "application/json", "User-Agent": _USER_AGENT},
+    )
+    try:
+        pageviews_rate.wait_for_pageviews_request()
+        # ruff: ignore[suspicious-url-open-usage]
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        message = "Malformed Wikimedia hourly project totals."
+        raise TypeError(message)
+    hours = {f"{stamp}{hour:02}" for hour in range(24)}
+    expected = {
+        "project": project.removesuffix(".org"),
+        "access": "all-access",
+        "agent": "user",
+        "granularity": "hourly",
+    }
+    total = 0
+    for item in items:
+        if not isinstance(item, dict) or any(
+            item.get(key) != value for key, value in expected.items()
+        ):
+            message = "Wikimedia hourly project total does not match request."
+            raise ValueError(message)
+        timestamp, views = item.get("timestamp"), item.get("views")
+        if not isinstance(timestamp, str) or timestamp not in hours:
+            message = "Unexpected or duplicate Wikimedia project hour."
+            raise ValueError(message)
+        if type(views) is not int or views < 0:
+            message = "Wikimedia hourly project total is not a valid count."
+            raise ValueError(message)
+        hours.remove(timestamp)
+        total += views
+    if hours:
+        message = "Wikimedia project totals do not cover all 24 UTC hours."
+        raise IncompletePageviewsDayError(message)
+    return total
 
 
 def fetch_top_dataframe(

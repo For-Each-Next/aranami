@@ -119,11 +119,12 @@ def _record_action(
             active.mark_updates_unknown()
             try:
                 _refresh(active.site, report.title)
-            except BaseException:
+            except BaseException as error:
                 active.finish_report(
                     report.title,
                     "failed",
                     confirmed_edits=None,
+                    error=error,
                 )
                 raise
             active.finish_report(

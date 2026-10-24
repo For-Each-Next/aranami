@@ -84,9 +84,12 @@ not the candidate endpoint. Completion clears progress and may retain a
 `report_date` established only by a confirmed save or verified unchanged report.
 
 Failed observations may include `failure_date` for the attempted report and
-`failure_reason` for a bounded public exception-class identifier. They never
-replace confirmed `report_date` or expose arbitrary exception text. Missing
-facts retain generic labels; new attempts and successful outcomes clear them.
+`failure_reason` for a bounded underlying-cause identifier, optionally with
+validated numeric `failure_context` observations. Unwrap homogeneous exception
+groups and retain HTTP status codes; mixed groups keep a generic reason. The
+website translates these facts into readable explanations in all three locales.
+They never replace confirmed `report_date` or expose arbitrary exception text.
+Missing facts retain generic labels; new attempts and successes clear them.
 
 Scheduler events and a thirty-second local heartbeat refresh schedule state
 without source requests. Optional validated `runtime` records Python, OS,
@@ -269,20 +272,25 @@ Yesterday becomes eligible only when the actual invocation starts at/after
 also precede the requested anchor, which cannot bypass readiness. Apply this
 to live, manual, and dry runs. Never use an incomplete UTC day's total.
 
-Probe candidate top lists and up to three leading articles before downloading
-full histories. Missing dates try an earlier endpoint; transport failures
-defer. Probe observations never replace histories. Download a fresh complete
-batch through the selected endpoint and reject it as soon as more than 1% of
-the full distinct population lacks the final day's record. Exactly 1% is
-allowed; observed zero is valid, while empty responses/HTTP 504 count missing.
-Stop before the next request after crossing the limit. Discard failed responses,
-shorten by one day, and download afresh; try only endpoints beyond the checkpoint.
+Verify each report day's overall publication using the official all-access/user
+[site totals][pageviews-project] for all 24 distinct UTC hours, a positive daily
+sum, the daily top list, and up to three leading articles' exact-day records.
+Wrong dates, duplicate hours, malformed counts, and source failures cannot
+establish readiness. Reuse
+successful checks only within the current batch. Probe observations never
+replace histories. Missing days try earlier unpublished endpoints; transport or
+malformed-source failures defer without advancing the checkpoint.
+
+Download fresh complete histories through the verified endpoint. Individual
+missing records, including HTTP 504 exclusions, impose no percentage cutoff.
+Reject a full batch with no target-day observations for any selected article.
+Discard rejected batches and download afresh for an earlier unpublished date.
 No passing endpoint means failure without advancing marker/healthy snapshot.
 
 Only the accepted batch supplies sequential analyses and saves through its
 endpoint. A shortened endpoint leaves hourly retries due. Bind provisional-zero
-permission to that batch's site, membership, project, history bounds, and
-threshold. Gaps after an article's first actual observation may contribute
+permission to that batch's site, membership, project, and history bounds.
+Gaps after an article's first actual observation may contribute
 provisional zeroes to totals/ranks/averages; continuous leading absence remains
 missing and unranked. Denominators include all calendar days. Preserve raw
 observations and current/previous observation flags; synthetic values do not
@@ -349,8 +357,10 @@ Preserve opening attributes and outside text. Validate settings before requests
 or publication; reject missing, duplicate, reversed, or ambiguous markers.
 Keep functional `<section begin="..."/>`/`<section end="..."/>` tags outside
 managed ranges. Settings include new-page retention, assessment categories,
-and Pageviews `history-days`/`missing-percent`; cap the effective Pageviews
-threshold at 1% without rewriting the stored attribute.
+and Pageviews `history-days`. Existing `missing-percent` attributes remain
+valid without rewriting wiki text; verified daily batches use whole-day
+publication evidence instead. Explicit unverified preparation retains its
+optional percentage guard.
 
 ## Wikitext, templates, and site semantics
 
@@ -439,4 +449,5 @@ policy stays in [AGENTS.md](../AGENTS.md); deployment/recovery stays in
 [3]: https://zh.wikipedia.org/wiki/Module:Article_history/config
 [4]: https://en.wikipedia.org/wiki/Module:Article_history/config
 [pageviews-top]: https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/examples/project-metrics.html#most-viewed-pages
+[pageviews-project]: https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/reference/page-views.html
 [page-summaries]: https://www.mediawiki.org/wiki/Page_Content_Service#/page/summary

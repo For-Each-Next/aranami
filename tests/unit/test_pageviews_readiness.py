@@ -65,6 +65,84 @@ def _members() -> pl.DataFrame:
 class TestPageviewsReadiness(TestCase):
     """Distinguish unpublished dates from source failures."""
 
+    def setUp(self) -> None:
+        """Supply complete site coverage without network requests."""
+        total = patch.object(
+            pageviews.pageviews,
+            "fetch_project_total",
+            return_value=1_000_000,
+        )
+        self.total = total.start()
+        self.addCleanup(total.stop)
+
+    def test_incomplete_site_day_stops_before_top_and_article_requests(
+        self,
+    ) -> None:
+        """Never infer a published day from incomplete hourly totals."""
+        self.total.side_effect = (
+            pageviews.pageviews.IncompletePageviewsDayError(
+                "23 hours published",
+            )
+        )
+        with (
+            patch.object(pageviews.pageviews, "fetch_top_dataframe") as top,
+            patch.object(pageviews.pageviews, "fetch_data_dataframe") as fetch,
+            self.assertRaises(pageviews.PageviewsUnavailableError),
+        ):
+            pageviews._require_day_ready(_site(), _DAY)
+        top.assert_not_called()
+        fetch.assert_not_called()
+
+    def test_site_total_outage_defers_without_probes(self) -> None:
+        """Keep HTTP failures from declaring a day unpublished."""
+        self.total.side_effect = HTTPError(
+            "https://example.test",
+            503,
+            "",
+            {},
+            None,
+        )
+        with (
+            patch.object(pageviews.pageviews, "fetch_top_dataframe") as top,
+            self.assertRaises(pageviews.PageviewsDeferredError),
+        ):
+            pageviews._require_day_ready(_site(), _DAY)
+        top.assert_not_called()
+
+    def test_zero_site_total_is_not_ready(self) -> None:
+        """Reject a day without site-wide human traffic."""
+        self.total.return_value = 0
+        with (
+            patch.object(pageviews.pageviews, "fetch_top_dataframe") as top,
+            self.assertRaises(pageviews.PageviewsUnavailableError),
+        ):
+            pageviews._require_day_ready(_site(), _DAY)
+        top.assert_not_called()
+
+    def test_verified_days_are_reused_only_inside_the_batch(self) -> None:
+        """Reuse checks inside a batch and refresh on the next run."""
+        site = _site()
+        with (
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=_top(),
+            ),
+            patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+                return_value=_observations(),
+            ),
+        ):
+            with pageviews.download_batch():
+                pageviews._require_day_ready(site, _DAY)
+                pageviews._require_day_ready(site, _DAY)
+            self.total.assert_called_once_with(site, _DAY)
+            with pageviews.download_batch():
+                pageviews._require_day_ready(site, _DAY)
+        expected_runs = 2
+        assert self.total.call_count == expected_runs
+
     @staticmethod
     def test_probes_three_top_articles_for_one_day_only() -> None:
         """Bound probes to the first three site ranks and exact day."""

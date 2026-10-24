@@ -4,6 +4,22 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.3 (2026-10-24 12:18 UTC)
+
+Overview: Replaced the daily Pageviews percentage cutoff with whole-day
+publication checks and made report failures understandable on the dashboard.
+
+- Verified all 24 UTC site-wide hours, the daily top list, and leading article
+  observations before publishing, allowing sparse individual article histories.
+- Retained fresh downloads, chronological catch-up, source-failure retries, and
+  missing-versus-zero observations without blocking verified days at 1% missing.
+- Rejected malformed hourly responses as source failures rather than treating
+  corrupt or duplicate observations as an unpublished day.
+- Replaced exception names with localized explanations, unwrapped grouped HTTP
+  failures, and retained safe failure causes for individual PexBot destinations.
+- Updated operating contracts and covered whole-day readiness, sparse histories,
+  grouped failures, and localized initial/live status views with offline tests.
+
 ### 0.7.2 (2026-10-24 11:28 UTC)
 
 Overview: Simplified dashboard navigation and article lists, exposed report
