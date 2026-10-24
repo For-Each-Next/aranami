@@ -331,7 +331,8 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
     Saved coverage never suppresses a request or fills missing response
     dates. A download batch can reuse fresh full histories for later
     reports in the same run. Validated batches may count absent records
-    as zero for calculations without storing synthetic observations.
+    after the first observation as zero without storing synthetic data.
+    Continuous leading absence remains missing.
     Other periods without observations remain null. HTTP 504 omits the
     article from rankings and counts toward the daily failure limit.
 
@@ -352,7 +353,7 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
     Returns:
         Totals with title, start, stop, and nullable views columns.
         Provisional-zero calculations also include an observed flag
-        indicating whether the interval contains any actual record.
+        and the first actual observation date in the full history.
 
     Raises:
         PageviewsUnavailableError: Target-day absence exceeds the limit.
@@ -427,9 +428,20 @@ def aggregate_views(  # ruff: ignore[too-many-arguments]
                 .select(list(_VIEWS_SCHEMA))
             )
             if zero_missing:
+                first_observed = observations.get_column("date").min()
                 frame = frame.with_columns(
                     pl.col("views").is_not_null().alias("observed"),
-                    pl.col("views").fill_null(0),
+                    pl
+                    .when(
+                        pl.lit(first_observed).is_null()
+                        | (pl.col("stop") <= pl.lit(first_observed)),
+                    )
+                    .then(None)
+                    .otherwise(pl.col("views").fill_null(0))
+                    .alias("views"),
+                    pl.lit(first_observed, dtype=pl.Date).alias(
+                        "first_observed",
+                    ),
                 )
             frames.append(frame)
         if index % 100 == 0 or index == total:
@@ -833,6 +845,8 @@ def _ranked_data(
 
     Returns:
         Every selected article with nullable totals and minimum ranks.
+        A previous rank of -1 identifies a page whose full history
+        begins in the current interval after continuous leading absence.
     """
     start = stop - delta
     relevant = views.join(articles.select("title"), on="title", how="semi")
@@ -840,6 +854,8 @@ def _ranked_data(
     observed = "observed" in relevant.columns
     if observed:
         columns.append("observed")
+    if "first_observed" in relevant.columns:
+        columns.append("first_observed")
     if "top" in relevant.columns:
         columns.append("top")
     current = (
@@ -866,7 +882,7 @@ def _ranked_data(
             pl.col("old_views").rank("min", descending=True).alias("old_rank"),
         )
     )
-    return (
+    ranked = (
         articles
         .join(current, on="title", how="left")
         .join(
@@ -876,6 +892,19 @@ def _ranked_data(
         )
         .sort(["views", "title"], descending=[True, False], nulls_last=True)
     )
+    if "first_observed" in ranked.columns:
+        ranked = ranked.with_columns(
+            pl
+            .when(
+                pl.col("first_observed").is_between(start, stop, closed="left")
+                & pl.col("old_rank").is_null()
+                & pl.col("rank").is_not_null(),
+            )
+            .then(pl.lit(-1, dtype=pl.Int64))
+            .otherwise(pl.col("old_rank").cast(pl.Int64))
+            .alias("old_rank"),
+        )
+    return ranked
 
 
 def _site_top_parameter(
@@ -1380,7 +1409,7 @@ def _ranking_data(
     available = rows.filter(pl.col("views").is_not_null())
     top = str(available.item(0, "title")) if available.height else None
     old_rank = available.item(0, "old_rank") if available.height else None
-    gain = int(old_rank) - 1 if old_rank is not None else None
+    gain = int(old_rank) - 1 if old_rank is not None and old_rank > 0 else None
     return RankingData(
         scope,
         config.key,

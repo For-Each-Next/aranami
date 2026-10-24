@@ -121,19 +121,19 @@ def _json_for_wikitext(payload: dict[str, object]) -> str:
     }
     encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False)
     metadata = ",\n".join(
-        f"    {encoder.encode(key)}: {encoder.encode(value)}"
+        f"  {encoder.encode(key)}: {encoder.encode(value)}"
         for key, value in payload["metadata"].items()
     )
     items = ",\n".join(
-        f"    {encoder.encode(item)}" for item in payload["items"]
+        f"  {encoder.encode(item)}" for item in payload["items"]
     )
     encoded = "\n".join(
         (
             "{",
-            '  "metadata": {',
+            '"metadata": {',
             metadata,
-            "  },",
-            f'  "items": [\n{items}\n  ]' if items else '  "items": []',
+            "},",
+            f'"items": [\n{items}\n]' if items else '"items": []',
             "}",
         ),
     )
@@ -199,7 +199,7 @@ def _render_section(
     invocation.add("1", "main", showkey=False)
     invocation.add(
         "data",
-        f"\n{_json_for_wikitext(payload)}\n",
+        f" {_json_for_wikitext(payload)} <!-- #endinvoke -->",
         preserve_spacing=False,
     )
     return f"\n=== {config.heading} ===\n\n{invocation}\n"

@@ -102,7 +102,7 @@ class Element {
     }
 }
 
-function fixture(offset = 0, completed = false, logs = false) {
+function fixture(offset = 0, completed = false, logs = false, about = false) {
     const subject = "Updating records for October 20, 2026";
     const button = new Element("BUTTON", {
         id: "status-button", popovertarget: "popover",
@@ -144,21 +144,25 @@ function fixture(offset = 0, completed = false, logs = false) {
         "data-uptime-template": "{days}d {hours}h {minutes}m {seconds}s",
         "data-uptime-unknown": "Uptime unavailable",
     });
+    const memory = new Element("TD", {
+        id: "memory-usage", "data-schedule-time": "", "data-stale-text": "Unknown",
+    }, "100.0 MiB");
+    const runtime = new Element("DIV", { id: "server-runtime" }, "", [memory]);
     const document = {
         hidden: false,
         documentElement: { lang: "en" },
-        roots: [root, uptime],
+        roots: [root, uptime, ...(about ? [runtime] : [])],
         getElementById(id) {
             const search = (node) => node.id === id ? node
                 : (node.childNodes ?? []).map(search).find(Boolean);
             return this.roots.map(search).find(Boolean) ?? null;
         },
     };
-    return { document, button, clock, popup, relative, schedule, server, progress, notice, root, uptime };
+    return { document, button, clock, popup, relative, schedule, server, progress, notice, root, uptime, runtime, memory };
 }
 
-function browser(logs = false) {
-    const state = fixture(0, false, logs);
+function browser(logs = false, about = false) {
+    const state = fixture(0, false, logs, about);
     const requests = [];
     const timers = new Map();
     const events = new Map();
@@ -191,7 +195,7 @@ function browser(logs = false) {
     };
     return {
         ...state, requests, settle,
-        async respond(next = fixture(now, false, logs)) {
+        async respond(next = fixture(now, false, logs, about)) {
             incoming = next;
             requests.at(-1).resolve({
                 ok: true, headers: { get: () => "text/html; charset=utf-8" },
@@ -371,4 +375,18 @@ test("logs synchronize only compact server state and uptime", async () => {
     assert.equal(page.server.textContent, "Server unavailable");
     assert.equal(page.uptime.textContent, "Uptime unavailable");
     assert.equal(page.document.getElementById("tool-status"), null);
+});
+
+test("About monitor refreshes resources and expires stale usage", async () => {
+    const page = browser(true, true);
+    await page.respond();
+    page.jump(5000);
+    const next = fixture(5000, false, true, true);
+    next.memory.textContent = "110.0 MiB";
+    await page.respond(next);
+    assert.equal(page.memory.textContent, "110.0 MiB");
+    assert.equal(page.document.getElementById("server-runtime"), page.runtime);
+    page.jump(121000);
+    assert.equal(page.memory.textContent, "Unknown");
+    assert.equal(page.server.textContent, "Server unavailable");
 });

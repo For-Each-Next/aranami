@@ -171,9 +171,9 @@ class PublicWebsiteTests(unittest.TestCase):
                     assert headers["Content-Language"] == "en"
                     assert "Accept-Language" in headers["Vary"]
                     assert b"Aranami" in body
-                    assert (b'<script src="/live.js" defer>' in body) == (
-                        target in {"/", "/logs/"}
-                    )
+                    assert b'<script src="/live.js" defer>' in body
+                    if target == "/about/":
+                        assert b'id="server-runtime"' in body
                     if target == "/logs/":
                         assert b'id="live-server-status"' in body
                         assert b'id="live-uptime"' in body

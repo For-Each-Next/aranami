@@ -212,15 +212,23 @@ def _validated_record(value: object) -> dict[str, object]:
     Raises:
         ValueError: The record has an unsupported shape or value.
     """
-    if not isinstance(value, Mapping) or set(value) not in (
-        _FIELDS,
-        _FIELDS | {"progress"},
+    if (
+        not isinstance(value, Mapping)
+        or not set(value) >= _FIELDS
+        or set(value) - _FIELDS - {"progress", "report_date"}
     ):
         message = "Routine status records require their complete fields."
         raise ValueError(message)
     record = dict(value)
     if "progress" in record:
         record["progress"] = validate_progress(record["progress"])
+    report_date = record.get("report_date")
+    if report_date is not None and (
+        not isinstance(report_date, str)
+        or dt.date.fromisoformat(report_date).isoformat() != report_date
+    ):
+        message = "Confirmed report dates must be ISO calendar dates."
+        raise ValueError(message)
     for name, pattern in (("routine", _ROUTINE_NAME), ("run_id", _RUN_ID)):
         if (
             not isinstance(record[name], str)

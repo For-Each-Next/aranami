@@ -42,6 +42,7 @@
     "src/backend/support/report_status.py",
     "src/backend/support/routine_status.py",
     "src/backend/support/schedule_status.py",
+    "src/backend/support/server_status.py",
     "src/backend/website/__init__.py",
     "src/backend/website/backlog.py",
     "src/backend/website/backlog_config.py",

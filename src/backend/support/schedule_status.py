@@ -10,6 +10,7 @@ from threading import RLock
 
 from apscheduler.schedulers.base import STATE_PAUSED, STATE_STOPPED
 
+from backend.support.server_status import sample_runtime
 from shared.config import TASK_DEFINITIONS, configuration_id
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ def _write_schedule(scheduler: object, started_at: dt.datetime | None) -> None:
             else None,
             "state": state,
             "config_id": configuration_id(),
+            "runtime": sample_runtime(),
             "routines": routines,
         },
         ensure_ascii=False,

@@ -56,6 +56,26 @@ def _record(
 class TestRoutineStatus(TestCase):
     """Keep independent, ordered routine snapshots safe to consume."""
 
+    def test_confirmed_report_dates_are_optional_and_validated(self) -> None:
+        """Retain canonical dates while accepting previous snapshots."""
+        with TemporaryDirectory() as directory:
+            destination = Path(directory)
+            record = {**_record(), "report_date": "2026-10-17"}
+            assert write_routine_status(record, directory=destination)
+            path = destination / "routine-status.json"
+            assert json.loads(path.read_text())["routines"]["dyks"] == record
+            previous = path.read_bytes()
+            for value in ("2026-02-30", "20261017", 1, True, []):
+                with (
+                    self.subTest(value=value),
+                    self.assertLogs(_LOGGER, level="WARNING"),
+                ):
+                    assert not write_routine_status(
+                        {**record, "report_date": value},
+                        directory=destination,
+                    )
+                assert path.read_bytes() == previous
+
     @staticmethod
     def test_all_lifecycle_states_preserve_other_routines() -> None:
         """Persist complete records and retain unrelated state."""

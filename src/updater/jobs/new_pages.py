@@ -150,6 +150,7 @@ def run(
             )
             if confirmed is not True:
                 return None
+        active.confirm_report_date(prepared.latest_date)
         return data.completion(
             prepared,
             key,

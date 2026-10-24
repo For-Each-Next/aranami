@@ -43,7 +43,8 @@ def _section(report: rendering.PageviewReport, index: int) -> dict:
     invocation = templates[index]
     assert str(invocation.name) == "#invoke:PJ:VG/HOT/v2"
     assert str(invocation.get("1").value) == "main"
-    return json.loads(str(invocation.get("data").value))
+    encoded = str(invocation.get("data").value).strip()
+    return json.loads(encoded.removesuffix("<!-- #endinvoke -->"))
 
 
 def _site() -> MagicMock:
@@ -268,8 +269,8 @@ class TestDownloadFallback(TestCase):
         )
 
     @staticmethod
-    def test_healthy_endpoint_zeroes_historical_gaps() -> None:
-        """Preserve raw gaps while reporting historical zeroes."""
+    def test_healthy_endpoint_preserves_continuous_leading_absence() -> None:
+        """Keep leading empty periods unranked."""
         with (
             TemporaryDirectory() as directory,
             chdir(directory),
@@ -310,10 +311,10 @@ class TestDownloadFallback(TestCase):
             )
             daily = prepared.rankings[0]
             assert daily.period == "daily"
-            assert daily.rows.get_column("views").to_list() == [0, 0]
-            assert daily.rows.get_column("old_views").to_list() == [0, 0]
-            assert daily.rows.get_column("rank").to_list() == [1, 1]
-            assert daily.rows.get_column("old_rank").to_list() == [1, 1]
+            assert daily.rows.get_column("views").to_list() == [None, None]
+            assert daily.rows.get_column("old_views").to_list() == [None, None]
+            assert daily.rows.get_column("rank").to_list() == [None, None]
+            assert daily.rows.get_column("old_rank").to_list() == [None, None]
             assert daily.rows.get_column("observed").to_list() == [
                 False,
                 False,
@@ -322,7 +323,7 @@ class TestDownloadFallback(TestCase):
                 False,
                 False,
             ]
-            assert daily.total_views == 0
+            assert daily.total_views is None
             totals = prepared.result.tables["totals"].filter(
                 pl.col("period") == "daily",
             )
@@ -333,11 +334,11 @@ class TestDownloadFallback(TestCase):
                 settings=replace(job.REPORT_SETTINGS, task_forces=()),
             )
             section = _section(report, 0)
-            assert section["metadata"]["total_views"] == 0
+            assert section["metadata"]["total_views"] is None
             assert [
                 (item["rank"], item["previous_rank"])
                 for item in section["items"]
-            ] == [(1, 1), (1, 1)]
+            ] == [(None, None), (None, None)]
             assert [item["views"] for item in section["items"]] == [None, None]
             cache = pageviews.PageviewsCache.load(site.hostname())
             history = cache.get("A0")
@@ -358,6 +359,9 @@ class TestDownloadFallback(TestCase):
             assert measured.rankings[0].rows.get_column(
                 "observed",
             ).to_list() == [True, True]
+            assert measured.rankings[0].rows.get_column(
+                "old_rank",
+            ).to_list() == [-1, -1]
             totals = measured.result.tables["totals"].filter(
                 pl.col("period") == "daily",
             )
@@ -582,7 +586,7 @@ class TestDownloadFallback(TestCase):
             expected_articles = 99
             assert daily.height == expected_articles
             assert "A0" not in daily.get_column("title").to_list()
-            assert daily.get_column("views").to_list() == [0] * daily.height
+            assert daily.get_column("views").to_list() == [None] * daily.height
             expected_downloads = 100
             assert fetch.call_count == expected_downloads
 

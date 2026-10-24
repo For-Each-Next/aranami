@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from backend.support.report_status import read_report_status
 from backend.support.routine_status import read_routine_status
+from backend.support.server_status import validate_runtime
 from shared.config import configuration_id, routine_configuration
 from shared.support.files import open_regular, read_json_object
 
@@ -224,6 +225,8 @@ def read_schedule_status(path: Path) -> dict[str, object]:
         ) and value["state"] == "running":
             message = "Scheduled routines require an observed next run."
             raise ValueError(message)
+    if "runtime" in value:
+        value["runtime"] = validate_runtime(value["runtime"])
     return value
 
 

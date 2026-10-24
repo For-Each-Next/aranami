@@ -626,6 +626,21 @@ class TestRoutineStatusLifecycle(TestCase):
         assert completed["duration_seconds"] >= 0
         page.save.assert_called_once()
 
+    def test_confirmed_dates_advance_without_using_preparation_progress(
+        self,
+    ) -> None:
+        """Advance only confirmed dates in chronological order."""
+        context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
+        with job_run("pageviews", context=context):
+            assert self._record("pageviews")["report_date"] is None
+            context.confirm_report_date(dt.date(2026, 10, 17))
+            context.confirm_report_date(dt.date(2026, 10, 16))
+            context.confirm_report_date(None)
+        record = self._record("pageviews")
+        assert record["report_date"] == "2026-10-17"
+        assert record["status"] == "no_update"
+        assert record["progress"] is None
+
     def test_terminal_states_preserve_confirmed_and_unknown_counts(
         self,
     ) -> None:

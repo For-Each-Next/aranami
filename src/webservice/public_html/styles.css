@@ -70,6 +70,27 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     font-weight: 700;
 }
 
+.page-toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    flex-basis: 100%;
+    font-size: .875rem;
+}
+
+.server-metrics {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 24px;
+}
+
+.server-metrics th, .server-metrics td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #c1d1cc;
+    text-align: start;
+    overflow-wrap: anywhere;
+}
+
 .brand img {
     width: 36px;
     height: 36px;
