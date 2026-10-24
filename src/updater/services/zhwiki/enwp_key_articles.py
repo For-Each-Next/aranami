@@ -564,17 +564,22 @@ def build_edit_summary(
         quality: Whether to describe English quality-class changes.
 
     Returns:
-        Total count followed by added and removed article links. Renames
-        retaining their page ID keep only the count. Quality reports
-        describe GA listings and delistings and FA/FL promotions and
-        removals, including earlier classes for known transitions.
+        Article total and assessment counts, followed by changed links.
+        Quality summaries list FA, FL, and GA; importance summaries list
+        Top and High. Missing assessment observations are omitted.
+        Renames with the same page ID keep only counts. Quality reports
+        describe GA listings and delistings, FA/FL promotions and
+        removals, and earlier classes for known transitions.
         Importance and Chinese assessment changes are ignored. Uncached
         entries use their Wikidata item or title. Chinese links require
         a Chinese Wikipedia sitelink.
     """
     count = changes.current_total
-    noun = "item" if count == 1 else "items"
-    summary = EditSummary(f"{count:,} {noun} total.", max_bytes=max_bytes)
+    noun = "article" if count == 1 else "articles"
+    counts = changes.quality_counts if quality else changes.importance_counts
+    breakdown = ", ".join(f"{total:,} {label}" for label, total in counts)
+    base = f"{count:,} {noun}" + (f": {breakdown}." if counts else ".")
+    summary = EditSummary(base, max_bytes=max_bytes)
     if quality:
         return _build_quality_summary(
             summary,

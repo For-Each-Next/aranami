@@ -88,49 +88,49 @@ def run(
         failures: list[Exception] = []
         for spec in REPORT_SPECS:
             title = selected_targets[spec.name]
-            prepared = prepare_publication(
-                data,
-                spec.definition,
-                active.site,
-                title,
-                existing[spec.name],
-            )
-            edit = ProposedEdit(
-                site=active.site,
-                title=title,
-                text=texts[spec.name],
-                summary=spec.build_edit_summary(
-                    prepared.changes,
-                    data.linked_titles,
-                ),
-                tags=("enwp-key-articles", spec.name),
-                original_text=existing[spec.name],
-                report_key=report_key(
-                    "english-comparisons",
-                    active.site.dbName(),
-                    title,
-                    variant=spec.name,
-                ),
-                result=reports.report_result(data, spec),
-            )
             try:
-                confirmed = active.publish(edit)
+                with active.report_attempt(title):
+                    prepared = prepare_publication(
+                        data,
+                        spec.definition,
+                        active.site,
+                        title,
+                        existing[spec.name],
+                    )
+                    edit = ProposedEdit(
+                        site=active.site,
+                        title=title,
+                        text=texts[spec.name],
+                        summary=spec.build_edit_summary(
+                            prepared.changes,
+                            data.linked_titles,
+                        ),
+                        tags=("enwp-key-articles", spec.name),
+                        original_text=existing[spec.name],
+                        report_key=report_key(
+                            "english-comparisons",
+                            active.site.dbName(),
+                            title,
+                            variant=spec.name,
+                        ),
+                        result=reports.report_result(data, spec),
+                    )
+                    confirmed = active.publish(edit)
+                    record_publication(
+                        prepared,
+                        active.site,
+                        title,
+                        existing[spec.name],
+                        texts[spec.name],
+                        confirmed=confirmed is True,
+                        dry=active.dry,
+                    )
             except Exception as error:
                 _LOGGER.exception(
                     "English-comparison publication failed: %s",
                     title,
                 )
                 failures.append(error)
-                continue
-            record_publication(
-                prepared,
-                active.site,
-                title,
-                existing[spec.name],
-                texts[spec.name],
-                confirmed=confirmed is True,
-                dry=active.dry,
-            )
         if failures:
             message = "English-comparison report publication failed."
             raise ExceptionGroup(message, failures)

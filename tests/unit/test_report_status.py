@@ -31,7 +31,7 @@ def _record(
 
     Args:
         title: Exact destination identity to retain.
-        status: Explicit running or terminal outcome.
+        status: Explicit queued, running, or terminal outcome.
         update_id: Stable identity ordering equal-time attempts.
         started_at: Actual start used to order concurrent observations.
 
@@ -52,13 +52,13 @@ def _record(
         ),
         "finished_at": (
             None
-            if status == "running"
+            if status in {"queued", "running"}
             else _FINISH.isoformat(timespec="microseconds").replace(
                 "+00:00",
                 "Z",
             )
         ),
-        "duration_seconds": None if status == "running" else 2.5,
+        "duration_seconds": None if status in {"queued", "running"} else 2.5,
         "confirmed_edits": (
             1
             if status == "updated"
@@ -135,6 +135,152 @@ class TestReportUpdateLifecycle(TestCase):
             )
             assert complete["confirmed_edits"] == 1
             assert {path.name for path in root.iterdir()} == {"state"}
+
+    @staticmethod
+    def test_individual_attempt_resets_clocks_and_preserves_identity() -> None:
+        """Exclude registration and shared preparation from timing."""
+        elapsed = [0.0]
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(
+                report_status.Path,
+                "cwd",
+                return_value=Path(temporary),
+            ),
+            patch.object(
+                report_status,
+                "_utc_now",
+                side_effect=lambda: _START + dt.timedelta(seconds=elapsed[0]),
+            ),
+            patch.object(
+                report_status,
+                "perf_counter",
+                side_effect=lambda: elapsed[0],
+            ),
+        ):
+            update = report_status.ReportUpdate(
+                "zhwiki",
+                "Wikipedia:Report",
+                "a" * 32,
+                "assessment_lists",
+            )
+            update.start()
+            key = report_status.report_update_key(update.site, update.title)
+            registered = _reports(Path(temporary) / "state")[key]
+            assert registered["status"] == "queued"
+            assert registered["duration_seconds"] is None
+            assert not update.attempt_started
+            elapsed[0] = 10.0
+            update.start_attempt()
+            running = _reports(Path(temporary) / "state")[key]
+            assert running["status"] == "running"
+            assert running["started_at"] == "2026-10-20T18:59:10.000000Z"
+            assert update.attempt_started
+            elapsed[0] = 12.5
+            update.finish("updated", confirmed_edits=1)
+            completed = _reports(Path(temporary) / "state")[key]
+        assert completed["update_id"] == registered["update_id"]
+        assert completed["run_id"] == registered["run_id"]
+        assert completed["started_at"] == "2026-10-20T18:59:10.000000Z"
+        assert completed["finished_at"] == "2026-10-20T18:59:12.500000Z"
+        assert math.isclose(completed["duration_seconds"], 2.5)
+
+    @staticmethod
+    def test_delayed_attempt_cannot_reset_newer_registration() -> None:
+        """Prevent stale resets from winning with a newer clock."""
+        elapsed = [0.0]
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(
+                report_status.Path,
+                "cwd",
+                return_value=Path(temporary),
+            ),
+            patch.object(
+                report_status,
+                "_utc_now",
+                side_effect=lambda: _START + dt.timedelta(seconds=elapsed[0]),
+            ),
+            patch.object(
+                report_status,
+                "perf_counter",
+                side_effect=lambda: elapsed[0],
+            ),
+        ):
+            old = report_status.ReportUpdate(
+                "zhwiki",
+                "Wikipedia:Report",
+                "a" * 32,
+                "assessment_lists",
+            )
+            old.start()
+            elapsed[0] = 1.0
+            current = report_status.ReportUpdate(
+                "zhwiki",
+                old.title,
+                "b" * 32,
+                "assessment_lists",
+            )
+            current.start()
+            elapsed[0] = 2.0
+            current.finish("updated", confirmed_edits=1)
+            expected = _reports(Path(temporary) / "state")
+            elapsed[0] = 3.0
+            old.start_attempt()
+            old.start()
+            elapsed[0] = 4.0
+            old.finish("failed", confirmed_edits=0)
+            old.start_attempt()
+            old.finish("no_update", confirmed_edits=0)
+            assert _reports(Path(temporary) / "state") == expected
+
+    def test_attempt_finish_recovers_from_temporary_reset_write_failure(
+        self,
+    ) -> None:
+        """Recover completion metadata after a failed start write."""
+        elapsed = [0.0]
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(
+                report_status.Path,
+                "cwd",
+                return_value=Path(temporary),
+            ),
+            patch.object(
+                report_status,
+                "_utc_now",
+                side_effect=lambda: _START + dt.timedelta(seconds=elapsed[0]),
+            ),
+            patch.object(
+                report_status,
+                "perf_counter",
+                side_effect=lambda: elapsed[0],
+            ),
+        ):
+            update = report_status.ReportUpdate(
+                "zhwiki",
+                "Wikipedia:Report",
+                "a" * 32,
+                "assessment_lists",
+            )
+            update.start()
+            elapsed[0] = 10.0
+            with (
+                patch.object(
+                    report_status,
+                    "_replace_snapshot",
+                    side_effect=OSError("temporary failure"),
+                ),
+                self.assertLogs(_LOGGER, level="WARNING"),
+            ):
+                update.start_attempt()
+            elapsed[0] = 12.5
+            update.finish("updated", confirmed_edits=1)
+            key = report_status.report_update_key(update.site, update.title)
+            completed = _reports(Path(temporary) / "state")[key]
+        assert completed["status"] == "updated"
+        assert completed["started_at"] == "2026-10-20T18:59:10.000000Z"
+        assert math.isclose(completed["duration_seconds"], 2.5)
 
     def test_exception_and_missing_confirmation_remain_explicit(self) -> None:
         """Retain failures and unknown confirmation outcomes."""
@@ -223,6 +369,7 @@ class TestReportStatusStorage(TestCase):
                 directory=destination,
             )
             for sequence, status in enumerate((
+                "queued",
                 "running",
                 "updated",
                 "no_update",
@@ -273,6 +420,7 @@ class TestReportStatusStorage(TestCase):
                     update_id="f" * 32,
                 ),
                 _record(update_id="7" * 32),
+                _record(status="queued"),
                 _record(status="running"),
                 {**current, "finished_at": "2026-10-20T18:59:01Z"},
             ):
@@ -290,6 +438,28 @@ class TestReportStatusStorage(TestCase):
                 directory=destination,
             )
             assert next(iter(_reports(destination).values())) == newer
+
+    @staticmethod
+    def test_equal_time_queue_can_start_but_cannot_regress() -> None:
+        """Preserve lifecycle order when both clock values coincide."""
+        with TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            queued = _record(status="queued")
+            running = _record(status="running")
+            for record in (queued, running):
+                assert report_status.write_report_update(
+                    record,
+                    directory=destination,
+                )
+            assert not report_status.write_report_update(
+                queued,
+                directory=destination,
+            )
+            assert next(iter(_reports(destination).values())) == running
+            assert report_status.write_report_update(
+                _record(),
+                directory=destination,
+            )
 
     def test_malformed_metadata_preserves_valid_prior_state(self) -> None:
         """Reject unsafe identities, outcomes, and timestamps."""
@@ -319,6 +489,9 @@ class TestReportStatusStorage(TestCase):
                 )
             ],
             {**_record(status="running"), "confirmed_edits": 0},
+            {**_record(status="queued"), "confirmed_edits": 0},
+            {**_record(status="queued"), "duration_seconds": 0},
+            {**_record(status="queued"), "finished_at": _FINISH.isoformat()},
             {**_record(status="no_update"), "confirmed_edits": None},
             {**_record(status="unconfirmed"), "confirmed_edits": 1},
         ]

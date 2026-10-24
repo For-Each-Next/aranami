@@ -137,6 +137,13 @@ class TestDailyCompletion(TestCase):
         self.enterContext(
             patch.object(pageviews, "_utc_now", return_value=_NOW),
         )
+        self.downloads = self.enterContext(
+            patch.object(
+                pageviews.data,
+                "prepare_downloads",
+                side_effect=lambda _site, _first, target, **_: target,
+            ),
+        )
 
     @staticmethod
     def _checkpoint(routine: str, *, now: dt.datetime = _NOW) -> str:
@@ -546,8 +553,10 @@ class TestDailyCompletion(TestCase):
         assert (self.root / "dry-run" / "reports").exists()
         page.assert_not_called()
 
-    def test_backlog_advances_one_date_and_keeps_hourly_retry(self) -> None:
-        """Keep hourly retries after a partial confirmed catch-up."""
+    def test_backlog_saves_each_date_and_checkpoints_complete_catchup(
+        self,
+    ) -> None:
+        """Postpone work only after all daily saves succeed."""
         context = _context()
         day = _DAY - dt.timedelta(days=1)
         page = Mock(text=_pageviews_text(day - dt.timedelta(days=1)))
@@ -561,17 +570,64 @@ class TestDailyCompletion(TestCase):
             patch.object(
                 pageviews.data,
                 "prepare_report",
-                return_value=_pageview_data(day),
+                side_effect=lambda _site, stop, **_: _pageview_data(
+                    stop - dt.timedelta(days=1),
+                ),
             ) as build,
             patch(
                 "updater.jobs._execution.pywikibot.Page",
                 return_value=page,
             ),
         ):
+            assert pageviews.run(context=context) == completion.next_daily_run(
+                "pageviews",
+                _NOW,
+            )
+        expected_saves = 2
+        assert build.call_count == expected_saves
+        assert page.save.call_count == expected_saves
+        assert [edit.tags[-1] for edit in context.edits] == [
+            day.isoformat(),
+            _DAY.isoformat(),
+        ]
+        assert context.edits[1].original_text == context.edits[0].text
+        assert str(_DAY) in page.text
+        assert (self.root / "cache" / "completion").exists()
+
+    def test_fallback_keeps_hourly_retry_without_completion(self) -> None:
+        """Retain earlier saves without checkpointing the target."""
+        context = _context()
+        accepted = _DAY - dt.timedelta(days=1)
+        first = accepted - dt.timedelta(days=1)
+        page = Mock(text=_pageviews_text(first - dt.timedelta(days=1)))
+        self.downloads.side_effect = None
+        self.downloads.return_value = accepted
+        with (
+            patch.object(
+                pageviews,
+                "job_run",
+                return_value=nullcontext(context),
+            ),
+            patch.object(pageviews, "read_pages", return_value=[page]),
+            patch.object(
+                pageviews.data,
+                "prepare_report",
+                side_effect=lambda _site, stop, **_: _pageview_data(
+                    stop - dt.timedelta(days=1),
+                ),
+            ),
+            patch(
+                "updater.jobs._execution.pywikibot.Page",
+                return_value=page,
+            ),
+        ):
             assert pageviews.run(context=context) is None
-        assert build.call_count == 1
-        assert str(day) in page.text
-        page.save.assert_called_once()
+        assert [edit.tags[-1] for edit in context.edits] == [
+            first.isoformat(),
+            accepted.isoformat(),
+        ]
+        assert page.save.call_count == len(context.edits)
+        assert str(accepted) in page.text
         assert not (self.root / "cache" / "completion").exists()
 
     def test_superseded_calculation_cannot_confirm_daily_completion(
@@ -659,7 +715,7 @@ class TestDailyCompletion(TestCase):
         build.assert_not_called()
         assert not (self.root / "cache" / "completion").exists()
 
-    def test_deferred_source_does_not_checkpoint_or_replace_saved_data(
+    def test_failed_daily_data_does_not_checkpoint_or_replace_saved_data(
         self,
     ) -> None:
         """Preserve complete data while a source is unavailable."""
@@ -694,8 +750,9 @@ class TestDailyCompletion(TestCase):
                     "not ready",
                 ),
             ),
+            self.assertRaises(pageviews.data.PageviewsUnavailableError),
         ):
-            assert pageviews.run(context=context) is None
+            pageviews.run(context=context)
         assert not (self.root / "cache" / "completion").exists()
         assert ReportStore().read(key).path == saved.path
 

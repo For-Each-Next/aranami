@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 ROOT = Path(__file__).resolve().parents[1]
 
 _PACKAGES = ("backend", "updater", "webservice", "shared")
-_SUFFIXES = {".py", ".css", ".json", ".svg"}
+_SUFFIXES = {".py", ".css", ".js", ".json", ".svg"}
 _SCRIPTS = (
     "setup-env.sh",
     "deploy-source.sh",

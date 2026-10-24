@@ -671,12 +671,16 @@ class TestRoutineStatusLifecycle(TestCase):
             patch(
                 "backend.support.execution.write_routine_status",
             ) as writer,
+            self.assertLogs("backend.support.execution", level="INFO") as logs,
             job_run("dyks", dry=False, context=preview),
         ):
             preview.mark_updates_unknown()
         writer.assert_not_called()
         assert (path.read_bytes(), path.stat().st_mtime_ns) == before
         assert self._record()["run_id"] == live.tasks[0].run_id
+        assert (
+            logs.records[-1].getMessage().startswith("Finished dyks preview:")
+        )
 
     def test_older_context_cannot_overwrite_a_newer_run(self) -> None:
         """Retain the newer state when an older context finishes."""

@@ -188,3 +188,31 @@ class TestArticleChanges(TestCase):
         )
         assert removed.current_total == 0
         assert removed.removed == changes.added
+
+    @staticmethod
+    def test_counts_keep_last_titles_and_distinguish_missing_columns() -> None:
+        """Count English assessments without duplicate titles."""
+        rows = _rows(
+            ("Same", 1, 10, "GA"),
+            ("Same", 1, 10, " fa "),
+            ("List", 2, 20, "FL"),
+            ("Unknown", 3, 30, None),
+        ).with_columns(
+            pl.Series("en_importance", ["High", "Top", "High", None]),
+        )
+        changes = compare_articles({}, rows)
+        expected_total = 3
+        assert changes.current_total == expected_total
+        assert changes.quality_counts == (("FA", 1), ("FL", 1), ("GA", 0))
+        assert changes.importance_counts == (("Top", 1), ("High", 1))
+        empty = compare_articles({}, rows.head(0))
+        assert empty.quality_counts == (("FA", 0), ("FL", 0), ("GA", 0))
+        assert empty.importance_counts == (("Top", 0), ("High", 0))
+        empty_counts_only = compare_articles(
+            {},
+            rows.head(0).select("en_class", "en_importance"),
+        )
+        assert empty_counts_only.quality_counts == empty.quality_counts
+        assert empty_counts_only.importance_counts == empty.importance_counts
+        missing = compare_articles({}, rows.select("en_title", "item_id"))
+        assert missing.quality_counts == missing.importance_counts == ()

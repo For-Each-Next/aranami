@@ -4,6 +4,47 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.7
 
+### 0.6.3 (2026-10-24 05:24 UTC)
+
+Overview: Simplified public run logs and status cards, corrected independent
+report timing, added live dashboard updates, and enabled sequential Pageviews
+catch-up with fresh full histories, daily-data guards, and earlier-endpoint retries.
+
+- Displayed concise lifecycle summaries publicly while preserving detailed
+  downloads, with thirty-calendar-day retention of UTC daily logs.
+- Replaced expanding status details with native popups, one-line emoji and
+  duration summaries, and four-character last-run and next-run labels.
+- Added small localized relative timestamps in whole minutes or hours
+  beside the retained UTC times, distinguishing past and future events.
+- Refreshed routine and per-page outcomes, relative times, and continuous
+  runtime every second from saved observations without initiating wiki work.
+- Preserved open popups, keyboard focus, and scroll during updates, paused
+  hidden tabs, and retried failed refreshes with an explicit connection notice.
+- Displayed execution times as whole seconds with two decimals below one
+  second, retaining full precision in stored measurements.
+- Measured each report attempt independently of earlier reports and cooldowns,
+  retained whole-routine totals, and waited for delegated requests to finish.
+- Displayed queued reports as waiting to run, with no start time or elapsed
+  timer until their individual preparation and publication actually began.
+- Downloaded full Pageviews histories per run and fallback attempt, sharing
+  only a successful batch across daily reports and retiring download checkpoints.
+- Stopped downloads above 1% missing final-day records and retried one day
+  earlier, preserving chronological saves and each report's actual data date.
+- Failed when all unpublished endpoints failed coverage or an intermediate
+  report exceeded the guard, preserving healthy data and confirmed progress.
+- Accepted measured zeroes and sparse older histories without per-article gap
+  warnings, retaining concise batch progress and source-failure diagnostics.
+- Allowed guarded sequential result generations within one run without
+  weakening stale-run protection, preview isolation, or source readiness.
+- Included the optional browser script in validated source payloads while
+  retaining complete server-rendered pages and native status popups.
+- Added article totals and FA/FL/GA or Top/High counts to English-comparison
+  edit summaries while retaining change details and bounded attribution.
+- Raised the documented and suggested hub memory allocation to 2 GiB after
+  confirming repeated out-of-memory restarts at Toolforge's 512 MiB default.
+- Updated operating and architecture guides for log retention, reader summaries,
+  live status, per-report timing, and API-only daily catch-up with Polars caches.
+
 ### 0.6.2 (2026-10-23 12:38 UTC)
 
 Overview: Replaced the PHP website with Python-rendered HTML and CSS,

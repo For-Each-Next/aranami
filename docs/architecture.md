@@ -118,7 +118,7 @@ restart. Failed saves, incomplete work, and previews cannot establish
 completion. Explicit manual jobs always revalidate the wiki. New pages
 requires the complete retained window through yesterday and then waits for
 the next 00:07 UTC trigger. Pageviews retains the actual-time 18:00 UTC
-readiness boundary, one missing day per invocation, and hourly :59 retries
+readiness boundary, sequential catch-up of missing days, and hourly :59 retries
 when behind or deferred. When current, its monitor postpones it to the
 18:59 trigger following the next readiness boundary. Jobs return scheduling
 advice; only the monitor changes scheduler state.
@@ -144,6 +144,15 @@ the scheduler snapshot. Per-destination observations distinguish a
 confirmed update, no change, failure, deferral, and an unconfirmed external
 write; an unknown edit count must not become zero. Older attempts cannot
 replace newer results. Preview activity does not update any live status.
+Routine durations cover the whole invocation. Per-report timing begins
+when that report's attempt starts, excluding earlier reports and delegated
+request cooldowns. Registered destinations remain `queued` until their
+individual work begins. While queued, `started_at` orders registrations
+only: the website hides that timestamp and displays a localized waiting
+label instead of elapsed time. Starting work replaces it with the actual
+start and changes the state to `running`. Reset an attempt only while its
+registered identity still owns the saved row,
+so a superseded handle cannot overwrite a newer observation.
 Never derive these observations by parsing human-readable log text.
 
 ## Reusable report results
@@ -165,8 +174,11 @@ publication state separately. Startup diagnostics also identify the
 running source version; edit summaries intentionally do not. `latest.json`
 atomically selects the newest complete generation and its predecessor.
 A lock and generation ordering guard prevent older concurrent runs from
-replacing newer results. Readers validate hashes, schemas, identities, and
-row counts. Previews use only `dry-run/reports/` and proposal companions.
+replacing newer results. Sequential results from the same run require the
+exact predecessor generation still selected under that lock, allowing
+daily catch-up without admitting a superseded run. Readers validate hashes,
+schemas, identities, and row counts. Previews use only `dry-run/reports/`
+and proposal companions.
 Use `ReportStore.read(key)` or `read(key, previous=True)` to consume a
 validated generation; it returns no bundle when none has been selected.
 
@@ -210,8 +222,11 @@ routine/schedule/report observations, and saved daily logs from the runtime
 directory. It validates each saved format through its owning backend
 reader before rendering pages or exposing `/api/dashboard`, `/api/status`,
 or `/api/logs`. Pages use normal links, GET forms, and native HTML controls;
-no browser application or JavaScript runtime is required. Fixed CSS and
-SVG assets come from `webservice/public_html/`. Requests accept only GET and HEAD,
+the complete initial page works without JavaScript. An optional same-origin
+script refreshes dashboard status through `/api/live`, which renders only
+validated status and uptime fragments without reading website datasets.
+Fixed CSS, JavaScript, and SVG assets come from `webservice/public_html/`.
+Requests accept only GET and HEAD,
 reject path traversal and unsafe files, and bound file sizes and concurrency.
 The hub also exposes local read-only `/dashboard.json` and `/healthz`
 diagnostics; the public server operates independently of those endpoints.
@@ -291,12 +306,29 @@ measured zeroes, nulls, and the verified non-article exclusions.
 
 Routine cards show localized state text, status time, measured/elapsed
 duration, configured report links, and the actual next execution from the
-monitor snapshot. Native expandable controls show a keyboard-accessible table
-of per-destination outcomes, linked page titles, and UTC timestamps, with
-the routine duration alongside the trigger. Shared Python presentation
-functions handle localization, safe markup, and presentation order.
-Narrow screens scroll the expanded table within its container. The footer combines
-source version and continuous runtime in one line. Missing, stale, paused, and stopped
+monitor snapshot. An emoji, linked-style status button, and whole-routine
+duration stay on one line. The button opens a native HTML popover with a
+keyboard-accessible table of per-destination outcomes, linked page titles,
+independent execution durations, and UTC timestamps. Close controls,
+Escape, and outside clicks dismiss it without JavaScript. Chinese timestamp
+labels use four characters followed by a fullwidth colon. Shared Python
+presentation functions handle localization, safe markup, and presentation order.
+Execution times use whole seconds, with two decimals for subsecond results;
+completed durations round to the nearest second and active durations count
+completed seconds. Stored measurements retain their original precision.
+Last-run and next-run UTC times include small relative annotations in
+whole minutes below an hour and whole hours thereafter, rounded down.
+Future times say how long remains; unavailable schedule times have no
+annotation. Dashboard status, per-page outcomes, relative times, and uptime
+refresh every second while the tab is visible. Each refresh uses the server's
+time and bypasses the full-page cache. Requests never overlap, time out after
+ten seconds, and retry with delays up to thirty seconds after failures.
+Hidden tabs pause polling; returning to the page resumes it. The browser
+updates existing elements to preserve open popovers, focus, and scroll.
+Failed refreshes retain the last received observations with an explicit notice.
+Narrow screens scroll the popup table within its container. The footer combines
+source version and continuous runtime including seconds in one line.
+Missing, stale, paused, and stopped
 schedules remain explicit. Preserve all three interface languages, logs,
 Chinese highlights, DYK, popularity, and maintenance. Cache rendered views
 and locales in bounded process memory for up to sixty seconds; saved-input
@@ -337,13 +369,19 @@ uploaded source tree or `site-packages`:
   being refreshed, destination being edited, counts, starts, completion,
   elapsed time, skips, and failures. Keep messages readable in a terminal;
   do not encode lifecycle JSON or internal metadata dumps in log lines.
-  Retain the latest 90 completed dates alongside the current day. Do not
+  Retain the current UTC date and previous 29 calendar dates. Do not
   configure the root logger at import time. Backend logging owns terminal
-  and file handlers; the website only displays those saved messages.
+  and file handlers; the website reads those saved messages.
   Log the hub's graceful shutdown reason before waiting for active work,
   then record its stopped state after scheduler, collector, and HTTP cleanup,
   while the daily handler remains open. Recent logs display at most one
-  hundred matching lines; forced termination cannot guarantee a final record.
+  hundred matching lifecycle summaries: starts, updates, no-change outcomes,
+  failures, and server stops. Hide individual source-request failures,
+  progress, logger prefixes, and tracebacks from this reader view, while
+  preserving raw daily downloads for diagnostics. Scan at most 8 MiB to
+  find recent summaries without loading the whole file. Preview summaries
+  remain explicitly marked and never imply live outcomes. Forced termination
+  cannot guarantee a final record.
 - `state/` holds the authoritative routine, schedule, and report-update
   observations described above. Keep it separate from diagnostic logs
   and disposable source caches.
@@ -392,7 +430,32 @@ identities leave the row unchanged with a diagnostic.
 
 ### Pageviews
 
-Pageviews processes at most one missing report date per call.
+Use the Wikimedia Pageviews API exclusively for daily observations and
+history, treating its returned measurements as authoritative. Do not read
+Pageviews dumps, including Toolforge's shared files, or substitute dump
+counts for API observations. Keep Polars processing and Parquet caching.
+
+Pageviews processes missing report dates in order, publishing each day's list
+separately. First download each article's full required history through the
+latest eligible complete UTC day and validate that final day's coverage.
+If missing daily records exceed the limit, stop that download,
+shorten its end by one day, and download the full histories afresh. Discard
+the failed attempt's responses; never resume prior downloads from memory
+or disk across endpoint retries. Try only endpoints later than the published
+checkpoint, and fail the task if none passes.
+
+Once an endpoint passes, share only that successful batch's fresh responses
+for daily analysis and saves from the next unpublished day through that
+endpoint, in chronological order. For example, a checkpoint on the 15th and
+an eligible target on the 18th produce separate reports for the 16th, 17th,
+and 18th. If the 18th is unavailable but a fresh download through the 17th
+passes, publish the 16th and 17th only. Do not skip intervening reports,
+roll back the checkpoint, or label older observations with a newer date.
+Stop at the first unavailable intermediate day, failed/unconfirmed save,
+or superseded result; resume from the last confirmed on-wiki marker on the
+next call. A shortened endpoint leaves the routine behind and eligible for
+hourly retries; it cannot establish current completion. The current incomplete
+UTC day is never treated as a complete daily total.
 Read its published checkpoint only from `<!-- report date YYYY-MM-DD -->`
 and emit the same marker in generated reports. Fail before building without
 a valid checkpoint or when recognized dates conflict.
@@ -403,26 +466,30 @@ schedule first attempts it at 18:59 UTC. Before 18:00, older missing dates
 remain eligible. Apply the same cutoff to live, dry, and manual job
 invocations, using the context's actual `started_at` rather than the chosen report
 anchor for readiness. Report dates must also be before the requested anchor;
-a supplied anchor cannot bypass the actual cutoff. If at least 95% of
-queried articles have no observation for that date, skip the edit and leave
-both the wiki date marker
-and healthy cache unchanged so the next call retries. Explicit zeroes remain valid.
-Its Parquet cache keeps an 800-day history by default, reuses sufficient
-coverage, fetches missing tails, and rebuilds histories that do not
-cover the required report intervals. Every build also checks each title's
-daily continuity from its earliest retained measurement through the target
-date. Refetch from the earliest missing date, merge newly returned measurements,
-and reject the entire staged daily batch if any previously measured title
-still lacks a date. Discard its pending checkpoint, leave the healthy file
-and report date unchanged, and retry on the next invocation. Do not perform
-the ranking join or publish a partial batch. A missing cache causes a fresh
-800-day download by default, not an incremental target-day-only request.
-Still-unreturned dates remain unknown, never invented zeroes.
-Unobserved leading dates and completely empty successful responses do not
-establish when an article began receiving traffic.
-New articles receive their own history
-fetch. Coverage metadata distinguishes an observed empty interval from an
-interval that was never queried.
+a supplied anchor cannot bypass the actual cutoff. Reject a candidate
+endpoint as soon as more than 1% of the full distinct article population
+lacks that day's daily record. Count absence while downloading and stop
+before the next request once the limit is crossed; do not use only the
+processed prefix as the denominator. Apply the same guard to each report
+day before publication. Exactly 1% missing is allowed. Explicit zeroes are
+valid records, while empty responses and HTTP 504 count as missing.
+Do not fetch top lists or publish a day after its guard fails. Failed
+attempts leave the wiki marker and healthy snapshot unchanged, preserving
+any earlier confirmed catch-up reports. If no later endpoint is usable,
+or an intermediate report fails its guard, mark the task failed. The next
+hourly invocation downloads the full histories again and retries from the
+last published marker.
+
+Fetch at least the configured 800-day history buffer by default, expanding
+it for the required comparisons and catch-up dates. Saved Parquet coverage
+never suppresses a request or fills missing fresh response dates in a report.
+Historical gaps do not reject a batch, and periods with no measurements
+remain null. Keep successful snapshots atomically after the daily guard
+and required top lists pass; retain known observations in those disposable
+snapshots without treating them as fresh inputs. Do not create or read
+pending request checkpoints. Log batch progress and concise endpoint-fallback
+or final-failure summaries without per-article unknown-date warnings.
+Individual HTTP attempt details belong at debug level.
 
 Fetch site ranks from the official all-access [Pageviews top endpoint][pageviews-top]
 for single UTC dates and complete calendar months. Fetch each distinct
@@ -444,8 +511,8 @@ An applicable list must be fetched successfully before publication or
 healthy-cache replacement. HTTP 404, empty or malformed results, and
 transport failures defer the complete report. Log its date, required
 period, and source failure reason through the job's existing deferral
-handler; retry the same report date at the next invocation. Save completed
-article requests in the pending checkpoint so retries reuse that work.
+handler; retry the same report date with fresh full article downloads at
+the next invocation.
 An available raw list containing only non-articles is a valid empty
 article result and does not defer publication.
 Keep the existing daily availability guard ahead of the top-list lookup.
@@ -463,16 +530,12 @@ this allowance. Cached observations consume no allowance, and idle time
 does not permit a later burst.
 
 Keep the source adapter's one-attempt contract. The Pageviews routine skips
-an unmeasured article immediately after HTTP 504, excluding it from the current
-rankings and availability check without changing its cached history or coverage.
-A 504 for a previously measured title rejects the entire daily batch under
-the continuity rule instead of dropping that title from the report.
-Skipped unmeasured articles remain eligible for later requests. Retry
-502/503 responses up to three times; exhausted retries defer publication
-until a later invocation. Preserve completed requests in a separate pending
-Parquet checkpoint for the target date, leaving the healthy snapshot intact.
-Resume pending work on the next attempt, commit it only after the global
-availability guard passes, and discard it when the guard rejects that day.
+an article immediately after HTTP 504, excluding it from rankings while
+counting its absent daily record toward the one-percent limit. Preserve
+its saved history and request it again on the next run. Retry 502/503
+responses up to three times using the same full range; exhausted retries
+defer publication until a later invocation. A later run starts all article
+downloads afresh, including requests completed before a source failure.
 
 ## Managed ranges and on-wiki configuration
 
@@ -487,7 +550,7 @@ Use paired `aranami` HTML comments to mark generated ranges:
 Settings belong on the opening comment where practical. For example:
 
 ```wikitext
-<!-- aranami begin="page_views" history-days="800" missing-percent="95" -->
+<!-- aranami begin="page_views" history-days="800" missing-percent="1" -->
 ...generated popularity report...
 <!-- aranami end="page_views" -->
 ```
@@ -496,6 +559,8 @@ Preserve the attributes when replacing content and validate values before
 requests or publication. Code supplies documented defaults. Current settings
 include new-page retention, Pageviews history and availability threshold,
 and assessment-list source categories.
+Pageviews caps the availability threshold at 1%; larger legacy
+`missing-percent` attributes remain preserved but cannot relax the guard.
 
 Only `aranami` comments delimit managed ranges. Keep functional
 `<section begin="..."/>` and `<section end="..."/>` tags used by labeled
@@ -618,6 +683,10 @@ introduction counters and body through required paired `aranami` ranges:
 `count_all` for the total, `count_fa`, `count_fl`, and `count_ga` for each
 English class, and `body` for the list. Preserve all surrounding content.
 The importance report retains its alphabetical sections and counter updates.
+Both edit summaries start with comma-separated article totals and assessment
+counts: `3,032 articles: 100 FA, 32 FL, 2,900 GA.` for quality, or
+`1,234 articles: 34 Top, 1,200 High.` for importance. Actual change details
+follow within the shared UTF-8 budget, preserving the attribution link.
 
 These behaviors follow the concrete importance or quality report strategy,
 not a report's name. The backend receives a data definition, including

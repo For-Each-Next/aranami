@@ -458,16 +458,22 @@ class TestSiteTopRanks(TestCase):
             task_forces=(job.TASK_FORCES[0],),
             task_force_period=config,
         )
+        extra_titles = [f"Other {index}" for index in range(97)]
         articles = pl.DataFrame({
-            "title": ["A", "B", "C"],
-            "page_id": [1, 2, 3],
-            "class": ["B"] * 3,
-            "importance": ["低"] * 3,
+            "title": ["A", "B", "C", *extra_titles],
+            "page_id": list(range(1, 101)),
+            "class": ["B"] * 100,
+            "importance": ["低"] * 100,
         })
         views = pl.DataFrame(
             [
                 (title, start, stop, value)
-                for title, value in (("A", 8), ("B", 0), ("C", None))
+                for title, value in (
+                    ("A", 8),
+                    ("B", 0),
+                    ("C", None),
+                    *((title, 0) for title in extra_titles),
+                )
                 for start, stop in pageviews.report_periods(_STOP, (config,))
             ],
             schema=pageviews._VIEWS_SCHEMA,
@@ -492,13 +498,15 @@ class TestSiteTopRanks(TestCase):
             report = _build_report(site, _STOP, settings=settings)
         assert report.result is not None
         retained = report.result.tables["rankings"]
+        assert retained.height == articles.height
+        retained = retained.filter(pl.col("title").is_in(["A", "B", "C"]))
         assert retained.get_column("title").to_list() == ["A", "B", "C"]
         assert retained.get_column("views").to_list() == [8, 0, None]
         assert retained.get_column("page_id").to_list() == [1, 2, 3]
         assert retained.get_column("old_rank").to_list() == [1, 2, None]
         assert report.result.tables["totals"].get_column(
             "article_count",
-        ).to_list() == [3, 0]
+        ).to_list() == [100, 0]
         assert report.result.tables["totals"].get_column(
             "total_views",
         ).to_list() == [8, 0]
@@ -678,7 +686,6 @@ class TestSiteTopRanks(TestCase):
                 ),
             )
         urlopen.assert_not_called()
-        load_cache.return_value.save_pending.assert_not_called()
         load_cache.return_value.save.assert_called_once()
         assert report.data_date == dt.date(2025, 12, 31)
         assert report.yearly_top == "A"
@@ -1092,43 +1099,43 @@ class TestReportState(TestCase):
 
 
 class TestPageviewAvailability(TestCase):
-    """Verify the missing-observation publication threshold."""
+    """Verify the strict one-percent daily-observation boundary."""
 
     @staticmethod
-    def _views(observed: int) -> pl.DataFrame:
-        """Create twenty target-day rows with explicit observed zeroes.
+    def _views(missing: int) -> pl.DataFrame:
+        """Create one hundred target-day rows with observed zeroes.
 
         Args:
-            observed: Number of articles with target-day observations.
+            missing: Number of articles without target-day records.
 
         Returns:
             Totals including older observations for every article.
         """
         rows = [
-            (str(index), _DAY, _STOP, 0 if index < observed else None)
-            for index in range(20)
+            (str(index), _DAY, _STOP, None if index < missing else 0)
+            for index in range(100)
         ]
         rows.extend(
-            (str(index), dt.date(2026, 1, 9), _DAY, 7) for index in range(20)
+            (str(index), dt.date(2026, 1, 9), _DAY, 7) for index in range(100)
         )
         return pl.DataFrame(rows, schema=pageviews._VIEWS_SCHEMA, orient="row")
 
-    def test_exactly_95_percent_missing_rejects_target_day(self) -> None:
-        """Reject 19 missing pages out of 20 with older observations."""
+    def test_more_than_one_percent_missing_rejects_target_day(self) -> None:
+        """Reject two missing records out of one hundred articles."""
         with self.assertRaises(pageviews.PageviewsUnavailableError):
-            pageviews.require_daily_observations(self._views(1), _DAY)
+            pageviews.require_daily_observations(self._views(2), _DAY)
 
-    def test_below_95_percent_accepts_explicit_zeroes(self) -> None:
-        """Accept the report when more than 5% have observed zeroes."""
-        pageviews.require_daily_observations(self._views(2), _DAY)
+    def test_exactly_one_percent_missing_accepts_explicit_zeroes(self) -> None:
+        """Allow one missing record and ninety-nine measured zeroes."""
+        pageviews.require_daily_observations(self._views(1), _DAY)
 
     def test_all_explicit_zeroes_are_healthy(self) -> None:
         """Treat all observed zeroes as available target-day data."""
-        pageviews.require_daily_observations(self._views(20), _DAY)
+        pageviews.require_daily_observations(self._views(0), _DAY)
 
 
 class TestPageviewJob(TestCase):
-    """Verify one-day catch-up, dry runs, and failed checkpoints."""
+    """Verify sequential daily catch-up and failed checkpoints."""
 
     def setUp(self) -> None:
         """Use rendered stand-ins for job coordination checks."""
@@ -1140,10 +1147,17 @@ class TestPageviewJob(TestCase):
         )
         renderer.start()
         self.addCleanup(renderer.stop)
+        self.downloads = self.enterContext(
+            patch.object(
+                pageviews,
+                "prepare_downloads",
+                side_effect=lambda _site, _first, target, **_: target,
+            ),
+        )
 
     @staticmethod
-    def test_dry_run_builds_only_one_missing_day() -> None:
-        """Build one missing day without publishing or looping."""
+    def test_dry_run_builds_each_missing_day_without_publishing() -> None:
+        """Chain daily previews without changing the live page."""
         context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
         page = MagicMock(text=_TEXT)
         with (
@@ -1153,19 +1167,24 @@ class TestPageviewJob(TestCase):
             patch.object(
                 pageviews,
                 "prepare_report",
-                return_value=_report(_STOP),
+                side_effect=lambda _site, stop, **_: _report(stop),
             ) as build,
         ):
             job.run(context=context)
 
-        build.assert_called_once_with(
-            context.site,
-            _STOP,
-            settings=job.REPORT_SETTINGS.source_settings(),
-            history_days=800,
-            missing_percent=95,
-        )
-        assert len(context.edits) == 1
+        stops = [dt.date(2026, 1, day) for day in (11, 12, 13)]
+        assert build.call_args_list == [
+            call(
+                context.site,
+                stop,
+                settings=job.REPORT_SETTINGS.source_settings(),
+                history_days=800,
+                missing_percent=1,
+                prefetch_stop=dt.date(2026, 1, 13),
+            )
+            for stop in stops
+        ]
+        assert len(context.edits) == len(stops)
         assert context.edits[0].original_text == _TEXT
         assert context.edits[0].title == job.REPORT_TITLE
         assert context.edits[0].summary == (
@@ -1174,6 +1193,127 @@ class TestPageviewJob(TestCase):
             f"{job.EditSummary.with_attribution('')}"
         )
         assert "2026-01-10" in context.edits[0].text
+        assert context.edits[1].original_text == context.edits[0].text
+        assert context.edits[2].original_text == context.edits[1].text
+        assert "2026-01-12" in context.edits[2].text
+        assert page.text == _TEXT
+        page.save.assert_not_called()
+
+    def test_download_end_selection_keeps_chronological_saves(self) -> None:
+        """Save 16 onward through the accepted end: 18, 17, or 16."""
+        text = _TEXT.replace("2026-01-09", "2026-10-15")
+        for accepted_day in (18, 17, 16):
+            with self.subTest(accepted_day=accepted_day):
+                context = JobContext(
+                    _site(),
+                    dt.date(2026, 10, 19),
+                    dry=False,
+                    started_at=dt.datetime(2026, 10, 19, 18, tzinfo=dt.UTC),
+                )
+                page = MagicMock(text=text)
+                self.downloads.reset_mock()
+                self.downloads.side_effect = None
+                self.downloads.return_value = dt.date(2026, 10, accepted_day)
+                with (
+                    TemporaryDirectory() as directory,
+                    chdir(directory),
+                    patch.object(job, "read_pages", return_value=[page]),
+                    patch.object(
+                        pageviews,
+                        "prepare_report",
+                        side_effect=lambda _site, stop, **_: _report(stop),
+                    ) as build,
+                    patch(
+                        "updater.jobs._execution.pywikibot.Page",
+                        return_value=page,
+                    ),
+                ):
+                    job.run(context=context)
+                self.downloads.assert_called_once_with(
+                    context.site,
+                    dt.date(2026, 10, 16),
+                    dt.date(2026, 10, 18),
+                    settings=job.REPORT_SETTINGS.source_settings(),
+                    history_days=800,
+                    missing_percent=1,
+                )
+                dates = [
+                    dt.date(2026, 10, day)
+                    for day in range(16, accepted_day + 1)
+                ]
+                assert [edit.tags[-1] for edit in context.edits] == [
+                    day.isoformat() for day in dates
+                ]
+                assert page.save.call_count == len(dates)
+                stops = [request.args[1] for request in build.call_args_list]
+                assert stops == [day + dt.timedelta(days=1) for day in dates]
+                assert all(
+                    request.kwargs["prefetch_stop"]
+                    == dt.date(2026, 10, accepted_day + 1)
+                    for request in build.call_args_list
+                )
+                assert context.edits[0].original_text == text
+                assert all(
+                    current.original_text == previous.text
+                    for previous, current in zip(
+                        context.edits,
+                        context.edits[1:],
+                        strict=False,
+                    )
+                )
+                assert f"report date 2026-10-{accepted_day}" in page.text
+
+    def test_exhausted_fallback_fails_without_publication(self) -> None:
+        """Keep the October 15 marker when all unpublished ends fail."""
+        context = JobContext(
+            _site(),
+            dt.date(2026, 10, 19),
+            dry=False,
+            started_at=dt.datetime(2026, 10, 19, 18, tzinfo=dt.UTC),
+        )
+        text = _TEXT.replace("2026-01-09", "2026-10-15")
+        page = MagicMock(text=text)
+        self.downloads.side_effect = pageviews.PageviewsUnavailableError(
+            "no available unpublished day",
+        )
+        with (
+            TemporaryDirectory() as directory,
+            chdir(directory),
+            patch.object(job, "read_pages", return_value=[page]),
+            patch.object(pageviews, "prepare_report") as build,
+            patch.object(job, "record_completion") as complete,
+            self.assertRaises(pageviews.PageviewsUnavailableError),
+        ):
+            job.run(context=context)
+        self.downloads.assert_called_once()
+        build.assert_not_called()
+        complete.assert_not_called()
+        assert not context.edits
+        assert context.tasks[0].status == "failed"
+        assert page.text == text
+        page.save.assert_not_called()
+
+    def test_deferred_download_preflight_preserves_report(self) -> None:
+        """Defer source outages before constructing a daily report."""
+        context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
+        page = MagicMock(text=_TEXT)
+        self.downloads.side_effect = pageviews.PageviewsDeferredError(
+            "HTTP 503",
+        )
+        with (
+            TemporaryDirectory() as directory,
+            chdir(directory),
+            patch.object(job, "read_pages", return_value=[page]),
+            patch.object(pageviews, "prepare_report") as build,
+            patch.object(job, "record_completion") as complete,
+        ):
+            assert job.run(context=context) is None
+        build.assert_not_called()
+        complete.assert_not_called()
+        assert context.tasks[0].status == "deferred"
+        assert context.notes == ["HTTP 503"]
+        assert not context.edits
+        assert page.text == _TEXT
         page.save.assert_not_called()
 
     def test_failed_save_stops_before_later_days(self) -> None:
@@ -1201,13 +1341,82 @@ class TestPageviewJob(TestCase):
             _STOP,
             settings=job.REPORT_SETTINGS.source_settings(),
             history_days=800,
-            missing_percent=95,
+            missing_percent=1,
+            prefetch_stop=dt.date(2026, 1, 14),
         )
         context.publish.assert_called_once()
         assert page.text == _TEXT
 
+    def test_partial_catchup_keeps_saved_day_and_reports_failure(self) -> None:
+        """Retain confirmed edit counts when the next day must retry."""
+        context = JobContext(
+            _site(),
+            dt.date(2026, 1, 13),
+            dry=False,
+            started_at=dt.datetime(2026, 1, 13, 18, tzinfo=dt.UTC),
+        )
+        page = MagicMock(text=_TEXT)
+        with (
+            TemporaryDirectory() as directory,
+            chdir(directory),
+            patch.object(job, "read_pages", return_value=[page]),
+            patch.object(
+                pageviews,
+                "prepare_report",
+                side_effect=[
+                    _report(_STOP),
+                    pageviews.PageviewsUnavailableError("next day missing"),
+                ],
+            ) as build,
+            patch(
+                "updater.jobs._execution.pywikibot.Page",
+                return_value=page,
+            ),
+            patch.object(job, "record_completion") as complete,
+            self.assertRaises(pageviews.PageviewsUnavailableError),
+        ):
+            assert job.run(context=context) is None
+        assert [request.args[1] for request in build.call_args_list] == [
+            _STOP,
+            _STOP + dt.timedelta(days=1),
+        ]
+        page.save.assert_called_once()
+        assert "report date 2026-01-10" in page.text
+        assert len(context.edits) == 1
+        assert context.routine_results()[0]["status"] == "failed"
+        assert context.routine_results()[0]["updated"] == 1
+        complete.assert_not_called()
+
     @staticmethod
-    def test_current_report_requires_no_api_fetch() -> None:
+    def test_unconfirmed_publication_stops_before_later_days() -> None:
+        """Stop the date marker at a superseded generation."""
+        context = MagicMock(
+            site=_site(),
+            today=dt.date(2026, 1, 13),
+            started_at=dt.datetime(2026, 1, 13, 18, tzinfo=dt.UTC),
+            dry=False,
+        )
+        context.publish.return_value = False
+        with (
+            patch.object(job, "job_run", return_value=nullcontext(context)),
+            patch.object(
+                job,
+                "read_pages",
+                return_value=[MagicMock(text=_TEXT)],
+            ),
+            patch.object(
+                pageviews,
+                "prepare_report",
+                side_effect=lambda _site, stop, **_: _report(stop),
+            ) as build,
+            patch.object(job, "record_completion") as complete,
+        ):
+            assert job.run(context=context) is None
+        build.assert_called_once()
+        context.publish.assert_called_once()
+        complete.assert_not_called()
+
+    def test_current_report_requires_no_api_fetch(self) -> None:
         """Skip work when the page is at the latest complete date."""
         context = MagicMock(
             site=_site(),
@@ -1225,18 +1434,19 @@ class TestPageviewJob(TestCase):
             patch.object(pageviews, "prepare_report") as build,
         ):
             job.run(context=context)
+        self.downloads.assert_not_called()
         build.assert_not_called()
         context.publish.assert_not_called()
 
     @staticmethod
-    def test_page_marker_configures_history_and_missing_limit() -> None:
-        """Read settings and retain their marker attributes."""
+    def test_page_marker_cannot_relax_the_one_percent_limit() -> None:
+        """Retain marker attributes while enforcing the daily limit."""
         text = _TEXT.replace(
             'aranami begin="page_views"',
             'aranami begin="page_views" history-days="900" '
             'missing-percent="90"',
         )
-        context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
+        context = JobContext(_site(), dt.date(2026, 1, 11), dry=True)
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(
@@ -1256,13 +1466,14 @@ class TestPageviewJob(TestCase):
             _STOP,
             settings=job.REPORT_SETTINGS.source_settings(),
             history_days=900,
-            missing_percent=90,
+            missing_percent=1,
+            prefetch_stop=_STOP,
         )
         assert 'history-days="900"' in context.edits[0].text
         assert 'missing-percent="90"' in context.edits[0].text
 
     def test_unavailable_daily_data_skips_publication(self) -> None:
-        """Defer unavailable yesterday data after its UTC cutoff."""
+        """Fail unavailable yesterday data after its UTC cutoff."""
         context = JobContext(
             _site(),
             dt.date(2026, 1, 11),
@@ -1279,12 +1490,12 @@ class TestPageviewJob(TestCase):
                 "prepare_report",
                 side_effect=pageviews.PageviewsUnavailableError("missing"),
             ) as build,
-            self.assertLogs(job.logger, level="WARNING"),
+            self.assertRaises(pageviews.PageviewsUnavailableError),
         ):
             job.run(context=context)
         assert not context.edits
-        assert context.notes == ["missing"]
-        assert context.tasks[0].status == "deferred"
+        assert "PageviewsUnavailableError: missing" in context.notes[0]
+        assert context.tasks[0].status == "failed"
         assert page.text == _TEXT
         page.save.assert_not_called()
         build.assert_called_once_with(
@@ -1292,7 +1503,8 @@ class TestPageviewJob(TestCase):
             _STOP,
             settings=job.REPORT_SETTINGS.source_settings(),
             history_days=800,
-            missing_percent=95,
+            missing_percent=1,
+            prefetch_stop=_STOP,
         )
 
     @staticmethod
@@ -1332,7 +1544,7 @@ class TestPageviewJob(TestCase):
             patch.object(
                 pageviews,
                 "prepare_report",
-                return_value=_report(_STOP),
+                side_effect=lambda _site, stop, **_: _report(stop),
             ),
         ):
             job.run(context=context, title=target)
@@ -1341,6 +1553,11 @@ class TestPageviewJob(TestCase):
 
 
 @patch.object(rendering, "build_report", new=lambda prepared, **_: prepared)
+@patch.object(
+    pageviews,
+    "prepare_downloads",
+    new=lambda _site, _first, target, **_: target,
+)
 class TestPageviewReadiness(TestCase):
     """Verify actual UTC time bounds requested report dates."""
 
@@ -1384,7 +1601,8 @@ class TestPageviewReadiness(TestCase):
                 expected_stop,
                 settings=job.REPORT_SETTINGS.source_settings(),
                 history_days=800,
-                missing_percent=95,
+                missing_percent=1,
+                prefetch_stop=expected_stop,
             )
             context.publish.assert_called_once()
 
@@ -1417,6 +1635,40 @@ class TestPageviewReadiness(TestCase):
             dt.datetime(2026, 1, 11, 17, tzinfo=dt.UTC),
             _DAY,
             text=_TEXT.replace("2026-01-09", "2026-01-08"),
+        )
+
+    def test_catchup_stops_before_yesterday_until_utc_cutoff(self) -> None:
+        """Preview older missing days without requesting yesterday."""
+        context = JobContext(
+            _site(),
+            dt.date(2026, 1, 14),
+            dry=True,
+            started_at=dt.datetime(2026, 1, 14, 17, tzinfo=dt.UTC),
+        )
+        with (
+            self.subTest(cutoff="before 18:00 UTC"),
+            TemporaryDirectory() as directory,
+            chdir(directory),
+            patch.object(
+                job,
+                "read_pages",
+                return_value=[MagicMock(text=_TEXT)],
+            ),
+            patch.object(
+                pageviews,
+                "prepare_report",
+                side_effect=lambda _site, stop, **_: _report(stop),
+            ) as build,
+        ):
+            job.run(context=context)
+        assert [edit.tags[-1] for edit in context.edits] == [
+            "2026-01-10",
+            "2026-01-11",
+            "2026-01-12",
+        ]
+        assert all(
+            request.kwargs["prefetch_stop"] == dt.date(2026, 1, 13)
+            for request in build.call_args_list
         )
 
     def test_historical_anchor_is_eligible_before_actual_cutoff(self) -> None:

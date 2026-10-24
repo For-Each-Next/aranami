@@ -1,4 +1,4 @@
-"""Publish at most one missing video-game pageview report per run.
+"""Catch up missing video-game pageview reports with one save per date.
 
 Call :func:`run` directly for this routine or let the package runner
 coordinate it with the other project reports.
@@ -180,15 +180,21 @@ def run(
     settings: pageviews.ReportSettings = REPORT_SETTINGS,
     automatic: bool = False,
 ) -> dt.datetime | None:
-    """Publish and checkpoint the earliest missing complete day.
+    """Publish each missing complete day in chronological order.
 
-    Hourly callers can check the date cheaply. Each invocation builds at
-    most one report, and current reports make no Pageviews API requests.
+    Hourly callers can check the date cheaply. Current reports make no
+    Pageviews API requests. Each catch-up run downloads full histories
+    through the final eligible date, trying earlier end dates if that
+    day's absence exceeds the configured limit. Share the accepted fresh
+    observations between daily reports, saving in chronological order.
+    Later runs download everything again.
     Yesterday is eligible from UTC 18:00; earlier runs can still fill
     older gaps. The actual run time limits historical or future report
     anchors.
-    A failed save leaves the last on-wiki marker authoritative. Dry runs
-    construct the same single proposal without advancing the marker.
+    Fail if no unpublished end date passes the daily availability guard.
+    Stop at the first unavailable report day or failed/unconfirmed save;
+    the last confirmed on-wiki marker controls the next invocation.
+    Dry runs construct sequential proposals without changing the wiki.
 
     Args:
         dry: Write proposed reports locally instead of editing.
@@ -213,7 +219,10 @@ def run(
         )
         if next_run is not None:
             return next_run
-    with job_run("pageviews", dry=dry, context=context) as active:
+    with (
+        job_run("pageviews", dry=dry, context=context) as active,
+        data.download_batch(),
+    ):
         active.register_targets([title])
         page = read_pages(active.site, [title])[0]
         text = page.text
@@ -234,48 +243,64 @@ def run(
                 confirmed_save=False,
                 dry=active.dry,
             )
-        data_date = current + dt.timedelta(days=1)
-        logger.info("Building pageview report for %s", data_date)
-        try:
-            prepared = data.prepare_report(
-                active.site,
-                data_date + dt.timedelta(days=1),
-                settings=settings.source_settings(),
-                history_days=state.history_days,
-                missing_percent=state.missing_percent,
-            )
-        except data.PageviewsUnavailableError as error:
-            logger.warning("%s", error)
-            active.defer(str(error))
-            return None
-        report = pageviews.build_report(prepared, settings=settings)
-        if report.data_date != data_date:
-            message = "Generated pageview report has an unexpected date."
-            raise ValueError(message)
-        edit = ProposedEdit(
-            site=active.site,
-            title=title,
-            text=pageviews.update_text(text, report),
-            summary=_edit_summary(report),
-            tags=("pageviews", report.data_date.isoformat()),
-            original_text=text,
-            report_key=(
-                report_key("pageviews", active.site.dbName(), title)
-                if report.result is not None
-                else None
-            ),
-            result=report.result,
+        while current < target:
+            data_date = current + dt.timedelta(days=1)
+            logger.info("Building pageview report for %s", data_date)
+            with active.report_attempt(title):
+                try:
+                    if current == state.data_date:
+                        target = data.prepare_downloads(
+                            active.site,
+                            data_date,
+                            target,
+                            settings=settings.source_settings(),
+                            history_days=state.history_days,
+                            missing_percent=state.missing_percent,
+                        )
+                    prepared = data.prepare_report(
+                        active.site,
+                        data_date + dt.timedelta(days=1),
+                        settings=settings.source_settings(),
+                        history_days=state.history_days,
+                        missing_percent=state.missing_percent,
+                        prefetch_stop=target + dt.timedelta(days=1),
+                    )
+                except data.PageviewsDeferredError as error:
+                    logger.warning("%s", error)
+                    active.defer(str(error))
+                    return None
+                report = pageviews.build_report(prepared, settings=settings)
+                if report.data_date != data_date:
+                    message = (
+                        "Generated pageview report has an unexpected date."
+                    )
+                    raise ValueError(message)
+                edit = ProposedEdit(
+                    site=active.site,
+                    title=title,
+                    text=pageviews.update_text(text, report),
+                    summary=_edit_summary(report),
+                    tags=("pageviews", report.data_date.isoformat()),
+                    original_text=text,
+                    report_key=(
+                        report_key("pageviews", active.site.dbName(), title)
+                        if report.result is not None
+                        else None
+                    ),
+                    result=report.result,
+                )
+                confirmed = active.publish(edit)
+                if confirmed is not True and active.dry is not True:
+                    return None
+                text = edit.text
+                current = data_date
+                logger.info("Completed pageview report for %s", data_date)
+        return record_completion(
+            key,
+            routine="pageviews",
+            through=current,
+            now=_utc_now(),
+            started_at=active.started_at,
+            confirmed_save=True,
+            dry=active.dry,
         )
-        confirmed = active.publish(edit)
-        logger.info("Completed pageview report for %s", data_date)
-        if confirmed is True and data_date >= target:
-            return record_completion(
-                key,
-                routine="pageviews",
-                through=data_date,
-                now=_utc_now(),
-                started_at=active.started_at,
-                confirmed_save=True,
-                dry=active.dry,
-            )
-    return None

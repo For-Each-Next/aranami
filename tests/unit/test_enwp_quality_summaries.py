@@ -62,7 +62,7 @@ class TestQualitySummaries(TestCase):
             quality=True,
         )
         assert summary == (
-            "2 items total. GA listed «[[:en:Good]]»; "
+            "2 articles: 1 FA, 0 FL, 1 GA. GA listed «[[:en:Good]]»; "
             "FA prompted «[[:en:Article]]»."
         )
         assert (
@@ -71,7 +71,7 @@ class TestQualitySummaries(TestCase):
                 {},
                 quality=True,
             )
-            == "1 item total. FL prompted «[[:en:List]]»."
+            == "1 article: 0 FA, 1 FL, 0 GA. FL prompted «[[:en:List]]»."
         )
 
     @staticmethod
@@ -87,7 +87,7 @@ class TestQualitySummaries(TestCase):
             {},
             quality=True,
         ) == (
-            "0 items total. GA delisted «[[:en:Good]]»; "
+            "0 articles: 0 FA, 0 FL, 0 GA. GA delisted «[[:en:Good]]»; "
             "FA removed «[[:en:Article]]»; FL removed «[[:en:List]]»."
         )
 
@@ -102,12 +102,13 @@ class TestQualitySummaries(TestCase):
             quality=True,
         )
         assert summary == (
-            "1 item total. FA prompted «[[:en:After]]» (from GA)."
+            "1 article: 1 FA, 0 FL, 0 GA. "
+            "FA prompted «[[:en:After]]» (from GA)."
         )
         assert reports.build_edit_summary(
             compare_articles(previous, current),
             {},
-        ) == ("1 item total.")
+        ) == ("1 article.")
 
     @staticmethod
     def test_class_change_uses_wikidata_or_title_without_cached_ids() -> None:
@@ -144,7 +145,8 @@ class TestQualitySummaries(TestCase):
                     {},
                     quality=True,
                 )
-                == "1 item total. FA prompted «[[:en:After]]» (from GA)."
+                == "1 article: 1 FA, 0 FL, 0 GA. "
+                "FA prompted «[[:en:After]]» (from GA)."
             )
 
     @staticmethod
@@ -157,7 +159,10 @@ class TestQualitySummaries(TestCase):
             ),
             {1: "後"},
             quality=True,
-        ) == ("1 item total. FA prompted «[[:en:After]]» ([[後]]) (from GA).")
+        ) == (
+            "1 article: 1 FA, 0 FL, 0 GA. "
+            "FA prompted «[[:en:After]]» ([[後]]) (from GA)."
+        )
 
     @staticmethod
     def test_same_class_ignores_renames_and_other_assessments() -> None:
@@ -176,7 +181,7 @@ class TestQualitySummaries(TestCase):
                 {},
                 quality=True,
             )
-            == "1 item total."
+            == "1 article: 0 FA, 0 FL, 1 GA."
         )
 
     @staticmethod
@@ -190,7 +195,7 @@ class TestQualitySummaries(TestCase):
             {},
             quality=True,
         ) == (
-            "1 item total. GA listed «[[:en:Same]]»; "
+            "1 article: 0 FA, 0 FL, 1 GA. GA listed «[[:en:Same]]»; "
             "GA delisted «[[:en:Same]]»."
         )
 
@@ -204,7 +209,7 @@ class TestQualitySummaries(TestCase):
                 {},
                 quality=True,
             )
-            == "1 item total."
+            == "1 article: 1 FA, 0 FL, 0 GA."
         )
         assert (
             reports.build_edit_summary(
@@ -212,7 +217,7 @@ class TestQualitySummaries(TestCase):
                 {},
                 quality=True,
             )
-            == "0 items total. Removed «[[:en:Before]]»."
+            == "0 articles: 0 FA, 0 FL, 0 GA. Removed «[[:en:Before]]»."
         )
 
     @staticmethod
@@ -229,4 +234,4 @@ class TestQualitySummaries(TestCase):
             quality=True,
         )
         assert len(summary.encode()) <= summary_budget
-        assert summary == "1 item total. FA prompted 1 more."
+        assert summary == "1 article: 1 FA, 0 FL, 0 GA. FA prompted 1 more."

@@ -1,6 +1,6 @@
 [project]
 name = "aranami"
-version = "0.6.2"
+version = "0.6.3"
 description = "A tool for maintaining on-wiki reports."
 readme = "README.md"
 authors = [
@@ -56,9 +56,6 @@ target-version = "py315"
 [tool.ruff.format]
 docstring-code-format = true
 docstring-code-line-length = 72
-
-[tool.ruff.per-file-target-version]
-"scripts/toolforge/validate-source.py" = "py311"
 
 [tool.ruff.lint]
 ignore = [

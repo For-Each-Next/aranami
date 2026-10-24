@@ -103,6 +103,7 @@
     "src/webservice/pages.py",
     "src/webservice/presentation.py",
     "src/webservice/public_html/aranami.svg",
+    "src/webservice/public_html/live.js",
     "src/webservice/public_html/styles.css"
   ]
 }

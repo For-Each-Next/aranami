@@ -11,10 +11,10 @@ import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import polars as pl
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
-    import polars as pl
 
 
 @dataclass(frozen=True)
@@ -58,12 +58,18 @@ class ArticleChanges:
         quality_changes: New members and matched known-class changes.
             Matched articles with an unknown previous class are omitted.
             Entries use accent-insensitive English title order.
+        quality_counts: Current FA, FL, and GA counts; empty without
+            the quality column.
+        importance_counts: Current Top and High counts; empty without
+            the importance column.
     """
 
     current_total: int
     added: tuple[OldArticle, ...]
     removed: tuple[OldArticle, ...]
     quality_changes: tuple[QualityChange, ...]
+    quality_counts: tuple[tuple[str, int], ...] = ()
+    importance_counts: tuple[tuple[str, int], ...] = ()
 
 
 class _ArticleMembership:
@@ -139,6 +145,35 @@ def _title_key(title: str) -> str:
     ).casefold()
 
 
+def _assessment_counts(
+    rows: pl.DataFrame,
+    column: str,
+    values: tuple[str, ...],
+) -> tuple[tuple[str, int], ...]:
+    """Count each distinct title's latest supplied assessment.
+
+    Args:
+        rows: Current report members, possibly with duplicate titles.
+        column: English assessment column, when available.
+        values: Assessment labels in the requested display order.
+
+    Returns:
+        Ordered counts including measured zeroes. An absent column
+        returns no observations rather than invented zeroes.
+    """
+    if column not in rows.columns:
+        return ()
+    if rows.is_empty():
+        return tuple((value, 0) for value in values)
+    assessment = (
+        pl.col(column).cast(pl.String).str.strip_chars().str.to_uppercase()
+    )
+    counts = rows.unique(subset="en_title", keep="last").select(
+        (assessment == value.upper()).sum().alias(value) for value in values
+    )
+    return tuple(counts.row(0, named=True).items())
+
+
 def compare_articles(
     old_articles: Mapping[str, OldArticle],
     new_rows: pl.DataFrame,
@@ -148,7 +183,8 @@ def compare_articles(
     Stable page IDs recognize renames even when Wikidata items change.
     Missing IDs permit Wikidata or title matching; known conflicting IDs
     preserve additions and removals. Importance and Chinese assessment
-    fields do not affect these observations.
+    fields do not affect membership or quality transitions. Current
+    English quality and importance counts accompany the differences.
 
     Args:
         old_articles: Previous report articles keyed by English title.
@@ -156,7 +192,7 @@ def compare_articles(
             page IDs and English classes may be absent or null.
 
     Returns:
-        Immutable, title-ordered differences and the current total.
+        Immutable, title-ordered differences and current counts.
         Duplicate current titles retain their last observation. Unknown
         previous classes do not establish a quality transition.
     """
@@ -195,4 +231,14 @@ def compare_articles(
         added=tuple(added),
         removed=removed,
         quality_changes=tuple(quality_changes),
+        quality_counts=_assessment_counts(
+            new_rows,
+            "en_class",
+            ("FA", "FL", "GA"),
+        ),
+        importance_counts=_assessment_counts(
+            new_rows,
+            "en_importance",
+            ("Top", "High"),
+        ),
     )

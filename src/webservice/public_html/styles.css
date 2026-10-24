@@ -255,11 +255,26 @@ main {
 
 .routine-meta {
     margin: 0;
-    padding-inline-start: 1.25rem;
+    padding: 0;
+    list-style: none;
+    font-size: .875rem;
 }
 
 .routine-meta > li {
     margin-top: 8px;
+}
+
+.relative-time {
+    margin-inline-start: .25em;
+    color: #54595d;
+    font-size: .85em;
+    white-space: nowrap;
+}
+
+.routine-status {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    overflow-x: auto;
 }
 
 .status-link {
@@ -274,20 +289,38 @@ main {
 }
 
 .page-updates {
-    max-width: 100%;
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    box-sizing: border-box;
+    width: min(960px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    overflow: auto;
+    padding: 20px;
+    border: 1px solid #c1d1cc;
+    border-radius: 12px;
+    background: #fff;
     color: #2d4b42;
+    box-shadow: 0 12px 48px #183c3433;
 }
 
-.page-updates > summary {
-    cursor: pointer;
+.page-updates::backdrop {
+    background: #183c3440;
 }
 
-.page-updates > h4 {
-    margin: 12px 0;
+.popup-heading {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 16px;
 }
 
-.page-updates[open] > .table-scroll {
-    margin-bottom: 12px;
+.popup-heading > h3 {
+    margin: 0;
+}
+
+.popup-heading > button {
+    flex-shrink: 0;
 }
 
 button, input, select {
