@@ -226,7 +226,11 @@ class _PublicViews:
                 return _html(content, locale)
         if path == "/about/":
             response = _html(
-                pages.render_about(_configuration(), locale),
+                pages.render_about(
+                    _configuration(),
+                    locale,
+                    status=saved_status(self.runtime),
+                ),
                 locale,
             )
         else:

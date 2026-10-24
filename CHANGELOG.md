@@ -4,6 +4,23 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.1 (2026-10-24 10:47 UTC)
+
+Overview: Corrected Pageviews new-entry trends, improved daily-report labels
+and dashboard navigation, added an About-page server monitor, and simplified
+generated wiki source.
+
+- Kept continuous leading Pageviews absence unranked and marked first-period
+  entries New, preserving zeroes for later gaps and matching previous periods.
+- Displayed confirmed daily report dates for New pages and Pageviews on the
+  website, including verified current reports and all three interface languages.
+- Removed one JSON indentation level and added explicit end-invocation comments
+  to generated HOT v2 lists while preserving their decoded report data.
+- Moved dashboard navigation beneath the title and added a section directory
+  linking only to visible report sections.
+- Added a live About-page server monitor with saved runtime environment,
+  CPU and memory usage, resource limits, and explicit stale observations.
+
 ### 0.7.0 (2026-10-24 09:40 UTC)
 
 Overview: Moved the dashboard to Flask and Waitress, exposed live execution

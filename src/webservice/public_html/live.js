@@ -5,7 +5,7 @@
     const clockId = document.getElementById("tool-status")
         ? "tool-status" : "live-server-status";
     if (!document.getElementById(clockId) || !document.getElementById("live-uptime")) return;
-    const regionIds = ["tool-status", "live-uptime", "live-server-status"]
+    const regionIds = ["tool-status", "live-uptime", "live-server-status", "server-runtime"]
         .filter((id) => document.getElementById(id));
 
     const interval = 5000;
@@ -46,10 +46,12 @@
         const expires = Date.parse(root.dataset.scheduleExpires);
         const stale = Number.isFinite(expires) && now > expires;
         if (stale) {
-            root.querySelectorAll("[data-schedule-time]").forEach((node) => {
-                node.textContent = node.dataset.staleText || root.dataset.scheduleStale;
-                node.removeAttribute("data-schedule-time");
-            });
+            for (const id of regionIds) {
+                document.getElementById(id).querySelectorAll("[data-schedule-time]").forEach((node) => {
+                    node.textContent = node.dataset.staleText || root.dataset.scheduleStale;
+                    node.removeAttribute("data-schedule-time");
+                });
+            }
             root.querySelectorAll("[data-progress-active]").forEach((node) => {
                 node.hidden = true;
             });

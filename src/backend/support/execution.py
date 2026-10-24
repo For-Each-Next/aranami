@@ -85,6 +85,7 @@ class _TaskResult:
         started_monotonic: Clock start shared with publication timing.
         run_id: Unique identity guarding the latest routine status.
         progress: Optional bounded activity for this running routine.
+        report_date: Latest daily report confirmed saved or unchanged.
     """
 
     name: str
@@ -101,6 +102,7 @@ class _TaskResult:
         repr=False,
     )
     run_id: str = field(default_factory=lambda: uuid4().hex)
+    report_date: dt.date | None = None
     progress: dict[str, object] | None = field(
         default_factory=lambda: {
             "phase": "preparing",
@@ -155,6 +157,9 @@ def _save_task_status(task: _TaskResult, *, dry: bool) -> None:
         ),
         "run_id": task.run_id,
         "progress": task.progress if task.finished_at is None else None,
+        "report_date": (
+            task.report_date.isoformat() if task.report_date else None
+        ),
     })
     if task.finished_at is None:
         record.update({
@@ -366,6 +371,19 @@ class RuntimeContext[EditT: Publication]:
             outcome,
             confirmed_edits,
         )
+
+    def confirm_report_date(self, day: dt.date | None) -> None:
+        """Retain this routine's latest verified daily report date.
+
+        Call only after a save or an unchanged-report check succeeds.
+        Failed attempts and preparation progress cannot establish it.
+
+        Args:
+            day: Actual report date, or none when no date is known.
+        """
+        task = self._active_task
+        if day is not None and task is not None:
+            task.report_date = max(day, task.report_date or day)
 
     def start_task(self, name: str) -> _TaskResult:
         """Start one independently executed routine in this run.
@@ -701,6 +719,7 @@ class RuntimeContext[EditT: Publication]:
             "updated" if outcome == "saved" else "no_update",
             confirmed_edits=int(outcome == "saved"),
         )
+        self.confirm_report_date(_publication_date(edit))
         if (
             outcome == "saved"
             and self._active_task is not None

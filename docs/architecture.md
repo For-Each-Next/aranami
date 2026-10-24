@@ -143,13 +143,21 @@ The counters are both null or observed integers satisfying
 update progress; article counters are recorded every hundred items and at
 completion. These callbacks add no source reads and use the same locked
 stale-run protections as other status updates. Completed outcomes clear
-progress; older records remain readable, with a generic preparing state while
-running. Previews remain isolated from production observations.
+progress and retain an optional `report_date` from confirmed publication or a
+verified unchanged daily report. Preparation dates never establish completion.
+Older records remain readable, with a generic preparing state while running.
+Previews remain isolated from production observations.
 
 `state/schedule-status.json` separately records actual scheduler
 next-run times, configuration identity, and running/paused/stopped state.
 Scheduler events and a thirty-second local heartbeat refresh it without
-source requests. The website shows the observed next execution and treats
+source requests. Its optional validated `runtime` object records the hub's
+Python, operating system, architecture, cgroup memory use/limit, CPU use, and CPU
+allocation. CPU percentages compare observed usage counters over elapsed time;
+100% means one fully used core. Missing resource files remain unknown.
+The About page displays these saved observations and live monitor state, with
+five-second synchronization and stale measurements hidden after 120 seconds.
+The website shows the observed next execution and treats
 missing or stale observations as unknown. Manual one-shot work does not rewrite
 the scheduler snapshot. Per-destination observations distinguish a
 confirmed update, no change, failure, deferral, and an unconfirmed external
@@ -326,6 +334,10 @@ never as project positions. Derive site rank from the full filtered daily
 top list before joining membership; retain raw ranks as tie breakers,
 measured zeroes, nulls, and the verified non-article exclusions.
 
+The dashboard's contents navigation sits beneath its title, links only to
+visible sections, and replaces the former footer dashboard/maintenance links.
+Successful daily New pages and Pageviews cards include their confirmed report
+date, including when the existing report was verified current.
 Routine cards show localized state text, the actual start time while running
 or finish time after completion, configured report links, and the scheduled
 next execution from the monitor snapshot. Hide the next-execution row while running;
@@ -521,10 +533,12 @@ ready, downloads full histories from the last published marker.
 Fetch at least the configured 800-day history buffer by default, expanding
 it for the required comparisons and catch-up dates. Saved Parquet coverage
 never suppresses a request or fills missing fresh response dates in a report.
-After endpoint validation, gaps in successful histories contribute provisional
-zeroes to daily totals, ranks, and averages. Average denominators include all
-calendar days. Bind this permission to the accepted batch's site, project,
-membership, history bounds, and threshold; arbitrary prefetched or cached
+After endpoint validation, gaps after an article's first actual observation
+contribute provisional zeroes to daily totals, ranks, and averages. Continuous
+absence from the beginning of the fetched history remains missing and unranked.
+Average denominators include all calendar days. Bind this permission to the
+accepted batch's site, project, membership, history bounds, and threshold;
+arbitrary prefetched or cached
 data cannot enable it. Retain current/previous observation flags with rankings
 so provisional zeroes do not inflate observed-article counts. Raw histories
 never gain synthetic measurements. Normal downloads for later report dates
@@ -572,8 +586,12 @@ the `工作组` suffix; the visible heading remains `我的世界工作组`.
 Each item contains `title`, a two-string `assessments` array ordered
 quality/importance, `views`, `rank`, `previous_rank`, and optional `site_rank`.
 Absent assessments use `未评` and `未知`; arrays never contain null holes.
-Previous ranks always have a key, with JSON null for unknown values; an unknown
-previous rank does not prove a new entry. An item with no actual observations
+Rank changes compare the immediately preceding non-overlapping interval of the
+same duration, including task-force lists; they never compare yesterday's
+overlapping list. Previous ranks always have a key, with JSON null for unknown
+values and `-1` for New when the full fetched history's first observation falls
+in the current interval after continuous leading absence. An unknown previous
+rank alone does not prove a new entry. An item with no actual observations
 in its interval emits `views: null`; an observed zero remains zero. This display
 distinction leaves the backend's provisional-zero calculations unchanged.
 Unknown population totals also remain null.
@@ -581,7 +599,8 @@ Display limits leave complete retained result tables unchanged. Escape wikitext
 delimiters inside JSON strings without changing their decoded values, and keep
 structural closing braces separated by whitespace. Emit each metadata field on
 its own line, keep date and assessment arrays inline, and emit each item object on
-one line for readable wiki diffs.
+one line for readable wiki diffs. Start JSON on the invocation's `data= {` line,
+indent only nested members, and close with `} <!-- #endinvoke -->}}`.
 
 The on-wiki `Module:PJ:VG/HOT/v2` renders bot-generated
 data directly using `mw.text.jsonDecode`, without a second validation or alias

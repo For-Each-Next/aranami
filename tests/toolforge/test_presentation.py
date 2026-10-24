@@ -1015,6 +1015,119 @@ class LiveVisibilityTests(unittest.TestCase):
         assert card is not None
         return card[1]
 
+    def test_completed_daily_reports_show_their_confirmed_date(self) -> None:
+        """Use dated success labels after verified daily work."""
+        status = self.data["status"]
+        config = self.data["config"]["routines"]["routines"]
+        original = status["routines"]["routines"]["pageviews"]
+        for routine in ("pageviews", "new_pages"):
+            config[routine] = config["pageviews"]
+            status["routines"]["routines"][routine] = original
+            for outcome in ("updated", "no_update"):
+                original.update(status=outcome, report_date="2026-10-17")
+                for locale, label in (
+                    ("en", "Updated report for October 17, 2026"),
+                    ("zh-hans", "已更新2026年10月17日报告"),
+                    ("zh-hant", "已更新2026年10月17日報告"),
+                ):
+                    with self.subTest(
+                        routine=routine,
+                        outcome=outcome,
+                        locale=locale,
+                    ):
+                        for output in self._outputs(locale):
+                            card = self._card(output, routine)
+                            assert label in card
+                            assert "✅" in card
+
+    def test_contents_moves_navigation_beneath_the_title(self) -> None:
+        """Link visible dashboard sections beneath the title."""
+        for locale in ("en", "zh-hans", "zh-hant"):
+            output = self._outputs(locale)[0]
+            header = output.split("</header>")[0]
+            footer = output.split("<footer>")[1]
+            assert header.index("</h1>") < header.index('class="page-toc"')
+            for anchor in (
+                "#homepage-pageviews",
+                "#homepage-recognized",
+                "#homepage-dyk",
+                "#homepage-news_history",
+                "#backlog",
+                "#tool-status",
+            ):
+                assert f'href="{anchor}"' in header
+            assert 'href="/#backlog"' not in footer
+            assert 'href="/"' not in footer
+        snapshot = self.data["snapshot"]
+        snapshot["pageviews"]["items"] = []
+        snapshot["backlog"]["total"] = 0
+        output = self._outputs("en")[0]
+        header = output.split("</header>")[0]
+        assert 'href="#homepage-pageviews"' not in header
+        assert 'href="#backlog"' not in header
+
+    def test_about_monitor_uses_saved_environment_and_fresh_usage(
+        self,
+    ) -> None:
+        """Refresh saved resource facts and hide stale measurements."""
+        status = self.data["status"]
+        status["schedule"]["runtime"] = {
+            "python": "3.15.0",
+            "system": "Linux",
+            "machine": "x86_64",
+            "memory_bytes": 104_857_600,
+            "memory_limit_bytes": 4_294_967_296,
+            "cpu_percent": 12.5,
+            "cpu_limit": 2,
+        }
+        for locale in ("en", "zh-hans", "zh-hant"):
+            initial = render_about(
+                self.data["config"],
+                locale,
+                status=status,
+                now=self.now,
+            )
+            live = self._outputs(locale)[1]
+            for output in (initial, live):
+                assert 'id="server-runtime"' in output
+                assert "3.15.0" in output
+                assert "Linux · x86_64" in output
+                assert "100.0 MiB" in output
+                assert "4.0 GiB" in output
+                assert "12.5%" in output
+            assert 'src="/live.js"' in initial
+            assert 'id="live-server-status"' in initial
+        stale = render_about(
+            self.data["config"],
+            "en",
+            status=status,
+            now=self.now + dt.timedelta(minutes=3),
+        )
+        assert "12.5%" not in stale
+        assert "100.0 MiB" not in stale
+        assert "3.15.0" in stale
+
+    def test_unconfirmed_daily_dates_keep_the_actual_failure_label(
+        self,
+    ) -> None:
+        """Never show a success date for failed or deferred work."""
+        event = self.data["status"]["routines"]["routines"]["pageviews"]
+        for outcome, label in (
+            ("failed", "Failed"),
+            ("deferred", "Waiting to retry"),
+            ("unknown", "Result unavailable"),
+        ):
+            event.update(status=outcome, report_date="2026-10-17")
+            for output in self._outputs("en"):
+                card = self._card(output)
+                assert label in card
+                assert "Updated report for" not in card
+        event.update(status="updated", report_date=None)
+        for output in self._outputs("en"):
+            card = self._card(output)
+            assert "Updated report for" not in card
+            assert ">Updated</button>" in card
+
     def test_running_progress_uses_saved_dates_and_counts(self) -> None:
         """Separate dated status labels from phase and counters."""
         status = self.data["status"]

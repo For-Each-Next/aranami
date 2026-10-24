@@ -59,12 +59,26 @@ _STATES = {
 _STATE_ICONS = {
     "running": "⏳",
     "updated": "✅",
-    "no_update": "\u2796",
+    "no_update": "🆗",
     "failed": "❌",
     "deferred": "⏸️",
     "unknown": "❔",
     "unconfirmed": "❔",
 }
+
+
+def _completed_daily_report(routine: str, event: Record | None) -> bool:
+    """Identify successful daily work with a confirmed report date.
+
+    Returns:
+        Whether the saved outcome supports a dated completion label.
+    """
+    return (
+        routine in {"new_pages", "pageviews"}
+        and event is not None
+        and event.get("status") in {"updated", "no_update"}
+        and bool(event.get("report_date"))
+    )
 
 
 def _time(value: object, *, seconds: bool = False) -> Markup:
@@ -242,6 +256,11 @@ class _Page:
             f"state.{_STATES[event['status']]}" if event else "ops.no_record",
         )
         label = fallback
+        if _completed_daily_report(routine, event):
+            label = self.text(
+                "state.UpdatedReportDate",
+                date=self.interface.date(event["report_date"]),
+            )
         if progress is not None:
             label = (
                 self.text(
@@ -271,6 +290,7 @@ class _Page:
         footer: str | Markup = "",
         *,
         live: bool = False,
+        navigation: Markup | None = None,
     ) -> str:
         """Wrap content with shared metadata, navigation, and styles.
 
@@ -282,8 +302,6 @@ class _Page:
             *(
                 tag("a", self.text(key), href=path)
                 for path, key in (
-                    ("/", "nav.dashboard"),
-                    ("/#backlog", "nav.backlog"),
                     ("/about/", "nav.about"),
                     ("/logs/", "nav.logs"),
                 )
@@ -331,6 +349,15 @@ class _Page:
                     class_="brand",
                 ),
                 tag("h1", heading),
+                navigation
+                if navigation is not None
+                else tag(
+                    "nav",
+                    tag("a", self.text("nav.dashboard"), href="/"),
+                    tag("a", self.text("nav.backlog"), href="/#backlog"),
+                    class_="page-toc",
+                    aria_label=self.text("nav.contents"),
+                ),
                 class_="shell",
             ),
             class_="masthead",
@@ -897,7 +924,12 @@ class _Page:
                     "li",
                     tag(
                         "span",
-                        _STATE_ICONS.get((event or {}).get("status"), "❔"),
+                        "✅"
+                        if _completed_daily_report(identifier, event)
+                        else _STATE_ICONS.get(
+                            (event or {}).get("status"),
+                            "❔",
+                        ),
                         aria_hidden="true",
                     ),
                     " ",
@@ -1315,6 +1347,29 @@ def render_dashboard(
     elif snapshot.get("errors"):
         notice = tag("p", page.text("notice.partial"), class_="notice")
     snapshot = snapshot or {}
+    sections = homepage_sections(snapshot)
+    navigation = tag(
+        "nav",
+        tag("a", page.text("nav.dashboard"), href="/", aria_current="page"),
+        *(
+            tag(
+                "a",
+                page.text(
+                    "pageviews.heading"
+                    if section["key"] == "pageviews"
+                    else f"homepage.{section['key']}",
+                ),
+                href=f"#homepage-{section['key']}",
+            )
+            for section in sections
+        ),
+        tag("a", page.text("nav.backlog"), href="#backlog")
+        if (snapshot.get("backlog") or {}).get("total") != 0
+        else fragment(),
+        tag("a", page.text("ops.heading"), href="#tool-status"),
+        class_="page-toc",
+        aria_label=page.text("nav.contents"),
+    )
     body = fragment(
         notice,
         page.highlights(snapshot),
@@ -1326,6 +1381,7 @@ def render_dashboard(
         body,
         footer,
         live=True,
+        navigation=navigation,
     )
 
 
@@ -1349,6 +1405,12 @@ def render_live_status(
     return str(
         fragment(
             *_live_status(
+                _Page(locale),
+                status or {},
+                config or {},
+                now or dt.datetime.now(dt.UTC),
+            ),
+            _runtime_status(
                 _Page(locale),
                 status or {},
                 config or {},
@@ -1436,13 +1498,109 @@ def render_maintenance(
     return page.document(heading, body)
 
 
-def render_about(config: Record | None, locale: str) -> str:
-    """Explain the tool to readers without technical details.
+def _runtime_status(
+    page: _Page,
+    status: Record,
+    config: Record,
+    now: dt.datetime,
+) -> Markup:
+    """Render saved hub environment and fresh resource observations.
 
     Returns:
-        Escaped HTML for the selected presentation content.
+        A live region with explicit unknown values for stale usage.
+    """
+    snapshot = status.get("schedule") or {}
+    definitions = (config.get("routines") or {}).get("routines", {})
+    schedule = schedule_state(snapshot, definitions, now)
+    runtime = snapshot.get("runtime") or {}
+    unknown = page.text("ops.unavailable")
+    fresh = schedule["state"] in {"running", "paused"}
+    memory = runtime.get("memory_bytes") if fresh else None
+    limit = runtime.get("memory_limit_bytes") if fresh else None
+    cpu = runtime.get("cpu_percent") if fresh else None
+    cpu_limit = runtime.get("cpu_limit") if fresh else None
+    rows = (
+        ("platform", "Wikimedia Toolforge", False),
+        ("python", runtime.get("python") or unknown, False),
+        (
+            "environment",
+            " · ".join(
+                value
+                for key in ("system", "machine")
+                if (value := runtime.get(key))
+            )
+            or unknown,
+            False,
+        ),
+        (
+            "memory",
+            readable_size(memory) if memory is not None else unknown,
+            True,
+        ),
+        (
+            "memory_limit",
+            readable_size(limit) if limit is not None else unknown,
+            True,
+        ),
+        ("cpu", f"{cpu:.1f}%" if cpu is not None else unknown, True),
+        (
+            "cpu_limit",
+            f"{cpu_limit:g}" if cpu_limit is not None else unknown,
+            True,
+        ),
+    )
+    return tag(
+        "div",
+        tag("h3", page.text("server.environment_heading")),
+        tag("p", page.text("server.usage_note"), class_="context"),
+        tag(
+            "table",
+            tag(
+                "tbody",
+                *(
+                    tag(
+                        "tr",
+                        tag("th", page.text(f"server.{key}"), scope="row"),
+                        tag(
+                            "td",
+                            value,
+                            data_schedule_time=True
+                            if usage and fresh
+                            else None,
+                            data_stale_text=unknown if usage else None,
+                        ),
+                    )
+                    for key, value, usage in rows
+                ),
+            ),
+            class_="server-metrics",
+        ),
+        id="server-runtime",
+    )
+
+
+def render_about(
+    config: Record | None,
+    locale: str,
+    *,
+    status: Record | None = None,
+    now: dt.datetime | None = None,
+) -> str:
+    """Explain the tool and show its observed server environment.
+
+    Args:
+        config: Current application version and routine configuration.
+        locale: Negotiated interface language.
+        status: Validated saved monitor and resource observations.
+        now: Optional clock for deterministic freshness checks.
+
+    Returns:
+        An informative About page with a read-only live server monitor.
     """
     page = _Page(locale)
+    config, status = config or {}, status or {}
+    now = now or dt.datetime.now(dt.UTC)
+    _, footer, server = _live_status(page, status, config, now)
     sections = [
         tag(
             "section",
@@ -1457,10 +1615,11 @@ def render_about(config: Record | None, locale: str) -> str:
         tag("p", page.text("about.intro")),
         *sections,
         tag("p", page.text("about.freshness")),
+        server,
+        _runtime_status(page, status, config, now),
         class_="prose",
     )
-    version = (config or {}).get("version") or page.text("ops.unavailable")
-    return page.document(page.text("nav.about"), body, f"Aranami · {version}")
+    return page.document(page.text("nav.about"), body, footer, live=True)
 
 
 def render_logs(

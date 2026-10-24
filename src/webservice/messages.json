@@ -44,6 +44,56 @@
     "zh-hans": "专题看板",
     "zh-hant": "專題看板"
   },
+  "server.environment_heading": {
+    "en": "Environment and resource use",
+    "zh-hans": "运行环境与资源使用",
+    "zh-hant": "執行環境與資源使用"
+  },
+  "server.usage_note": {
+    "en": "Resource use of the data hub, sampled every 30 seconds. One fully used CPU core is 100%.",
+    "zh-hans": "数据中心的资源使用情况，每30秒采样一次。一个CPU核心满载为100%。",
+    "zh-hant": "資料中心的資源使用情況，每30秒取樣一次。一個CPU核心滿載為100%。"
+  },
+  "server.platform": {
+    "en": "Hosting",
+    "zh-hans": "托管平台",
+    "zh-hant": "託管平台"
+  },
+  "server.python": {
+    "en": "Python",
+    "zh-hans": "Python",
+    "zh-hant": "Python"
+  },
+  "server.environment": {
+    "en": "System and architecture",
+    "zh-hans": "系统与架构",
+    "zh-hant": "系統與架構"
+  },
+  "server.memory": {
+    "en": "Memory in use",
+    "zh-hans": "已用内存",
+    "zh-hant": "已用記憶體"
+  },
+  "server.memory_limit": {
+    "en": "Memory allocation",
+    "zh-hans": "内存配额",
+    "zh-hant": "記憶體配額"
+  },
+  "server.cpu": {
+    "en": "CPU use",
+    "zh-hans": "CPU使用率",
+    "zh-hant": "CPU使用率"
+  },
+  "server.cpu_limit": {
+    "en": "Allocated CPU cores",
+    "zh-hans": "CPU核心配额",
+    "zh-hant": "CPU核心配額"
+  },
+  "nav.contents": {
+    "en": "Contents",
+    "zh-hans": "目录",
+    "zh-hant": "目錄"
+  },
   "about.intro": {
     "en": "Aranami helps Chinese Wikipedia’s video-game editors find articles to improve and keep track of their project. It brings useful lists and recent highlights together in one place.",
     "zh-hans": "Aranami帮助中文维基百科电子游戏专题的编辑寻找可改善的条目、了解专题动态，将实用列表和近期亮点集中展示。",
@@ -703,6 +753,11 @@
     "en": "Updated",
     "zh-hans": "已更新",
     "zh-hant": "已更新"
+  },
+  "state.UpdatedReportDate": {
+    "en": "Updated report for {date}",
+    "zh-hans": "已更新{date}报告",
+    "zh-hant": "已更新{date}報告"
   },
   "state.NoUpdate": {
     "en": "No update needed",

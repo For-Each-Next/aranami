@@ -236,6 +236,7 @@ def run(
         current = state.data_date
         logger.info("Pageview report is at %s; target is %s", current, target)
         if current >= target:
+            active.confirm_report_date(current)
             return record_completion(
                 key,
                 routine="pageviews",
@@ -296,6 +297,7 @@ def run(
                     return None
                 text = edit.text
                 current = data_date
+                active.confirm_report_date(current)
                 logger.info("Completed pageview report for %s", data_date)
         return record_completion(
             key,

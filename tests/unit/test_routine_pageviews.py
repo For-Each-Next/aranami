@@ -45,7 +45,10 @@ def _sections(text: str) -> list[dict]:
     for invocation in mwparserfromhell.parse(text).filter_templates():
         assert str(invocation.name) == "#invoke:PJ:VG/HOT/v2"
         assert str(invocation.get("1").value) == "main"
-        sections.append(json.loads(str(invocation.get("data").value)))
+        encoded = str(invocation.get("data").value).strip()
+        sections.append(
+            json.loads(encoded.removesuffix("<!-- #endinvoke -->")),
+        )
     return sections
 
 
@@ -400,10 +403,13 @@ class TestJSONRendering(TestCase):
         ).filter_templates()
         for invocation in templates:
             encoded = str(invocation.get("data").value).strip()
+            assert encoded.endswith("} <!-- #endinvoke -->")
+            assert "|data= {\n" in str(invocation)
+            encoded = encoded.removesuffix("<!-- #endinvoke -->").rstrip()
             payload = json.loads(encoded)
             lines = encoded.splitlines()
             item_lines = [
-                line for line in lines if line.startswith('    {"title":')
+                line for line in lines if line.startswith('  {"title":')
             ]
             assert len(item_lines) == len(payload["items"])
             assert [
@@ -411,7 +417,8 @@ class TestJSONRendering(TestCase):
                 for line in item_lines
             ] == payload["items"]
             assert '"assessments": ["典范", "高"]' in item_lines[0]
-            assert '    "end": [2026, 9, 30],' in lines
+            assert '"metadata": {' in lines
+            assert '  "end": [2026, 9, 30],' in lines
             assert "}}" not in encoded
 
     def test_empty_display_uses_a_compact_empty_array(self) -> None:
@@ -433,7 +440,7 @@ class TestJSONRendering(TestCase):
                 task_forces=(),
             ),
         )
-        assert '  "items": []' in report.text.splitlines()
+        assert '"items": []' in report.text.splitlines()
         assert _sections(report.text)[0]["items"] == []
 
     def test_each_list_has_only_its_metadata_and_items(self) -> None:
@@ -705,6 +712,119 @@ class TestPeriodAggregation(TestCase):
         assert [items[0]["previous_rank"]] == [2]
         assert all("old_views" not in item for item in items)
         assert [item["title"] for item in items] == ["A", "B", "C"]
+
+
+class TestPreviousPeriods(TestCase):
+    """Compare matching periods and preserve new-entry evidence."""
+
+    def test_leading_absence_is_new_for_every_period_and_task_force(
+        self,
+    ) -> None:
+        """Distinguish leading absence from later gaps and zeroes."""
+        stop = dt.date(2026, 10, 22)
+        articles = pl.DataFrame({
+            "title": ["Established", "New", "Gap", "Unavailable"],
+            "class": ["丙"] * 4,
+            "importance": ["低"] * 4,
+        })
+        for config in (*job.PROJECT_PERIODS, job.TASK_FORCE_PERIOD):
+            with self.subTest(period=config.key, limit=config.limit):
+                start = stop - config.delta
+                previous = start - config.delta
+                histories = [
+                    [(previous, 30), (stop - dt.timedelta(days=1), 10)],
+                    [(start, 0), (stop - dt.timedelta(days=1), 50)],
+                    [
+                        (previous - dt.timedelta(days=1), 5),
+                        (stop - dt.timedelta(days=1), 1),
+                    ],
+                    [],
+                ]
+                with patch.object(
+                    pageviews.pageviews,
+                    "fetch_data_dataframe",
+                    side_effect=[
+                        pl.DataFrame(
+                            rows,
+                            schema={"date": pl.Date, "pageview": pl.Int64},
+                            orient="row",
+                        )
+                        for rows in histories
+                    ],
+                ):
+                    views = pageviews.aggregate_views(
+                        _site(),
+                        articles.get_column("title").to_list(),
+                        pageviews.report_periods(stop, (config,)),
+                        cache=MagicMock(),
+                        zero_missing=True,
+                    )
+                text, top, gain = _section(
+                    articles,
+                    views,
+                    stop,
+                    config,
+                    "force" if config is job.TASK_FORCE_PERIOD else "vg",
+                )
+                items = {item["title"]: item for item in _items(text)}
+                assert items["New"]["previous_rank"] == -1
+                gap_rank = 2
+                assert items["Gap"]["previous_rank"] == gap_rank
+                assert items["Established"]["previous_rank"] == 1
+                assert items["Unavailable"]["previous_rank"] is None
+                assert items["Unavailable"]["rank"] is None
+                assert top == "New"
+                assert gain is None
+
+    @staticmethod
+    def test_monthly_example_uses_august_to_september_comparison() -> None:
+        """Mark the reported monthly rank 64 as new to its interval."""
+        stop = dt.date(2026, 10, 22)
+        config = job.PROJECT_PERIODS[2]
+        previous, current = pageviews.report_periods(stop, (config,))
+        assert previous == (dt.date(2026, 8, 22), dt.date(2026, 9, 22))
+        assert current == (dt.date(2026, 9, 22), stop)
+        titles = [f"Leader {index}" for index in range(63)] + ["80億分之1"]
+        articles = pl.DataFrame({
+            "title": titles,
+            "class": ["丙"] * len(titles),
+            "importance": ["低"] * len(titles),
+        })
+        views = pl.DataFrame(
+            [
+                (title, start, end, value, first)
+                for title in titles
+                for start, end, value, first in (
+                    (
+                        *previous,
+                        None if title == "80億分之1" else 7000,
+                        dt.date(2026, 10, 19)
+                        if title == "80億分之1"
+                        else previous[0],
+                    ),
+                    (
+                        *current,
+                        6515 if title == "80億分之1" else 7000,
+                        dt.date(2026, 10, 19)
+                        if title == "80億分之1"
+                        else previous[0],
+                    ),
+                    (
+                        dt.date(2026, 9, 21),
+                        dt.date(2026, 10, 21),
+                        9000,
+                        previous[0],
+                    ),
+                )
+            ],
+            schema={**pageviews._VIEWS_SCHEMA, "first_observed": pl.Date},
+            orient="row",
+        )
+        text, _, _ = _section(articles, views, stop, config, "vg")
+        item = _items(text)[-1]
+        assert item["title"] == "80億分之1"
+        assert item["rank"] == len(titles)
+        assert item["previous_rank"] == -1
 
 
 class TestSiteTopRanks(TestCase):
