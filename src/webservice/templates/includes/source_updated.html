@@ -1,0 +1,1 @@
+{% if updated %}<p class="source-updated">{{ t.snapshot.updated }} {% with time=updated.time %}{% include "includes/time.html" %}{% endwith %}{% if updated.attribution %}<span class="extract-attribution"> · {{ updated.before }}<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>{{ updated.after }}</span>{% endif %}</p>{% endif %}

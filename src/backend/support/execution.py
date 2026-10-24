@@ -16,6 +16,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
+from backend.support.events import event_extra
 from backend.support.failure_status import exception_failure_details
 from backend.support.logs import open_run_log
 from backend.support.report_status import ReportUpdate, report_update_key
@@ -798,7 +799,12 @@ def routine_run[EditT: Publication](
         logger = _LOGGER
         task = active.start_task(name)
         started = task.started_monotonic
-        logger.info("Started %s%s.", name, " preview" if active.dry else "")
+        logger.info(
+            "Started %s%s.",
+            name,
+            " preview" if active.dry else "",
+            extra=event_extra("routine_started", routine=name, dry=active.dry),
+        )
         _save_task_status(task, dry=active.dry)
         try:
             with progress_updates(
@@ -846,6 +852,21 @@ def routine_run[EditT: Publication](
                 if result["updated"] is not None
                 else "unknown",
                 result["duration_seconds"],
-                extra={"routine_result": result, "run_id": task.run_id},
+                extra={
+                    "routine_result": result,
+                    "run_id": task.run_id,
+                    **event_extra(
+                        "routine_finished",
+                        routine=name,
+                        dry=active.dry,
+                        status=(
+                            "unconfirmed"
+                            if result["status"] == "unknown"
+                            else result["status"]
+                        ),
+                        updated=result["updated"],
+                        duration_seconds=result["duration_seconds"],
+                    ),
+                },
                 exc_info=task.status == "failed",
             )

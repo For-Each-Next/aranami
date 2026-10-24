@@ -10,10 +10,16 @@ or malformed observations remain unavailable instead of becoming zeroes.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import re
 from typing import TYPE_CHECKING
 
+from backend.support.events import (
+    MAX_EVENT_FILE_BYTES,
+    MAX_EVENT_LINE_BYTES,
+    validate_event,
+)
 from backend.support.report_status import read_report_status
 from backend.support.routine_status import read_routine_status
 from backend.support.server_status import validate_runtime
@@ -28,129 +34,12 @@ if TYPE_CHECKING:
 MAX_LOG_BYTES = 128 * 1024 * 1024
 _SCAN_BYTES = 8 * 1024 * 1024
 _READ_BYTES = 64 * 1024
-_LINE_BYTES = 16 * 1024
+_LINE_BYTES = MAX_EVENT_LINE_BYTES
 _DISPLAY_BYTES = 256 * 1024
-_MAX_LINES = 100
+_MAX_EVENTS = 100
 _QUERY_BYTES = 1024
 _LOG_NAME = re.compile(r"aranami\.(\d{4}-\d{2}-\d{2})\.log")
 _STATUS_BYTES = 1024 * 1024
-_LOG_RECORD = re.compile(
-    r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}Z) "
-    r"(?:INFO|WARNING|ERROR|CRITICAL) \[([\w.]+)\]: (.*)",
-)
-_ROUTINE_NAMES = {
-    "new_pages": "new-page reports",
-    "pageviews": "Pageviews reports",
-    "dyks": "DYK reports",
-    "enwp_key_articles": "English-comparison reports",
-    "assessment_lists": "assessment lists",
-    "pexbot": "PexBot reports",
-}
-_ROUTINE_START = re.compile(r"Started (\w+)( preview)?\.")
-_ROUTINE_FINISH = re.compile(
-    r"Finished (\w+)( preview)?: ([^.]+)\. Confirmed edits: (?:\d+|unknown)\. "
-    r"Duration: [\d.]+ seconds\.",
-)
-# Only known lifecycle emitters enter the public view. Full diagnostics,
-# including source requests and tracebacks, remain in the download.
-_SUMMARY_PATTERNS = {
-    "backend.hub": (
-        (r"Aranami \S+ backend hub started\.", "Server started."),
-        (
-            (
-                r"Aranami backend hub stopping \([^)]+\); "
-                r"waiting for active work\."
-            ),
-            "Server shutting down; waiting for active work.",
-        ),
-        (r"Aranami \S+ backend hub stopped\.", "Server stopped."),
-        (
-            r"Website refresh failed after wiki task failure \([^)]+\)\.",
-            "Failed to refresh website data.",
-        ),
-    ),
-    "backend.monitor": (
-        (r"Aranami monitor started .+", "Report scheduler started."),
-        (r"Aranami monitor stopped\.", "Report scheduler stopped."),
-    ),
-    "backend.server": (
-        (r"Website collector started\.", "Website updates started."),
-        (r"Website collector stopped\.", "Website updates stopped."),
-        (r"Website refresh started\.", "Started checking website updates."),
-        (
-            r"Website refresh failed after .+",
-            "Failed to refresh website data; previous data retained.",
-        ),
-        (
-            r"Website refresh completed in [\d.]+ seconds\.",
-            "Finished checking website updates.",
-        ),
-        (
-            r"Website refresh completed in [\d.]+ seconds with (\d+) .+",
-            (
-                r"Website updates finished with \1 source failures; "
-                "previous data retained for failed reports."
-            ),
-        ),
-        (
-            r"Website refresh completed in [\d.]+ seconds; .+",
-            "Website update outcome is unconfirmed.",
-        ),
-    ),
-    "backend.website.collect": (
-        (r"Refreshing website (.+) data\.", r"Started updating website \1."),
-        (r"Updated website (.+): \d+ records\.", r"Updated website \1."),
-        (
-            r"Could not refresh website (.+) \([^)]+\)\..+",
-            r"Failed to update website \1; previous data retained.",
-        ),
-    ),
-    "updater.jobs._execution": (
-        (r"Updating (.+) on (\S+): .+", r"Started updating \1 on \2."),
-        (r"Saved (.+) on (\S+)\.", r"Updated \1 on \2."),
-        (
-            r"No changes needed for (.+) on (\S+)\.",
-            r"No changes needed for \1 on \2.",
-        ),
-    ),
-    "updater.jobs.assessment_lists": (
-        (r"Starting assessment list (.+)", r"Started updating \1."),
-        (r"Assessment list failed: (.+)", r"Failed to update \1."),
-    ),
-    "updater.jobs.enwp_key_articles": (
-        (
-            r"English-comparison publication failed: (.+)",
-            r"Failed to update \1.",
-        ),
-    ),
-    "updater.jobs.pexbot": (
-        (
-            r"PexBot report failed: (.+)\.",
-            r"Failed to update \1 with PexBot.",
-        ),
-        (r"PexBot (.+): refresh started\.", r"Started PexBot refresh for \1."),
-        (
-            r"PexBot (.+): refresh completed; edit count is unconfirmed\.",
-            r"PexBot refresh completed for \1; edits are unconfirmed.",
-        ),
-        (
-            r"Delegated refresh failed: (.+)\.",
-            r"Failed to refresh \1 with PexBot.",
-        ),
-        (
-            r"PexBot history check failed: (.+)\.",
-            r"Failed to check PexBot updates for \1.",
-        ),
-        (
-            r"Skipped PexBot refresh: (.+)\. PexBot already edited .+",
-            r"No changes needed for \1; PexBot already updated it today.",
-        ),
-    ),
-}
-_SUMMARY_PATTERNS = {
-    source: tuple((re.compile(pattern), summary) for pattern, summary in rows)
-    for source, rows in _SUMMARY_PATTERNS.items()
-}
 
 
 def _timestamp(value: object) -> dt.datetime:
@@ -331,67 +220,13 @@ def log_selection(
     return name, query.strip(), download == "1"
 
 
-def _routine_summary(message: str) -> str | None:
-    """Summarize routine starts and publication outcomes.
-
-    Returns:
-        A readable lifecycle summary, or null for unrelated messages.
-    """
-    if match := _ROUTINE_START.fullmatch(message):
-        name = _ROUTINE_NAMES.get(match[1])
-        if name is not None:
-            preview = " preview" if match[2] else ""
-            return f"Started {name}{preview}."
-    elif match := _ROUTINE_FINISH.fullmatch(message):
-        name = _ROUTINE_NAMES.get(match[1])
-        if name is not None and match[2]:
-            name += " preview"
-            if match[3] in {"updated", "no changes needed"}:
-                return f"Finished {name}."
-        outcome = {
-            "updated": f"Updated {name}.",
-            "no changes needed": f"No changes needed for {name}.",
-            "failed": f"Failed to update {name}.",
-            "waiting to retry": f"Waiting to retry {name}.",
-            "outcome unconfirmed": f"Update outcome unconfirmed for {name}.",
-        }.get(match[3])
-        if name is not None and outcome is not None:
-            return outcome
-    return None
-
-
-def _public_log_line(raw: bytes) -> str | None:
-    """Project one saved diagnostic into a timestamped public summary.
-
-    Unknown emitters, progress details, and traceback continuations are
-    omitted. These summaries never establish authoritative status.
-
-    Returns:
-        A timestamped summary, or null for unrelated diagnostic lines.
-    """
-    record = _LOG_RECORD.fullmatch(raw.decode("utf-8", errors="replace"))
-    if record is None:
-        return None
-    timestamp, origin, message = record.groups()
-    source, _, _function = origin.rpartition(".")
-    summary = None
-    if source == "backend.support.execution":
-        summary = _routine_summary(message)
-    else:
-        for pattern, replacement in _SUMMARY_PATTERNS.get(source, ()):
-            if match := pattern.fullmatch(message):
-                summary = match.expand(replacement)
-                break
-    return None if summary is None else f"{timestamp} {summary}"
-
-
-def _recent_log_lines(stream: BinaryIO, size: int) -> Iterator[bytes]:
+def _recent_event_lines(stream: BinaryIO, size: int) -> Iterator[bytes]:
     """Yield newest complete lines from a bounded tail in small blocks.
 
     Keep partial lines between blocks, including split UTF-8 sequences.
     Overlong lines retain only their bounded prefix and an extra byte
     that lets the caller recognize truncation. A partial line at the
-    scan boundary is omitted rather than interpreted as a log record.
+    scan boundary is omitted rather than interpreted as an event record.
     """
     start = max(0, size - _SCAN_BYTES)
     cursor = size
@@ -407,47 +242,75 @@ def _recent_log_lines(stream: BinaryIO, size: int) -> Iterator[bytes]:
         yield pending
 
 
+def _event_excerpt(
+    stream: BinaryIO,
+    size: int,
+    day: str,
+) -> dict[str, object]:
+    """Select the latest bounded events from one observed file size.
+
+    Returns:
+        Valid records and whether scan or display bounds trimmed them.
+    """
+    events = []
+    total = 0
+    truncated = size > _SCAN_BYTES
+    for raw in _recent_event_lines(stream, size):
+        if len(raw) > _LINE_BYTES:
+            truncated = True
+            continue
+        try:
+            event = json.loads(raw)
+        except ValueError, UnicodeError, RecursionError:
+            continue
+        if (
+            not validate_event(event)
+            or _timestamp(event["time"]).date().isoformat() != day
+        ):
+            continue
+        if len(events) == _MAX_EVENTS or total + len(raw) > _DISPLAY_BYTES:
+            truncated = True
+            break
+        events.append(event)
+        total += len(raw)
+    return {"events": list(reversed(events)), "truncated": truncated}
+
+
 def log_excerpt(
     directory: Path,
     filename: str,
     query: str,
 ) -> dict[str, object]:
-    """Read recent lifecycle summaries without loading the whole log.
+    """Read validated events without opening the diagnostic log.
 
     Args:
         directory: Backend-owned daily log directory.
         filename: Previously validated exact daily filename.
-        query: Literal case-insensitive filter on visible summaries.
+        query: Bounded search text retained for request compatibility.
+            The presentation layer filters localized event descriptions.
 
     Returns:
-        At most one hundred summaries and whether output was trimmed.
-        The scan covers up to eight MiB of recent diagnostics so source
-        progress messages do not immediately hide lifecycle events.
+        At most one hundred validated events in file order and whether
+        bounds trimmed the recent window. Only that window is searched.
+        This reader never parses diagnostics or searches full history.
+        Missing, unsafe, or oversized event files return no events.
 
     Raises:
-        OSError: The selected file is missing, unsafe, or unreadable.
-        ValueError: The filename, query, or file size is invalid.
+        ValueError: The filename or query is invalid.
     """
-    if log_date(filename) is None or len(query.encode()) > _QUERY_BYTES:
+    day = log_date(filename)
+    if day is None or len(query.encode()) > _QUERY_BYTES:
         message = "Invalid log selection."
         raise ValueError(message)
-    lines = []
-    total = 0
-    needle = query.casefold()
-    with open_regular(directory / filename, MAX_LOG_BYTES) as stream:
-        size = os.fstat(stream.fileno()).st_size
-        truncated = size > _SCAN_BYTES
-        for raw in _recent_log_lines(stream, size):
-            if len(raw) > _LINE_BYTES:
-                truncated = True
-                continue
-            line = _public_log_line(raw.removesuffix(b"\r"))
-            if line is None or needle not in line.casefold():
-                continue
-            length = len(line.encode("utf-8"))
-            if len(lines) == _MAX_LINES or total + length > _DISPLAY_BYTES:
-                truncated = True
-                break
-            lines.append(line)
-            total += length
-    return {"lines": list(reversed(lines)), "truncated": truncated}
+    try:
+        with open_regular(
+            directory / f"events.{day}.jsonl",
+            MAX_EVENT_FILE_BYTES,
+        ) as stream:
+            return _event_excerpt(
+                stream,
+                os.fstat(stream.fileno()).st_size,
+                day,
+            )
+    except OSError, ValueError:
+        return {"events": [], "truncated": False}

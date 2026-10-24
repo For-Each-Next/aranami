@@ -314,8 +314,7 @@ main {
     background: none;
     font: inherit;
     color: #3366cc;
-    text-decoration: underline;
-    text-underline-offset: .15em;
+    text-decoration: none;
     cursor: pointer;
 }
 
@@ -505,21 +504,24 @@ footer nav {
     min-width: 0;
 }
 
-.log-lines {
-    padding: 1rem;
-    border: 1px solid #d9ebe4;
-    border-radius: .5rem;
-    background: white;
-    white-space: pre-wrap;
+.major-events {
+    margin: 1rem 0 1.5rem;
     overflow-wrap: anywhere;
-    font-size: .85rem;
+}
+
+.major-events p {
+    margin-block: .5rem;
+}
+
+.major-events time {
+    font-variant-numeric: tabular-nums;
 }
 
 .logs-table {
     margin: 2rem 0;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 600px) {
     .shell {
         padding-left: 16px;
         padding-right: 16px;

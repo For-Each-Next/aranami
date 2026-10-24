@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% block navigation %}<nav class="page-toc" aria-label="{{ t.nav.contents }}">{% for section in sections %}<a href="#homepage-{{ section.key }}">{{ section.title }}</a>{% endfor %}{% if backlog %}<a href="#backlog">{{ t.nav.backlog }}</a>{% endif %}<a href="#tool-status">{{ t.ops.heading }}</a></nav>{% endblock %}
+{% block content %}{% if notice %}<p class="notice">{{ notice }}</p>{% endif %}{% include "includes/highlights.html" %}{% include "includes/backlog.html" %}{% include "includes/routines.html" %}{% endblock %}

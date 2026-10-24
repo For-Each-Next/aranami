@@ -81,22 +81,30 @@ class ReadOnlyRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(content)
 
 
-def read_only_headers(status: int) -> dict[str, str]:
+def read_only_headers(
+    status: int,
+    *,
+    websocket_origin: str | None = None,
+) -> dict[str, str]:
     """Return the security and cache policy for saved public responses.
 
     Args:
         status: HTTP response code, including method rejections.
+        websocket_origin: Trusted origin allowed for status pushes.
 
     Returns:
         Transport-independent headers shared by both backend servers.
     """
+    connect_sources = "'self'"
+    if websocket_origin:
+        connect_sources += f" {websocket_origin}"
     headers = {
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "Content-Security-Policy": (
             "default-src 'none'; style-src 'self'; script-src 'self'; "
-            "img-src 'self'; connect-src 'self'; base-uri 'none'; "
+            f"img-src 'self'; connect-src {connect_sources}; base-uri 'none'; "
             "form-action 'self'; frame-ancestors 'none'"
         ),
     }

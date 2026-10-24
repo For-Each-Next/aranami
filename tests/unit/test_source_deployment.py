@@ -117,11 +117,13 @@ class TestSourcePayload(TestCase):
         """Declare locked web dependencies and project metadata."""
         metadata = tomllib.loads(self.payload["pyproject.toml"].decode())
         project = metadata["project"]
-        assert {"flask", "waitress"} <= set(project["dependencies"])
+        assert {"fastapi", "jinja2", "uvicorn", "websockets"} <= set(
+            project["dependencies"],
+        )
         assert {
             "Development Status :: 4 - Beta",
             "Environment :: Web Environment",
-            "Framework :: Flask",
+            "Framework :: FastAPI",
         } <= set(project["classifiers"])
         assert (
             "Development Status :: 1 - Planning"
@@ -129,9 +131,9 @@ class TestSourcePayload(TestCase):
         )
         assert metadata["tool"]["uv"]["package"] is False
         lock = tomllib.loads(self.payload["uv.lock"].decode())
-        assert {"flask", "waitress"} <= {
-            package["name"] for package in lock["package"]
-        }
+        packages = {package["name"] for package in lock["package"]}
+        assert {"fastapi", "jinja2", "uvicorn", "websockets"} <= packages
+        assert not {"django", "flask", "werkzeug", "waitress"} & packages
 
     def test_payload_matches_reviewed_manifest_and_recorded_hashes(
         self,
@@ -149,6 +151,7 @@ class TestSourcePayload(TestCase):
         }
         assert set(self.payload) == expected
         assert "src/webservice/pages.py" in self.payload
+        assert "src/webservice/templates/base.html" in self.payload
         assert {
             Path(name).parts[1]
             for name in self.payload

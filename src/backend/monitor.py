@@ -33,6 +33,7 @@ from apscheduler.events import EVENT_ALL, EVENT_SCHEDULER_SHUTDOWN
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from backend.support.events import event_extra
 from backend.support.logs import open_run_log
 from backend.support.schedule_status import write_schedule_status
 from shared.config import TASK_DEFINITIONS, TaskDefinition
@@ -253,7 +254,14 @@ def start(
                     shutdown_event.set()
                     changed_event.set()
                     with open_run_log():
-                        _LOGGER.info("Aranami monitor stopped.")
+                        _LOGGER.info(
+                            "Aranami monitor stopped.",
+                            extra=event_extra(
+                                "service_stopped",
+                                service="scheduler",
+                                dry=dry,
+                            ),
+                        )
                     write_schedule_status(
                         scheduler,
                         dry=dry,
@@ -307,5 +315,10 @@ def start(
                 "checking routines immediately"
                 if run_immediately
                 else "waiting for scheduled triggers",
+                extra=event_extra(
+                    "service_started",
+                    service="scheduler",
+                    dry=dry,
+                ),
             )
         return scheduler

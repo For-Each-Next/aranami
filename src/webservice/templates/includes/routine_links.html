@@ -1,0 +1,1 @@
+{% if routine.links.multiple %}{{ routine.links.name }}{{ routine.links.opening }}{% endif %}{% for link in routine.links.targets %}{% if not loop.first %} {% endif %}{{ link }}{% else %}{{ routine.links.name }}{% endfor %}{% if routine.links.multiple %}{{ routine.links.closing }}{% endif %}

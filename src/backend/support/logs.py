@@ -1,8 +1,9 @@
-"""Write natural-language backend diagnostics to UTC daily files.
+"""Write UTC diagnostics and explicitly marked major lifecycle events.
 
 Every run shares ``logs/aranami.YYYY-MM-DD.log`` beneath the caller's
-current directory. Keep the current UTC date and the preceding 29 dates.
-Importing the package does not configure logging.
+current directory, alongside structured ``events.YYYY-MM-DD.jsonl``
+records. Keep the current UTC date and the preceding 29 dates. Importing
+the package does not configure logging.
 Execution metadata is stored separately in status snapshots and report
 manifests; diagnostics are ordinary Python logging messages.
 """
@@ -20,6 +21,8 @@ from pathlib import Path
 from threading import RLock
 from time import gmtime
 from typing import TYPE_CHECKING
+
+from backend.support.events import DailyEventHandler
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -133,13 +136,13 @@ class _RunLogManager:
                     raise RuntimeError(msg)
                 self._active.references += 1
                 return logger
-            directory = directory or (Path.cwd() / "logs").resolve()
+            directory = directory or (Path.cwd().resolve() / "logs")
             directory.mkdir(parents=True, exist_ok=True)
             handler = _DailyLogHandler(directory)
             terminal = logging.StreamHandler()
             terminal.setLevel(logging.INFO)
             terminal.setFormatter(handler.formatter)
-            handlers = (handler, terminal)
+            handlers = (handler, terminal, DailyEventHandler(directory))
             original_levels = {}
             for name in ("backend", "updater", "shared", "webservice"):
                 component = logging.getLogger(name)
@@ -184,7 +187,11 @@ def open_run_log(directory: Path | None = None) -> Iterator[logging.Logger]:
     Yields:
         The stable package logger with its shared file handler attached.
     """
-    destination = directory.resolve() if directory is not None else None
+    destination = (
+        directory.parent.resolve() / directory.name
+        if directory is not None
+        else None
+    )
     logger = _RUN_LOG_MANAGER.acquire(destination)
     try:
         yield logger

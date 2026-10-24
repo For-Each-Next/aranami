@@ -54,7 +54,8 @@ PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s 
 Test `backend.run_once`/`run` with fake dependencies: both default to live
 publication. Imports and command-line help must stay inert. Real previews use
 the [Toolforge workflow](usage.md#preview-selected-routines), never local live
-clients. For HTTP checks use `backend.public.create_app` and Flask's test client;
+clients. For HTTP and WebSocket checks use `backend.public.create_app` and
+FastAPI's test client, as in `tests/toolforge/test_public.py`;
 preserve read-only routes, security headers, bounds, and disabled debugging.
 
 ## Verification and releases

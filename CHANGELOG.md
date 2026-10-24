@@ -4,6 +4,32 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.4 (2026-10-24 16:30 UTC)
+
+Overview: Rebuilt the read-only website with FastAPI, WebSocket status pushes,
+and Jinja2 templates, with compact server details and resilient live updates.
+
+- Replaced Flask with FastAPI routing, responses, autoescaping Jinja2 templates,
+  and isolated application contexts; removed unused web dependencies.
+- Preserved read-only saved-data routes, bounded downloads, security headers,
+  native popovers, localized pages, and isolated source/runtime storage.
+- Replaced Waitress with Uvicorn and added bounded, read-only status pushes,
+  heartbeat detection, automatic reconnects, and independent HTTP verification.
+- Resynchronized on window focus after sleep, recovered overdue requests, and
+  distinguished network, response, clock, and rendering failures.
+- Included templates in verified source deployments and covered framework
+  errors, application isolation, transport recovery, and stale-response races.
+- Condensed About into the tool description and contact links, with compact
+  server facts, observed startup, sample timestamps, and relative ages.
+- Applied narrow-screen layouts through 600 pixels and relative day labels
+  while preserving permanent startup facts when resource samples expired.
+- Generated separate structured major-event logs and displayed localized
+  lifecycle/results as natural-sentence paragraphs with Wikipedia links.
+- Displayed completed popup durations as `12′05.30″`, `5.30″`, or `0.44″`
+  across all locales, with padded seconds and correct minute rollover.
+- Kept running timers in whole seconds, using `12′05″…` or `5″…`.
+- Styled clickable routine status labels as blue text without underlines.
+
 ### 0.7.3 (2026-10-24 12:18 UTC)
 
 Overview: Replaced the daily Pageviews percentage cutoff with whole-day

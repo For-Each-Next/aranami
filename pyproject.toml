@@ -1,6 +1,6 @@
 [project]
 name = "aranami"
-version = "0.7.3"
+version = "0.7.4"
 description = "Toolforge automation for Wikipedia reports and a read-only dashboard."
 readme = "README.md"
 authors = [
@@ -14,7 +14,7 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Environment :: Web Environment",
-    "Framework :: Flask",
+    "Framework :: FastAPI",
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
     "Operating System :: OS Independent",
@@ -29,8 +29,10 @@ classifiers = [
 dependencies = [
     "apscheduler",
     "dateparser",
-    "flask",
+    "fastapi",
     "jieba",
+    "jinja2",
+    "markupsafe",
     "mwparserfromhell",
     "opencc-python-reimplemented",
     "polars",
@@ -39,7 +41,8 @@ dependencies = [
     "python-dateutil",
     "sqlalchemy",
     "tqdm",
-    "waitress",
+    "uvicorn",
+    "websockets",
 ]
 
 [project.urls]
@@ -47,6 +50,7 @@ Homepage = "https://aranami.toolforge.org/"
 
 [dependency-groups]
 dev = [
+    "httpx2",
     "ruff",
 ]
 

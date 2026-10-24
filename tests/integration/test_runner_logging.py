@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -15,6 +16,7 @@ from unittest.mock import Mock, patch
 
 import backend
 from backend import runner
+from backend.support.events import validate_event
 from backend.support.logs import open_run_log
 from updater.jobs import JobContext, ProposedEdit, job_run
 
@@ -158,6 +160,27 @@ class TestRunnerLoggingIntegration(TestCase):
             assert content.count("run started (dry=") == runs
             assert content.count("Aranami run finished") == runs
             outcomes = _routine_results(calls)
+            events = [
+                json.loads(line)
+                for line in (root / "logs" / "events.2026-10-03.jsonl")
+                .read_text()
+                .splitlines()
+            ]
+            sequence = [
+                "run_started",
+                *(
+                    kind
+                    for _ in _ROUTINES
+                    for kind in ("routine_started", "routine_finished")
+                ),
+                "run_finished",
+            ]
+            assert [event["kind"] for event in events] == sequence * runs
+            assert all(
+                validate_event(event) and event["dry"] is True
+                for event in events
+            )
+            assert all(event["time"] == now.isoformat() for event in events)
             assert len(outcomes) == runs * len(_ROUTINES)
             assert all(
                 result["schema"] == 1
@@ -244,6 +267,14 @@ class TestRunnerLoggingIntegration(TestCase):
             assert "Traceback (most recent call last):" in content
             assert "Simulated DYK source failure." in content
             assert "6 jobs, 1 failures" in content
+            raw_events = next(
+                (root / "logs").glob("events.*.jsonl"),
+            ).read_text()
+            events = [json.loads(line) for line in raw_events.splitlines()]
+            assert all(validate_event(event) for event in events)
+            assert events[2]["status"] == "failed"
+            assert events[-1]["failures"] == 1
+            assert "Simulated DYK source failure." not in raw_events
             reports = list((root / "dry-run").glob("*.md"))
             assert len(reports) == 1
             summary = reports[0].read_text(encoding="utf-8")
@@ -508,7 +539,7 @@ class TestRunLogManagerIntegration(TestCase):
                     source_logger.debug("Excluded debug record.")
                     source_logger.info("Nested source record.")
                     assert outer is inner is package_logger
-                    assert len(handlers) == len(("file", "terminal"))
+                    assert len(handlers) == len(("file", "terminal", "events"))
                 source_logger.warning("Outer source record.")
             content = next(root.glob("*.log")).read_text(encoding="utf-8")
             assert content.count("Nested source record.") == 1

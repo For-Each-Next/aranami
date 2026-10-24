@@ -53,7 +53,7 @@ Paths below are relative to `/data/project/aranami`:
 | `reports/` | Durable result bundles, manifests, Parquet tables, and wikitext |
 | `state/` | Routine, schedule, and per-destination observations |
 | `cache/` | Disposable source data, completion evidence, bytecode, and website snapshots |
-| `logs/` | Current UTC date and previous 29 daily logs |
+| `logs/` | UTC diagnostic logs and separate major-event records, retained for 30 dates |
 | `dry-run/` | Preview summaries, exact proposals, and isolated result bundles |
 
 Preserve credentials, reports, state, and logs during replacement. Clearing
@@ -63,8 +63,10 @@ deployment step. Inspect saved observations through the
 
 Both jobs use Toolforge's `python3.13` image to launch the managed Python
 3.15.0 environment. Keep the image and application interpreter distinct.
-The web job serves assets from `app/src/webservice/public_html/`; debugging
-and automatic reloading remain disabled.
+The Uvicorn web job serves the FastAPI application, WebSocket status updates,
+and assets from `app/src/webservice/public_html/`. Debugging and automatic
+reloading remain disabled. Replace the process after source changes so the
+application, templates, and browser assets use the same deployment.
 
 ## Validate and upload source
 

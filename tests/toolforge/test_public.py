@@ -1,8 +1,11 @@
 """Exercise the public website with saved fixtures."""
 
+from __future__ import annotations
+
+import asyncio
+
 # Protocol statuses and size limits are exact regression assertions.
 # ruff: file-ignore[magic-value-comparison]
-
 import datetime as dt
 import gzip
 import http.client
@@ -16,7 +19,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
-from waitress import create_server
+from fastapi.testclient import TestClient
+from starlette.exceptions import HTTPException
+from starlette.requests import ClientDisconnect
+from starlette.websockets import WebSocketDisconnect
+from uvicorn import Config, Server
+from websockets.sync.client import connect
 
 from backend.public import create_app, main
 from backend.support.http import accepts_gzip
@@ -25,14 +33,73 @@ from backend.support.routine_status import write_routine_status
 from shared.config import configuration_id, routine_configuration
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    import socket
+    from collections.abc import Callable, Iterator
+
+    import httpx2
+    from fastapi import FastAPI
+    from starlette.types import Message
+
+
+async def _exchange(
+    app: FastAPI,
+    target: str,
+    *,
+    on_send: Callable[[Message], None] | None = None,
+) -> list[Message]:
+    """Observe messages that HTTP clients normalize or buffer.
+
+    Returns:
+        Response start and body messages from the actual application.
+    """
+    raw_path, _, query = target.partition("?")
+    messages = []
+
+    async def receive() -> Message:
+        """Provide an empty read-only request body.
+
+        Returns:
+            One complete empty request message.
+        """
+        await asyncio.sleep(0)
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:
+        """Capture transport chunks and optional disconnect effects."""
+        await asyncio.sleep(0)
+        messages.append(message)
+        if on_send is not None:
+            on_send(message)
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": raw_path,
+            "raw_path": raw_path.encode(),
+            "query_string": query.encode(),
+            "root_path": "",
+            "headers": [
+                (b"host", b"testserver"),
+                (b"accept-encoding", b"identity"),
+            ],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        },
+        receive,
+        send,
+    )
+    return messages
 
 
 class PublicWebsiteTests(unittest.TestCase):
     """Verify routes, bounded logs, and unavailable-state behavior."""
 
     def setUp(self) -> None:
-        """Create a socket-free Flask client over synthetic data."""
+        """Create a socket-free FastAPI client over synthetic data."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.runtime = Path(temporary.name).resolve()
@@ -44,8 +111,12 @@ class PublicWebsiteTests(unittest.TestCase):
         (self.assets / "styles.css").write_text("body { color: green; }")
         (self.assets / "live.js").write_text('"use strict";')
         self.app = create_app(self.runtime, self.assets)
-        self.app.testing = True
-        self.client = self.app.test_client()
+        self.client = TestClient(
+            self.app,
+            raise_server_exceptions=False,
+            headers={"Accept-Encoding": "identity"},
+        )
+        self.addCleanup(self.client.close)
 
     def request(
         self,
@@ -53,28 +124,26 @@ class PublicWebsiteTests(unittest.TestCase):
         method: str = "GET",
         encoding: str = "identity",
         language: str = "en",
-    ) -> tuple[int, dict[str, str], bytes]:
-        """Read a response through Flask's real WSGI request pipeline.
+    ) -> tuple[int, httpx2.Headers, bytes]:
+        """Read a response through FastAPI's real request pipeline.
 
         Returns:
             Status, headers, and bytes for assertions.
         """
-        response = self.client.open(
+        with self.client.stream(
+            method,
             target,
-            method=method,
             headers={
                 "Accept-Encoding": encoding,
                 "Accept-Language": language,
             },
-        )
-        try:
+            follow_redirects=False,
+        ) as response:
             return (
                 response.status_code,
-                dict(response.headers),
-                response.get_data(),
+                response.headers,
+                b"".join(response.iter_raw()),
             )
-        finally:
-            response.close()
 
     def test_assets_headers_compression_and_methods(self) -> None:
         """Verify asset CSP, gzip negotiation, and HEAD parity."""
@@ -85,6 +154,9 @@ class PublicWebsiteTests(unittest.TestCase):
         assert headers["Cache-Control"] == "no-store"
         assert "default-src 'none'" in headers["Content-Security-Policy"]
         assert "script-src 'self'" in headers["Content-Security-Policy"]
+        assert (
+            "wss://aranami.toolforge.org" in headers["Content-Security-Policy"]
+        )
         assert "unsafe-inline" not in headers["Content-Security-Policy"]
         head = self.request("/fixture.html", "HEAD", "gzip")
         assert head[0] == 200
@@ -240,7 +312,7 @@ class PublicWebsiteTests(unittest.TestCase):
         assert not (self.runtime / "cache").exists()
 
     def test_log_selection_filter_limits_and_full_download(self) -> None:
-        """Preserve filtering, dates, bounded tails, and downloads."""
+        """Keep structured events separate from diagnostic downloads."""
         directory = self.runtime / "logs"
         directory.mkdir()
         filename = "aranami.2026-10-23.log"
@@ -250,6 +322,22 @@ class PublicWebsiteTests(unittest.TestCase):
             for index in range(150)
         )
         (directory / filename).write_text(content)
+        events = [
+            {
+                "schema": 1,
+                "time": (
+                    dt.datetime(2026, 10, 23, 12, tzinfo=dt.UTC)
+                    + dt.timedelta(seconds=index)
+                ).isoformat(),
+                "kind": "routine_started",
+                "routine": "pageviews",
+                "dry": False,
+            }
+            for index in range(150)
+        ]
+        (directory / "events.2026-10-23.jsonl").write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n",
+        )
         (directory / "aranami.2026-02-30.log").write_text("invalid date")
         (directory / "credentials.log").write_text("private")
         (directory / "aranami.2026-10-22.log").symlink_to(directory / filename)
@@ -263,16 +351,21 @@ class PublicWebsiteTests(unittest.TestCase):
                 "size": len(content),
             },
         ]
-        assert len(value["lines"]) == 100
-        assert value["lines"][0] == (
-            "2026-10-23 12:00:00Z Updated Line 50 <script> [x] on zhwiki."
-        )
+        assert value["events"] == events[-100:]
         assert value["truncated"]
-        assert json.loads(self.request("/api/logs?q=LINE+149")[2])[
-            "lines"
-        ] == [
-            "2026-10-23 12:00:00Z Updated Line 149 <script> [x] on zhwiki.",
-        ]
+        assert value["query"] == "[x]"
+        human = self.request("/logs/")[2].decode()
+        _, marker, remainder = human.partition('<div class="major-events">')
+        assert marker
+        prose = remainder.partition("</div>")[0]
+        assert prose.count("<p>") == 100
+        assert "<ul" not in prose
+        assert "<li" not in prose
+        assert " · " not in prose
+        assert "the Pageview rankings task started." in prose
+        assert "https://zh.wikipedia.org/wiki/" in prose
+        assert "Line 149" not in human
+        assert "<script>" not in human
         downloaded = self.request("/api/logs?date=2026-10-23&download=1")
         assert downloaded[2] == content.encode()
         assert filename in downloaded[1]["Content-Disposition"]
@@ -303,7 +396,6 @@ class PublicWebsiteTests(unittest.TestCase):
             "/logs",
             "/%252e%252e/private.html",
             "/api//status",
-            "/./fixture.html",
         ):
             with self.subTest(target=target):
                 assert self.request(target)[0] == 404
@@ -315,14 +407,14 @@ class PublicWebsiteTests(unittest.TestCase):
         ):
             with self.subTest(target=target):
                 assert self.request(target)[0] == 400
-        for raw in ("https://invalid.example/", "/#fragment"):
+        for raw, expected in (
+            ("https://invalid.example/", 400),
+            ("/#fragment", 400),
+            ("/./fixture.html", 404),
+        ):
             with self.subTest(raw=raw):
-                response = self.client.get(
-                    "/",
-                    environ_overrides={"RAW_URI": raw},
-                )
-                self.addCleanup(response.close)
-                assert response.status_code == 400
+                messages = asyncio.run(_exchange(self.app, raw))
+                assert messages[0]["status"] == expected
         directory = self.assets / "api"
         directory.mkdir()
         (directory / "private.css").write_text("not an API")
@@ -357,6 +449,19 @@ class PublicWebsiteTests(unittest.TestCase):
             assert json.loads(body) == {"error": "Service Unavailable"}
             assert headers["Cache-Control"] == "no-store"
 
+    def test_header_and_declared_body_bounds(self) -> None:
+        """Reject large or malformed headers and declared bodies."""
+        for headers, expected in (
+            ({"Content-Length": "4097"}, 413),
+            ({"Content-Length": "-1"}, 400),
+            ({"Content-Length": "invalid"}, 400),
+            ({"X-Large": "a" * (64 * 1024)}, 431),
+        ):
+            with self.subTest(expected=expected):
+                response = self.client.get("/api/status", headers=headers)
+                assert response.status_code == expected
+                assert response.headers["Cache-Control"] == "no-store"
+
     def test_downloads_close_and_do_not_include_appended_bytes(self) -> None:
         """Bound streams to opening size and close aborted reads."""
         directory = self.runtime / "logs"
@@ -364,13 +469,23 @@ class PublicWebsiteTests(unittest.TestCase):
         path = directory / "aranami.2026-10-23.log"
         content = b"a" * (128 * 1024)
         path.write_bytes(content)
-        response = self.client.get("/api/logs?download=1")
-        self.addCleanup(response.close)
-        with path.open("ab") as stream:
-            stream.write(b"new data")
-        assert response.get_data() == content
-        assert int(response.headers["Content-Length"]) == len(content)
-        assert "Content-Encoding" not in response.headers
+
+        def append(message: Message) -> None:
+            """Append after headers establish the original size."""
+            if message["type"] == "http.response.start":
+                with path.open("ab") as stream:
+                    stream.write(b"new data")
+
+        messages = asyncio.run(
+            _exchange(self.app, "/api/logs?download=1", on_send=append),
+        )
+        assert (
+            b"".join(message.get("body", b"") for message in messages)
+            == content
+        )
+        headers = dict(messages[0]["headers"])
+        assert int(headers[b"content-length"]) == len(content)
+        assert b"content-encoding" not in headers
 
         opened = []
 
@@ -382,14 +497,27 @@ class PublicWebsiteTests(unittest.TestCase):
                 yield tracked
 
         with patch("backend.public.open_regular", side_effect=tracked_open):
-            response = self.client.get("/api/logs?download=1", buffered=False)
-            assert not opened[-1].closed
-            response.close()
+
+            def abort(message: Message) -> None:
+                """Simulate failure during the first chunk.
+
+                Raises:
+                    OSError: To simulate the client disconnecting.
+                """
+                if message["type"] == "http.response.body":
+                    assert not opened[-1].closed
+                    reason = "disconnected"
+                    raise OSError(reason)
+
+            with self.assertRaises(ClientDisconnect):  # ruff: ignore[pytest-unittest-raises-assertion]
+                asyncio.run(
+                    _exchange(self.app, "/api/logs?download=1", on_send=abort),
+                )
             assert opened[-1].closed
             response = self.client.head("/api/logs?download=1")
             try:
                 assert opened[-1].closed
-                assert response.get_data() == b""
+                assert response.content == b""
                 assert (
                     int(response.headers["Content-Length"])
                     == path.stat().st_size
@@ -397,39 +525,82 @@ class PublicWebsiteTests(unittest.TestCase):
             finally:
                 response.close()
 
-    def test_all_large_responses_use_bounded_wsgi_chunks(self) -> None:
-        """Avoid Waitress spooling for large saved responses."""
+    def test_framework_errors_preserve_public_policy(self) -> None:
+        """Keep native framework failures sanitized and private."""
+        for error, expected in (
+            (HTTPException(404, "/secret"), 404),
+            (RuntimeError("/secret"), 500),
+        ):
+            with (
+                self.subTest(error=type(error).__name__),
+                patch("backend.public.saved_status", side_effect=error),
+            ):
+                status, headers, body = self.request("/api/status")
+                assert status == expected
+                assert b"secret" not in body
+                assert "error" in json.loads(body)
+                assert headers["Cache-Control"] == "no-store"
+                assert headers["X-Content-Type-Options"] == "nosniff"
+
+    def test_all_large_responses_use_bounded_asgi_chunks(self) -> None:
+        """Yield bounded transport chunks for large saved responses."""
         content = b"x" * (2 * 1024 * 1024)
         (self.assets / "large.css").write_bytes(content)
-        response = self.client.get("/large.css", buffered=False)
-        try:
-            chunks = list(response.response)
-            assert b"".join(chunks) == content
-            assert all(len(chunk) <= 64 * 1024 for chunk in chunks)
-            assert int(response.headers["Content-Length"]) == len(content)
-        finally:
-            response.close()
+        messages = asyncio.run(_exchange(self.app, "/large.css"))
+        chunks = [
+            message["body"]
+            for message in messages
+            if message["type"] == "http.response.body"
+        ]
+        assert b"".join(chunks) == content
+        assert all(len(chunk) <= 64 * 1024 for chunk in chunks)
+        assert int(dict(messages[0]["headers"])[b"content-length"]) == len(
+            content,
+        )
 
     def test_factories_isolate_cache_and_runtime(self) -> None:
         """Keep saved observations and cached pages isolated per app."""
         other = self.runtime / "other"
         other.mkdir()
-        app = create_app(other, self.assets)
+        assets = other / "assets"
+        assets.mkdir()
+        (assets / "fixture.html").write_text("other assets")
+        logs = other / "logs"
+        logs.mkdir()
+        (logs / "aranami.2026-10-23.log").write_text("other runtime")
+        app = create_app(other, assets)
+        client = TestClient(app, headers={"Accept-Encoding": "identity"})
+        self.addCleanup(client.close)
         with patch(
             "webservice.pages.render_dashboard",
             return_value="cached",
         ) as render:
             assert self.request("/")[2] == b"cached"
-            response = app.test_client().get("/")
+            response = client.get("/")
             try:
-                assert response.get_data() == b"cached"
+                assert response.content == b"cached"
             finally:
                 response.close()
             assert render.call_count == 2
+        for _ in range(2):
+            response = client.get("/fixture.html")
+            try:
+                assert response.content == b"other assets"
+            finally:
+                response.close()
+            assert self.request("/fixture.html")[2].startswith(
+                b"<!doctype html>",
+            )
+            response = client.get("/api/logs")
+            try:
+                assert len(response.json()["files"]) == 1
+            finally:
+                response.close()
+            assert json.loads(self.request("/api/logs")[2])["files"] == []
         assert not (other / "state").exists()
 
-    def test_waitress_protocol_and_streams_do_not_spool(self) -> None:
-        """Serve HTTP with strict paths and no disk buffers."""
+    def test_uvicorn_http_and_websocket_protocols(self) -> None:
+        """Serve HTTP and localized WebSocket status on loopback."""
         content = b"x" * (2 * 1024 * 1024)
         (self.assets / "large.css").write_bytes(content)
         directory = self.runtime / "logs"
@@ -438,28 +609,41 @@ class PublicWebsiteTests(unittest.TestCase):
 
         def serve_and_check(app: object, **options: object) -> None:
             """Exercise the actual server settings selected by main."""
-            server = create_server(app, **options)
+            ready = threading.Event()
 
-            def close_sockets() -> None:
-                """Close descriptors on the event-loop thread."""
-                for channel in tuple(server.active_channels.values()):
-                    channel.close()
-                server.close()
+            class ReadyServer(Server):
+                """Signal when the fixture listener is ready."""
 
+                async def startup(
+                    self,
+                    sockets: list[socket.socket] | None = None,
+                ) -> None:
+                    """Initialize native sockets and unblock checks."""
+                    await super().startup(sockets)
+                    ready.set()
+
+            server = ReadyServer(Config(app, **options))
             thread = threading.Thread(target=server.run)
             thread.start()
             try:
+                assert ready.wait(timeout=5)
+                port = server.servers[0].sockets[0].getsockname()[1]
                 for path, method, status, expected in (
                     ("/large.css", "GET", 200, content),
-                    ("/api/logs?download=1", "GET", 200, content),
-                    ("/api/logs?download=1", "HEAD", 200, b""),
+                    (
+                        "/api/logs?date=2026-10-23&download=1",
+                        "GET",
+                        200,
+                        content,
+                    ),
+                    ("/api/logs?date=2026-10-23&download=1", "HEAD", 200, b""),
                     ("/%61pi/status", "GET", 404, None),
                     ("/api/status", "OPTIONS", 405, None),
                 ):
                     with self.subTest(path=path, method=method):
                         connection = http.client.HTTPConnection(
                             "127.0.0.1",
-                            int(server.effective_port),
+                            port,
                             timeout=5,
                         )
                         try:
@@ -478,26 +662,45 @@ class PublicWebsiteTests(unittest.TestCase):
                                 ) == len(content)
                         finally:
                             connection.close()
+                with connect(
+                    f"ws://127.0.0.1:{port}/api/live/ws?lang=zh-hant",
+                    origin=f"http://127.0.0.1:{port}",
+                    proxy=None,
+                ) as websocket:
+                    value = json.loads(websocket.recv(timeout=5))
+                    assert value["type"] == "status"
+                    assert 'id="live-uptime"' in value["html"]
             finally:
-                server.task_dispatcher.shutdown()
-                server.trigger.pull_trigger(close_sockets)
+                server.should_exit = True
                 thread.join(timeout=5)
                 assert not thread.is_alive()
 
         with (
             patch("backend.public.create_app", return_value=self.app),
-            patch("backend.public.serve", side_effect=serve_and_check),
-            patch(
-                "waitress.buffers.TempfileBasedBuffer",
-                side_effect=AssertionError("Requests must not spool to disk"),
-            ),
+            patch("backend.public.uvicorn.run", side_effect=serve_and_check),
             patch(
                 "threading.excepthook",
                 wraps=threading.excepthook,
             ) as thread_failure,
         ):
-            main(["--host", "127.0.0.1", "--port", "0"])
+            main([
+                "--runtime",
+                str(self.runtime),
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "0",
+            ])
             thread_failure.assert_not_called()
+        records = [
+            json.loads(line)
+            for path in sorted(directory.glob("events.*.jsonl"))
+            for line in path.read_text().splitlines()
+        ]
+        assert [(event["kind"], event["service"]) for event in records] == [
+            ("service_started", "web"),
+            ("service_stopped", "web"),
+        ]
 
     def test_page_cache_invalidates_after_saved_inputs_change(self) -> None:
         """Refresh cached locale HTML after state replacement."""
@@ -525,7 +728,11 @@ class PublicWebsiteTests(unittest.TestCase):
         directory.mkdir()
         (directory / "aranami.2026-10-23.log").write_bytes(b"x" * 20000)
         value = json.loads(self.request("/api/logs")[2])
-        assert value["lines"] == []
+        assert value["events"] == []
+        assert not value["truncated"]
+        (directory / "events.2026-10-23.jsonl").write_bytes(b"x" * 20000)
+        value = json.loads(self.request("/api/logs")[2])
+        assert value["events"] == []
         assert value["truncated"]
 
     def test_scheduler_validation_preserves_observed_configuration(
@@ -560,38 +767,169 @@ class PublicWebsiteTests(unittest.TestCase):
         assert json.loads(self.request("/api/status")[2])["schedule"] is None
 
 
+class PublicSocketTests(unittest.TestCase):
+    """Verify bounded read-only live status delivery and recovery."""
+
+    setUp = PublicWebsiteTests.setUp
+
+    def test_pushes_changes_heartbeats_and_reconciliation(self) -> None:
+        """Keep sockets alive and reconcile changed or expired views."""
+        with (
+            patch("pywikibot.Site", side_effect=AssertionError("No sources")),
+            patch(
+                "backend.public._PublicViews._dashboard",
+                side_effect=AssertionError("No datasets"),
+            ),
+            patch("backend.public._SOCKET_CHECK_SECONDS", 0.01),
+            patch("backend.public._SOCKET_HEARTBEAT_SECONDS", 0.02),
+            patch("backend.public._SOCKET_REFRESH_SECONDS", 0.08),
+            patch(
+                "webservice.pages.render_live_status",
+                return_value="initial",
+            ) as render,
+            self.client.websocket_connect(
+                "/api/live/ws?lang=zh-hant",
+                headers={"Origin": "http://testserver"},
+            ) as websocket,
+        ):
+            assert websocket.receive_json() == {
+                "type": "status",
+                "html": "initial",
+            }
+            assert render.call_args.args[2] == "zh-hant"
+            websocket.send_json({"type": "ping"})
+            assert websocket.receive_json() == {"type": "heartbeat"}
+            assert render.call_count == 1
+            render.return_value = "changed"
+            state = self.runtime / "state"
+            state.mkdir()
+            (state / "routine-status.json").write_text(
+                "invalid saved observation",
+            )
+            while (message := websocket.receive_json())["type"] == "heartbeat":
+                pass
+            assert message == {"type": "status", "html": "changed"}
+            assert render.call_count == 2
+            render.return_value = "reconciled"
+            while (message := websocket.receive_json())["type"] == "heartbeat":
+                pass
+            assert message == {"type": "status", "html": "reconciled"}
+        assert not (self.runtime / "cache").exists()
+
+    def test_rejects_invalid_origin_path_query_and_commands(self) -> None:
+        """Bound the protocol before and after accepting a socket."""
+        for target, headers in (
+            ("/api/live/ws?lang=invalid", {}),
+            ("/api/live/ws?lang=en&lang=zh", {}),
+            ("/api/live/ws?other=1", {}),
+            ("/api/live/ws?lang=%FF", {}),
+            ("/api/live/ws?lang=" + "a" * 513, {}),
+            ("/%61pi/live/ws", {}),
+            ("/api/live/ws", {"Origin": "https://evil.example"}),
+            ("/api/live/ws", {"Origin": "https://testserver"}),
+            ("/api/live/ws", {"Origin": "null"}),
+            ("/api/live/ws", {"Origin": "http://testserver/path"}),
+            (
+                "/api/live/ws",
+                {
+                    "Origin": "https://evil.example",
+                    "X-Forwarded-Host": "evil.example",
+                    "X-Forwarded-Proto": "https",
+                },
+            ),
+        ):
+            with (
+                self.subTest(target=target, headers=headers),
+                self.assertRaises(WebSocketDisconnect),  # ruff: ignore[pytest-unittest-raises-assertion]
+                self.client.websocket_connect(target, headers=headers),
+            ):
+                self.fail("Rejected connections must not open")
+        for text in ('{"type":"write"}', "invalid", "[1]", "x" * 513):
+            with (
+                self.subTest(text=text[:30]),
+                self.client.websocket_connect("/api/live/ws") as websocket,
+            ):
+                assert websocket.receive_json()["type"] == "status"
+                websocket.send_text(text)
+                with self.assertRaises(WebSocketDisconnect) as caught:  # ruff: ignore[pytest-unittest-raises-assertion]
+                    websocket.receive_json()
+                assert caught.exception.code == 1008
+
+    def test_tls_termination_limits_and_disconnect_cleanup(self) -> None:
+        """Honor canonical TLS and release bounded socket slots."""
+        with self.client.websocket_connect(
+            "/api/live/ws?lang=zh-hans",
+            headers={
+                "Host": "aranami.toolforge.org",
+                "Origin": "https://aranami.toolforge.org",
+            },
+        ) as websocket:
+            assert websocket.receive_json()["type"] == "status"
+        with patch("backend.public._SOCKET_CLIENTS", 1):
+            with self.client.websocket_connect("/api/live/ws") as first:
+                assert first.receive_json()["type"] == "status"
+                with (
+                    self.assertRaises(WebSocketDisconnect),  # ruff: ignore[pytest-unittest-raises-assertion]
+                    self.client.websocket_connect("/api/live/ws"),
+                ):
+                    self.fail("Full socket capacity must reject")
+            with self.client.websocket_connect("/api/live/ws") as replacement:
+                assert replacement.receive_json()["type"] == "status"
+
+    def test_immediate_invalid_command_closes_without_send_races(self) -> None:
+        """Keep one sender for commands arriving before initial HTML."""
+        for _ in range(10):
+            with self.client.websocket_connect("/api/live/ws") as websocket:
+                websocket.send_json({"wrong": True})
+                with self.assertRaises(WebSocketDisconnect) as caught:  # ruff: ignore[pytest-unittest-raises-assertion]
+                    while websocket.receive_json()["type"] == "status":
+                        pass
+                assert caught.exception.code == 1008
+
+
 class PublicStartupTests(unittest.TestCase):
     """Verify the launcher starts bounded production serving."""
 
     @staticmethod
-    def test_launcher_uses_waitress_with_limits() -> None:
+    def test_launcher_uses_uvicorn_with_limits() -> None:
         """Keep launcher flags while replacing bespoke workers."""
         with (
+            tempfile.TemporaryDirectory() as directory,
             patch("backend.public.create_app") as factory,
-            patch("backend.public.serve") as serve,
+            patch("backend.public.uvicorn.run") as serve,
         ):
-            main(["--runtime", "/saved", "--host", "127.0.0.1", "--port", "0"])
-        factory.assert_called_once_with(Path("/saved"))
+            main([
+                "--runtime",
+                directory,
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "0",
+            ])
+        factory.assert_called_once_with(Path(directory))
         serve.assert_called_once_with(
             factory.return_value,
             host="127.0.0.1",
             port=0,
-            threads=16,
-            connection_limit=64,
-            channel_timeout=15,
-            cleanup_interval=5,
-            max_request_header_size=64 * 1024,
-            max_request_body_size=4096,
-            outbuf_overflow=1024 * 1024,
-            outbuf_high_watermark=256 * 1024,
-            log_socket_errors=False,
+            limit_concurrency=64,
+            ws="websockets-sansio",
+            ws_max_size=512,
+            ws_max_queue=16,
+            ws_ping_interval=15,
+            ws_ping_timeout=15,
+            timeout_keep_alive=15,
+            h11_max_incomplete_event_size=64 * 1024,
+            proxy_headers=False,
+            access_log=False,
+            server_header=False,
+            log_level="warning",
         )
 
     def test_help_and_invalid_ports_do_not_create_apps(self) -> None:
         """Keep CLI help and validation free of clients and jobs."""
         with (
             patch("backend.public.create_app") as factory,
-            patch("backend.public.serve") as serve,
+            patch("backend.public.uvicorn.run") as serve,
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
         ):

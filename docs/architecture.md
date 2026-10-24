@@ -16,7 +16,7 @@ with Python 3.15. Credentials and runtime files stay outside the source tree.
 |---|---|
 | `backend` | Hub lifecycle, source interpretation, reusable preparation, scheduling, persistence, logs/status, and read-only HTTP |
 | `updater` | Selected edit destinations, wikitext projection, summaries, and intentional publication |
-| `webservice` | Python HTML presentation, localization, and public assets |
+| `webservice` | Jinja2 templates, presentation contexts, localization, and public assets |
 | `shared` | Read-only source adapters, configuration, generic mechanics, and storage primitives |
 
 The hub delegates wiki and website work, sharing read-only inputs within a
@@ -142,16 +142,21 @@ Failures retain validated data and successful timestamps and retry hourly;
 restart does not reset intervals. The schema-2 snapshot is bounded to 8 MiB.
 
 `backend.public` validates saved dashboard, status, and daily-log inputs through
-their owning readers. Flask/Waitress serves GET/HEAD only, with bounded reads,
-requests, and concurrency; reject unsafe paths/files and disable production
-debugging/reloading. `create_app` creates routing and caches only. Shared HTTP
-security/compression belongs in `backend.support.http`. The public application
+their owning readers. FastAPI/Uvicorn serves GET/HEAD and read-only WebSocket
+status subscriptions, with bounded reads, requests, and concurrency. Reject
+unsafe paths/files and disable production debugging/reloading. `create_app`
+creates routing and caches only. Shared HTTP security/compression belongs in
+`backend.support.http`. The public application
 is independent of the hub's local `/dashboard.json` and `/healthz` diagnostics.
+Allow the canonical `wss://aranami.toolforge.org` origin explicitly in CSP;
+some browsers do not include WebSocket schemes in `connect-src 'self'`.
 
 Pages work with ordinary links, GET forms, and native controls without
 JavaScript. `/api/live` reads saved status only and renders existing live
-regions, never website datasets or logs. The dashboard owns routine cards;
-About shows environment/resources; logs shows compact server state even without
+regions, never website datasets or logs. `/api/live/ws` pushes the same
+localized snapshot when saved status changes and periodically renews it.
+Subscriptions accept no mutations or collection commands. The dashboard owns
+routine cards; About shows environment/resources; logs shows compact server state even without
 saved logs. Fixed assets live in `webservice/public_html/`. Omit confirmed-empty
 sections but preserve their saved observations; unavailable data is not empty.
 
@@ -181,7 +186,8 @@ valid reports. Contract changes invalidate affected report identities, not
 maintenance data.
 
 Keep sections stacked, with responsive sibling-card columns and no horizontal
-page overflow. Preserve ordering, inline assessments, source metadata, and
+page overflow. Treat widths up to and including 600 pixels as narrow screens.
+Preserve ordering, inline assessments, source metadata, and
 all three interface languages. Popularity/DYK show at most six actual rows;
 other lists render supplied rows directly. Display limits do not trim collected
 data. Maintenance sorts the complete group before fifty-row pagination, with
@@ -197,17 +203,34 @@ daily cards show confirmed report dates. Active progress requires a fresh
 monitor session containing the routine start; stale sessions restore generic
 labels. Never extrapolate phases, counts, or dates from clocks or logs.
 Native popovers expose per-destination outcomes, independent timing, and UTC
-timestamps while preserving keyboard access and unknown states.
+timestamps while preserving keyboard access and unknown states. Execution
+durations use minute/second primes: completed values retain hundredths
+(`12′05.30″`, `5.30″`, `0.44″`); active values use whole seconds (`12′05″…`).
 
 Live clocks tick each second from a monotonic server-time anchor. Visible pages
-synchronize every five seconds, without overlapping requests, with a ten-second
-timeout and failure backoff up to thirty seconds. Hidden tabs pause and resume
-with immediate synchronization. Update existing elements to preserve popovers,
-focus, and scroll. Completed durations stay fixed; stale state/resources expire
+receive WebSocket updates and independently verify the complete state through
+HTTP every thirty seconds. When push is unavailable, HTTP retries start at five
+seconds with a ten-second timeout and backoff up to thirty seconds. Heartbeats
+every fifteen seconds and a forty-five-second silence deadline detect stalled
+connections. Reconnect with backoff and always request a complete snapshot.
+Hidden tabs pause connections
+and requests; returning visibility, focus, or connectivity restores them.
+Reject older snapshots received after newer updates. Update existing elements
+to preserve popovers, focus, and scroll. Completed durations stay fixed;
+stale state/resources expire
 after 120 seconds. Failed refreshes retain prior observations with a notice.
 Bound rendered-view caches to sixty seconds and invalidate on saved-input
 changes; logs and unseeded random views bypass them. Keep responses no-store
 and source timestamps intact. Source changes require process replacement.
+Distinguish network, transport, response, clock, and rendering failures in
+bounded browser diagnostics without exposing arbitrary server or error text.
+
+About combines monitor state, observed hub startup, system/architecture,
+Python, memory use/allocation, and CPU use/allocation in one server table.
+Startup is the recorded hub start, not an inferred operating-system boot.
+Retain static facts and startup timestamps when resource samples expire.
+Show the sample's actual UTC timestamp through seconds and its relative age;
+relative annotations advance in whole minutes, hours, or days.
 
 ## Polars and Parquet
 
@@ -226,8 +249,16 @@ source or `site-packages`:
 - `logs/aranami.YYYY-MM-DD.log`: shared UTC diagnostics, retaining today and
   29 previous dates. Initialize handlers at runtime. Record graceful shutdown
   before waiting and completion after cleanup; forced termination may omit it.
-  The website shows at most 100 lifecycle summaries from an 8 MiB scan, not
-  request details or tracebacks; raw downloads retain diagnostics.
+- `logs/events.YYYY-MM-DD.jsonl`: separately emitted, validated major events
+  for service, routine, and website lifecycle/results, with the same UTC
+  retention. Record event codes and safe observed fields at their producers;
+  never derive these records by parsing diagnostic messages. Bound each line
+  and daily file. Logging failure must not change publication outcomes.
+  The website reads at most 100 recent events, translates them into all three
+  locales, and links configured wiki destinations in natural-sentence
+  paragraphs. Missing event files remain empty; historical diagnostics are not
+  backfilled. Raw downloads retain the separate diagnostic log, including
+  tracebacks.
 - `state/`: authoritative observed metadata, separate from logs and caches.
 - `cache/`: disposable optimization. Deletion must not lose durable state or
   change output for identical inputs. Replace atomically; reject malformed data.

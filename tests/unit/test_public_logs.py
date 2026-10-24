@@ -1,358 +1,360 @@
-"""Verify concise public lifecycle summaries over bounded saved logs."""
+"""Verify bounded event reads without parsing diagnostic logs."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 from unittest import TestCase
 from unittest.mock import patch
 
 from backend.support import public_data
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from typing import BinaryIO
+
 _FILENAME = "aranami.2026-10-24.log"
-_STAMP = "2026-10-24 03:14:15Z"
+_EVENT_FILENAME = "events.2026-10-24.jsonl"
+_STAMP = "2026-10-24T03:14:15+00:00"
 
 
-def _record(source: str, message: str, level: str = "INFO") -> str:
-    """Build the daily handler's natural-language format.
+def _event(
+    kind: str = "service_started",
+    **fields: object,
+) -> dict[str, object]:
+    """Build one event from explicit lifecycle facts.
+
+    Args:
+        kind: Structured lifecycle event identifier.
+        **fields: Observations or intentionally invalid fixture fields.
 
     Returns:
-        One complete UTC diagnostic line.
+        A schema-one event dictionary.
     """
-    return f"{_STAMP} {level} [{source}]: {message}\n"
+    return {
+        "schema": 1,
+        "time": _STAMP,
+        "kind": kind,
+        "dry": False,
+        **({"service": "hub"} if kind.startswith("service_") else {}),
+        **fields,
+    }
 
 
-class TestPublicLogSummaries(TestCase):
-    """Keep detailed diagnostics out of the public lifecycle view."""
+def _line(event: object) -> str:
+    """Encode one UTF-8 JSONL fixture with a terminating newline.
+
+    Returns:
+        One JSON record, including intentionally invalid values.
+    """
+    return json.dumps(event, ensure_ascii=False) + "\n"
+
+
+class TestPublicLogEvents(TestCase):
+    """Keep public events separate from detailed runtime diagnostics."""
 
     @staticmethod
-    def test_real_lifecycle_messages_have_concise_timestamped_outcomes() -> (
-        None
-    ):
-        """Preserve server, routine, website, and page lifecycle."""
-        samples = (
-            (
-                "backend.hub.run",
-                "Aranami 0.6.2 backend hub started.",
-                "Server started.",
+    def test_valid_lifecycle_events_preserve_observed_fields() -> None:
+        """Retain outcomes, unknown edit counts, and preview facts."""
+        events = [
+            _event(),
+            _event("service_stopping", service="scheduler"),
+            _event("service_stopped", service="website"),
+            _event("routine_started", routine="pageviews"),
+            _event(
+                "routine_finished",
+                routine="pexbot",
+                status="unconfirmed",
+                updated=None,
+                duration_seconds=12.34,
             ),
-            (
-                "backend.support.execution.routine_run",
-                "Started pageviews.",
-                "Started Pageviews reports.",
+            _event(
+                "routine_finished",
+                routine="pageviews",
+                status="no_update",
+                updated=0,
+                duration_seconds=0,
+                dry=True,
             ),
-            (
-                "updater.jobs._execution._save_edit",
-                "Updating Wikipedia:电子游戏/热门 on zhwiki: Update counts.",
-                "Started updating Wikipedia:电子游戏/热门 on zhwiki.",
+            _event("website_started"),
+            _event(
+                "website_finished",
+                status="partial",
+                failures=1,
+                duration_seconds=2.5,
             ),
-            (
-                "updater.jobs._execution._save_edit",
-                "Saved Wikipedia:电子游戏/热门 on zhwiki.",
-                "Updated Wikipedia:电子游戏/热门 on zhwiki.",
+            _event("run_started", tasks=6),
+            _event(
+                "run_finished",
+                tasks=6,
+                failures=1,
+                deferred=2,
+                duration_seconds=12.5,
             ),
-            (
-                "updater.jobs._execution._save_edit",
-                "No changes needed for Wikipedia:电子游戏/热门 on zhwiki.",
-                "No changes needed for Wikipedia:电子游戏/热门 on zhwiki.",
-            ),
-            (
-                "backend.support.execution.routine_run",
-                (
-                    "Finished pageviews: updated. Confirmed edits: 1. "
-                    "Duration: 56.090 seconds."
-                ),
-                "Updated Pageviews reports.",
-            ),
-            (
-                "backend.website.collect.collect_dashboard",
-                "Refreshing website popular articles data.",
-                "Started updating website popular articles.",
-            ),
-            (
-                "backend.website.collect.collect_dashboard",
-                "Updated website popular articles: 12 records.",
-                "Updated website popular articles.",
-            ),
-            (
-                "backend.website.collect.collect_dashboard",
-                (
-                    "Could not refresh website news and history (OSError). "
-                    "Previous results were retained; retrying at the next "
-                    "hourly check."
-                ),
-                (
-                    "Failed to update website news and history; "
-                    "previous data retained."
-                ),
-            ),
-            (
-                "updater.jobs.assessment_lists.run",
-                "Assessment list failed: Wikipedia:电子游戏/列表",
-                "Failed to update Wikipedia:电子游戏/列表.",
-            ),
-            (
-                "updater.jobs.pexbot.run",
-                "Delegated refresh failed: Wikipedia:电子游戏/清理.",
-                "Failed to refresh Wikipedia:电子游戏/清理 with PexBot.",
-            ),
-            (
-                "updater.jobs.pexbot._refresh",
-                (
-                    "PexBot Wikipedia:电子游戏/清理: refresh completed; "
-                    "edit count is unconfirmed."
-                ),
-                (
-                    "PexBot refresh completed for Wikipedia:电子游戏/清理; "
-                    "edits are unconfirmed."
-                ),
-            ),
-            (
-                "updater.jobs.pexbot.run",
-                (
-                    "Skipped PexBot refresh: Wikipedia:电子游戏/清理. "
-                    "PexBot already edited this page on 2026-10-24 UTC."
-                ),
-                (
-                    "No changes needed for Wikipedia:电子游戏/清理; "
-                    "PexBot already updated it today."
-                ),
-            ),
-            (
-                "backend.hub.run",
-                (
-                    "Aranami backend hub stopping (SIGTERM); "
-                    "waiting for active work."
-                ),
-                "Server shutting down; waiting for active work.",
-            ),
-            (
-                "backend.hub.__exit__",
-                "Aranami 0.6.2 backend hub stopped.",
-                "Server stopped.",
-            ),
-        )
+        ]
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            content = "".join(
-                _record(source, text) for source, text, _ in samples
+            raw = root / _FILENAME
+            raw.write_text(
+                "private source request and traceback /credentials\n",
             )
-            path = root / _FILENAME
+            path = root / _EVENT_FILENAME
+            content = "".join(_line(event) for event in events)
             path.write_text(content)
-            result = public_data.log_excerpt(root, _FILENAME, "")
-            assert result == {
-                "lines": [f"{_STAMP} {summary}" for _, _, summary in samples],
-                "truncated": False,
-            }
+            with patch.object(
+                public_data,
+                "open_regular",
+                wraps=public_data.open_regular,
+            ) as opened:
+                result = public_data.log_excerpt(root, _FILENAME, "")
+            assert result == {"events": events, "truncated": False}
+            opened.assert_called_once_with(
+                path,
+                public_data.MAX_EVENT_FILE_BYTES,
+            )
             assert path.read_text() == content
-
-    def test_routine_outcomes_never_invent_success_or_edit_counts(
-        self,
-    ) -> None:
-        """Distinguish unchanged, failed, deferred, and unknown work."""
-        outcomes = {
-            "no changes needed": "No changes needed for PexBot reports.",
-            "failed": "Failed to update PexBot reports.",
-            "waiting to retry": "Waiting to retry PexBot reports.",
-            "outcome unconfirmed": (
-                "Update outcome unconfirmed for PexBot reports."
-            ),
-        }
-        for outcome, expected in outcomes.items():
-            with (
-                self.subTest(outcome=outcome),
-                TemporaryDirectory() as directory,
-            ):
-                root = Path(directory)
-                (root / _FILENAME).write_text(
-                    _record(
-                        "backend.support.execution.routine_run",
-                        f"Finished pexbot: {outcome}. "
-                        "Confirmed edits: unknown. "
-                        "Duration: 56.090 seconds.",
-                        "ERROR" if outcome == "failed" else "WARNING",
-                    ),
-                )
-                assert public_data.log_excerpt(root, _FILENAME, "")[
-                    "lines"
-                ] == [
-                    f"{_STAMP} {expected}",
-                ]
+            assert "/credentials" in raw.read_text()
 
     @staticmethod
-    def test_preview_completion_does_not_claim_live_updates() -> None:
-        """Keep preview results visibly distinct from live outcomes."""
+    def test_diagnostics_are_never_parsed_or_used_as_a_fallback() -> None:
+        """Keep formerly recognized English messages out of the page."""
         with TemporaryDirectory() as directory:
             root = Path(directory)
             (root / _FILENAME).write_text(
-                _record(
-                    "backend.support.execution.routine_run",
-                    "Finished pageviews preview: no changes needed. "
-                    "Confirmed edits: 0. Duration: 0.123 seconds.",
-                ),
+                "2026-10-24 03:14:15Z INFO [backend.hub.run]: "
+                "Aranami 0.6.2 backend hub started.\n"
+                "RuntimeError: private-token /secret/path\n",
             )
-            assert public_data.log_excerpt(root, _FILENAME, "")["lines"] == [
-                f"{_STAMP} Finished Pageviews reports preview.",
+            assert public_data.log_excerpt(root, _FILENAME, "") == {
+                "events": [],
+                "truncated": False,
+            }
+            assert not (root / _EVENT_FILENAME).exists()
+            (root / _EVENT_FILENAME).write_text("not JSON\n")
+            assert public_data.log_excerpt(
+                root,
+                _FILENAME,
+                "private-token",
+            ) == {
+                "events": [],
+                "truncated": False,
+            }
+
+    @staticmethod
+    def test_unknown_malformed_and_free_text_events_are_omitted() -> None:
+        """Require the known UTC schema and exclude arbitrary text."""
+        invalid = [
+            None,
+            [],
+            _event(schema=2),
+            _event(time="2026-10-24T03:14:15"),
+            _event(time="2026-10-24T03:14:15+08:00"),
+            _event("unknown_event"),
+            _event(dry=0),
+            _event(service="private-source"),
+            _event(message="private-token /secret/path"),
+            _event(title="Wikipedia:电子游戏"),
+            _event("routine_started", routine="unknown"),
+            _event(
+                "routine_finished",
+                routine="pexbot",
+                status="success",
+                updated=0,
+                duration_seconds=1,
+            ),
+            _event(
+                "routine_finished",
+                routine="pexbot",
+                status="failed",
+                updated=-1,
+                duration_seconds=1,
+            ),
+            _event(
+                "routine_finished",
+                routine="pexbot",
+                status="failed",
+                updated=None,
+                duration_seconds=float("nan"),
+            ),
+            _event("run_started", tasks=7),
+        ]
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            valid = _event("service_stopped")
+            (root / _EVENT_FILENAME).write_text(
+                "{malformed JSON\n"
+                + "".join(_line(event) for event in invalid)
+                + _line(valid),
+            )
+            assert public_data.log_excerpt(root, _FILENAME, "") == {
+                "events": [valid],
+                "truncated": False,
+            }
+
+    @staticmethod
+    def test_event_utc_day_must_match_the_selected_daily_file() -> None:
+        """Do not attribute another day's valid record to this date."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / _EVENT_FILENAME).write_text(
+                _line(_event(time="2026-10-23T23:59:59+00:00"))
+                + _line(_event(time="2026-10-25T00:00:00Z"))
+                + _line(_event(time="2026-10-24T00:00:00Z")),
+            )
+            assert public_data.log_excerpt(root, _FILENAME, "")["events"] == [
+                _event(time="2026-10-24T00:00:00Z"),
             ]
 
     @staticmethod
-    def test_tracebacks_progress_and_unrecognized_sources_are_hidden() -> None:
-        """Retain failing tasks and omit diagnostic continuations."""
-        messages = (
-            _record(
-                "backend.services.zhwiki.pageviews.fetch_period_totals",
-                "Aggregated 12000/13048 articles",
-            ),
-            _record("shared.sources.wiki.read", "Started pageviews."),
-            _record(
-                "backend.website.extracts.save",
-                "Could not save the article-introduction cache.",
-                "WARNING",
-            ),
-            _record(
-                "updater.jobs.pexbot._refresh",
-                "PexBot Wikipedia:Report: running a database query.",
-            ),
-            _record(
-                "backend.support.execution.routine_run",
-                "Finished pageviews: failed. Confirmed edits: 0. "
-                "Duration: 123.456 seconds.",
-                "ERROR",
-            ),
-            "Traceback (most recent call last):\n",
-            '  File "/private/source.py", line 2, in fetch\n',
-            "    raise RuntimeError('details')\n",
-            "RuntimeError: details\n",
-        )
+    def test_recent_hundred_events_are_returned_for_localized_filtering() -> (
+        None
+    ):
+        """Bound the recent search window before localized filtering."""
+        events = [
+            _event(
+                time=f"2026-10-24T03:{index // 60:02}:{index % 60:02}+00:00",
+            )
+            for index in range(150)
+        ]
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / _FILENAME).write_text("".join(messages))
-            assert public_data.log_excerpt(root, _FILENAME, "") == {
-                "lines": [f"{_STAMP} Failed to update Pageviews reports."],
-                "truncated": False,
-            }
-            assert (
-                public_data.log_excerpt(root, _FILENAME, "RuntimeError")[
-                    "lines"
-                ]
-                == []
-            )
+            (root / _EVENT_FILENAME).write_text("".join(map(_line, events)))
+            for query in ("", "service_started", "已启动", "not present"):
+                assert public_data.log_excerpt(root, _FILENAME, query) == {
+                    "events": events[50:],
+                    "truncated": True,
+                }
 
     @staticmethod
-    def test_filter_matches_visible_text_and_keeps_newest_hundred() -> None:
-        """Filter visible text before limiting; retain literal HTML."""
+    def test_small_blocks_skip_long_and_invalid_utf8_lines() -> None:
+        """Preserve split records and omit unsafe encoded content."""
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / _FILENAME).write_text(
-                "".join(
-                    _record(
-                        "updater.jobs._execution._save_edit",
-                        f"Saved Report {index} <script> [x] on zhwiki.",
-                    )
-                    for index in range(150)
-                ),
-            )
-            result = public_data.log_excerpt(root, _FILENAME, "[X]")
-            expected_limit = 100
-            assert len(result["lines"]) == expected_limit
-            assert result["lines"][0] == (
-                f"{_STAMP} Updated Report 50 <script> [x] on zhwiki."
-            )
-            assert result["truncated"]
-            assert public_data.log_excerpt(root, _FILENAME, "REPORT 149")[
-                "lines"
-            ] == [f"{_STAMP} Updated Report 149 <script> [x] on zhwiki."]
-            assert (
-                public_data.log_excerpt(root, _FILENAME, "_save_edit")["lines"]
-                == []
-            )
-
-    @staticmethod
-    def test_noisy_megabyte_does_not_hide_latest_lifecycle_event() -> None:
-        """Look beyond the former one-MiB tail with bounded reads."""
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / _FILENAME).write_text(
-                _record(
-                    "backend.hub.run",
-                    "Aranami 0.6.2 backend hub started.",
-                )
-                + _record(
-                    "backend.services.zhwiki.pageviews.fetch_period_totals",
-                    "Aggregated 12000/13048 articles",
-                )
-                * 12000,
-            )
-            assert public_data.log_excerpt(root, _FILENAME, "") == {
-                "lines": [f"{_STAMP} Server started."],
-                "truncated": False,
-            }
-
-    @staticmethod
-    def test_chunk_boundaries_preserve_utf8_and_skip_long_lines() -> None:
-        """Reassemble split codepoints and omit oversized lines."""
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / _FILENAME).write_text(
-                "x" * 20000
-                + "\n"
-                + _record(
-                    "updater.jobs._execution._save_edit",
-                    "Saved Wikipedia:电子游戏 on zhwiki.",
-                ).replace("\n", "\r\n"),
+            valid = _event()
+            (root / _EVENT_FILENAME).write_bytes(
+                b"x" * (public_data.MAX_EVENT_LINE_BYTES + 1)
+                + b"\n"
+                + b"\xff\xfe\n"
+                + _line(_event(message="非结构化文本")).encode()
+                + _line(valid).replace("\n", "\r\n").encode(),
             )
             with patch.object(public_data, "_READ_BYTES", 7):
                 result = public_data.log_excerpt(root, _FILENAME, "")
-            assert result == {
-                "lines": [f"{_STAMP} Updated Wikipedia:电子游戏 on zhwiki."],
-                "truncated": True,
-            }
+            assert result == {"events": [valid], "truncated": True}
 
     @staticmethod
-    def test_scan_boundary_and_display_bytes_remain_bounded() -> None:
-        """Drop incomplete boundary records and cap rendered bytes."""
-        first = _record(
-            "backend.hub.run",
-            "Aranami 0.6.2 backend hub started.",
-        )
-        second = _record(
-            "backend.hub.run",
-            "Aranami 0.6.2 backend hub stopped.",
-        )
+    def test_scan_boundary_and_encoded_output_remain_bounded() -> None:
+        """Drop partial boundary records and enforce the byte budget."""
+        first = _line(_event())
+        second_event = _event("service_stopped")
+        second = _line(second_event)
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / _FILENAME).write_text(first + second)
+            (root / _EVENT_FILENAME).write_text(first + second)
             with (
                 patch.object(public_data, "_SCAN_BYTES", len(second) + 7),
                 patch.object(public_data, "_READ_BYTES", 13),
             ):
                 result = public_data.log_excerpt(root, _FILENAME, "")
-            assert result == {
-                "lines": [f"{_STAMP} Server stopped."],
-                "truncated": True,
-            }
-            with patch.object(public_data, "_DISPLAY_BYTES", 40):
+            assert result == {"events": [second_event], "truncated": True}
+            with patch.object(public_data, "_DISPLAY_BYTES", len(second) - 2):
                 result = public_data.log_excerpt(root, _FILENAME, "")
-            assert result == {
-                "lines": [f"{_STAMP} Server stopped."],
-                "truncated": True,
-            }
+            assert result == {"events": [], "truncated": True}
 
-    def test_unsafe_selection_is_rejected(self) -> None:
-        """Retain valid dates, query bounds, and safe file checks."""
+    @staticmethod
+    def test_bytes_appended_after_opening_do_not_extend_the_scan() -> None:
+        """Keep one read bounded to its observed opening size."""
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            target = root / "other.log"
-            target.write_text("private diagnostics")
-            (root / _FILENAME).symlink_to(target)
+            path = root / _EVENT_FILENAME
+            event = _event()
+            path.write_text(_line(event))
+            reader = public_data._recent_event_lines  # ruff: ignore[private-member-access]
+
+            def append_before_scan(
+                stream: BinaryIO,
+                size: int,
+            ) -> Iterator[bytes]:
+                """Append a record after the reader observed file size.
+
+                Yields:
+                    Complete lines within the observed file boundary.
+                """
+                with path.open("a") as appended:
+                    appended.write(_line(_event("service_stopped")))
+                yield from reader(stream, size)
+
+            with patch.object(
+                public_data,
+                "_recent_event_lines",
+                side_effect=append_before_scan,
+            ):
+                result = public_data.log_excerpt(root, _FILENAME, "")
+            assert result == {"events": [event], "truncated": False}
+
+    def test_invalid_selection_and_unsafe_event_files_are_rejected(
+        self,
+    ) -> None:
+        """Keep strict dates, query bounds, and safe file opens."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
             for filename, query in (
                 ("../other.log", ""),
                 ("aranami.2026-02-30.log", ""),
                 (_FILENAME, "x" * 1025),
-                (_FILENAME, ""),
+                (_FILENAME, "中" * 342),
             ):
                 with (
-                    self.subTest(filename=filename, query=query),
-                    self.assertRaises((OSError, ValueError)),  # ruff: ignore[pytest-unittest-raises-assertion]
+                    self.subTest(filename=filename),
+                    self.assertRaises(ValueError),  # ruff: ignore[pytest-unittest-raises-assertion]
                 ):
                     public_data.log_excerpt(root, filename, query)
+            target = root / "private.jsonl"
+            target.write_text(_line(_event()))
+            path = root / _EVENT_FILENAME
+            path.symlink_to(target)
+            assert public_data.log_excerpt(root, _FILENAME, "")["events"] == []
+            path.unlink()
+            path.mkdir()
+            assert public_data.log_excerpt(root, _FILENAME, "")["events"] == []
+            path.rmdir()
+            with path.open("wb") as oversized:
+                oversized.truncate(public_data.MAX_EVENT_FILE_BYTES + 1)
+            assert public_data.log_excerpt(root, _FILENAME, "")["events"] == []
+            linked = root / "linked"
+            linked.symlink_to(root, target_is_directory=True)
+            assert (
+                public_data.log_excerpt(linked, _FILENAME, "")["events"] == []
+            )
+
+    @staticmethod
+    def test_raw_listing_and_download_selection_keep_existing_contracts() -> (
+        None
+    ):
+        """List bounded diagnostic files independently from events."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / _FILENAME).write_text("raw diagnostics\n")
+            (root / _EVENT_FILENAME).write_text(_line(_event()))
+            (root / "aranami.2026-10-23.log").symlink_to(root / _FILENAME)
+            with (root / "aranami.2026-10-22.log").open("wb") as oversized:
+                oversized.truncate(public_data.MAX_LOG_BYTES + 1)
+            files = public_data.available_logs(root)
+            assert files == [
+                {
+                    "date": "2026-10-24",
+                    "name": _FILENAME,
+                    "size": len("raw diagnostics\n"),
+                },
+            ]
+            assert public_data.log_selection({}, files) == (
+                _FILENAME,
+                "",
+                False,
+            )
+            assert public_data.log_selection(
+                {"date": ["2026-10-24"], "q": [" 网站 "], "download": ["1"]},
+                files,
+            ) == (_FILENAME, "网站", True)

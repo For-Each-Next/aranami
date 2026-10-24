@@ -220,6 +220,13 @@ class TestHubLifecycle(TestCase):
             call(
                 "Aranami backend hub stopping (%s); waiting for active work.",
                 "SIGTERM",
+                extra={
+                    "major_event": {
+                        "kind": "service_stopping",
+                        "service": "hub",
+                        "dry": False,
+                    },
+                },
             )
             in logged.call_args_list
         )

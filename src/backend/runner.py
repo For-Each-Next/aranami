@@ -22,6 +22,7 @@ import pywikibot
 
 from backend import monitor
 from backend.monitor import TASK_DEFINITIONS
+from backend.support.events import event_extra
 from backend.support.logs import open_run_log
 from shared.deployment import project_version
 from updater.jobs import JobContext
@@ -149,6 +150,7 @@ def run_once(
             "Aranami %s run started (dry=%s).",
             project_version(),
             dry,
+            extra=event_extra("run_started", dry=dry, tasks=len(selected)),
         )
         if clear_cache:
             monitor.clear_caches()
@@ -173,13 +175,23 @@ def run_once(
         finally:
             context.finished_at = dt.datetime.now(dt.UTC)
             context.write_report()
+        elapsed = perf_counter() - started
+        deferred = sum(task.status == "deferred" for task in context.tasks)
         _LOGGER.info(
             "Aranami run finished in %.3f seconds: "
             "%d jobs, %d failures, %d deferred.",
-            perf_counter() - started,
+            elapsed,
             len(selected),
             len(failures),
-            sum(task.status == "deferred" for task in context.tasks),
+            deferred,
+            extra=event_extra(
+                "run_finished",
+                dry=dry,
+                tasks=len(selected),
+                failures=len(failures),
+                deferred=deferred,
+                duration_seconds=elapsed,
+            ),
         )
         if failures:
             msg = "Aranami routine jobs failed; see the daily log."

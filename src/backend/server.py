@@ -22,6 +22,7 @@ from http.server import HTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from backend.support.events import event_extra
 from backend.support.http import ReadOnlyRequestHandler
 from backend.support.logs import open_run_log
 from shared.support.files import read_regular
@@ -103,7 +104,10 @@ class DashboardUpdater:
             self._claim_lock(descriptor)
             self._lock_fd = descriptor
             self._logs.enter_context(open_run_log(self._log_dir))
-            _LOGGER.info("Website collector started.")
+            _LOGGER.info(
+                "Website collector started.",
+                extra=event_extra("service_started", service="website"),
+            )
         except BaseException:
             self._logs.close()
             self._lock_fd = None
@@ -116,7 +120,10 @@ class DashboardUpdater:
         self._stop.set()
         with self._refresh_lock:
             if self._lock_fd is not None:
-                _LOGGER.info("Website collector stopped.")
+                _LOGGER.info(
+                    "Website collector stopped.",
+                    extra=event_extra("service_stopped", service="website"),
+                )
                 os.close(self._lock_fd)
                 self._lock_fd = None
             self._logs.close()
@@ -206,7 +213,10 @@ class DashboardUpdater:
         started = time.monotonic()
         with self._state_lock:
             self._state.update(last_attempt=_utc_now(), refreshing=True)
-        _LOGGER.info("Website refresh started.")
+        _LOGGER.info(
+            "Website refresh started.",
+            extra=event_extra("website_started"),
+        )
         try:
             snapshot = self._collect_snapshot()
             self._save(self.output, snapshot)
@@ -214,12 +224,19 @@ class DashboardUpdater:
             kind = type(error).__name__
             with self._state_lock:
                 self._state["last_error"] = kind
+            elapsed = time.monotonic() - started
             _LOGGER.log(
                 logging.ERROR,
                 "Website refresh failed after %.3f seconds (%s). "
                 "Previous data was retained.",
-                time.monotonic() - started,
+                elapsed,
                 kind,
+                extra=event_extra(
+                    "website_finished",
+                    status="failed",
+                    failures=None,
+                    duration_seconds=elapsed,
+                ),
             )
             return False
         else:
@@ -232,12 +249,24 @@ class DashboardUpdater:
                 _LOGGER.info(
                     "Website refresh completed in %.3f seconds.",
                     elapsed,
+                    extra=event_extra(
+                        "website_finished",
+                        status="updated",
+                        failures=0,
+                        duration_seconds=elapsed,
+                    ),
                 )
             elif source_failures is None:
                 _LOGGER.warning(
                     "Website refresh completed in %.3f seconds; "
                     "the source failure count is unavailable.",
                     elapsed,
+                    extra=event_extra(
+                        "website_finished",
+                        status="unconfirmed",
+                        failures=None,
+                        duration_seconds=elapsed,
+                    ),
                 )
             else:
                 _LOGGER.warning(
@@ -247,6 +276,12 @@ class DashboardUpdater:
                     elapsed,
                     source_failures,
                     "" if source_failures == 1 else "s",
+                    extra=event_extra(
+                        "website_finished",
+                        status="partial",
+                        failures=source_failures,
+                        duration_seconds=elapsed,
+                    ),
                 )
             return True
         finally:

@@ -1,9 +1,8 @@
-"""Build complete website pages in Python from saved backend data.
+"""Render Jinja pages from validated, saved backend observations.
 
-The public server selects and validates observations, then calls these
-renderers. All output uses shared escaped HTML builders, authored locale
-messages, responsive CSS, and native controls. Optional browser updates
-refresh status and timers without requiring a page reload.
+The public application validates facts before calling these renderers.
+Templates own HTML structure and escaping; context preparation localizes
+observations without reading runtime files or starting source clients.
 """
 
 from __future__ import annotations
@@ -12,17 +11,20 @@ import datetime as dt
 import json
 import operator
 import secrets
+from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from webservice.presentation import (
     Interface,
-    Markup,
     article_extract,
     assessment_code,
-    element as tag,
+    catalog,
+    duration,
     event_duration,
     failure_description,
-    fragment,
     homepage_sections,
     local_url,
     maintenance_items,
@@ -35,6 +37,7 @@ from webservice.presentation import (
     relative_time,
     schedule_state,
     timestamp,
+    title_url,
     uptime,
     utc_time,
     wiki_link,
@@ -44,8 +47,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from webservice.presentation import Record
-
-from webservice.presentation import title_url
 
 _STATES = {
     "queued": "Queued",
@@ -66,6 +67,64 @@ _STATE_ICONS = {
     "unknown": "❔",
     "unconfirmed": "❔",
 }
+_LOG_EVENT_LIMIT = 100
+_LOG_EVENT_KINDS = frozenset({
+    "service_started",
+    "service_stopping",
+    "service_stopped",
+    "routine_started",
+    "routine_finished",
+    "website_started",
+    "website_finished",
+    "run_started",
+    "run_finished",
+})
+
+
+@lru_cache(maxsize=1)
+def _templates() -> Environment:
+    """Load cached presentation templates with HTML autoescaping.
+
+    Returns:
+        A Jinja environment rooted in the source template directory.
+    """
+    return Environment(
+        loader=FileSystemLoader(Path(__file__).with_name("templates")),
+        autoescape=select_autoescape(["html"]),
+        auto_reload=False,
+    )
+
+
+def _render(name: str, context: Record) -> str:
+    """Render plain context values through an autoescaping template.
+
+    Returns:
+        A complete document or live fragments selected by the caller.
+    """
+    return _templates().get_template(name).render(context)
+
+
+@lru_cache(maxsize=4)
+def _messages(locale: str) -> Record:
+    """Expose authored message namespaces to Jinja templates.
+
+    Returns:
+        Nested message keys containing localized plain text.
+    """
+    interface = Interface(locale)
+    result = {}
+    for key in catalog():
+        namespace = result
+        *parents, leaf = key.split(".")
+        for parent in parents:
+            if isinstance(namespace.get(parent), str):
+                namespace[parent] = {"heading": namespace[parent]}
+            namespace = namespace.setdefault(parent, {})
+        if isinstance(namespace.get(leaf), dict):
+            namespace[leaf]["heading"] = interface.text(key)
+        else:
+            namespace[leaf] = interface.text(key)
+    return result
 
 
 def _completed_daily_report(routine: str, event: Record | None) -> bool:
@@ -82,97 +141,90 @@ def _completed_daily_report(routine: str, event: Record | None) -> bool:
     )
 
 
-def _time(value: object, *, seconds: bool = False) -> Markup:
-    """Render an actual UTC observation or an unknown marker.
+def _time(value: object, *, seconds: bool = False) -> Record:
+    """Prepare an actual UTC observation or its unknown marker.
 
     Returns:
-        A time element or the explicit unknown marker.
+        The original timestamp, its label, and whether it is known.
     """
     label = utc_time(value, seconds=seconds)
-    return (
-        fragment(label) if label == "—" else tag("time", label, datetime=value)
-    )
-
-
-def _clock_attributes(
-    interface: Interface,
-    schedule: Record,
-    now: dt.datetime,
-) -> Record:
-    """Share server clock anchors between status views.
-
-    Returns:
-        Escaped-element attributes for local clocks and state expiry.
-    """
-    return {
-        "data_server_time": now.isoformat(),
-        "data_schedule_expires": schedule.get("expires_at"),
-        "data_schedule_stale": interface.text("ops.schedule_stale"),
-        "data_clock_messages": json.dumps({
-            key: interface.text(
-                key,
-                count="{count}",
-                seconds="{seconds}",
-                minutes="{minutes}",
-            )
-            for key in (
-                "duration.seconds",
-                "duration.minutes",
-                "time.minutes_ago",
-                "time.hours_ago",
-                "time.minutes_ahead",
-                "time.hours_ahead",
-                "time.soon",
-                "time.just_now",
-            )
-        }),
-    }
+    return {"value": value, "label": label, "known": label != "—"}
 
 
 class _Page:
-    """Compose localized fragments with one escaping boundary."""
+    """Prepare localized template values from unchanged source facts."""
 
     def __init__(self, locale: str) -> None:
         """Use one negotiated locale throughout a complete response."""
         self.interface = Interface(locale)
         self.text = self.interface.text
 
-    def relative_note(self, value: object, now: dt.datetime) -> Markup:
-        """Render a small relative annotation for a known timestamp.
+    def context(self, heading: str, *, live: bool = False) -> Record:
+        """Prepare metadata and shared navigation for a document.
 
         Returns:
-            A localized small element, or nothing for unknown times.
+            Plain context values and an explicitly validated wiki link.
+        """
+        return {
+            "heading": heading,
+            "language_tag": self.interface.language_tag,
+            "t": _messages(self.interface.locale),
+            "live": live,
+            "project_link": wiki_link(
+                "https://zh.wikipedia.org/wiki/WikiProject:电子游戏",
+                self.text("nav.project"),
+            ),
+        }
+
+    def relative_note(
+        self,
+        value: object,
+        now: dt.datetime,
+        *,
+        inline: bool = False,
+    ) -> Record:
+        """Prepare a relative annotation only for a known timestamp.
+
+        Returns:
+            A localized label and the original observed timestamp.
         """
         label = relative_time(value, self.interface, now)
-        return (
-            tag(
-                "small",
-                label,
-                class_="relative-time",
-                data_clock="relative",
-                data_observed_at=value,
-            )
-            if label
-            else fragment()
-        )
+        return {
+            "label": label[1:-1] if inline and label else label,
+            "value": value,
+            "inline": inline,
+        }
 
-    @staticmethod
-    def _duration_attributes(event: Record | None) -> Record:
-        """Expose running starts for optional browser clocks.
+    def clock(self, schedule: Record, now: dt.datetime) -> Record:
+        """Share server clock anchors between status views.
 
         Returns:
-            Timer attributes for active observations with a valid start.
+            Plain values for browser clocks and observed state expiry.
         """
-        if (
-            not event
-            or event.get("status") != "running"
-            or timestamp(event.get("started_at")) is None
-        ):
-            return {}
         return {
-            "data_clock": "elapsed",
-            "data_started_at": event["started_at"],
-            "data_duration_template": "{duration}",
+            "server_time": now.isoformat(),
+            "expires": schedule.get("expires_at"),
+            "stale": self.text("ops.schedule_stale"),
+            "messages": json.dumps({
+                key: self.text(
+                    key,
+                    count="{count}",
+                    seconds="{seconds}",
+                    minutes="{minutes}",
+                )
+                for key in (
+                    "duration.seconds",
+                    "duration.minutes",
+                    "time.minutes_ago",
+                    "time.hours_ago",
+                    "time.days_ago",
+                    "time.minutes_ahead",
+                    "time.hours_ahead",
+                    "time.days_ahead",
+                    "time.soon",
+                    "time.just_now",
+                )
+            }),
         }
 
     @staticmethod
@@ -182,13 +234,9 @@ class _Page:
     ) -> Record | None:
         """Select progress from the current active monitor session.
 
-        Args:
-            event: Saved routine lifecycle and optional progress.
-            schedule: Validated monitor state and session start.
-
         Returns:
-            Saved progress or a preparing phase while fresh and running.
-            None for inactive, stale, or superseded observations.
+            Saved progress or a preparing phase while fresh and running;
+            none for inactive, stale, or superseded observations.
         """
         if (
             not event
@@ -202,14 +250,14 @@ class _Page:
             return None
         return event.get("progress") or {"phase": "preparing"}
 
-    def _progress_note(self, progress: Record | None) -> Markup:
-        """Describe the phase separately from the update subject.
+    def _progress_note(self, progress: Record | None) -> str | None:
+        """Describe the saved phase separately from the update subject.
 
         Returns:
-            A phase and optional counters, or nothing when inactive.
+            A phase and optional counters, or none when inactive.
         """
         if progress is None:
-            return fragment()
+            return None
         phase = progress.get("phase", "preparing")
         if phase not in {
             "preparing",
@@ -221,72 +269,19 @@ class _Page:
             phase = "preparing"
         label = self.text(f"progress.{phase}")
         current, total = progress.get("current"), progress.get("total")
-        if current is not None and total is not None:
-            label = self.text(
+        return (
+            self.text(
                 "progress.count",
                 phase=label,
                 current=f"{current:,}",
                 total=f"{total:,}",
             )
-        return tag(
-            "li",
-            label,
-            class_="routine-progress context",
-            data_progress_active=True,
-        )
-
-    def _routine_state(
-        self,
-        routine: str,
-        event: Record | None,
-        progress: Record | None,
-        popup_id: str,
-    ) -> Markup:
-        """Render a result button with fresh update details.
-
-        Args:
-            routine: Configured task whose update subject is shown.
-            event: Saved lifecycle outcome, if available.
-            progress: Current-session progress selected by the caller.
-            popup_id: Existing destination-details dialog identifier.
-
-        Returns:
-            A result button retaining a generic fallback after expiry.
-        """
-        fallback = self._outcome_label(event)
-        label = fallback
-        if _completed_daily_report(routine, event):
-            label = self.text(
-                "state.UpdatedReportDate",
-                date=self.interface.date(event["report_date"]),
-            )
-        if progress is not None:
-            label = (
-                self.text(
-                    "progress.pageviews_date"
-                    if routine == "pageviews"
-                    else "progress.report_date",
-                    date=self.interface.date(progress["report_date"]),
-                )
-                if progress.get("report_date")
-                else self.text(f"progress.routine.{routine}")
-            )
-        return tag(
-            "button",
-            label,
-            type="button",
-            class_="status-link",
-            popovertarget=popup_id,
-            aria_haspopup="dialog",
-            data_progress_label=label if progress is not None else None,
-            data_progress_fallback=fallback if progress is not None else None,
+            if current is not None and total is not None
+            else label
         )
 
     def _outcome_label(self, event: Record | None) -> str:
-        """Describe an outcome using its saved failure observations.
-
-        Args:
-            event: Routine or destination outcome with failure facts.
+        """Describe an outcome from its saved failure observations.
 
         Returns:
             Localized text, with a generic label for older records.
@@ -311,173 +306,57 @@ class _Page:
             else label
         )
 
-    def document(
-        self,
-        heading: str,
-        body: Markup,
-        footer: str | Markup = "",
-        *,
-        live: bool = False,
-        navigation: Markup | None = None,
-    ) -> str:
-        """Wrap content with shared metadata, navigation, and styles.
+    def article(self, item: Record) -> Record:
+        """Prepare a title, assessment chips, and saved introduction.
 
         Returns:
-            A complete escaped HTML document.
+            Localized plain observations and a safe upstream title link.
         """
-        nav = tag(
-            "nav",
-            *(
-                tag("a", self.text(key), href=path)
-                for path, key in (
-                    ("/about/", "nav.about"),
-                    ("/logs/", "nav.logs"),
-                )
-            ),
-            wiki_link(
-                "https://zh.wikipedia.org/wiki/WikiProject:电子游戏",
-                self.text("nav.project"),
-            ),
-            aria_label="Aranami",
-        )
-        head = tag(
-            "head",
-            tag("meta", charset="utf-8"),
-            tag(
-                "meta",
-                name="viewport",
-                content="width=device-width, initial-scale=1",
-            ),
-            tag("meta", name="theme-color", content="#edf9f4"),
-            tag(
-                "meta",
-                name="description",
-                content=self.text("page.description"),
-            ),
-            tag("link", rel="icon", href="/aranami.svg", type="image/svg+xml"),
-            tag("link", rel="stylesheet", href="/styles.css"),
-            tag("script", src="/live.js", defer=True) if live else fragment(),
-            tag("title", f"{heading} · Aranami"),
-        )
-        header = tag(
-            "header",
-            tag(
-                "div",
-                tag(
-                    "a",
-                    tag(
-                        "img",
-                        src="/aranami.svg",
-                        width=36,
-                        height=36,
-                        alt="",
-                    ),
-                    tag("span", "Aranami"),
-                    href="/",
-                    class_="brand",
-                ),
-                tag("h1", heading),
-                navigation
-                if navigation is not None
-                else tag(
-                    "nav",
-                    tag("a", self.text("nav.backlog"), href="/#backlog"),
-                    class_="page-toc",
-                    aria_label=self.text("nav.contents"),
-                ),
-                class_="shell",
-            ),
-            class_="masthead",
-        )
-        contents = tag(
-            "body",
-            tag("a", self.text("nav.skip"), href="#main", class_="skip"),
-            header,
-            tag("main", body, class_="shell", id="main"),
-            tag(
-                "footer",
-                tag(
-                    "div",
-                    tag("p", footer, class_="footer-uptime"),
-                    nav,
-                    class_="shell footer-inner",
-                ),
-            ),
-        )
-        return "<!doctype html>\n" + str(
-            tag("html", head, contents, lang=self.interface.language_tag),
-        )
-
-    def assessments(self, item: Record) -> Markup:
-        """Show recorded grades as independently wrapping chips.
-
-        Returns:
-            Escaped HTML for the selected presentation content.
-        """
-        chips = []
+        assessments = []
         for dimension in ("class", "importance"):
             value = item.get(f"assessment_{dimension}")
             if not isinstance(value, str) or not value.strip():
                 continue
             code = assessment_code(value, dimension)
-            label = (
-                self.text(f"assessment.{dimension}.{code}") if code else value
-            )
-            chips.append(
-                tag(
-                    "span",
-                    label,
-                    class_="assessment-chip",
-                    data_assessment=dimension,
-                    title=label,
-                ),
-            )
-        return (
-            tag("span", *chips, class_="assessment-chips")
-            if chips
-            else fragment()
-        )
+            assessments.append({
+                "dimension": dimension,
+                "label": self.text(f"assessment.{dimension}.{code}")
+                if code
+                else value,
+            })
+        language, extract = article_extract(item, self.interface.locale)
+        return {
+            "link": wiki_link(item["url"], item["title"], item["title"]),
+            "assessments": assessments,
+            "extract": extract,
+            "extract_language": Interface(language).language_tag,
+        }
 
-    def article_summary(self, item: Record) -> Markup:
-        """Share title links and assessment chips across cards.
-
-        Returns:
-            Escaped HTML for the selected presentation content.
-        """
-        return tag(
-            "span",
-            tag(
-                "bdi",
-                wiki_link(item["url"], item["title"], item["title"]),
-                lang="zh",
-            ),
-            " ",
-            self.assessments(item),
-            class_="article-summary",
-        )
-
-    def entry_meta(self, item: Record) -> Markup:
-        """Retain scheduled and carry-in date semantics.
+    def article_card(
+        self,
+        item: Record,
+        pageviews: Record | None,
+    ) -> Record:
+        """Prepare date, appearance, and popularity observations.
 
         Returns:
-            Escaped HTML for the selected presentation content.
+            An article card preserving each observation's meaning.
         """
-        parts = []
-        if item.get("date") is not None:
-            if item.get("date_kind") == "scheduled":
-                label = self.text("date.scheduled")
-                parts.append(
-                    f"({label}) "
-                    if self.interface.locale == "en"
-                    else f"\uff08{label}\uff09",
+        card = self.article(item)
+        if pageviews:
+            card.update(
+                rank=item["rank"],
+                pageviews_url=pageviews_url(item, pageviews["date"]),
+                views=self.text("pageviews.views", count=f"{item['views']:,}"),
+                site_rank=self.text(
+                    "pageviews.site_rank",
+                    rank=f"{item['site_rank']:,}",
                 )
-            parts.append(
-                tag(
-                    "time",
-                    self.interface.date(item["date"]),
-                    datetime=item["date"],
-                ),
+                if item.get("site_rank") is not None
+                else None,
             )
+            return card
+        date = item.get("date")
         kind = {
             "fa": "appearance.featured",
             "fl": "appearance.featured",
@@ -486,427 +365,219 @@ class _Page:
             "news": "homepage.news",
             "history": "homepage.history",
         }.get(item.get("kind"))
-        if kind is not None:
-            if item.get("date") is not None and (
-                self.interface.locale == "en"
-                or item.get("kind") in {"news", "history"}
-            ):
-                parts.append(" · ")
-            parts.append(self.text(kind))
         note = {
             "window_start": "date.window_start",
             "observed": "date.observed",
         }.get(item.get("date_kind"))
-        if note:
-            parts.append(
-                tag(
-                    "abbr",
-                    "†",
-                    class_="date-note-marker",
-                    title=self.text(note),
-                    aria_label=self.text(note),
-                ),
+        card.update(
+            date={"value": date, "label": self.interface.date(date)}
+            if date is not None
+            else None,
+            scheduled=(
+                f"({self.text('date.scheduled')}) "
+                if self.interface.locale == "en"
+                else f"\uff08{self.text('date.scheduled')}\uff09"
             )
-        return tag("p", *parts, class_="card-meta")
-
-    def pageviews_meta(self, item: Record, day: str) -> Markup:
-        """Link daily counts to trends and keep site ranks separate.
-
-        Returns:
-            Escaped HTML for the selected presentation content.
-        """
-        count = tag(
-            "a",
-            self.text("pageviews.views", count=f"{item['views']:,}"),
-            href=pageviews_url(item, day),
-            class_="pageviews-number",
+            if date is not None and item.get("date_kind") == "scheduled"
+            else "",
+            kind=self.text(kind) if kind else None,
+            separator=date is not None
+            and kind is not None
+            and (
+                self.interface.locale == "en"
+                or item.get("kind") in {"news", "history"}
+            ),
+            date_note=self.text(note) if note else None,
         )
-        rank = fragment()
-        if item.get("site_rank") is not None:
-            rank = fragment(
-                " · ",
-                tag(
-                    "span",
-                    self.text(
-                        "pageviews.site_rank",
-                        rank=f"{item['site_rank']:,}",
-                    ),
-                    class_="site-rank",
-                ),
-            )
-        return tag("p", count, rank, class_="card-meta")
-
-    def article_cards(
-        self,
-        items: list[Record] | None,
-        pageviews: Record | None = None,
-    ) -> Markup:
-        """Render supplied cards with saved introductions and metadata.
-
-        Returns:
-            Escaped HTML for the selected presentation content.
-        """
-        if items is None:
-            return tag("p", self.text("empty.section"), class_="empty")
-        if not items:
-            return tag("p", self.text("empty.period"), class_="empty")
-        cards = []
-        for item in items:
-            language, extract = article_extract(item, self.interface.locale)
-            intro = (
-                tag(
-                    "p",
-                    tag("bdi", extract, lang=Interface(language).language_tag),
-                    class_="article-extract",
-                )
-                if extract is not None
-                else fragment()
-            )
-            meta = (
-                self.pageviews_meta(item, pageviews["date"])
-                if pageviews
-                else self.entry_meta(item)
-            )
-            body = tag(
-                "div",
-                self.article_summary(item),
-                intro,
-                meta,
-                class_="article-card-body",
-            )
-            cards.append(
-                tag(
-                    "li",
-                    body,
-                    class_="article-card",
-                    value=item["rank"] if pageviews else None,
-                ),
-            )
-        return tag("ol", *cards, class_="card-grid article-list highlights")
+        return card
 
     def source_updated(
         self,
         value: object,
         *,
         attribution: bool = False,
-    ) -> Markup:
-        """Attach attribution to the section update time.
+    ) -> Record | None:
+        """Prepare attribution alongside the section's observed time.
 
         Returns:
-            Escaped HTML for the selected presentation content.
+            Plain source metadata, or none without a saved observation.
         """
         if value is None:
-            return fragment()
-        credit = fragment()
-        if attribution:
-            before, after = self.text("extracts.attribution").split(
-                "{license}",
-            )
-            credit = tag(
-                "span",
-                " · ",
-                before,
-                tag(
-                    "a",
-                    "CC BY-SA 4.0",
-                    href="https://creativecommons.org/licenses/by-sa/4.0/",
-                ),
-                after,
-                class_="extract-attribution",
-            )
-        return tag(
-            "p",
-            self.text("snapshot.updated"),
-            " ",
-            _time(value),
-            credit,
-            class_="source-updated",
+            return None
+        before, after = (
+            self.text("extracts.attribution").split("{license}")
+            if attribution
+            else ("", "")
         )
+        return {
+            "time": _time(value),
+            "attribution": attribution,
+            "before": before,
+            "after": after,
+        }
 
-    def pageviews_description(self, observation: Record | None) -> Markup:
-        """Link the measured day to the full-site popularity ranking.
-
-        Returns:
-            Escaped HTML for the selected presentation content.
-        """
-        day = fragment()
-        top = self.text("pageviews.top")
-        if observation is not None:
-            day = fragment(
-                tag(
-                    "time",
-                    self.interface.date(observation["date"]),
-                    datetime=observation["date"],
-                ),
-                " · " if self.interface.locale == "en" else "",
-            )
-            top = tag(
-                "a",
-                top,
-                href=local_url(
-                    "https://pageviews.wmcloud.org/topviews",
-                    project="zh.wikipedia.org",
-                    date=observation["date"],
-                ),
-            )
-        before, remainder = self.text("pageviews.description").split("{date}")
-        middle, after = remainder.split("{top}")  # ruff: ignore[missing-f-string-syntax]
-        return fragment(before, day, middle, top, after)
-
-    def highlights(self, snapshot: Record) -> Markup:
-        """Render article sections while omitting confirmed empties.
+    def highlights(self, snapshot: Record) -> list[Record]:
+        """Prepare visible article sections, omitting confirmed empties.
 
         Returns:
-            Escaped HTML for the selected presentation content.
+            Ordered sections retaining unavailable and empty states.
         """
         sections = []
         for section in homepage_sections(snapshot):
             key = section["key"]
             views = snapshot.get("pageviews") if key == "pageviews" else None
-            title = self.text(
-                "pageviews.heading"
-                if key == "pageviews"
-                else f"homepage.{key}",
-            )
-            description = (
-                self.pageviews_description(views)
-                if key == "pageviews"
-                else self.text(f"homepage.{key}_description")
-            )
-            cards = (
-                tag("p", self.text("pageviews.unavailable"), class_="empty")
-                if key == "pageviews" and views is None
-                else self.article_cards(section["items"], views)
-            )
+            description = None
+            if key == "pageviews":
+                before, remainder = self.text("pageviews.description").split(
+                    "{date}",
+                )
+                middle, after = remainder.split("{top}")
+                description = {
+                    "before": before,
+                    "middle": middle,
+                    "after": after,
+                    "top": self.text("pageviews.top"),
+                    "date": self.interface.date(views["date"])
+                    if views
+                    else None,
+                    "day": views["date"] if views else None,
+                    "separator": " · "
+                    if self.interface.locale == "en"
+                    else "",
+                    "url": local_url(
+                        "https://pageviews.wmcloud.org/topviews",
+                        project="zh.wikipedia.org",
+                        date=views["date"],
+                    )
+                    if views
+                    else None,
+                }
             updated = (
                 snapshot.get("reports", {}).get(key, {}).get("last_success_at")
             )
-            sections.append(
-                tag(
-                    "section",
-                    tag("h3", title, id=f"homepage-{key}"),
-                    tag("p", description, class_="report-description"),
-                    cards,
-                    self.source_updated(updated, attribution=True),
-                    class_="report-section",
-                    aria_labelledby=f"homepage-{key}",
+            sections.append({
+                "key": key,
+                "title": self.text(
+                    "pageviews.heading"
+                    if key == "pageviews"
+                    else f"homepage.{key}",
                 ),
-            )
-        if not sections:
-            return fragment()
-        return tag(
-            "section",
-            tag("h2", self.text("homepage.heading"), id="homepage-heading"),
-            *sections,
-            class_="section-flat",
-            id="homepage",
-            aria_labelledby="homepage-heading",
-        )
+                "description": self.text(f"homepage.{key}_description")
+                if key != "pageviews"
+                else None,
+                "pageviews_description": description,
+                "empty": self.text("pageviews.unavailable")
+                if key == "pageviews" and views is None
+                else self.text("empty.section")
+                if section["items"] is None
+                else self.text("empty.period")
+                if not section["items"]
+                else None,
+                "cards": [
+                    self.article_card(item, views)
+                    for item in section["items"] or []
+                ],
+                "updated": self.source_updated(updated, attribution=True),
+            })
+        return sections
 
-    def backlog(self, backlog: Record | None) -> Markup:
-        """Link nonempty tasks in their configured section order.
+    def backlog(self, backlog: Record | None) -> Record | None:
+        """Prepare nonempty maintenance tasks in their configured order.
 
         Returns:
-            Escaped HTML for the selected presentation content.
+            Ordered sections, unavailable state, or none when empty.
         """
         if backlog is not None and backlog["total"] == 0:
-            return fragment()
-        content = [
-            tag("h2", self.text("backlog.heading"), id="backlog-heading"),
-        ]
+            return None
         if backlog is None:
-            content.append(
-                tag("p", self.text("backlog.unavailable"), class_="empty"),
-            )
-        else:
-            groups = [
-                group for group in backlog["groups"] if group["count"] > 0
-            ]
-            for key, tasks in maintenance_sections(groups).items():
-                cards = [
-                    tag(
-                        "a",
-                        tag(
-                            "span",
-                            self.interface.label(
+            return {"unavailable": True}
+        groups = [group for group in backlog["groups"] if group["count"] > 0]
+        return {
+            "sections": [
+                {
+                    "key": key,
+                    "label": self.interface.label(
+                        tasks[0].get("section_label"),
+                        self.text("backlog.heading"),
+                    ),
+                    "tasks": [
+                        {
+                            "label": self.interface.label(
                                 group.get("label"),
                                 group["category"],
                             ),
-                            class_="backlog-label",
-                        ),
-                        tag(
-                            "span",
-                            self.text(
+                            "count": self.text(
                                 "backlog.count",
                                 count=f"{group['count']:,}",
                             ),
-                            class_="backlog-count",
-                        ),
-                        href=local_url(
-                            "/maintenance/",
-                            task=group["key"],
-                            page=1,
-                        ),
-                        class_="backlog-task",
-                    )
-                    for group in tasks
-                ]
-                label = self.interface.label(
-                    tasks[0].get("section_label"),
-                    self.text("backlog.heading"),
-                )
-                content.append(
-                    tag(
-                        "section",
-                        tag("h3", label, id=f"backlog-section-{key}"),
-                        tag("div", *cards, class_="card-grid"),
-                        class_="backlog-section",
-                        aria_labelledby=f"backlog-section-{key}",
-                    ),
-                )
-            content.extend((
-                tag("p", self.text("backlog.note"), class_="homepage-note"),
-                self.source_updated(backlog["observed_at"]),
-            ))
-        return tag(
-            "section",
-            *content,
-            class_="section-flat",
-            id="backlog",
-            aria_labelledby="backlog-heading",
-        )
+                            "url": local_url(
+                                "/maintenance/",
+                                task=group["key"],
+                                page=1,
+                            ),
+                        }
+                        for group in tasks
+                    ],
+                }
+                for key, tasks in maintenance_sections(groups).items()
+            ],
+            "updated": self.source_updated(backlog["observed_at"]),
+        }
 
-    def routine_links(self, name: str, definition: Record) -> Markup:
-        """Render configured targets with accessible link names.
+    def _routine_links(self, name: str, definition: Record) -> Record:
+        """Prepare configured report links with accessible names.
 
         Returns:
-            Escaped HTML for the selected presentation content.
+            Validated target links and locale-specific separators.
         """
         targets = list(definition.get("pages", {}).values()) or definition.get(
             "prefixes",
             [],
         )
-        if not targets:
-            return fragment(name)
         multiple = len(targets) > 1
-        links = []
-        for index, title in enumerate(targets, 1):
-            description = (
-                f"{index} · {name} · {title}"
-                if multiple
-                else f"{name} · {title}"
-            )
-            links.extend((
-                " " if index > 1 else "",
+        return {
+            "name": name,
+            "multiple": multiple,
+            "opening": " (" if self.interface.locale == "en" else "\uff08",
+            "closing": ")" if self.interface.locale == "en" else "\uff09",
+            "targets": [
                 wiki_link(
                     title_url(title),
                     str(index) if multiple else name,
-                    description,
-                ),
-            ))
-        if not multiple:
-            return fragment(*links)
-        opening, closing = (
-            (" (", ")")
-            if self.interface.locale == "en"
-            else ("\uff08", "\uff09")
-        )
-        return fragment(name, opening, *links, closing)
+                    f"{index} · {name} · {title}"
+                    if multiple
+                    else f"{name} · {title}",
+                )
+                for index, title in enumerate(targets, 1)
+            ],
+        }
 
-    def report_details(
-        self,
-        routine: str,
-        popup_id: str,
-        records: list[Record],
-        now: dt.datetime,
-    ) -> Markup:
-        """Build a keyboard-accessible native popup without JavaScript.
+    def _report(self, record: Record, now: dt.datetime) -> Record:
+        """Prepare destination outcomes and independent execution times.
 
         Returns:
-            Escaped HTML for the selected presentation content.
+            Localized values and an active timer anchor when observed.
         """
-        keys = (
-            "column.article",
-            "ops.column_status",
-            "ops.started",
-            "ops.finished",
-            "ops.column_duration",
-        )
-        rows = [
-            tag(
-                "tr",
-                tag(
-                    "th",
-                    wiki_link(
-                        title_url(record["title"], record["site"]),
-                        record["title"],
-                    ),
-                    scope="row",
-                ),
-                tag("td", self._outcome_label(record)),
-                tag(
-                    "td",
-                    _time(
-                        None
-                        if record["status"] == "queued"
-                        else record.get("started_at"),
-                        seconds=True,
-                    ),
-                ),
-                tag("td", _time(record.get("finished_at"), seconds=True)),
-                tag(
-                    "td",
-                    event_duration(record, self.interface, now),
-                    **self._duration_attributes(record),
-                ),
-                data_key=f"{record['site']}:{record['title']}",
-            )
-            for record in records
-        ]
-        table = tag(
-            "table",
-            tag(
-                "thead",
-                tag(
-                    "tr",
-                    *(tag("th", self.text(key), scope="col") for key in keys),
-                ),
+        return {
+            "key": f"{record['site']}:{record['title']}",
+            "link": wiki_link(
+                title_url(record["title"], record["site"]),
+                record["title"],
             ),
-            tag("tbody", *rows),
-        )
-        heading = self.text("ops.details", routine=routine)
-        return tag(
-            "div",
-            tag(
-                "div",
-                tag("h3", heading, id=f"{popup_id}-heading"),
-                tag(
-                    "button",
-                    self.text("ops.close"),
-                    type="button",
-                    popovertarget=popup_id,
-                    popovertargetaction="hide",
-                    autofocus=True,
-                ),
-                class_="popup-heading",
+            "outcome": self._outcome_label(record),
+            "started": _time(
+                None
+                if record["status"] == "queued"
+                else record.get("started_at"),
+                seconds=True,
             ),
-            tag("p", self.text("ops.timing_note"), class_="context"),
-            tag(
-                "div",
-                table,
-                class_="table-scroll",
-                tabindex=0,
-                role="region",
-                aria_label=heading,
-            )
-            if records
-            else tag("p", self.text("ops.no_record"), class_="empty"),
-            id=popup_id,
-            popover="auto",
-            role="dialog",
-            aria_labelledby=f"{popup_id}-heading",
-            class_="page-updates",
-        )
+            "finished": _time(record.get("finished_at"), seconds=True),
+            "duration": event_duration(record, self.interface, now),
+            "timer_start": record.get("started_at")
+            if record["status"] == "running"
+            and timestamp(record.get("started_at")) is not None
+            else None,
+        }
 
     def routine_cards(
         self,
@@ -914,11 +585,11 @@ class _Page:
         definitions: Record,
         schedule: Record,
         now: dt.datetime,
-    ) -> Markup:
-        """Show actual outcomes and schedule states independently.
+    ) -> list[Record]:
+        """Prepare actual outcomes and independent configured schedules.
 
         Returns:
-            Escaped HTML for the selected presentation content.
+            Routine cards with current-session progress and report rows.
         """
         events = (status.get("routines") or {}).get("routines", {})
         records = (status.get("reports") or {}).get("reports", {}).values()
@@ -928,6 +599,33 @@ class _Page:
             event = events.get(identifier)
             running = (event or {}).get("status") == "running"
             progress = self._active_progress(event, schedule)
+            fallback = self._outcome_label(event)
+            label = fallback
+            completed_daily = _completed_daily_report(identifier, event)
+            if completed_daily:
+                label = self.text(
+                    "state.UpdatedReportDate",
+                    date=self.interface.date(event["report_date"]),
+                )
+            if progress is not None:
+                label = (
+                    self.text(
+                        "progress.pageviews_date"
+                        if identifier == "pageviews"
+                        else "progress.report_date",
+                        date=self.interface.date(progress["report_date"]),
+                    )
+                    if progress.get("report_date")
+                    else self.text(f"progress.routine.{identifier}")
+                )
+            observed = (
+                event["started_at" if running else "finished_at"]
+                if event
+                else None
+            )
+            upcoming = (
+                schedule["routines"].get(identifier, {}).get("next_run_at")
+            )
             pages = sorted(
                 (
                     record
@@ -937,410 +635,358 @@ class _Page:
                 ),
                 key=operator.itemgetter("title"),
             )
-            popup_id = f"report-details-{identifier}"
-            state = self._routine_state(identifier, event, progress, popup_id)
-            observed = (
-                event["started_at" if running else "finished_at"]
-                if event
-                else None
-            )
-            scheduled = schedule["routines"].get(identifier, {})
-            upcoming = scheduled.get("next_run_at")
-            metadata = tag(
-                "ul",
-                tag(
-                    "li",
-                    tag(
-                        "span",
-                        "✅"
-                        if _completed_daily_report(identifier, event)
-                        else _STATE_ICONS.get(
-                            (event or {}).get("status"),
-                            "❔",
-                        ),
-                        aria_hidden="true",
-                    ),
-                    " ",
-                    state,
-                    class_="routine-status",
-                ),
-                self._progress_note(progress),
-                tag(
-                    "li",
-                    self.text(
-                        "ops.execution_started"
-                        if running
-                        else "ops.execution_finished",
-                    ),
-                    _time(observed),
-                    self.relative_note(observed, now),
-                ),
-                tag(
-                    "li",
-                    self.text("ops.next_run"),
-                    tag(
-                        "span",
-                        next_run(schedule, identifier, self.interface),
-                        self.relative_note(upcoming, now),
-                        data_schedule_time=schedule.get("expires_at")
-                        is not None,
-                    ),
-                )
-                if not running
-                else fragment(),
-                class_="routine-meta",
-            )
-            cards.append(
-                tag(
-                    "article",
-                    tag("h3", self.routine_links(name, definition)),
-                    metadata,
-                    self.report_details(name, popup_id, pages, now),
-                    class_="routine-card",
-                    id=f"routine-{identifier}",
-                ),
-            )
-        missing = (
-            tag("p", self.text("ops.schedule_missing"), class_="empty")
-            if not definitions
-            else fragment()
-        )
-        return tag(
-            "section",
-            tag("h2", self.text("ops.heading"), id="tool-status-heading"),
-            tag(
-                "p",
-                self.text("ops.reconnecting"),
-                id="live-notice",
-                class_="context",
-                role="status",
-                hidden=True,
-            ),
-            missing,
-            tag("div", *cards, class_="card-grid"),
-            class_="section-flat",
-            id="tool-status",
-            aria_labelledby="tool-status-heading",
-            **_clock_attributes(self.interface, schedule, now),
-        )
+            cards.append({
+                "identifier": identifier,
+                "links": self._routine_links(name, definition),
+                "running": running,
+                "icon": "✅"
+                if completed_daily
+                else _STATE_ICONS.get((event or {}).get("status"), "❔"),
+                "state": label,
+                "progress": self._progress_note(progress),
+                "fallback": fallback,
+                "observed": _time(observed),
+                "relative": self.relative_note(observed, now),
+                "next_run": next_run(schedule, identifier, self.interface),
+                "upcoming": self.relative_note(upcoming, now),
+                "schedule_expires": schedule.get("expires_at") is not None,
+                "popup_id": f"report-details-{identifier}",
+                "popup_heading": self.text("ops.details", routine=name),
+                "reports": [self._report(record, now) for record in pages],
+            })
+        return cards
 
-    def worklist_card(self, item: Record, groups: Record) -> Markup:
-        """Render exact issue sources and the earliest month category.
+    def live_status(
+        self,
+        status: Record,
+        config: Record,
+        now: dt.datetime,
+    ) -> Record:
+        """Prepare shared status, footer, server, and resource data.
 
         Returns:
-            Escaped HTML for the selected presentation content.
+            Context shared by complete pages and the live fragment view.
         """
-        issues = [
-            groups[key] for key in item.get("issues", []) if key in groups
-        ]
-        issue_links = [
-            tag(
-                "li",
-                wiki_link(
-                    group["source_url"],
-                    self.interface.label(
-                        group.get("label"),
-                        group["category"],
-                    ),
+        definitions = (config.get("routines") or {}).get("routines", {})
+        schedule = schedule_state(status.get("schedule"), definitions, now)
+        version = config.get("version") or self.text("ops.unavailable")
+        started = schedule.get("started_at")
+        snapshot = status.get("schedule") or {}
+        observed_start = snapshot.get("started_at")
+        server_started = (
+            _time(observed_start, seconds=True)
+            if timestamp(observed_start) is not None
+            else None
+        )
+        return {
+            "clock": self.clock(schedule, now),
+            "routines": self.routine_cards(status, definitions, schedule, now),
+            "footer": {
+                "label": uptime(schedule, version, self.interface, now),
+                "started": started,
+                "template": self.text(
+                    "footer.uptime",
+                    version=version,
+                    days="{days}",
+                    hours="{hours}",
+                    minutes="{minutes}",
+                    seconds="{seconds}",
+                    since=utc_time(started).removesuffix(" UTC"),
+                )
+                if started
+                else None,
+                "unknown": self.text("footer.uptime_unknown", version=version),
+            },
+            "server": {
+                "state": self.text(f"server.{schedule['state']}"),
+                "observed": _time(schedule.get("updated_at"), seconds=True),
+                "relative": self.relative_note(
+                    schedule.get("updated_at"),
+                    now,
                 ),
+                "expires": schedule.get("expires_at") is not None,
+                "started": server_started,
+                "started_relative": self.relative_note(
+                    observed_start,
+                    now,
+                    inline=True,
+                ),
+                "opening": " (" if self.interface.locale == "en" else "\uff08",
+                "separator": ", "
+                if self.interface.locale == "en"
+                else "\uff0c",
+                "closing": ")" if self.interface.locale == "en" else "\uff09",
+            },
+            "runtime": self.runtime(status, schedule),
+        }
+
+    def runtime(self, status: Record, schedule: Record) -> list[Record]:
+        """Prepare saved environment and fresh resource observations.
+
+        Returns:
+            Metric rows with explicit unknowns for missing observations.
+        """
+        runtime = (status.get("schedule") or {}).get("runtime") or {}
+        unknown = self.text("ops.unavailable")
+        fresh = schedule["state"] in {"running", "paused"}
+        memory = runtime.get("memory_bytes") if fresh else None
+        limit = runtime.get("memory_limit_bytes") if fresh else None
+        cpu = runtime.get("cpu_percent") if fresh else None
+        cpu_limit = runtime.get("cpu_limit") if fresh else None
+        used_memory = readable_size(memory) if memory is not None else unknown
+        allocated_memory = (
+            readable_size(limit) if limit is not None else unknown
+        )
+        cpu_use = f"{cpu:.1f}%" if cpu is not None else unknown
+        cpu_cores = (
+            self.text(
+                "server.cpu_core" if cpu_limit == 1 else "server.cpu_cores",
+                count=f"{cpu_limit:g}",
             )
-            for group in issues
+            if cpu_limit is not None
+            else self.text("server.cpu_cores_unknown")
+        )
+        separator = " " if self.interface.locale == "en" else ""
+        rows = (
+            (
+                "environment",
+                " · ".join(
+                    value
+                    for key in ("system", "machine")
+                    if (value := runtime.get(key))
+                )
+                or unknown,
+                False,
+            ),
+            ("python", runtime.get("python") or unknown, False),
+            ("memory", f"{used_memory} / {allocated_memory}", True),
+            ("cpu", f"{cpu_use}{separator}{cpu_cores}", True),
+        )
+        return [
+            {
+                "label": self.text(f"server.{key}"),
+                "value": value,
+                "fresh": usage and fresh,
+                "stale": unknown if usage else None,
+            }
+            for key, value, usage in rows
         ]
-        if not issue_links:
-            issue_links = [tag("li", "—", class_="unknown")]
+
+    def worklist_card(self, item: Record, groups: Record) -> Record:
+        """Prepare exact issue sources and the earliest observed month.
+
+        Returns:
+            An article summary with localized issue links and dates.
+        """
+        card = self.article(item)
         month = item.get("oldest_issue_month")
-        month_label = (
-            tag(
-                "time",
-                self.interface.date(month, month_only=True),
-                datetime=month,
-            )
-            if month
-            else fragment("—")
-        )
-        if month and item.get("oldest_issue_category"):
-            month_label = tag(
-                "a",
-                month_label,
-                href=title_url("Category:" + item["oldest_issue_category"]),
-            )
-        return tag(
-            "li",
-            self.article_summary(item),
-            tag(
-                "ul",
-                *issue_links,
-                class_="card-meta issues",
-                aria_label=self.text("backlog.column.issues"),
-            ),
-            tag(
-                "p",
-                month_label,
-                class_="card-meta",
-                aria_label=self.text("backlog.column.oldest"),
-            ),
-            class_="article-card",
-        )
-
-    def sort_controls(self, selection: dict[str, str]) -> Markup:
-        """Preserve random seeds and reverse controls across pages.
-
-        Returns:
-            Escaped HTML for the selected presentation content.
-        """
-        choices = {
-            "title": "backlog.sort.title",
-            "class": "backlog.sort.class",
-            "importance": "backlog.column.importance",
-            "oldest": "backlog.sort.time",
-            "random": "backlog.sort.random",
-        }
-        links = [
-            tag(
-                "a",
-                self.text(key),
-                href=local_url(
-                    "/maintenance/",
-                    task=selection["task"],
-                    sort=sort,
-                ),
-                aria_current="true" if sort == selection["sort"] else None,
-            )
-            for sort, key in choices.items()
-        ]
-        reverse = {
-            **selection,
-            "page": "1",
-            "order": "desc" if selection["order"] == "asc" else "asc",
-        }
-        return tag(
-            "nav",
-            tag("span", self.text("backlog.sort"), ":"),
-            *links,
-            tag(
-                "a",
-                "[",
-                self.text("backlog.sort.reverse"),
-                "]",
-                href=local_url("/maintenance/", **reverse),
-            ),
-            class_="sort-controls",
-            aria_label=self.text("backlog.sort"),
-        )
-
-    def pagination(self, selection: dict[str, str], page: Record) -> Markup:
-        """Retain sort controls in previous and next page links.
-
-        Returns:
-            Escaped HTML for the selected presentation content.
-        """
-        previous = (
-            tag(
-                "a",
-                self.text("backlog.previous"),
-                href=local_url(
-                    "/maintenance/",
-                    **{**selection, "page": page["page"] - 1},
-                ),
-                rel="prev",
-            )
-            if page["page"] > 1
-            else fragment()
-        )
-        following = (
-            tag(
-                "a",
-                self.text("backlog.next"),
-                href=local_url(
-                    "/maintenance/",
-                    **{**selection, "page": page["page"] + 1},
-                ),
-                rel="next",
-            )
-            if page["page"] < page["pages"]
-            else fragment()
-        )
-        return tag(
-            "nav",
-            previous,
-            tag(
-                "p",
-                self.text(
-                    "backlog.page",
-                    page=page["page"],
-                    pages=page["pages"],
-                ),
-            ),
-            following,
-            class_="pagination",
-            aria_label=self.text("nav.backlog"),
-        )
-
-    def log_controls(self, data: Record) -> Markup:
-        """Show date and literal-text controls in a GET form.
-
-        Returns:
-            Escaped HTML for the selected presentation content.
-        """
-        options = [
-            tag(
-                "option",
-                row["date"],
-                value=row["date"],
-                selected=row["date"] == data["date"],
-            )
-            for row in data["files"]
-        ]
-        return tag(
-            "form",
-            tag(
-                "label",
-                self.text("logs.column_date"),
-                tag("select", *options, name="date"),
-            ),
-            tag(
-                "label",
-                self.text("logs.query"),
-                tag(
-                    "input",
-                    type="search",
-                    name="q",
-                    maxlength=256,
-                    value=data["query"],
-                ),
-                class_="search",
-            ),
-            tag("button", self.text("logs.apply"), type="submit"),
-            action="/logs/",
-            method="get",
-            class_="log-query",
-        )
-
-    def log_files(self, files: list[Record]) -> Markup:
-        """List exact daily files with download links and sizes.
-
-        Returns:
-            Escaped HTML for the selected presentation content.
-        """
-        headings = tag(
-            "tr",
-            *(
-                tag("th", self.text(key), scope="col")
-                for key in (
-                    "logs.column_date",
-                    "logs.column_file",
-                    "logs.column_size",
+        card.update(
+            issues=[
+                wiki_link(
+                    groups[key]["source_url"],
+                    self.interface.label(
+                        groups[key].get("label"),
+                        groups[key]["category"],
+                    ),
                 )
-            ),
+                for key in item.get("issues", [])
+                if key in groups
+            ],
+            month={
+                "value": month,
+                "label": self.interface.date(month, month_only=True),
+                "url": title_url("Category:" + item["oldest_issue_category"])
+                if item.get("oldest_issue_category")
+                else None,
+            }
+            if month
+            else None,
         )
-        rows = [
-            tag(
-                "tr",
-                tag(
-                    "td",
-                    tag(
-                        "a",
-                        row["date"],
-                        href=local_url("/logs/", date=row["date"]),
-                    ),
+        return card
+
+    def log_events(self, data: Record, config: Record) -> list[Record]:
+        """Localize saved events and filter their visible content.
+
+        Args:
+            data: Validated events and the literal-text search query.
+            config: Serialized routine definitions for report links.
+
+        Returns:
+            Localized summaries, UTC timestamps, and safe report links.
+            Unknown event kinds are omitted instead of exposing codes.
+        """
+        definitions = (config.get("routines") or {}).get("routines", {})
+        query = data.get("query", "").casefold()
+        events = []
+        for event in data.get("events", [])[:_LOG_EVENT_LIMIT]:
+            content = self._log_event(event, definitions)
+            if content is None:
+                continue
+            if query and query not in content["searchable"].casefold():
+                continue
+            events.append(content)
+        return events
+
+    def _log_event(self, event: Record, definitions: Record) -> Record | None:
+        """Prepare one authored event summary without diagnostic fields.
+
+        Returns:
+            Localized event data, or none for an unsupported event kind.
+        """
+        kind = event.get("kind")
+        if kind not in _LOG_EVENT_KINDS:
+            return None
+        preview = "preview_" if event.get("dry") is True else ""
+        routine_key = f"routine.{event.get('routine')}"
+        service_key = f"logs.service.{event.get('service')}"
+        summary = self.text(
+            f"logs.event.{preview}{kind}",
+            routine=self.text(routine_key)
+            if routine_key in catalog()
+            else self.text("logs.routine_unknown"),
+            service=self.text(service_key)
+            if service_key in catalog()
+            else self.text("logs.service.unknown"),
+            result=self._log_result(
+                event.get("status"),
+                preview=event.get("dry") is True
+                and kind == "routine_finished",
+            ),
+            tasks=self._log_task_count(event.get("tasks")),
+            failed_tasks=self._log_task_count(event.get("failures")),
+            deferred_tasks=self._log_task_count(event.get("deferred")),
+        )
+        definition = definitions.get(event.get("routine"), {})
+        titles = list(definition.get("pages", {}).values()) or list(
+            definition.get("prefixes", []),
+        )
+        separator = " " if self.interface.locale == "en" else ""
+        summary = separator.join((summary, *self._log_details(event)))
+        reports = self._log_reports(titles)
+        time = _time(event.get("time"), seconds=True)
+        return {
+            "time": time,
+            "time_intro": self.text("logs.time_intro"),
+            "time_separator": self.text("logs.time_separator"),
+            "summary": summary,
+            "sentence_separator": separator,
+            "reports": reports,
+            "searchable": (
+                self.text("logs.time_intro")
+                + time["label"]
+                + self.text("logs.time_separator")
+                + summary
+                + (separator + reports["text"] if reports else "")
+            ),
+        }
+
+    def _log_task_count(self, count: object) -> str:
+        """Use the correct noun form for an observed run count.
+
+        Returns:
+            A localized count phrase, or empty text for absent counts.
+        """
+        return (
+            self.text("logs.task" if count == 1 else "logs.tasks", count=count)
+            if count is not None
+            else ""
+        )
+
+    def _log_reports(self, titles: list[str]) -> Record | None:
+        """Introduce related reports without claiming they were edited.
+
+        Returns:
+            Safe links and prose separators, or none without targets.
+        """
+        if not titles:
+            return None
+        english = self.interface.locale == "en"
+        separator = ", " if english else "、"
+        last_separator = " and " if english else "、"
+        joined = (
+            separator.join(titles[:-1]) + last_separator + titles[-1]
+            if len(titles) > 1
+            else titles[0]
+        )
+        before, after = self.text("logs.related_reports").split("{reports}")
+        return {
+            "before": before,
+            "after": after,
+            "separator": separator,
+            "last_separator": last_separator,
+            "links": [wiki_link(title_url(title), title) for title in titles],
+            "text": self.text("logs.related_reports", reports=joined),
+        }
+
+    def _log_details(self, event: Record) -> list[str]:
+        """Keep measured durations and confirmed counts independent.
+
+        Returns:
+            Localized details without inventing edits for previews.
+        """
+        details = []
+        if (
+            event["kind"] == "routine_finished"
+            and not event["dry"]
+            and event.get("updated") is not None
+        ):
+            details.append(
+                self.text(
+                    "logs.edit" if event["updated"] == 1 else "logs.edits",
+                    count=f"{event['updated']:,}",
                 ),
-                tag(
-                    "td",
-                    tag(
-                        "a",
-                        tag("code", row["name"]),
-                        href=local_url("/logs/", date=row["date"], download=1),
-                        download=True,
-                    ),
-                    class_="filename",
-                ),
-                tag("td", readable_size(row["size"])),
             )
-            for row in files
-        ]
-        return tag(
-            "div",
-            tag(
-                "table",
-                tag("thead", headings),
-                tag("tbody", *rows),
-                class_="logs-table",
-            ),
-            class_="table-scroll",
+        if (
+            event["kind"] == "website_finished"
+            and event.get("failures") is not None
+        ):
+            details.append(
+                self.text(
+                    "logs.failure"
+                    if event["failures"] == 1
+                    else "logs.failures",
+                    count=event["failures"],
+                ),
+            )
+        if event.get("duration_seconds") is not None:
+            details.append(
+                self.text(
+                    "logs.duration",
+                    duration=duration(
+                        event["duration_seconds"],
+                        self.interface,
+                    ),
+                ),
+            )
+        return details
+
+    def _log_result(self, status: object, *, preview: bool = False) -> str:
+        """Localize outcomes without exposing unexpected identifiers.
+
+        Args:
+            status: Validated saved task or website outcome.
+            preview: Whether a routine only prepared proposed changes.
+
+        Returns:
+            Localized results. Successful previews report completion
+            without claiming that no changes were needed.
+        """
+        if preview and status in {"updated", "no_update"}:
+            return self.text("logs.result.updated")
+        key = (
+            status
+            if status
+            in {
+                "updated",
+                "no_update",
+                "failed",
+                "deferred",
+                "unconfirmed",
+                "partial",
+            }
+            else "unknown"
         )
-
-
-def _live_status(
-    page: _Page,
-    status: Record,
-    config: Record,
-    now: dt.datetime,
-) -> tuple[Markup, Markup, Markup]:
-    """Share status cards and uptime between initial and live views.
-
-    Returns:
-        Routine cards, uptime, and compact server-state fragments.
-    """
-    definitions = (config.get("routines") or {}).get("routines", {})
-    schedule = schedule_state(status.get("schedule"), definitions, now)
-    version = config.get("version") or page.text("ops.unavailable")
-    started = schedule.get("started_at")
-    footer = tag(
-        "span",
-        uptime(schedule, version, page.interface, now),
-        id="live-uptime",
-        data_clock="uptime" if started else None,
-        data_started_at=started,
-        data_uptime_template=page.text(
-            "footer.uptime",
-            version=version,
-            days="{days}",
-            hours="{hours}",
-            minutes="{minutes}",
-            seconds="{seconds}",
-            since=utc_time(started).removesuffix(" UTC"),
-        )
-        if started
-        else None,
-        data_uptime_unknown=page.text(
-            "footer.uptime_unknown",
-            version=version,
-        ),
-    )
-    server = tag(
-        "section",
-        tag("h2", page.text("server.heading"), id="server-status-heading"),
-        tag(
-            "p",
-            page.text(f"server.{schedule['state']}"),
-            id="server-state",
-            data_schedule_time=schedule.get("expires_at") is not None,
-            data_stale_text=page.text("server.stale"),
-        ),
-        tag(
-            "p",
-            page.text("server.observed"),
-            _time(schedule.get("updated_at"), seconds=True),
-            page.relative_note(schedule.get("updated_at"), now),
-            class_="source-updated",
-        ),
-        tag(
-            "p",
-            page.text("ops.reconnecting"),
-            id="live-server-notice",
-            class_="context",
-            role="status",
-            hidden=True,
-        ),
-        id="live-server-status",
-        aria_labelledby="server-status-heading",
-        **_clock_attributes(page.interface, schedule, now),
-    )
-    return (
-        page.routine_cards(status, definitions, schedule, now),
-        footer,
-        server,
-    )
+        return self.text(f"logs.result.{key}")
 
 
 def render_dashboard(
@@ -1350,7 +996,7 @@ def render_dashboard(
     locale: str,
     now: dt.datetime | None = None,
 ) -> str:
-    """Build the dashboard from independent saved observations.
+    """Render the dashboard from independent saved observations.
 
     Args:
         snapshot: Validated website snapshot, or unavailable data.
@@ -1363,50 +1009,24 @@ def render_dashboard(
         Complete escaped HTML document, including unavailable states.
     """
     page = _Page(locale)
-    now = now or dt.datetime.now(dt.UTC)
-    status, config = status or {}, config or {}
-    status_cards, footer, _ = _live_status(page, status, config, now)
-    notice = fragment()
-    if snapshot is None:
-        notice = tag("p", page.text("notice.preparing"), class_="notice")
-    elif snapshot.get("errors"):
-        notice = tag("p", page.text("notice.partial"), class_="notice")
-    snapshot = snapshot or {}
-    sections = homepage_sections(snapshot)
-    navigation = tag(
-        "nav",
-        *(
-            tag(
-                "a",
-                page.text(
-                    "pageviews.heading"
-                    if section["key"] == "pageviews"
-                    else f"homepage.{section['key']}",
-                ),
-                href=f"#homepage-{section['key']}",
-            )
-            for section in sections
+    context = page.context(page.text("page.heading"), live=True)
+    context.update(
+        page.live_status(
+            status or {},
+            config or {},
+            now or dt.datetime.now(dt.UTC),
         ),
-        tag("a", page.text("nav.backlog"), href="#backlog")
-        if (snapshot.get("backlog") or {}).get("total") != 0
-        else fragment(),
-        tag("a", page.text("ops.heading"), href="#tool-status"),
-        class_="page-toc",
-        aria_label=page.text("nav.contents"),
     )
-    body = fragment(
-        notice,
-        page.highlights(snapshot),
-        page.backlog(snapshot.get("backlog")),
-        status_cards,
+    context.update(
+        notice=page.text("notice.preparing")
+        if snapshot is None
+        else page.text("notice.partial")
+        if snapshot.get("errors")
+        else None,
+        sections=page.highlights(snapshot or {}),
+        backlog=page.backlog((snapshot or {}).get("backlog")),
     )
-    return page.document(
-        page.text("page.heading"),
-        body,
-        footer,
-        live=True,
-        navigation=navigation,
-    )
+    return _render("dashboard.html", context)
 
 
 def render_live_status(
@@ -1415,7 +1035,7 @@ def render_live_status(
     locale: str,
     now: dt.datetime | None = None,
 ) -> str:
-    """Render fresh status and uptime without loading website datasets.
+    """Render status fragments without loading website datasets.
 
     Args:
         status: Validated routine, schedule, and page observations.
@@ -1426,22 +1046,16 @@ def render_live_status(
     Returns:
         Escaped fragments with the same identities as the full page.
     """
-    return str(
-        fragment(
-            *_live_status(
-                _Page(locale),
-                status or {},
-                config or {},
-                now or dt.datetime.now(dt.UTC),
-            ),
-            _runtime_status(
-                _Page(locale),
-                status or {},
-                config or {},
-                now or dt.datetime.now(dt.UTC),
-            ),
+    page = _Page(locale)
+    context = {"t": _messages(locale)}
+    context.update(
+        page.live_status(
+            status or {},
+            config or {},
+            now or dt.datetime.now(dt.UTC),
         ),
     )
+    return _render("live.html", context)
 
 
 def render_maintenance(
@@ -1449,7 +1063,7 @@ def render_maintenance(
     params: Mapping[str, list[str]],
     locale: str,
 ) -> str:
-    """Build a maintenance list page after globally sorting it.
+    """Render a maintenance list after sorting all saved observations.
 
     Args:
         snapshot: Validated website snapshot containing the catalogue.
@@ -1457,7 +1071,7 @@ def render_maintenance(
         locale: Negotiated interface language.
 
     Returns:
-        Complete escaped HTML document with stable pagination links.
+        Complete escaped HTML with stable sorting and pagination links.
 
     Raises:
         LookupError: The selected maintenance task does not exist.
@@ -1486,121 +1100,56 @@ def render_maintenance(
     portion = maintenance_page(items, selection["page"])
     page = _Page(locale)
     heading = page.interface.label(selected.get("label"), selected["category"])
-    cards = (
-        tag(
-            "ol",
-            *(page.worklist_card(item, groups) for item in portion["items"]),
-            class_="card-grid article-list",
-            start=portion["offset"] + 1,
-            aria_label=heading,
-        )
-        if portion["items"]
-        else tag("p", page.text("backlog.empty"), class_="empty")
-    )
-    body = fragment(
-        tag("a", page.text("backlog.back"), href="/#backlog", class_="back"),
-        tag("p", page.text("backlog.heading"), class_="context"),
-        tag(
-            "div",
-            tag(
-                "p",
-                page.text("backlog.count", count=f"{selected['count']:,}"),
-            ),
-            page.source_updated(backlog["observed_at"]),
-            class_="metadata",
-        ),
-        page.sort_controls(selection),
-        cards,
-        page.pagination(selection, portion),
-        tag(
-            "p",
-            page.text("backlog.source"),
-            ": ",
-            wiki_link(selected["source_url"], selected["category"]),
-        ),
-    )
-    return page.document(heading, body)
-
-
-def _runtime_status(
-    page: _Page,
-    status: Record,
-    config: Record,
-    now: dt.datetime,
-) -> Markup:
-    """Render saved hub environment and fresh resource observations.
-
-    Returns:
-        A live region with explicit unknown values for stale usage.
-    """
-    snapshot = status.get("schedule") or {}
-    definitions = (config.get("routines") or {}).get("routines", {})
-    schedule = schedule_state(snapshot, definitions, now)
-    runtime = snapshot.get("runtime") or {}
-    unknown = page.text("ops.unavailable")
-    fresh = schedule["state"] in {"running", "paused"}
-    memory = runtime.get("memory_bytes") if fresh else None
-    limit = runtime.get("memory_limit_bytes") if fresh else None
-    cpu = runtime.get("cpu_percent") if fresh else None
-    cpu_limit = runtime.get("cpu_limit") if fresh else None
-    rows = (
-        ("platform", "Wikimedia Toolforge", False),
-        ("python", runtime.get("python") or unknown, False),
-        (
-            "environment",
-            " · ".join(
-                value
-                for key in ("system", "machine")
-                if (value := runtime.get(key))
-            )
-            or unknown,
-            False,
-        ),
-        (
-            "memory",
-            readable_size(memory) if memory is not None else unknown,
-            True,
-        ),
-        (
-            "memory_limit",
-            readable_size(limit) if limit is not None else unknown,
-            True,
-        ),
-        ("cpu", f"{cpu:.1f}%" if cpu is not None else unknown, True),
-        (
-            "cpu_limit",
-            f"{cpu_limit:g}" if cpu_limit is not None else unknown,
-            True,
-        ),
-    )
-    return tag(
-        "div",
-        tag("h3", page.text("server.environment_heading")),
-        tag("p", page.text("server.usage_note"), class_="context"),
-        tag(
-            "table",
-            tag(
-                "tbody",
-                *(
-                    tag(
-                        "tr",
-                        tag("th", page.text(f"server.{key}"), scope="row"),
-                        tag(
-                            "td",
-                            value,
-                            data_schedule_time=True
-                            if usage and fresh
-                            else None,
-                            data_stale_text=unknown if usage else None,
-                        ),
-                    )
-                    for key, value, usage in rows
+    context = page.context(heading)
+    reverse = {
+        **selection,
+        "page": "1",
+        "order": "desc" if selection["order"] == "asc" else "asc",
+    }
+    context.update(
+        count=page.text("backlog.count", count=f"{selected['count']:,}"),
+        updated=page.source_updated(backlog["observed_at"]),
+        sort_choices=[
+            {
+                "label": page.text(key),
+                "url": local_url(
+                    "/maintenance/",
+                    task=selection["task"],
+                    sort=sort,
                 ),
-            ),
-            class_="server-metrics",
+                "current": sort == selection["sort"],
+            }
+            for sort, key in (
+                ("title", "backlog.sort.title"),
+                ("class", "backlog.sort.class"),
+                ("importance", "backlog.column.importance"),
+                ("oldest", "backlog.sort.time"),
+                ("random", "backlog.sort.random"),
+            )
+        ],
+        reverse_url=local_url("/maintenance/", **reverse),
+        cards=[page.worklist_card(item, groups) for item in portion["items"]],
+        start=portion["offset"] + 1,
+        previous=local_url(
+            "/maintenance/",
+            **{**selection, "page": portion["page"] - 1},
+        )
+        if portion["page"] > 1
+        else None,
+        following=local_url(
+            "/maintenance/",
+            **{**selection, "page": portion["page"] + 1},
+        )
+        if portion["page"] < portion["pages"]
+        else None,
+        pagination=page.text(
+            "backlog.page",
+            page=portion["page"],
+            pages=portion["pages"],
         ),
-        id="server-runtime",
+        source_link=wiki_link(selected["source_url"], selected["category"]),
     )
+    return _render("maintenance.html", context)
 
 
 def render_about(
@@ -1610,7 +1159,7 @@ def render_about(
     status: Record | None = None,
     now: dt.datetime | None = None,
 ) -> str:
-    """Explain the tool and show its observed server environment.
+    """Explain the tool and show its saved server environment.
 
     Args:
         config: Current application version and routine configuration.
@@ -1622,28 +1171,23 @@ def render_about(
         An informative About page with a read-only live server monitor.
     """
     page = _Page(locale)
-    config, status = config or {}, status or {}
-    now = now or dt.datetime.now(dt.UTC)
-    _, footer, server = _live_status(page, status, config, now)
-    sections = [
-        tag(
-            "section",
-            tag("h2", page.text(f"about.{key}_heading"), id=f"{key}-heading"),
-            tag("p", page.text(f"about.{key}")),
-            aria_labelledby=f"{key}-heading",
-        )
-        for key in ("discover", "improve", "reports")
-    ]
-    body = tag(
-        "div",
-        tag("p", page.text("about.intro")),
-        *sections,
-        tag("p", page.text("about.freshness")),
-        server,
-        _runtime_status(page, status, config, now),
-        class_="prose",
+    context = page.context(page.text("nav.about"), live=True)
+    context.update(
+        page.live_status(
+            status or {},
+            config or {},
+            now or dt.datetime.now(dt.UTC),
+        ),
     )
-    return page.document(page.text("nav.about"), body, footer, live=True)
+    before_name, after_name = page.text("about.intro").split("{name}")
+    before_user, after_user = page.text("about.contact").split("{user}")
+    context.update(
+        before_name=before_name,
+        after_name=after_name,
+        before_user=before_user,
+        after_user=after_user,
+    )
+    return _render("about.html", context)
 
 
 def render_logs(
@@ -1654,65 +1198,56 @@ def render_logs(
     config: Record | None = None,
     now: dt.datetime | None = None,
 ) -> str:
-    """Display bounded log excerpts and exact daily-file downloads.
+    """Render localized major events and daily-file downloads.
 
     Args:
-        data: Validated log listing, selection, and bounded excerpt.
+        data: Validated daily-file listing, selection, and major events.
         locale: Negotiated interface language.
         status: Validated routine and scheduler observations.
         config: Current source version and routine definitions.
         now: Optional aware clock for deterministic status freshness.
 
     Returns:
-        Escaped HTML diagnostics without interpreting them as status.
+        Escaped event summaries without exposing diagnostic text.
     """
     page = _Page(locale)
-    _, footer, server = _live_status(
-        page,
-        status or {},
-        config or {},
-        now or dt.datetime.now(dt.UTC),
+    context = page.context(page.text("logs.heading"), live=True)
+    context.update(
+        page.live_status(
+            status or {},
+            config or {},
+            now or dt.datetime.now(dt.UTC),
+        ),
     )
-    if not data["files"]:
-        return page.document(
-            page.text("logs.heading"),
-            fragment(
-                server,
-                tag("p", page.text("logs.empty"), class_="empty"),
-            ),
-            footer,
-            live=True,
-        )
-    notice = (
-        tag("p", page.text("logs.truncated"), class_="source-updated")
-        if data["truncated"]
-        else fragment()
+    context.update(
+        files=[
+            {
+                **row,
+                "size_label": readable_size(row["size"]),
+                "url": local_url("/logs/", date=row["date"]),
+                "download_url": local_url(
+                    "/logs/",
+                    date=row["date"],
+                    download=1,
+                ),
+                "selected": row["date"] == data.get("date"),
+            }
+            for row in data["files"]
+        ],
+        query=data.get("query", ""),
+        truncated=data.get("truncated", False),
+        events=page.log_events(data, config or {}),
     )
-    excerpt = (
-        tag("pre", "\n".join(data["lines"]), class_="log-lines")
-        if data["lines"]
-        else tag("p", page.text("logs.no_matches"), class_="empty")
-    )
-    body = fragment(
-        server,
-        page.log_controls(data),
-        tag("h2", page.text("logs.recent")),
-        tag("p", page.text("logs.reader_note"), class_="context"),
-        notice,
-        excerpt,
-        page.log_files(data["files"]),
-    )
-    return page.document(page.text("logs.heading"), body, footer, live=True)
+    return _render("logs.html", context)
 
 
 def render_error(message_key: str, locale: str) -> str:
     """Show a localized failure with working site navigation.
 
     Returns:
-        Escaped HTML for the selected presentation content.
+        An escaped HTML document with a localized alert.
     """
     page = _Page(locale)
-    return page.document(
-        page.text("page.heading"),
-        tag("p", page.text(message_key), class_="notice", role="alert"),
-    )
+    context = page.context(page.text("page.heading"))
+    context["message"] = page.text(message_key)
+    return _render("error.html", context)

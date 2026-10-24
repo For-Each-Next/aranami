@@ -28,7 +28,11 @@ tail -n 100 logs/aranami.YYYY-MM-DD.log
 ```
 
 Choose a UTC date. Logs retain the current date and previous 29 dates. The web
-viewer shows concise lifecycle events; downloads include full diagnostics.
+viewer translates separately recorded major events into the selected language
+and links related Wikipedia reports; downloads include full diagnostics.
+Event records begin with this deployment. Older diagnostic files remain
+downloadable, without inferred historical events. Search covers the recent
+event window shown on the page.
 Inspect backend-owned metadata read-only:
 
 | File | Observation |

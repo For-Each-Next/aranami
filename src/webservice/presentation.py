@@ -9,7 +9,6 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import hashlib
-import html
 import json
 import math
 import operator
@@ -21,8 +20,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlencode, urlsplit
 
+from markupsafe import Markup, escape
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
 
 type Record = dict[str, object]
 _MINUTE = 60
@@ -57,7 +59,6 @@ _FAILURE_REASONS = {
     "ValueError": "invalid_data",
     "TypeError": "invalid_data",
 }
-_VOID_ELEMENTS = frozenset({"meta", "link", "img", "input"})
 _QUALITY = (
     ("FA", "fa", "典范", "典範"),
     ("FL", "fl", "特色列表", "典表"),
@@ -114,21 +115,6 @@ _RANKS = {
 }
 
 
-@dataclass(frozen=True, slots=True)
-class Markup:
-    """Identify HTML already escaped by the shared element builder."""
-
-    value: str
-
-    def __str__(self) -> str:
-        """Return the already escaped HTML.
-
-        Returns:
-            The safely composed HTML text.
-        """
-        return self.value
-
-
 def failure_description(event: Record, interface: Interface) -> str | None:
     """Translate safe failure facts into an explanation for readers.
 
@@ -166,53 +152,6 @@ def failure_description(event: Record, interface: Interface) -> str | None:
         return interface.text(f"failure.{key}", status=status)
     key = _FAILURE_REASONS.get(reason, "unknown")
     return interface.text(f"failure.{key}")
-
-
-def _escaped(value: object) -> str:
-    """Escape data while retaining explicitly built elements.
-
-    Returns:
-        Escaped text suitable for an HTML text or attribute value.
-    """
-    if value is None:
-        return ""
-    return str(value) if isinstance(value, Markup) else html.escape(str(value))
-
-
-def fragment(*children: object) -> Markup:
-    """Join safe elements and escaped text without a container.
-
-    Returns:
-        Safely composed HTML without a wrapping element.
-    """
-    return Markup("".join(_escaped(child) for child in children))
-
-
-def element(tag_name: str, *children: object, **attributes: object) -> Markup:
-    """Build one HTML element with escaped text and quoted attributes.
-
-    Args:
-        tag_name: Literal tag selected by the renderer.
-        children: Plain text or elements returned by these builders.
-        attributes: Literal attribute names with underscore separators.
-
-    Returns:
-        Escaped markup safe to compose with other generated elements.
-    """
-    attrs = []
-    for key, value in attributes.items():
-        if value is None or value is False:
-            continue
-        attribute = key.rstrip("_").replace("_", "-")
-        attrs.append(
-            attribute
-            if value is True
-            else f'{attribute}="{html.escape(str(value))}"',
-        )
-    opening = f"<{tag_name}{' ' if attrs else ''}{' '.join(attrs)}>"
-    if tag_name in _VOID_ELEMENTS:
-        return Markup(opening)
-    return Markup(f"{opening}{fragment(*children)}</{tag_name}>")
 
 
 @lru_cache(maxsize=1)
@@ -413,10 +352,17 @@ def wiki_link(url: object, label: str, title: str | None = None) -> Markup:
         Escaped HTML for the selected presentation content.
     """
     target = wiki_url(url)
-    return (
-        element("a", label, href=target, title=title, aria_label=title)
-        if target
-        else fragment(label)
+    if not target:
+        return escape(label)
+    if title is None:
+        return Markup('<a href="{}">{}</a>').format(target, label)
+    return Markup(
+        '<a href="{}" title="{}" aria-label="{}">{}</a>',
+    ).format(
+        target,
+        title,
+        title,
+        label,
     )
 
 
@@ -462,9 +408,9 @@ def relative_time(
         now: Aware rendering time shared with the absolute timestamp.
 
     Returns:
-        Whole minutes below one hour, otherwise whole hours, rounded
-        down. Sub-minute intervals have short explicit labels. Invalid
-        or missing timestamps produce no annotation.
+        Whole minutes, hours, or days, rounded down at each boundary.
+        Sub-minute intervals have short explicit labels. Invalid or
+        missing timestamps produce no annotation.
     """
     instant = timestamp(value)
     if instant is None:
@@ -473,11 +419,12 @@ def relative_time(
     minutes = int(abs(seconds) // _MINUTE)
     if minutes == 0:
         return interface.text("time.soon" if seconds > 0 else "time.just_now")
-    unit, count = (
-        ("hours", minutes // _HOUR_MINUTES)
-        if minutes >= _HOUR_MINUTES
-        else ("minutes", minutes)
-    )
+    if minutes >= _DAY_MINUTES:
+        unit, count = "days", minutes // _DAY_MINUTES
+    elif minutes >= _HOUR_MINUTES:
+        unit, count = "hours", minutes // _HOUR_MINUTES
+    else:
+        unit, count = "minutes", minutes
     direction = "ahead" if seconds > 0 else "ago"
     return interface.text(f"time.{unit}_{direction}", count=count)
 
@@ -751,11 +698,12 @@ def duration(
     *,
     running: bool = False,
 ) -> str:
-    """Localize durations without conflating unknown and zero.
+    """Format execution durations with minute and second prime notation.
 
     Returns:
-        Whole seconds, or two decimals below one second, with an
-        ellipsis for active work. Unknown observations remain explicit.
+        Seconds with an optional minute prefix. Completed values retain
+        hundredths; active work uses whole seconds and an ellipsis.
+        Unknown observations stay explicit.
     """
     if (
         not isinstance(seconds, (int, float))
@@ -763,18 +711,20 @@ def duration(
         or seconds < 0
     ):
         return "—"
-    whole = math.floor(seconds) if running else math.floor(seconds + 0.5)
-    if whole >= _MINUTE:
-        label = interface.text(
-            "duration.minutes",
-            minutes=whole // _MINUTE,
-            seconds=whole % _MINUTE,
-        )
+    if running:
+        minutes, whole_seconds = divmod(math.floor(seconds), _MINUTE)
+        remainder = str(whole_seconds)
     else:
-        label = interface.text(
-            "duration.seconds",
-            seconds=f"{seconds:.2f}" if seconds < 1 else str(whole),
+        minutes, hundredths = divmod(
+            math.floor(seconds * 100 + 0.5),
+            _MINUTE * 100,
         )
+        remainder = f"{hundredths / 100:.2f}"
+    label = interface.text(
+        "duration.minutes" if minutes else "duration.seconds",
+        minutes=minutes,
+        seconds=remainder.zfill(2 if running else 5) if minutes else remainder,
+    )
     return label + ("…" if running else "")
 
 

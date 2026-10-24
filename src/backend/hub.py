@@ -26,6 +26,7 @@ from backend.server import (
     DashboardUpdater,
     collect_dashboard_pass,
 )
+from backend.support.events import event_extra
 from backend.support.logs import open_run_log
 from backend.website.collect import (
     add_refresh_arguments,
@@ -162,11 +163,24 @@ def run(config: HubConfig) -> None:
 
     with ExitStack() as resources:
         resources.enter_context(open_run_log(config.log_dir))
-        _LOGGER.info("Aranami %s backend hub started.", project_version())
+        _LOGGER.info(
+            "Aranami %s backend hub started.",
+            project_version(),
+            extra=event_extra(
+                "service_started",
+                service="hub",
+                dry=config.dry,
+            ),
+        )
         resources.callback(
             _LOGGER.info,
             "Aranami %s backend hub stopped.",
             project_version(),
+            extra=event_extra(
+                "service_stopped",
+                service="hub",
+                dry=config.dry,
+            ),
         )
         for kind in (signal.SIGINT, signal.SIGTERM):
             previous = signal.signal(kind, stop)
@@ -229,6 +243,11 @@ def run(config: HubConfig) -> None:
             _LOGGER.info(
                 "Aranami backend hub stopping (%s); waiting for active work.",
                 shutdown_reason,
+                extra=event_extra(
+                    "service_stopping",
+                    service="hub",
+                    dry=config.dry,
+                ),
             )
 
 

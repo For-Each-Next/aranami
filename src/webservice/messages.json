@@ -34,20 +34,10 @@
     "zh-hans": "关于Aranami",
     "zh-hant": "關於Aranami"
   },
-  "server.environment_heading": {
-    "en": "Environment and resource use",
-    "zh-hans": "运行环境与资源使用",
-    "zh-hant": "執行環境與資源使用"
-  },
-  "server.usage_note": {
-    "en": "Resource use of the data hub, sampled every 30 seconds. One fully used CPU core is 100%.",
-    "zh-hans": "数据中心的资源使用情况，每30秒采样一次。一个CPU核心满载为100%。",
-    "zh-hant": "資料中心的資源使用情況，每30秒取樣一次。一個CPU核心滿載為100%。"
-  },
-  "server.platform": {
-    "en": "Hosting",
-    "zh-hans": "托管平台",
-    "zh-hant": "託管平台"
+  "server.state": {
+    "en": "Status",
+    "zh-hans": "状态",
+    "zh-hant": "狀態"
   },
   "server.python": {
     "en": "Python",
@@ -60,24 +50,34 @@
     "zh-hant": "系統與架構"
   },
   "server.memory": {
-    "en": "Memory in use",
-    "zh-hans": "已用内存",
-    "zh-hant": "已用記憶體"
-  },
-  "server.memory_limit": {
-    "en": "Memory allocation",
-    "zh-hans": "内存配额",
-    "zh-hant": "記憶體配額"
+    "en": "Memory",
+    "zh-hans": "内存",
+    "zh-hant": "記憶體"
   },
   "server.cpu": {
     "en": "CPU use",
     "zh-hans": "CPU使用率",
     "zh-hant": "CPU使用率"
   },
-  "server.cpu_limit": {
-    "en": "Allocated CPU cores",
-    "zh-hans": "CPU核心配额",
-    "zh-hant": "CPU核心配額"
+  "server.cpu_core": {
+    "en": "({count} core)",
+    "zh-hans": "（{count}核心）",
+    "zh-hant": "（{count}核心）"
+  },
+  "server.cpu_cores": {
+    "en": "({count} cores)",
+    "zh-hans": "（{count}核心）",
+    "zh-hant": "（{count}核心）"
+  },
+  "server.cpu_cores_unknown": {
+    "en": "(core allocation unavailable)",
+    "zh-hans": "（核心数未获取）",
+    "zh-hant": "（核心數未取得）"
+  },
+  "server.started": {
+    "en": "started at ",
+    "zh-hans": "启动时间",
+    "zh-hant": "啟動時間"
   },
   "nav.contents": {
     "en": "Contents",
@@ -85,44 +85,14 @@
     "zh-hant": "目錄"
   },
   "about.intro": {
-    "en": "Aranami helps Chinese Wikipedia’s video-game editors find articles to improve and keep track of their project. It brings useful lists and recent highlights together in one place.",
-    "zh-hans": "Aranami帮助中文维基百科电子游戏专题的编辑寻找可改善的条目、了解专题动态，将实用列表和近期亮点集中展示。",
-    "zh-hant": "Aranami幫助中文維基百科電子遊戲專題的編輯尋找可改善的條目、了解專題動態，將實用列表和近期亮點集中展示。"
+    "en": "Aranami ({name}, meaning “raging waves”) is a tool hosted on Toolforge. It primarily updates reports for Chinese Wikipedia’s video-game WikiProject and also provides a few web lookup features.",
+    "zh-hans": "Aranami（{name}，意为「狂澜」），是托管在Toolforge上的工具。其主要更新中文维基百科电子游戏专题报告，并顺带提供一些网页查询功能。",
+    "zh-hant": "Aranami（{name}，意為「狂瀾」），是託管在Toolforge上的工具。其主要更新中文維基百科電子遊戲專題報告，並順帶提供一些網頁查詢功能。"
   },
-  "about.discover_heading": {
-    "en": "Discover articles",
-    "zh-hans": "发现条目",
-    "zh-hant": "發現條目"
-  },
-  "about.discover": {
-    "en": "See video-game articles featured on Wikipedia’s main page, new-article highlights, news and historical anniversaries, and articles attracting readers. New-page reports also help editors spot recent pages that may belong to the project.",
-    "zh-hans": "查看登上维基百科首页的电子游戏条目、新篇推荐、新闻与历史纪念日，以及吸引读者关注的热门条目。新进条目报告也帮助编辑发现可能属于专题的新页面。",
-    "zh-hant": "查看登上維基百科首頁的電子遊戲條目、新篇推薦、新聞與歷史紀念日，以及吸引讀者關注的熱門條目。新進條目報告也幫助編輯發現可能屬於專題的新頁面。"
-  },
-  "about.improve_heading": {
-    "en": "Find something to improve",
-    "zh-hans": "寻找改善方向",
-    "zh-hant": "尋找改善方向"
-  },
-  "about.improve": {
-    "en": "Browse maintenance worklists for articles needing attention, follow assessment and review lists, or explore important and high-quality English Wikipedia articles and their Chinese counterparts.",
-    "zh-hans": "通过维护列表寻找需要完善的条目，跟进评级与评审列表，或探索英文维基百科的重要、优质条目及其对应的中文条目。",
-    "zh-hant": "透過維護列表尋找需要完善的條目，跟進評級與評審列表，或探索英文維基百科的重要、優質條目及其對應的中文條目。"
-  },
-  "about.reports_heading": {
-    "en": "Keep project reports up to date",
-    "zh-hans": "保持专题报告更新",
-    "zh-hant": "保持專題報告更新"
-  },
-  "about.reports": {
-    "en": "Aranami automatically updates selected project report pages on Wikipedia and requests refreshes of subscribed database reports. The dashboard links to these reports and shows their latest recorded update results. Editors remain responsible for reviewing and improving the articles themselves.",
-    "zh-hans": "Aranami自动更新维基百科上指定的专题报告，并请求刷新订阅的数据库报告。看板提供报告链接，显示最近记录的更新结果；条目本身仍由编辑审阅和完善。",
-    "zh-hant": "Aranami自動更新維基百科上指定的專題報告，並請求重新整理訂閱的資料庫報告。看板提供報告連結，顯示最近記錄的更新結果；條目本身仍由編輯審閱和完善。"
-  },
-  "about.freshness": {
-    "en": "Lists refresh automatically, but changes are not immediate. Check the displayed update dates and follow the Wikipedia links for the current article or report.",
-    "zh-hans": "列表会自动刷新，但并非即时更新。请查看所示的更新时间，并通过维基百科链接了解条目或报告的最新内容。",
-    "zh-hant": "列表會自動重新整理，但並非即時更新。請查看所示的更新時間，並透過維基百科連結了解條目或報告的最新內容。"
+  "about.contact": {
+    "en": "If you have questions, contact {user}.",
+    "zh-hans": "如果有疑问，联系{user}。",
+    "zh-hant": "如果有疑問，聯絡{user}。"
   },
   "ops.started": {
     "en": "Started",
@@ -629,6 +599,11 @@
     "zh-hans": "（{count}小时前）",
     "zh-hant": "（{count}小時前）"
   },
+  "time.days_ago": {
+    "en": "({count} d ago)",
+    "zh-hans": "（{count}天前）",
+    "zh-hant": "（{count}天前）"
+  },
   "time.minutes_ahead": {
     "en": "(in {count} min)",
     "zh-hans": "（{count}分钟后）",
@@ -638,6 +613,11 @@
     "en": "(in {count} hr)",
     "zh-hans": "（{count}小时后）",
     "zh-hant": "（{count}小時後）"
+  },
+  "time.days_ahead": {
+    "en": "(in {count} d)",
+    "zh-hans": "（{count}天后）",
+    "zh-hant": "（{count}天後）"
   },
   "time.just_now": {
     "en": "(just now)",
@@ -685,9 +665,9 @@
     "zh-hant": "無法確認，上次伺服器狀態紀錄已過期"
   },
   "server.observed": {
-    "en": "Last observed at ",
-    "zh-hans": "最近记录于",
-    "zh-hant": "最近紀錄於"
+    "en": "Last updated at ",
+    "zh-hans": "最近更新于",
+    "zh-hant": "最近更新於"
   },
   "ops.schedule_stopped": {
     "en": "Scheduler stopped",
@@ -905,14 +885,219 @@
     "zh-hant": "Aranami ({version}) 連續運行時間：未取得"
   },
   "duration.seconds": {
-    "en": "{seconds} sec",
-    "zh-hans": "{seconds}秒",
-    "zh-hant": "{seconds}秒"
+    "en": "{seconds}″",
+    "zh-hans": "{seconds}″",
+    "zh-hant": "{seconds}″"
   },
   "duration.minutes": {
-    "en": "{minutes} min {seconds} sec",
-    "zh-hans": "{minutes}分{seconds}秒",
-    "zh-hant": "{minutes}分{seconds}秒"
+    "en": "{minutes}′{seconds}″",
+    "zh-hans": "{minutes}′{seconds}″",
+    "zh-hant": "{minutes}′{seconds}″"
+  },
+  "logs.service.hub": {
+    "en": "the data hub",
+    "zh-hans": "数据中心",
+    "zh-hant": "資料中心"
+  },
+  "logs.service.scheduler": {
+    "en": "the report scheduler",
+    "zh-hans": "报告调度服务",
+    "zh-hant": "報告排程服務"
+  },
+  "logs.service.website": {
+    "en": "the website data service",
+    "zh-hans": "网站数据服务",
+    "zh-hant": "網站資料服務"
+  },
+  "logs.service.web": {
+    "en": "the web server",
+    "zh-hans": "网页服务",
+    "zh-hant": "網頁服務"
+  },
+  "logs.service.unknown": {
+    "en": "the service",
+    "zh-hans": "服务",
+    "zh-hant": "服務"
+  },
+  "logs.routine_unknown": {
+    "en": "report",
+    "zh-hans": "报告任务",
+    "zh-hant": "報告任務"
+  },
+  "logs.result.updated": {
+    "en": "completed successfully",
+    "zh-hans": "已完成",
+    "zh-hant": "已完成"
+  },
+  "logs.result.no_update": {
+    "en": "finished without needing any changes",
+    "zh-hans": "无需更新",
+    "zh-hant": "無須更新"
+  },
+  "logs.result.failed": {
+    "en": "failed",
+    "zh-hans": "执行失败",
+    "zh-hant": "執行失敗"
+  },
+  "logs.result.deferred": {
+    "en": "was deferred for retry",
+    "zh-hans": "已推迟执行，等待重试",
+    "zh-hant": "已延後執行，等待重試"
+  },
+  "logs.result.unconfirmed": {
+    "en": "finished, but its result is unconfirmed",
+    "zh-hans": "已结束，但结果尚未确认",
+    "zh-hant": "已結束，但結果尚未確認"
+  },
+  "logs.result.partial": {
+    "en": "completed with some failures",
+    "zh-hans": "已部分完成",
+    "zh-hant": "已部分完成"
+  },
+  "logs.result.unknown": {
+    "en": "finished without a recorded result",
+    "zh-hans": "已结束，但未获取执行结果",
+    "zh-hant": "已結束，但未取得執行結果"
+  },
+  "logs.time_intro": {
+    "en": "At ",
+    "zh-hans": "在",
+    "zh-hant": "在"
+  },
+  "logs.time_separator": {
+    "en": ", ",
+    "zh-hans": "，",
+    "zh-hant": "，"
+  },
+  "logs.task": {
+    "en": "{count} task",
+    "zh-hans": "{count}项任务",
+    "zh-hant": "{count}項任務"
+  },
+  "logs.tasks": {
+    "en": "{count} tasks",
+    "zh-hans": "{count}项任务",
+    "zh-hant": "{count}項任務"
+  },
+  "logs.edit": {
+    "en": "{count} page edit was confirmed.",
+    "zh-hans": "已确认完成{count}次页面编辑。",
+    "zh-hant": "已確認完成{count}次頁面編輯。"
+  },
+  "logs.edits": {
+    "en": "{count} page edits were confirmed.",
+    "zh-hans": "已确认完成{count}次页面编辑。",
+    "zh-hant": "已確認完成{count}次頁面編輯。"
+  },
+  "logs.failure": {
+    "en": "The refresh encountered {count} source failure.",
+    "zh-hans": "刷新时有{count}项来源获取失败。",
+    "zh-hant": "重新整理時有{count}項來源取得失敗。"
+  },
+  "logs.failures": {
+    "en": "The refresh encountered {count} source failures.",
+    "zh-hans": "刷新时有{count}项来源获取失败。",
+    "zh-hant": "重新整理時有{count}項來源取得失敗。"
+  },
+  "logs.duration": {
+    "en": "The attempt took {duration}.",
+    "zh-hans": "本次执行耗时{duration}。",
+    "zh-hant": "本次執行耗時{duration}。"
+  },
+  "logs.related_reports": {
+    "en": "Related reports include {reports}.",
+    "zh-hans": "相关报告包括{reports}。",
+    "zh-hant": "相關報告包括{reports}。"
+  },
+  "logs.event.service_started": {
+    "en": "{service} started.",
+    "zh-hans": "{service}已启动。",
+    "zh-hant": "{service}已啟動。"
+  },
+  "logs.event.service_stopping": {
+    "en": "{service} is shutting down.",
+    "zh-hans": "{service}正在停止。",
+    "zh-hant": "{service}正在停止。"
+  },
+  "logs.event.service_stopped": {
+    "en": "{service} stopped.",
+    "zh-hans": "{service}已停止。",
+    "zh-hant": "{service}已停止。"
+  },
+  "logs.event.preview_service_started": {
+    "en": "{service} started in preview mode.",
+    "zh-hans": "{service}已启动预览模式。",
+    "zh-hant": "{service}已啟動預覽模式。"
+  },
+  "logs.event.preview_service_stopping": {
+    "en": "{service} is shutting down its preview mode.",
+    "zh-hans": "{service}正在停止预览模式。",
+    "zh-hant": "{service}正在停止預覽模式。"
+  },
+  "logs.event.preview_service_stopped": {
+    "en": "{service} stopped its preview mode.",
+    "zh-hans": "{service}已停止预览模式。",
+    "zh-hant": "{service}已停止預覽模式。"
+  },
+  "logs.event.routine_started": {
+    "en": "the {routine} task started.",
+    "zh-hans": "开始执行{routine}。",
+    "zh-hant": "開始執行{routine}。"
+  },
+  "logs.event.routine_finished": {
+    "en": "the {routine} task {result}.",
+    "zh-hans": "{routine}{result}。",
+    "zh-hant": "{routine}{result}。"
+  },
+  "logs.event.preview_routine_started": {
+    "en": "a preview of the {routine} task started.",
+    "zh-hans": "开始预览{routine}。",
+    "zh-hant": "開始預覽{routine}。"
+  },
+  "logs.event.preview_routine_finished": {
+    "en": "the preview of the {routine} task {result}.",
+    "zh-hans": "{routine}预览{result}。",
+    "zh-hant": "{routine}預覽{result}。"
+  },
+  "logs.event.website_started": {
+    "en": "the website data refresh started.",
+    "zh-hans": "开始刷新网站数据。",
+    "zh-hant": "開始重新整理網站資料。"
+  },
+  "logs.event.website_finished": {
+    "en": "the website data refresh {result}.",
+    "zh-hans": "网站数据刷新{result}。",
+    "zh-hant": "網站資料重新整理{result}。"
+  },
+  "logs.event.preview_website_started": {
+    "en": "the website data preview started.",
+    "zh-hans": "开始预览网站数据。",
+    "zh-hant": "開始預覽網站資料。"
+  },
+  "logs.event.preview_website_finished": {
+    "en": "the website data preview {result}.",
+    "zh-hans": "网站数据预览{result}。",
+    "zh-hant": "網站資料預覽{result}。"
+  },
+  "logs.event.run_started": {
+    "en": "a report run started with {tasks}.",
+    "zh-hans": "开始执行报告，共{tasks}。",
+    "zh-hant": "開始執行報告，共{tasks}。"
+  },
+  "logs.event.run_finished": {
+    "en": "the report run finished after processing {tasks}, with {failed_tasks} failing and {deferred_tasks} deferred for retry.",
+    "zh-hans": "报告执行完毕，共处理{tasks}，其中{failed_tasks}失败，{deferred_tasks}等待重试。",
+    "zh-hant": "報告執行完畢，共處理{tasks}，其中{failed_tasks}失敗，{deferred_tasks}等待重試。"
+  },
+  "logs.event.preview_run_started": {
+    "en": "a preview run started with {tasks}.",
+    "zh-hans": "开始预览报告，共{tasks}。",
+    "zh-hant": "開始預覽報告，共{tasks}。"
+  },
+  "logs.event.preview_run_finished": {
+    "en": "the preview run finished after processing {tasks}, with {failed_tasks} failing and {deferred_tasks} deferred for retry.",
+    "zh-hans": "报告预览完毕，共处理{tasks}，其中{failed_tasks}失败，{deferred_tasks}等待重试。",
+    "zh-hant": "報告預覽完畢，共處理{tasks}，其中{failed_tasks}失敗，{deferred_tasks}等待重試。"
   },
   "logs.not_found": {
     "en": "Log not found.",
@@ -940,9 +1125,9 @@
     "zh-hant": "這裡只顯示任務開始、執行結果和服務啟停。日誌保留30天；下載檔案包含詳細診斷資訊。"
   },
   "logs.no_matches": {
-    "en": "No matching lines in the displayed portion.",
-    "zh-hans": "当前范围内没有匹配行。",
-    "zh-hant": "目前範圍內沒有符合的行。"
+    "en": "No matching major events in the displayed period.",
+    "zh-hans": "当前范围内没有匹配的主要事件。",
+    "zh-hant": "目前範圍內沒有符合的主要事件。"
   },
   "logs.invalid_query": {
     "en": "The log date or text query is invalid.",
@@ -975,8 +1160,8 @@
     "zh-hant": "大小"
   },
   "logs.truncated": {
-    "en": "Showing a bounded excerpt of the most recent log lines. Download the file for the complete log.",
-    "zh-hans": "当前显示最近日志的有限摘录；下载文件可查看完整日志。",
-    "zh-hant": "目前顯示最近日誌的有限摘錄；下載檔案可查看完整日誌。"
+    "en": "Showing up to 100 recent major events. Download the daily log for detailed diagnostics.",
+    "zh-hans": "当前最多显示最近100项主要事件；下载每日日志可查看详细诊断信息。",
+    "zh-hant": "目前最多顯示最近100項主要事件；下載每日日誌可查看詳細診斷資訊。"
   }
 }

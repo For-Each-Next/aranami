@@ -1,0 +1,1 @@
+<span class="article-summary"><bdi lang="zh">{{ card.link }}</bdi> {% if card.assessments %}<span class="assessment-chips">{% for assessment in card.assessments %}<span class="assessment-chip" data-assessment="{{ assessment.dimension }}" title="{{ assessment.label }}">{{ assessment.label }}</span>{% endfor %}</span>{% endif %}</span>

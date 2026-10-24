@@ -8,7 +8,9 @@ The [dashboard](https://aranami.toolforge.org/) brings together main-page
 highlights, upcoming quality content, popular articles, maintenance
 worklists, and report update results in English, Simplified Chinese, and
 Traditional Chinese. The [About page](https://aranami.toolforge.org/about/)
-includes the server monitor.
+includes the server monitor. [Major events](https://aranami.toolforge.org/logs/)
+show service starts and report outcomes in the selected language, with links
+to related Wikipedia reports and separate diagnostic downloads.
 
 ## Scheduled tasks
 

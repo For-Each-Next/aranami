@@ -1,4 +1,4 @@
-"""Serve the read-only Flask website with Waitress on Toolforge.
+"""Serve saved website data and live status on Toolforge with FastAPI.
 
 Run ``python -m backend.public`` as the published web job. Requests only
 read fixed source assets and validated runtime snapshots; they never
@@ -8,20 +8,26 @@ start the hub, initialize source clients, or publish wiki changes.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import logging
 import os
-from contextlib import ExitStack, suppress
-from functools import partial
+from contextlib import ExitStack, asynccontextmanager, suppress
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlsplit
 
-from flask import Flask, Response, request
-from werkzeug.exceptions import HTTPException
-lazy from waitress import serve
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.routing import APIRoute
+from starlette.exceptions import HTTPException
+from starlette.responses import Response, StreamingResponse
+from starlette.websockets import WebSocketState
+lazy import uvicorn
 
+from backend.support.events import event_extra
 from backend.support.http import encoded_response, read_only_headers
+from backend.support.logs import open_run_log
 from backend.support.page_cache import PageCache
 from backend.support.public_data import (
     MAX_LOG_BYTES,
@@ -39,14 +45,24 @@ lazy from webservice import pages
 lazy from webservice.presentation import select_locale
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import AsyncIterator, Callable, Sequence
     from typing import BinaryIO
+
+    from starlette.types import ASGIApp, Receive, Scope, Send
 
 _ASSETS = Path(__file__).resolve().parents[1] / "webservice" / "public_html"
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_QUERY_BYTES = 4096
+_MAX_HEADER_BYTES = 64 * 1024
 _MAX_PORT = 65535
 _CHUNK_BYTES = 64 * 1024
+_SOCKET_CLIENTS = 16
+_SOCKET_MESSAGE_BYTES = 512
+_SOCKET_HEARTBEAT_SECONDS = 15
+_SOCKET_REFRESH_SECONDS = 60
+_SOCKET_CHECK_SECONDS = 1
+_SOCKET_SEND_SECONDS = 5
+_LOGGER = logging.getLogger(__name__)
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -59,8 +75,8 @@ def _json(value: object, status: HTTPStatus = HTTPStatus.OK) -> Response:
     """Return validated metadata encoded as standard JSON."""
     return Response(
         json.dumps(value, ensure_ascii=False, allow_nan=False).encode(),
-        status=status,
-        content_type="application/json; charset=utf-8",
+        status_code=status,
+        media_type="application/json; charset=utf-8",
     )
 
 
@@ -69,64 +85,92 @@ def _error(status: HTTPStatus) -> Response:
     return _json({"error": status.phrase}, status)
 
 
-def _http_error(error: HTTPException) -> Response:
-    """Return the public JSON error for a Flask routing failure."""
-    return _error(HTTPStatus(error.code or HTTPStatus.INTERNAL_SERVER_ERROR))
-
-
-def _unavailable(_exception: Exception) -> Response:
-    """Return a sanitized failure without private filesystem details."""
-    return _error(HTTPStatus.SERVICE_UNAVAILABLE)
-
-
-def _validate_request() -> Response | None:
+def _validate_request(request: Request) -> Response | None:
     """Return a rejection for unsafe requests, otherwise None."""
     if request.method not in {"GET", "HEAD"}:
         return _error(HTTPStatus.METHOD_NOT_ALLOWED)
-    target = urlsplit(
-        request.environ.get("RAW_URI")
-        or request.environ.get("REQUEST_URI")
-        or request.full_path,
-    )
+    rejection = _request_size_error(request)
+    if rejection is not None:
+        return rejection
+    try:
+        query = request.scope.get("query_string", b"")
+        target = urlsplit(request.scope["raw_path"].decode("ascii"))
+    except ValueError, UnicodeError:
+        return _error(HTTPStatus.BAD_REQUEST)
     if (
         target.scheme
         or target.netloc
         or target.fragment
-        or len(request.query_string) > _MAX_QUERY_BYTES
+        or len(query) > _MAX_QUERY_BYTES
     ):
         return _error(HTTPStatus.BAD_REQUEST)
-    if (
-        any(token in target.path for token in ("\\", "%", "//"))
-        or any(part in {".", ".."} for part in target.path.split("/"))
-        or (
-            request.url_rule is not None
-            and not request.url_rule.arguments
-            and request.path != request.url_rule.rule
-        )
+    if any(token in target.path for token in ("\\", "%", "//")) or any(
+        part in {".", ".."} for part in target.path.split("/")
     ):
         return _error(HTTPStatus.NOT_FOUND)
     return None
 
 
-def _response_policy(response: Response) -> Response:
-    """Return shared headers and gzip without buffering log streams."""
-    response.headers.update(read_only_headers(response.status_code))
+def _request_size_error(request: Request) -> Response | None:
+    """Bound headers and declared bodies without consuming input.
+
+    Returns:
+        A size or syntax rejection, or None for bounded input.
+    """
+    try:
+        lengths = request.headers.getlist("content-length")
+        length = int(lengths[0]) if lengths else 0
+    except ValueError:
+        return _error(HTTPStatus.BAD_REQUEST)
+    if len(lengths) > 1 or length < 0:
+        return _error(HTTPStatus.BAD_REQUEST)
+    if length > _MAX_QUERY_BYTES:
+        return _error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
     if (
-        not response.is_streamed
+        sum(len(key) + len(value) for key, value in request.scope["headers"])
+        > _MAX_HEADER_BYTES
+    ):
+        return _error(HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE)
+    return None
+
+
+async def _content_chunks(content: bytes) -> AsyncIterator[bytes]:
+    """Yield already prepared responses in bounded ASGI chunks."""
+    for offset in range(0, len(content), _CHUNK_BYTES):
+        await asyncio.sleep(0)
+        yield content[offset : offset + _CHUNK_BYTES]
+
+
+def _response_policy(
+    request: Request,
+    response: Response,
+) -> Response:
+    """Return shared headers and gzip without buffering log streams."""
+    for name, value in read_only_headers(
+        response.status_code,
+        websocket_origin="wss://aranami.toolforge.org",
+    ).items():
+        response.headers[name] = value
+    if (
+        not isinstance(response, StreamingResponse)
         and "Content-Disposition" not in response.headers
     ):
         content, headers = encoded_response(
-            response.get_data(),
+            response.body,
             request.headers.get("Accept-Encoding", ""),
         )
-        response.set_data(content)
-        response.vary.add("Accept-Encoding")
+        response.headers["Content-Length"] = str(len(content))
+        vary = response.headers.get("Vary", "")
+        response.headers["Vary"] = ", ".join(
+            value for value in (vary, "Accept-Encoding") if value
+        )
         if "Content-Encoding" in headers:
             response.headers["Content-Encoding"] = headers["Content-Encoding"]
-        # Small WSGI chunks keep Waitress below its spooling threshold.
-        response.response = (
-            content[offset : offset + _CHUNK_BYTES]
-            for offset in range(0, len(content), _CHUNK_BYTES)
+        response = StreamingResponse(
+            _content_chunks(b"" if request.method == "HEAD" else content),
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            background=response.background,
         )
     return response
 
@@ -139,8 +183,8 @@ def _html(
     """Return a complete localized server-rendered document."""
     return Response(
         content.encode(),
-        status=status,
-        content_type="text/html; charset=utf-8",
+        status_code=status,
+        media_type="text/html; charset=utf-8",
         headers={"Content-Language": locale, "Vary": "Accept-Language"},
     )
 
@@ -158,49 +202,83 @@ def _configuration() -> dict[str, object]:
     }
 
 
-def _download_chunks(stream: BinaryIO, remaining: int) -> Iterator[bytes]:
+async def _download_chunks(
+    stream: BinaryIO,
+    remaining: int,
+) -> AsyncIterator[bytes]:
     """Yield at most the validated size even if a log keeps growing."""
     while remaining:
-        chunk = stream.read(min(remaining, _CHUNK_BYTES))
+        chunk = await asyncio.to_thread(
+            stream.read,
+            min(remaining, _CHUNK_BYTES),
+        )
         if not chunk:
             break
         yield chunk
         remaining -= len(chunk)
 
 
-def _download(path: Path) -> Response:
+class _DownloadResponse(StreamingResponse):
+    """Close bounded downloads on completion or disconnect."""
+
+    def __init__(
+        self,
+        *args: object,
+        resources: ExitStack,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.resources = resources
+
+    async def __call__(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        """Stream through Starlette and release the opened log."""
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self.resources.close()
+
+
+def _download(request: Request, path: Path) -> StreamingResponse:
     """Return a bounded log stream closed on completion or abort."""
     with ExitStack() as resources:
         stream = resources.enter_context(open_regular(path, MAX_LOG_BYTES))
         size = os.fstat(stream.fileno()).st_size
-        response = Response(
-            () if request.method == "HEAD" else _download_chunks(stream, size),
-            content_type="text/plain; charset=utf-8",
+        response = _DownloadResponse(
+            _content_chunks(b"")
+            if request.method == "HEAD"
+            else _download_chunks(stream, size),
+            media_type="text/plain; charset=utf-8",
             headers={
                 "Content-Length": str(size),
                 "Content-Disposition": f'attachment; filename="{path.name}"',
             },
+            resources=resources.pop_all(),
         )
-        if request.method != "HEAD":
-            response.call_on_close(resources.pop_all().close)
         return response
 
 
 class _PublicViews:
-    """Read validated saved inputs for one isolated Flask app."""
+    """Read validated saved inputs for one public application."""
 
     def __init__(self, runtime: Path, assets: Path) -> None:
         self.runtime = runtime
         self.assets = assets
         self.pages = PageCache()
+        self.socket_clients = 0
 
-    def page(self, path: str) -> Response:
+    def page(self, request: Request) -> Response:
         """Return a page cached by locale and saved-input identity."""
+        path = request.url.path
         locale = select_locale(request.headers.get("Accept-Language", ""))
         if path == "/logs/":
-            return self.logs(locale=locale)
+            return self.logs(request, locale=locale)
         try:
-            query = request.query_string.decode("ascii")
+            query = request.scope.get("query_string", b"").decode("ascii")
             parameters = parse_qs(
                 query,
                 keep_blank_values=True,
@@ -249,7 +327,7 @@ class _PublicViews:
                 else self._maintenance_page(snapshot, parameters, locale)
             )
         if not randomized and response.status_code == HTTPStatus.OK:
-            self.pages.put(key, identity, response.get_data(as_text=True))
+            self.pages.put(key, identity, response.body.decode())
         return response
 
     @staticmethod
@@ -327,8 +405,9 @@ class _PublicViews:
             return None
         return value if validate_dashboard_snapshot(value) else None
 
-    def api(self, kind: str) -> Response:
+    def api(self, request: Request) -> Response:
         """Return data through its backend validation contract."""
+        kind = request.url.path.rsplit("/", 1)[-1]
         if kind == "config":
             return _json(_configuration())
         if kind == "status":
@@ -366,15 +445,23 @@ class _PublicViews:
             content = read_regular(location, _MAX_BYTES)
         except OSError, ValueError:
             return _error(HTTPStatus.NOT_FOUND)
-        return Response(content, content_type=_CONTENT_TYPES[relative.suffix])
+        return Response(
+            content,
+            media_type=_CONTENT_TYPES[relative.suffix],
+        )
 
-    def logs(self, *, locale: str | None = None) -> Response:
+    def logs(
+        self,
+        request: Request,
+        *,
+        locale: str | None = None,
+    ) -> Response:
         """Return a bounded excerpt or stream one complete daily log."""
         directory = self.runtime / "logs"
         files = available_logs(directory)
         try:
             selection = parse_qs(
-                request.query_string.decode("ascii"),
+                request.scope.get("query_string", b"").decode("ascii"),
                 keep_blank_values=True,
                 errors="strict",
                 max_num_fields=3,
@@ -406,10 +493,10 @@ class _PublicViews:
             return (
                 _error(HTTPStatus.NOT_FOUND)
                 if filename is None
-                else _download(directory / filename)
+                else _download(request, directory / filename)
             )
         excerpt = (
-            {"lines": [], "truncated": False}
+            {"events": [], "truncated": False}
             if filename is None
             else log_excerpt(directory, filename, text)
         )
@@ -433,8 +520,292 @@ class _PublicViews:
             )
         )
 
+    def api_logs(self, request: Request) -> Response:
+        """Return the log API with its fixed presentation contract."""
+        return self.logs(request)
 
-def create_app(runtime: Path, assets: Path = _ASSETS) -> Flask:
+    def _live_identity(self) -> tuple:
+        """Return saved-status metadata without reading datasets."""
+        identities = []
+        for name in (
+            "state",
+            "state/routine-status.json",
+            "state/schedule-status.json",
+            "state/report-updates.json",
+        ):
+            try:
+                info = (self.runtime / name).lstat()
+            except OSError:
+                identities.append(None)
+            else:
+                identities.append((
+                    info.st_ino,
+                    info.st_mode,
+                    info.st_size,
+                    info.st_mtime_ns,
+                    info.st_ctime_ns,
+                ))
+        return tuple(identities)
+
+    def _live_html(self, locale: str) -> str:
+        """Render saved live observations.
+
+        Returns:
+            Complete localized live fragments without dataset reads.
+        """
+        return pages.render_live_status(
+            saved_status(self.runtime),
+            _configuration(),
+            locale,
+        )
+
+    async def live_socket(self, websocket: WebSocket) -> None:
+        """Push saved-status changes until the client disconnects.
+
+        Args:
+            websocket: Connection requesting a supported locale.
+        """
+        locale = _socket_locale(websocket)
+        if locale is None or not _socket_origin(websocket):
+            await websocket.close(code=1008)
+            return
+        if self.socket_clients >= _SOCKET_CLIENTS:
+            await websocket.close(code=1013)
+            return
+        self.socket_clients += 1
+        receiver = None
+        close_code = 1000
+        try:
+            await websocket.accept()
+            receiver = asyncio.create_task(_socket_receive(websocket))
+            close_code = await self._watch_live(websocket, locale, receiver)
+        except WebSocketDisconnect, TimeoutError, OSError:
+            pass
+        finally:
+            self.socket_clients -= 1
+            if receiver is not None:
+                receiver.cancel()
+                with suppress(asyncio.CancelledError, WebSocketDisconnect):
+                    await receiver
+            if websocket.application_state == WebSocketState.CONNECTED:
+                with suppress(WebSocketDisconnect, RuntimeError, TimeoutError):
+                    await asyncio.wait_for(
+                        websocket.close(code=close_code),
+                        timeout=1,
+                    )
+
+    async def _watch_live(
+        self,
+        websocket: WebSocket,
+        locale: str,
+        receiver: asyncio.Task[int],
+    ) -> int:
+        """Watch saved metadata while one task owns all outgoing frames.
+
+        Returns:
+            The close code observed by the read-only message receiver.
+        """
+        identity = await asyncio.to_thread(self._live_identity)
+        await self._send_live(websocket, locale)
+        loop = asyncio.get_running_loop()
+        refreshed = heartbeat = loop.time()
+        while True:
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(receiver),
+                    timeout=_SOCKET_CHECK_SECONDS,
+                )
+            except TimeoutError:
+                pass
+            current = await asyncio.to_thread(self._live_identity)
+            now = loop.time()
+            if (
+                current != identity
+                or now - refreshed >= _SOCKET_REFRESH_SECONDS
+            ):
+                await self._send_live(websocket, locale)
+                identity = current
+                refreshed = heartbeat = now
+            elif now - heartbeat >= _SOCKET_HEARTBEAT_SECONDS:
+                await asyncio.wait_for(
+                    websocket.send_json({"type": "heartbeat"}),
+                    timeout=_SOCKET_SEND_SECONDS,
+                )
+                heartbeat = now
+
+    async def _send_live(self, websocket: WebSocket, locale: str) -> None:
+        """Send current saved-status HTML with bounded backpressure."""
+        html = await asyncio.to_thread(self._live_html, locale)
+        await asyncio.wait_for(
+            websocket.send_json({"type": "status", "html": html}),
+            timeout=_SOCKET_SEND_SECONDS,
+        )
+
+
+def _socket_locale(websocket: WebSocket) -> str | None:
+    """Validate the exact socket path and locale query.
+
+    Returns:
+        A supported locale, or None for an invalid request.
+    """
+    try:
+        raw_path = websocket.scope["raw_path"].decode("ascii")
+        query = websocket.scope.get("query_string", b"")
+        if raw_path != "/api/live/ws" or len(query) > _SOCKET_MESSAGE_BYTES:
+            return None
+        parameters = parse_qs(
+            query.decode("ascii"),
+            keep_blank_values=True,
+            errors="strict",
+            max_num_fields=1,
+        )
+    except ValueError, UnicodeError:
+        return None
+    locale = parameters.get("lang", ["en"])
+    return (
+        locale[0]
+        if set(parameters) <= {"lang"}
+        and len(locale) == 1
+        and locale[0] in {"en", "zh", "zh-hans", "zh-hant"}
+        else None
+    )
+
+
+def _socket_origin(websocket: WebSocket) -> bool:
+    """Check the actual host origin and Toolforge TLS termination.
+
+    Returns:
+        Whether the caller is non-browser or has the matching origin.
+    """
+    origins = websocket.headers.getlist("origin")
+    if not origins:
+        return True
+    hosts = websocket.headers.getlist("host")
+    if (
+        len(origins) != 1
+        or len(hosts) != 1
+        or len(origins[0]) > _SOCKET_MESSAGE_BYTES
+    ):
+        return False
+    try:
+        origin = urlsplit(origins[0])
+    except ValueError:
+        return False
+    host = hosts[0].lower()
+    scheme = (
+        "https"
+        if websocket.scope["scheme"] == "wss"
+        or host == "aranami.toolforge.org"
+        else "http"
+    )
+    return (
+        origin.scheme == scheme
+        and origin.netloc.lower() == host
+        and not any((
+            origin.path,
+            origin.query,
+            origin.fragment,
+            origin.username,
+        ))
+    )
+
+
+async def _socket_receive(websocket: WebSocket) -> int:
+    """Observe disconnects and validate bounded ping frames.
+
+    Returns:
+        A normal close code or a protocol-policy rejection.
+    """
+    while True:
+        message = await websocket.receive()
+        if message["type"] == "websocket.disconnect":
+            return 1000
+        text = message.get("text")
+        if (
+            not isinstance(text, str)
+            or len(text.encode()) > _SOCKET_MESSAGE_BYTES
+        ):
+            return 1008
+        try:
+            value = json.loads(text)
+        except ValueError, RecursionError:
+            value = None
+        if value != {"type": "ping"}:
+            return 1008
+
+
+class _PublicRoute(APIRoute):
+    """Apply shared response encoding to FastAPI route handling."""
+
+    def get_route_handler(self) -> Callable:
+        """Return the route handler with the public response policy."""
+        handler = super().get_route_handler()
+
+        async def respond(request: Request) -> Response:
+            """Return a validated route response with shared headers."""
+            return _response_policy(request, await handler(request))
+
+        return respond
+
+
+class _RequestBounds:
+    """Reject unsafe HTTP targets before FastAPI resolves routes."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        """Validate HTTP requests and pass other ASGI events through."""
+        if scope["type"] == "http":
+            request = Request(scope)
+            response = _validate_request(request)
+            if response is not None:
+                await _response_policy(request, response)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+def _routing_error(request: Request, exception: Exception) -> Response:
+    """Return sanitized API errors with the shared response policy."""
+    status = (
+        HTTPStatus(exception.status_code)
+        if isinstance(exception, HTTPException)
+        else HTTPStatus.SERVICE_UNAVAILABLE
+        if isinstance(
+            exception,
+            (OSError, ValueError, TypeError, RecursionError, OverflowError),
+        )
+        else HTTPStatus.INTERNAL_SERVER_ERROR
+    )
+    return _response_policy(request, _error(status))
+
+
+@asynccontextmanager
+async def _website_lifecycle(_app: FastAPI) -> AsyncIterator[None]:
+    """Record web application startup and orderly shutdown.
+
+    Yields:
+        The active ASGI application lifetime.
+    """
+    _LOGGER.info(
+        "Aranami web application started.",
+        extra=event_extra("service_started", service="web"),
+    )
+    try:
+        yield
+    finally:
+        _LOGGER.info(
+            "Aranami web application stopped.",
+            extra=event_extra("service_stopped", service="web"),
+        )
+
+
+def create_app(runtime: Path, assets: Path = _ASSETS) -> FastAPI:
     """Create an isolated read-only website without starting any jobs.
 
     Args:
@@ -442,53 +813,41 @@ def create_app(runtime: Path, assets: Path = _ASSETS) -> Flask:
         assets: Source directory containing public browser assets.
 
     Returns:
-        Flask application ready for WSGI serving or offline tests.
+        Isolated FastAPI application ready for ASGI serving or tests.
     """
-    app = Flask(__name__, static_folder=None)
-    app.url_map.merge_slashes = False
-    app.url_map.strict_slashes = False
-    app.config["MAX_CONTENT_LENGTH"] = _MAX_QUERY_BYTES
-    views = _PublicViews(runtime, assets)
-    for path in ("/", "/about/", "/maintenance/", "/logs/"):
-        app.add_url_rule(
-            path,
-            endpoint=path,
-            view_func=partial(views.page, path),
-            provide_automatic_options=False,
-        )
-    for kind in ("config", "status", "live", "dashboard"):
-        app.add_url_rule(
-            f"/api/{kind}",
-            endpoint=kind,
-            view_func=partial(views.api, kind),
-            provide_automatic_options=False,
-        )
-    app.add_url_rule(
-        "/api/logs",
-        view_func=views.logs,
-        provide_automatic_options=False,
+    app = FastAPI(
+        debug=False,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        redirect_slashes=False,
+        lifespan=_website_lifecycle,
     )
-    app.add_url_rule(
-        "/<path:path>",
-        view_func=views.asset,
-        provide_automatic_options=False,
-    )
-    app.before_request(_validate_request)
-    app.after_request(_response_policy)
-    app.register_error_handler(HTTPException, _http_error)
-    for error in (
+    app.router.route_class = _PublicRoute
+    app.add_middleware(_RequestBounds)
+    for exception in (
+        HTTPException,
         OSError,
         ValueError,
         TypeError,
         RecursionError,
         OverflowError,
+        Exception,
     ):
-        app.register_error_handler(error, _unavailable)
+        app.add_exception_handler(exception, _routing_error)
+    views = _PublicViews(runtime, assets)
+    for path in ("/", "/about/", "/maintenance/", "/logs/"):
+        app.add_api_route(path, views.page, methods=["GET", "HEAD"])
+    for kind in ("config", "status", "live", "dashboard"):
+        app.add_api_route(f"/api/{kind}", views.api, methods=["GET", "HEAD"])
+    app.add_api_route("/api/logs", views.api_logs, methods=["GET", "HEAD"])
+    app.add_api_websocket_route("/api/live/ws", views.live_socket)
+    app.add_api_route("/{path:path}", views.asset, methods=["GET", "HEAD"])
     return app
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Run Waitress with explicit runtime paths and bounded resources.
+    """Run Uvicorn with explicit runtime paths and bounded resources.
 
     Args:
         argv: Optional command-line arguments for offline verification.
@@ -500,20 +859,23 @@ def main(argv: Sequence[str] | None = None) -> None:
     options = parser.parse_args(argv)
     if not 0 <= options.port <= _MAX_PORT:
         parser.error("--port must be between 0 and 65535")
-    with suppress(KeyboardInterrupt):
-        serve(
+    with open_run_log(options.runtime / "logs"), suppress(KeyboardInterrupt):
+        uvicorn.run(
             create_app(options.runtime),
             host=options.host,
             port=options.port,
-            threads=16,
-            connection_limit=64,
-            channel_timeout=15,
-            cleanup_interval=5,
-            max_request_header_size=64 * 1024,
-            max_request_body_size=_MAX_QUERY_BYTES,
-            outbuf_overflow=1024 * 1024,
-            outbuf_high_watermark=256 * 1024,
-            log_socket_errors=False,
+            limit_concurrency=64,
+            ws="websockets-sansio",
+            ws_max_size=_SOCKET_MESSAGE_BYTES,
+            ws_max_queue=16,
+            ws_ping_interval=_SOCKET_HEARTBEAT_SECONDS,
+            ws_ping_timeout=_SOCKET_HEARTBEAT_SECONDS,
+            timeout_keep_alive=15,
+            h11_max_incomplete_event_size=64 * 1024,
+            proxy_headers=False,
+            access_log=False,
+            server_header=False,
+            log_level="warning",
         )
 
 
