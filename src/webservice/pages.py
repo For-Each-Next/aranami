@@ -79,6 +79,41 @@ def _time(value: object, *, seconds: bool = False) -> Markup:
     )
 
 
+def _clock_attributes(
+    interface: Interface,
+    schedule: Record,
+    now: dt.datetime,
+) -> Record:
+    """Share server clock anchors between status views.
+
+    Returns:
+        Escaped-element attributes for local clocks and state expiry.
+    """
+    return {
+        "data_server_time": now.isoformat(),
+        "data_schedule_expires": schedule.get("expires_at"),
+        "data_schedule_stale": interface.text("ops.schedule_stale"),
+        "data_clock_messages": json.dumps({
+            key: interface.text(
+                key,
+                count="{count}",
+                seconds="{seconds}",
+                minutes="{minutes}",
+            )
+            for key in (
+                "duration.seconds",
+                "duration.minutes",
+                "time.minutes_ago",
+                "time.hours_ago",
+                "time.minutes_ahead",
+                "time.hours_ahead",
+                "time.soon",
+                "time.just_now",
+            )
+        }),
+    }
+
+
 class _Page:
     """Compose localized fragments with one escaping boundary."""
 
@@ -106,12 +141,8 @@ class _Page:
             else fragment()
         )
 
-    def _duration_attributes(
-        self,
-        event: Record | None,
-        *,
-        summary: bool = False,
-    ) -> Record:
+    @staticmethod
+    def _duration_attributes(event: Record | None) -> Record:
         """Expose running starts for optional browser clocks.
 
         Returns:
@@ -126,13 +157,112 @@ class _Page:
         return {
             "data_clock": "elapsed",
             "data_started_at": event["started_at"],
-            "data_duration_template": self.text(
-                "ops.state_duration",
-                duration="{duration}",
-            )
-            if summary
-            else "{duration}",
+            "data_duration_template": "{duration}",
         }
+
+    @staticmethod
+    def _active_progress(
+        event: Record | None,
+        schedule: Record,
+    ) -> Record | None:
+        """Select progress from the current active monitor session.
+
+        Args:
+            event: Saved routine lifecycle and optional progress.
+            schedule: Validated monitor state and session start.
+
+        Returns:
+            Saved progress or a preparing phase while fresh and running.
+            None for inactive, stale, or superseded observations.
+        """
+        if (
+            not event
+            or event.get("status") != "running"
+            or schedule["state"] != "running"
+        ):
+            return None
+        started = timestamp(event.get("started_at"))
+        session = timestamp(schedule.get("started_at"))
+        if started is None or session is None or started < session:
+            return None
+        return event.get("progress") or {"phase": "preparing"}
+
+    def _progress_note(self, progress: Record | None) -> Markup:
+        """Describe the phase separately from the update subject.
+
+        Returns:
+            A phase and optional counters, or nothing when inactive.
+        """
+        if progress is None:
+            return fragment()
+        phase = progress.get("phase", "preparing")
+        if phase not in {
+            "preparing",
+            "publishing",
+            "pageviews_readiness",
+            "pageviews_download",
+            "pageviews_aggregate",
+        }:
+            phase = "preparing"
+        label = self.text(f"progress.{phase}")
+        current, total = progress.get("current"), progress.get("total")
+        if current is not None and total is not None:
+            label = self.text(
+                "progress.count",
+                phase=label,
+                current=f"{current:,}",
+                total=f"{total:,}",
+            )
+        return tag(
+            "li",
+            label,
+            class_="routine-progress context",
+            data_progress_active=True,
+        )
+
+    def _routine_state(
+        self,
+        routine: str,
+        event: Record | None,
+        progress: Record | None,
+        popup_id: str,
+    ) -> Markup:
+        """Render a result button with fresh update details.
+
+        Args:
+            routine: Configured task whose update subject is shown.
+            event: Saved lifecycle outcome, if available.
+            progress: Current-session progress selected by the caller.
+            popup_id: Existing destination-details dialog identifier.
+
+        Returns:
+            A result button retaining a generic fallback after expiry.
+        """
+        fallback = self.text(
+            f"state.{_STATES[event['status']]}" if event else "ops.no_record",
+        )
+        label = fallback
+        if progress is not None:
+            label = (
+                self.text(
+                    "progress.pageviews_date"
+                    if routine == "pageviews"
+                    else "progress.report_date",
+                    date=self.interface.date(progress["report_date"]),
+                )
+                if progress.get("report_date")
+                else self.text(f"progress.routine.{routine}")
+            )
+        return tag(
+            "button",
+            label,
+            type="button",
+            class_="status-link",
+            popovertarget=popup_id,
+            aria_haspopup="dialog",
+            data_progress_label=label if progress is not None else None,
+            data_progress_fallback=fallback if progress is not None else None,
+        )
 
     def document(
         self,
@@ -741,11 +871,8 @@ class _Page:
         for identifier, definition in definitions.items():
             name = self.text(f"routine.{identifier}")
             event = events.get(identifier)
-            label = self.text(
-                f"state.{_STATES[event['status']]}"
-                if event
-                else "ops.no_record",
-            )
+            running = (event or {}).get("status") == "running"
+            progress = self._active_progress(event, schedule)
             pages = sorted(
                 (
                     record
@@ -756,20 +883,9 @@ class _Page:
                 key=operator.itemgetter("title"),
             )
             popup_id = f"report-details-{identifier}"
-            state = tag(
-                "button",
-                label,
-                type="button",
-                class_="status-link",
-                popovertarget=popup_id,
-                aria_haspopup="dialog",
-            )
+            state = self._routine_state(identifier, event, progress, popup_id)
             observed = (
-                event[
-                    "started_at"
-                    if event["status"] == "running"
-                    else "finished_at"
-                ]
+                event["started_at" if running else "finished_at"]
                 if event
                 else None
             )
@@ -786,25 +902,16 @@ class _Page:
                     ),
                     " ",
                     state,
-                    " " if self.interface.locale == "en" else "",
-                    tag(
-                        "span",
-                        self.text(
-                            "ops.state_duration",
-                            duration=event_duration(
-                                event,
-                                self.interface,
-                                now,
-                            ),
-                        ),
-                        title=self.text("ops.column_duration"),
-                        **self._duration_attributes(event, summary=True),
-                    ),
                     class_="routine-status",
                 ),
+                self._progress_note(progress),
                 tag(
                     "li",
-                    self.text("ops.column_time"),
+                    self.text(
+                        "ops.execution_started"
+                        if running
+                        else "ops.execution_finished",
+                    ),
                     _time(observed),
                     self.relative_note(observed, now),
                 ),
@@ -819,7 +926,7 @@ class _Page:
                         is not None,
                     ),
                 )
-                if (event or {}).get("status") != "running"
+                if not running
                 else fragment(),
                 class_="routine-meta",
             )
@@ -857,27 +964,7 @@ class _Page:
             class_="section-flat",
             id="tool-status",
             aria_labelledby="tool-status-heading",
-            data_server_time=now.isoformat(),
-            data_schedule_expires=schedule.get("expires_at"),
-            data_schedule_stale=self.text("ops.schedule_stale"),
-            data_clock_messages=json.dumps({
-                key: self.text(
-                    key,
-                    count="{count}",
-                    seconds="{seconds}",
-                    minutes="{minutes}",
-                )
-                for key in (
-                    "duration.seconds",
-                    "duration.minutes",
-                    "time.minutes_ago",
-                    "time.hours_ago",
-                    "time.minutes_ahead",
-                    "time.hours_ahead",
-                    "time.soon",
-                    "time.just_now",
-                )
-            }),
+            **_clock_attributes(self.interface, schedule, now),
         )
 
     def worklist_card(self, item: Record, groups: Record) -> Markup:
@@ -1131,11 +1218,11 @@ def _live_status(
     status: Record,
     config: Record,
     now: dt.datetime,
-) -> tuple[Markup, Markup]:
+) -> tuple[Markup, Markup, Markup]:
     """Share status cards and uptime between initial and live views.
 
     Returns:
-        Independently replaceable status and footer fragments.
+        Routine cards, uptime, and compact server-state fragments.
     """
     definitions = (config.get("routines") or {}).get("routines", {})
     schedule = schedule_state(status.get("schedule"), definitions, now)
@@ -1163,7 +1250,40 @@ def _live_status(
             version=version,
         ),
     )
-    return page.routine_cards(status, definitions, schedule, now), footer
+    server = tag(
+        "section",
+        tag("h2", page.text("server.heading"), id="server-status-heading"),
+        tag(
+            "p",
+            page.text(f"server.{schedule['state']}"),
+            id="server-state",
+            data_schedule_time=schedule.get("expires_at") is not None,
+            data_stale_text=page.text("server.stale"),
+        ),
+        tag(
+            "p",
+            page.text("server.observed"),
+            _time(schedule.get("updated_at"), seconds=True),
+            page.relative_note(schedule.get("updated_at"), now),
+            class_="source-updated",
+        ),
+        tag(
+            "p",
+            page.text("ops.reconnecting"),
+            id="live-server-notice",
+            class_="context",
+            role="status",
+            hidden=True,
+        ),
+        id="live-server-status",
+        aria_labelledby="server-status-heading",
+        **_clock_attributes(page.interface, schedule, now),
+    )
+    return (
+        page.routine_cards(status, definitions, schedule, now),
+        footer,
+        server,
+    )
 
 
 def render_dashboard(
@@ -1188,7 +1308,7 @@ def render_dashboard(
     page = _Page(locale)
     now = now or dt.datetime.now(dt.UTC)
     status, config = status or {}, config or {}
-    status_cards, footer = _live_status(page, status, config, now)
+    status_cards, footer, _ = _live_status(page, status, config, now)
     notice = fragment()
     if snapshot is None:
         notice = tag("p", page.text("notice.preparing"), class_="notice")
@@ -1343,21 +1463,42 @@ def render_about(config: Record | None, locale: str) -> str:
     return page.document(page.text("nav.about"), body, f"Aranami · {version}")
 
 
-def render_logs(data: Record, locale: str) -> str:
+def render_logs(
+    data: Record,
+    locale: str,
+    *,
+    status: Record | None = None,
+    config: Record | None = None,
+    now: dt.datetime | None = None,
+) -> str:
     """Display bounded log excerpts and exact daily-file downloads.
 
     Args:
         data: Validated log listing, selection, and bounded excerpt.
         locale: Negotiated interface language.
+        status: Validated routine and scheduler observations.
+        config: Current source version and routine definitions.
+        now: Optional aware clock for deterministic status freshness.
 
     Returns:
         Escaped HTML diagnostics without interpreting them as status.
     """
     page = _Page(locale)
+    _, footer, server = _live_status(
+        page,
+        status or {},
+        config or {},
+        now or dt.datetime.now(dt.UTC),
+    )
     if not data["files"]:
         return page.document(
             page.text("logs.heading"),
-            tag("p", page.text("logs.empty"), class_="empty"),
+            fragment(
+                server,
+                tag("p", page.text("logs.empty"), class_="empty"),
+            ),
+            footer,
+            live=True,
         )
     notice = (
         tag("p", page.text("logs.truncated"), class_="source-updated")
@@ -1370,6 +1511,7 @@ def render_logs(data: Record, locale: str) -> str:
         else tag("p", page.text("logs.no_matches"), class_="empty")
     )
     body = fragment(
+        server,
         page.log_controls(data),
         tag("h2", page.text("logs.recent")),
         tag("p", page.text("logs.reader_note"), class_="context"),
@@ -1377,7 +1519,7 @@ def render_logs(data: Record, locale: str) -> str:
         excerpt,
         page.log_files(data["files"]),
     )
-    return page.document(page.text("logs.heading"), body)
+    return page.document(page.text("logs.heading"), body, footer, live=True)
 
 
 def render_error(message_key: str, locale: str) -> str:

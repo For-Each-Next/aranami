@@ -2,8 +2,8 @@
 
 Usage (this guide) is for terminal users inspecting Aranami's operation,
 running a selected routine, or previewing an update. Aranami maintains wiki reports
-and a read-only website from one backend hub on Toolforge. It does not run
-as an application on the development computer.
+and a read-only website from one backend hub on Toolforge. Local development
+and verification remain offline.
 
 Use the existing Toolforge tool-account environment. For account access,
 source uploads, starting/stopping services, and recovery, see the
@@ -26,8 +26,13 @@ toolforge jobs logs aranami-web
 `aranami-hub` prepares data and publishes wiki reports. `aranami-web`
 serves the [website](https://aranami.toolforge.org/) and saved data,
 including the [daily-log viewer](https://aranami.toolforge.org/logs/).
-The website shows routine outcomes and actual scheduled next executions;
-missing, stale, paused, or stopped scheduling metadata remains explicit.
+The website shows routine outcomes and actual scheduled next executions,
+hiding the next-execution row while a routine runs. Its execution timestamp
+uses the start while running and the finish after completion. Missing, stale, paused,
+or stopped scheduling metadata remains explicit.
+Running cards display available progress supplied by the backend, such as the
+current report date or processed article count. Live status synchronizes every
+five seconds while visible; running times advance locally every second.
 
 All routines append readable diagnostics to one UTC file per day:
 
@@ -39,16 +44,17 @@ tail -n 100 logs/aranami.YYYY-MM-DD.log
 Replace `YYYY-MM-DD` with the required UTC date. The current date and the
 previous 29 UTC calendar dates are retained. Messages describe the data being
 prepared, the page being edited, counts, completion, skips, and failures.
-They are not a machine-readable status database.
 The public log viewer shows concise starts, results, and server lifecycle
 events, omitting per-article fetch failures and other diagnostic noise.
-Daily downloads retain the full diagnostics for troubleshooting.
+It also shows compact server state and uptime from saved schedule observations,
+alongside the source version, with the same live synchronization. Daily downloads
+retain the full diagnostics for troubleshooting.
 
 Backend metadata is separate:
 
 | File | Observation |
 |---|---|
-| `state/routine-status.json` | Actual routine starts/results, measured duration, and confirmed save counts |
+| `state/routine-status.json` | Actual routine starts/results, optional active progress, measured duration, and confirmed save counts |
 | `state/schedule-status.json` | Monitor's actual next executions and running/paused/stopped state |
 | `state/report-updates.json` | Per-destination update times, duration, outcome, and confirmed edits |
 
@@ -79,32 +85,24 @@ New pages retains 100 complete UTC dates through yesterday by default.
 Once the whole retained window is verified complete, automatic work waits
 for the next daily trigger.
 
-Pageviews first checks the candidate day's top list and up to three leading
-articles' single-day records. An unpublished day is rejected before full
-histories are requested. It then downloads through the latest eligible
-ready day. If too many articles lack that day's record, it retries a fresh full
-download ending one day earlier, without going back to an already-published
-date. It then analyzes and saves each missing day's report in order through
-the usable endpoint. For example, a report on the 15th catches up with
-separate saves for the 16th, 17th, and 18th; if only the download through the
-17th passes, it saves the 16th and 17th and retries the 18th later.
-Each report keeps its actual data date. Gaps in the accepted histories count
-as zero in daily totals and averages, allowing older reports to catch up.
-Source failures and unsuccessful saves stop publication, preserving confirmed progress.
-If no unpublished endpoint passes, the task fails and retries later.
-Today's incomplete totals are excluded. Yesterday becomes eligible at the
-actual 18:00 UTC readiness boundary; its hourly schedule first attempts
-that day at 18:59.
-Once current, it waits for 18:59 following the next readiness boundary.
+Pageviews saves each missing day's report in order through the latest eligible
+ready day. For example, a report on the 15th catches up with separate saves
+for the 16th, 17th, and 18th; if only data through the 17th passes validation,
+it saves the 16th and 17th and retries the 18th later. Each report keeps its
+actual data date. The [Pageviews settings](#pageviews-data-readiness) below
+describe readiness checks, zero-filled gaps, and retries.
+Yesterday becomes eligible at the actual 18:00 UTC readiness boundary;
+the hourly schedule first attempts that day at 18:59. Once current, the
+routine waits for 18:59 following the next readiness boundary.
 Failed saves and previews do not establish completion. Missing or invalid
 disposable evidence causes on-wiki revalidation. Manual runs always
 revalidate and cannot bypass data readiness with a chosen date.
 
 ## Preview selected routines
 
-Submit real previews as one-off Toolforge jobs, not from the development
-computer. The existing runtime supplies authentication and the locked
-Python 3.15 environment. From the bastion as the tool account:
+Submit real previews as one-off Toolforge jobs. The existing runtime supplies
+authentication and the locked Python 3.15 environment. From the bastion as
+the tool account:
 
 ```shell
 toolforge jobs run aranami-preview --image python3.13 --mount=all \
@@ -125,8 +123,8 @@ ls -lt dry-run/
 toolforge jobs delete aranami-preview
 ```
 
-Delete only the finished job definition before reusing that name. Do not
-delete the job while it is still producing the preview. A PexBot preview
+Keep the job active until preview production finishes, then delete its
+definition before reusing the name. A PexBot preview
 describes the proposed refresh action without calling the external writer.
 
 ## Run an immediate update
@@ -141,9 +139,9 @@ toolforge jobs logs aranami-manual
 ```
 
 This command can edit wiki pages. Use it only when a live update is
-intended. Avoid overlapping an automatic invocation of the same routine;
-ask the maintainer to arrange a maintenance window when needed. Inspect
-the result and delete the finished `aranami-manual` definition before
+intended and the same routine is idle; ask the maintainer to arrange a
+maintenance window when needed. Inspect the result and delete the finished
+`aranami-manual` definition before
 reusing its name.
 
 The API is `run_once(date=None, dry=False, tasks=None,
@@ -153,8 +151,8 @@ sets the report anchor, not the wall clock or Pageviews readiness.
 for deliberate maintainer-led revalidation. A one-shot pass does not
 start, stop, or rewrite recurring schedules.
 
-Do not create another continuous hub to request one immediate update.
-The normal service runs `run-hub.sh`, which starts `python -m backend`.
+Use the one-shot API for an immediate update. The single continuous service
+runs `run-hub.sh`, which starts `python -m backend`.
 Its default startup checks due work immediately. `--no-run-immediately`
 waits for scheduled callbacks; `--dry` runs recurring previews without
 production website collection or HTTP serving. Imports and `--help` do
@@ -192,11 +190,21 @@ the managed ranges. The Pageviews checkpoint remains
 also use supported opening-marker settings. Backend services validate and
 interpret settings; the updater only renders within the managed ranges.
 
+Changing target titles, UTC schedules, subscription roots, or maintenance
+catalogue definitions requires a source change and validated deployment.
+Follow [Development](development.md) and the validated deployment workflow.
+
+### Pageviews data readiness
+
+Pageviews first checks the candidate day's top list and up to three leading
+articles' single-day records. An unavailable date tries an earlier unpublished
+endpoint before full downloads; a transport failure defers the invocation.
 Once readiness passes, each Pageviews run or earlier-endpoint retry downloads
 full article histories again; catch-up dates share only the successful batch's fresh
 responses. A download stops immediately when more than 1% of selected
 articles lack its final day's daily record, then retries the previous
-unpublished endpoint. Single-day readiness probes do not replace full histories.
+unpublished endpoint. The full-history coverage check remains required
+after probes.
 Failed attempts leave the report and healthy cache unchanged. A shorter
 successful catch-up does not mark the routine current; hourly retries
 continue for the remaining dates. Exactly 1% missing is allowed and measured
@@ -204,16 +212,12 @@ zeroes are valid.
 After a batch passes, missing records in successful histories contribute zero
 to report calculations. Daily averages include every calendar day in the period.
 Saved rankings distinguish provisional zeroes from actual observations; raw
-cached histories keep the gaps absent. Later full downloads retry those dates
-and incorporate recovered counts in future reports and comparisons, without
-rewriting already published historical reports. HTTP failures are not zeroes.
-Older historical gaps do not produce per-article warnings.
-Larger legacy `missing-percent` values cannot raise the one-percent limit.
-
-Changing target titles, UTC schedules, subscription roots, or maintenance
-catalogue definitions requires a source change and validated deployment.
-See [Development](development.md) rather than editing deployed source
-in place.
+cached histories keep the gaps absent. Normal downloads for later report dates
+can fill those gaps and incorporate recovered counts in future reports and
+comparisons. Gaps alone do not trigger same-day retries or rewrite published
+historical reports. HTTP failures are not zeroes.
+Historical gaps are summarized at batch level. The maximum effective
+`missing-percent` is 1, including when a stored attribute is larger.
 
 ## Website refresh and retained data
 
@@ -234,6 +238,6 @@ Complete reusable wiki results live in `reports/`, independently of
 publication success. A storage failure prevents publication, while an
 unsuccessful wiki save retains the calculated result. New-page historical
 initialization preserves saved records and unknown facts without repeating
-historical discovery. Do not modify result manifests, state snapshots, or
-cache files to force a status. Runtime folder retention and safe cleanup
-are covered by [Administration](administration.md).
+historical discovery. Treat result manifests, state snapshots, and cache files
+as backend-owned observations and inspect them read-only. Runtime folder
+retention and safe cleanup are covered by [Administration](administration.md).

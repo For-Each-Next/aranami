@@ -40,9 +40,9 @@ package and repository-wide instructions.
   routine task.
 - Link each proposed edit's exact text in a flat UTF-8 `.wikitext`
   companion. Include target site/page, summary, and status tags beside
-  the link; do not embed proposed wikitext in the Markdown summary. Use
-  the unique report stem and edit number for filenames. Do not create a
-  JSON manifest or nested per-edit artifacts.
+  the link. Keep the summary and its companions flat, using the unique
+  report stem and edit number for filenames. Backend storage separately
+  retains complete result bundles and manifests under `dry-run/reports/`.
 - Refer to the [Polars Python API reference][1],
   [mwparserfromhell documentation][2], and [Pywikibot documentation][3]
   when the corresponding job-specific operation is necessary.

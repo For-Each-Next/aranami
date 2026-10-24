@@ -188,7 +188,8 @@ def run(
     final-day coverage fail. Share the accepted fresh observations
     between daily reports, saving in chronological order and counting
     missing historical values as provisional zeroes.
-    Later runs download everything again.
+    Downloads for later report dates can fill these gaps. Historical
+    gaps alone do not trigger another same-day attempt.
     Yesterday is eligible from UTC 18:00; earlier runs can still fill
     older gaps. The actual run time limits historical or future report
     anchors.

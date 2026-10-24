@@ -57,18 +57,10 @@ class ReadOnlyRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(length))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'none'; style-src 'self'; script-src 'self'; "
-            "img-src 'self'; connect-src 'self'; base-uri 'none'; "
-            "form-action 'self'; frame-ancestors 'none'",
-        )
-        if status == HTTPStatus.METHOD_NOT_ALLOWED:
-            self.send_header("Allow", "GET, HEAD")
-        for name, value in (extra or {}).items():
+        for name, value in {
+            **read_only_headers(status),
+            **(extra or {}),
+        }.items():
             self.send_header(name, value)
         self.end_headers()
 
@@ -81,14 +73,56 @@ class ReadOnlyRequestHandler(BaseHTTPRequestHandler):
         headers: dict[str, str] | None = None,
     ) -> None:
         """Send bytes or HEAD metadata with negotiated compression."""
-        extra = {"Vary": "Accept-Encoding", **(headers or {})}
         encodings = self.headers.get("Accept-Encoding", "")
-        if len(content) >= _COMPRESS_MIN_BYTES and accepts_gzip(encodings):
-            content = gzip.compress(content, mtime=0)
-            extra["Content-Encoding"] = "gzip"
+        content, extra = encoded_response(content, encodings)
+        extra.update(headers or {})
         self.response_headers(status, len(content), content_type, extra)
         if self.command != "HEAD":
             self.wfile.write(content)
+
+
+def read_only_headers(status: int) -> dict[str, str]:
+    """Return the security and cache policy for saved public responses.
+
+    Args:
+        status: HTTP response code, including method rejections.
+
+    Returns:
+        Transport-independent headers shared by both backend servers.
+    """
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Content-Security-Policy": (
+            "default-src 'none'; style-src 'self'; script-src 'self'; "
+            "img-src 'self'; connect-src 'self'; base-uri 'none'; "
+            "form-action 'self'; frame-ancestors 'none'"
+        ),
+    }
+    if status == HTTPStatus.METHOD_NOT_ALLOWED:
+        headers["Allow"] = "GET, HEAD"
+    return headers
+
+
+def encoded_response(
+    content: bytes,
+    encodings: str,
+) -> tuple[bytes, dict[str, str]]:
+    """Compress complete response bytes when negotiated and worthwhile.
+
+    Args:
+        content: Complete body; streamed downloads bypass this helper.
+        encodings: The request's Accept-Encoding field.
+
+    Returns:
+        Encoded bytes and the corresponding negotiation headers.
+    """
+    headers = {"Vary": "Accept-Encoding"}
+    if len(content) >= _COMPRESS_MIN_BYTES and accepts_gzip(encodings):
+        content = gzip.compress(content, mtime=0)
+        headers["Content-Encoding"] = "gzip"
+    return content, headers
 
 
 def accepts_gzip(value: str) -> bool:

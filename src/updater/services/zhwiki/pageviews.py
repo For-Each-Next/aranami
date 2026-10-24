@@ -1,17 +1,18 @@
 """Render prepared popularity rankings inside managed wiki ranges.
 
 Call :func:`build_report` with backend data and presentation settings.
-This module constructs templates and summary metadata without source
+This module constructs per-list JSON and summary metadata without source
 requests, cache access, or interpretation of report-page inputs.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import json
+import re
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-import mwparserfromhell
 from mwparserfromhell.nodes import Template
 
 from backend.services.zhwiki import pageviews as data
@@ -39,7 +40,7 @@ class ReportPeriod:
 
 @dataclass(frozen=True, slots=True)
 class TaskForce:
-    """Select a task force and its heading and template identifier."""
+    """Select a task force, its heading, and its assessment scope."""
 
     project: str
     heading: str
@@ -101,62 +102,107 @@ class PageviewReport:
     result: ReportResult | None = field(default=None, compare=False)
 
 
+def _json_for_wikitext(payload: dict[str, object]) -> str:
+    """Encode JSON without allowing its strings to introduce wikitext.
+
+    Keep each item and array on one line, with one metadata field per
+    line. Escape only JSON string tokens, retaining structural braces.
+    Separate closing braces so MediaWiki cannot mistake them for the
+    invocation's closing delimiter.
+
+    Args:
+        payload: One list's population metadata and displayed articles.
+
+    Returns:
+        Readable JSON whose decoded strings remain exactly unchanged.
+    """
+    escapes = {
+        ord(character): f"\\u{ord(character):04x}" for character in "{}|<>&"
+    }
+    encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False)
+    metadata = ",\n".join(
+        f"    {encoder.encode(key)}: {encoder.encode(value)}"
+        for key, value in payload["metadata"].items()
+    )
+    items = ",\n".join(
+        f"    {encoder.encode(item)}" for item in payload["items"]
+    )
+    encoded = "\n".join(
+        (
+            "{",
+            '  "metadata": {',
+            metadata,
+            "  },",
+            f'  "items": [\n{items}\n  ]' if items else '  "items": []',
+            "}",
+        ),
+    )
+    return re.sub(
+        r'"(?:[^"\\]|\\.)*"',
+        lambda match: match[0].translate(escapes),
+        encoded,
+    )
+
+
 def _render_section(
     population: RankingData,
     stop: dt.date,
     config: ReportPeriod,
-    tag: str,
+    project: str,
 ) -> str:
-    """Render prepared rows and totals with a display limit.
+    """Render one limited list with its own population metadata.
+
+    Intervals with no actual observation display null views. Prepared
+    zero-filled totals and ranks remain unchanged for calculations.
 
     Args:
         population: Complete backend ranking and population totals.
         stop: Exclusive reporting stop date.
         config: Calendar interval, heading, and display limit.
-        tag: Template identifier for this project or task force.
+        project: Full project name identifying this population.
 
     Returns:
-        Section heading, header, and ranked items as wikitext.
+        Ordinary section heading followed by one JSON module invocation.
     """
     start, end = stop - config.delta, stop - dt.timedelta(days=1)
-    header = Template("PJ:VG/HOT/header")
-    for key, value in (
-        ("start", start),
-        ("end", end),
-        ("page_count", population.article_count),
-        ("total_views", population.total_views or 0),
-        ("tag", tag),
-        ("limit", config.limit),
-    ):
-        header.add(key, str(value), preserve_spacing=False)
-    items: list[str] = []
-    for row in population.rows.head(config.limit).iter_rows(named=True):
-        item = Template("PJ:VG/HOT/item")
-        values = {
-            "1": row["title"],
-            "2": row["class"],
-            "3": row["importance"],
-            "start": start,
-            "end": end,
-            "views": row["views"],
-            "rank": row["rank"],
-            "old_rank": row["old_rank"],
-        }
-        if row["site_rank"] is not None and row["site_period"] is not None:
-            values["top"] = f"{row['site_period']}/{row['site_rank']}"
-        for key, value in values.items():
-            item.add(
-                key,
-                "" if value is None else str(value),
-                preserve_spacing=False,
-            )
-        items.append(f"# {item}")
-    code = mwparserfromhell.parse(f"\n=== {config.heading} ===\n\n")
-    code.append(header)
-    code.append("\n" + "\n".join(items) + "\n")
-    code.append(Template("PJ:VG/HOT/footer"))
-    code.append("\n")
-    return str(code)
+    payload = {
+        "metadata": {
+            "project": project,
+            "duration": config.key,
+            "start": [start.year, start.month, start.day],
+            "end": [end.year, end.month, end.day],
+            "total_pages": population.article_count,
+            "total_views": population.total_views,
+        },
+        "items": [
+            {
+                "title": row["title"],
+                "assessments": [
+                    "未评" if row["class"] is None else row["class"],
+                    "未知" if row["importance"] is None else row["importance"],
+                ],
+                "views": None
+                if row.get("observed") is False
+                else row["views"],
+                "rank": row["rank"],
+                "previous_rank": row["old_rank"],
+                **(
+                    {"site_rank": row["site_rank"]}
+                    if row["site_rank"] is not None
+                    else {}
+                ),
+            }
+            for row in population.rows.head(config.limit).iter_rows(named=True)
+        ],
+    }
+    invocation = Template("#invoke:PJ:VG/HOT/v2")
+    invocation.add("1", "main", showkey=False)
+    invocation.add(
+        "data",
+        f"\n{_json_for_wikitext(payload)}\n",
+        preserve_spacing=False,
+    )
+    return f"\n=== {config.heading} ===\n\n{invocation}\n"
 
 
 def build_report(
@@ -168,7 +214,7 @@ def build_report(
 
     Args:
         prepared: Backend observations, rankings, and summary metadata.
-        settings: Ordered headings, intervals, and template choices.
+        settings: Ordered headings, intervals, and presentation choices.
 
     Returns:
         Rendered report and unchanged reusable backend result tables.
@@ -180,17 +226,17 @@ def build_report(
     }
     sections = [
         f"<!-- report date {prepared.data_date.isoformat()} -->\n",
-        f"== {settings.project_heading} ==",
+        f"== {settings.project_heading} ==\n",
     ]
     leaders: dict[str, tuple[str | None, int | None]] = {}
     for config in settings.periods:
         population = populations[settings.project_tag, config.key]
         sections.append(
-            _render_section(population, stop, config, settings.project_tag),
+            _render_section(population, stop, config, settings.project),
         )
         leaders[config.key] = population.top, population.gain
     if settings.task_forces:
-        sections.append(f"== {settings.task_force_heading} ==")
+        sections.append(f"\n== {settings.task_force_heading} ==\n")
     for task_force in settings.task_forces:
         config = replace(
             settings.task_force_period,
@@ -201,7 +247,7 @@ def build_report(
                 populations[task_force.tag, config.key],
                 stop,
                 config,
-                task_force.tag,
+                f"{settings.project}/{task_force.project}",
             ),
         )
     return PageviewReport(

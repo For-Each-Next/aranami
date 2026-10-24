@@ -5,10 +5,9 @@ fixes, tests, and documentation. It explains how to prepare a local workspace, f
 right component, verify a change offline, and prepare a source payload.
 For cross-component design and contracts, read [Architecture](architecture.md).
 
-The development computer is not a runtime target. Live collection and
-publication run only on Toolforge. Do not provision local credentials or
-publish wiki edits as part of verification. Toolforge deployment and
-process management are in [Administration](administration.md).
+Use the development computer for offline implementation and verification;
+live collection, credentials, and publication belong on Toolforge. Deployment
+and process management are in [Administration](administration.md).
 
 ## Prepare the workspace
 
@@ -18,7 +17,7 @@ Use a recent uv release with Python 3.15 support. From the repository root:
 uv sync --locked
 ```
 
-The project runs directly from `src/`; it is not installed as a wheel.
+The project runs directly from `src/`.
 Keep `tool.uv.package = false` and the locked `pywikibot[mwoauth]`
 dependency. Runtime credentials and Wiki Replica configuration are supplied
 by the existing Toolforge account, not the source payload.
@@ -42,16 +41,16 @@ Use a focused change and add a regression test for changed behavior.
 
 The backend prepares and retains facts. The updater reads its edit
 destinations, renders backend data, and performs intentional publication.
-Python presentation functions display saved backend outputs and never
-initiate collection. Keep data processing and runtime file writes in the
-backend. The [Architecture](architecture.md#runtime-and-architecture) describes
+Python presentation functions display saved backend outputs. Keep source
+collection, data processing, and runtime file writes in the backend.
+The [Architecture](architecture.md#runtime-and-architecture) describes
 the complete ownership rules.
 
 Routine destinations and UTC triggers are defined once in
 `src/shared/config.py`. Setup validates its serialized contract and the
-generated version metadata. Renderers receive prepared configuration from the
-backend; do not maintain a separate website schedule. Maintenance definitions
-live in `src/backend/website/maintenance.json`.
+generated version metadata. Renderers use the backend-supplied configuration
+and observed schedule. Maintenance definitions live in
+`src/backend/website/maintenance.json`.
 
 ## Implement and test a change
 
@@ -62,13 +61,13 @@ measured zeroes. Keep source-wiki interpretation separate by wiki.
 
 Before changing a template call or extractor mapping, verify the actual
 template, redirects, documentation, and invoked module/configuration on
-that wiki. Record audited revisions when the contract needs evidence.
-Do not infer Chinese template semantics from English ones, or vice versa.
+that wiki. Record audited revisions when the contract needs evidence, and
+verify each wiki's semantics independently.
 See [wikitext and template contracts](architecture.md#wikitext-templates-and-site-semantics).
 
-Tests should use prepared data, fake wiki objects, temporary directories,
-and mocked network boundaries. They must not require live credentials or
-write to wiki pages. Cover the failure path as well as the happy path;
+Tests use prepared data, fake wiki objects, temporary directories, and mocked
+network boundaries, keeping verification offline and credential-free.
+Cover the failure path as well as the happy path;
 for persistence or publication changes, include storage-before-save,
 unconfirmed writes, stale generations, and preview isolation.
 
@@ -85,8 +84,12 @@ offline tests; submit real previews only through the
 [Toolforge preview workflow](usage.md#preview-selected-routines).
 `python -m backend` is the normal central-hub entry point and also manages
 website updates. `python -m backend.public` serves saved public data and
-Python-rendered pages independently. Imports and command-line help must
-not initialize clients or run reports.
+Python-rendered pages independently. Imports and command-line help remain inert.
+
+The public website uses Flask routing and Waitress for production serving.
+Use `backend.public.create_app` and its Flask test client for offline route
+checks; preserve GET/HEAD-only behavior, security headers, bounded reads, and
+inert imports. Keep the production debugger and automatic reloader disabled.
 
 If embedding the recurring monitor, `run(dry=True,
 run_immediately=False)` returns a background scheduler. Stop it with
@@ -123,14 +126,24 @@ For website changes, check desktop and narrow layouts, long titles and
 chips, maintenance sorting/pagination, real source dates and site ranks,
 and scheduling states in all three interface languages. Page requests remain
 read-only, including when snapshots are missing or invalid.
-For live status changes, also verify one-second local ticks, fifteen-second
-server synchronization, running and completed timers, open popovers and focus,
-hidden-tab pause/resume, and recovery from
-failed or malformed responses. Dashboard content and native controls must still
-work with JavaScript disabled. `/api/live` reads only saved status and renders
-fresh fragments independently of the full-page cache and website datasets.
+For live status changes, also verify one-second local ticks, five-second
+server synchronization, running and completed timers, hidden next-execution
+rows during running work, optional structured progress, open popovers and focus,
+hidden-tab pause/resume, and recovery from failed or malformed responses.
+Check the log page's compact server state, version, and uptime independently
+of routine cards and log contents. Dashboard content and native controls must
+still work with JavaScript disabled. `/api/live` reads only saved status and
+renders fresh fragments independently of the full-page cache and website datasets.
 Run `node --test tests/toolforge/test_live.cjs` for clock drift, synchronization,
 failure recovery, and DOM-preservation regressions.
+
+HOT v2 Lua and CSS belong to the wiki, not this source repository. Keep any
+paste artifacts or rendering harnesses in temporary directories. Python
+regressions verify per-list JSON fields, date arrays, assessment scope, optional
+site ranks, and escaped values using synthetic prepared data. Preview the
+module and TemplateStyles on-wiki before enabling the new publisher.
+See the [Pageviews rendering contract](architecture.md#pageviews) for data
+ownership, supported ratings, and the installation dependency.
 
 The uploader's dry run validates the exact source payload without
 contacting Toolforge. Add `--archive <new-file.tar>` to retain that payload;
@@ -145,7 +158,7 @@ keep one cohesive version decision. Before a formal release, remove
 temporary scaffolding and consolidate superseded details. Formal versions
 are immutable; release tags must match the project version and publish
 the validated source archive. Use Conventional Commits for requested Git
-commits, and do not commit unrelated work.
+commits scoped to the requested changes.
 
 ## Update the right documentation
 
@@ -161,5 +174,5 @@ Keep all files in `docs/` in English and lead with outcomes and use cases.
   ownership, storage, lifecycle, and domain contracts.
 
 Keep the root README focused on the tool's results and UTC schedules.
-Update the documentation index and links when moving content, and avoid
-duplicating operational procedures across guides.
+Update the documentation index and links when moving content. Link to each
+guide's authoritative procedure rather than duplicating it elsewhere.

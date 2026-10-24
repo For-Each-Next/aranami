@@ -4,6 +4,7 @@
 # ruff: file-ignore[private-member-access, pytest-unittest-raises-assertion]
 
 import datetime as dt
+import json
 import urllib.error
 from contextlib import chdir, nullcontext
 from dataclasses import replace
@@ -29,6 +30,88 @@ _TEXT = (
     '<!-- aranami end="page_views" -->After'
 )
 _TOP_SCHEMA = {"title": pl.String, "top": pl.Int64}
+
+
+def _sections(text: str) -> list[dict]:
+    """Read ordered lists from the generated module invocations.
+
+    Args:
+        text: Complete generated report.
+
+    Returns:
+        Project sections followed by task-force sections.
+    """
+    sections = []
+    for invocation in mwparserfromhell.parse(text).filter_templates():
+        assert str(invocation.name) == "#invoke:PJ:VG/HOT/v2"
+        assert str(invocation.get("1").value) == "main"
+        sections.append(json.loads(str(invocation.get("data").value)))
+    return sections
+
+
+def _items(text: str) -> list[dict]:
+    """Attach list metadata to each displayed article for assertions.
+
+    Args:
+        text: Complete generated report.
+
+    Returns:
+        Ordered item facts with their inclusive dates and durations.
+    """
+    return [
+        {**section["metadata"], **item}
+        for section in _sections(text)
+        for item in section["items"]
+    ]
+
+
+def _example_report() -> rendering.PageviewReport:
+    """Build a synthetic daily/monthly display fixture.
+
+    Returns:
+        Generator output with site ranks and unobserved article views.
+    """
+    populations = []
+    tables = {}
+    for period, count, site_rank, old_rank in (
+        ("daily", 13_492, 42, 60),
+        ("monthly", 404_760, 87, 2),
+    ):
+        rows = pl.DataFrame({
+            "title": ["原神", "Luna Abyss"],
+            "class": ["典范", "未评"],
+            "importance": ["高", "低"],
+            "views": [count, 0],
+            "observed": [True, False],
+            "rank": [1, 2],
+            "old_rank": [old_rank, None],
+            "site_rank": [site_rank, None],
+            "site_period": [period, period],
+        })
+        tables[period] = rows
+        populations.append(
+            pageviews.RankingData(
+                "vg",
+                period,
+                rows,
+                "原神",
+                old_rank - 1,
+                rows.height,
+                count,
+            ),
+        )
+    return rendering.build_report(
+        pageviews.PageviewData(
+            dt.date(2026, 9, 30),
+            tuple(populations),
+            ReportResult("pageviews", tables),
+        ),
+        settings=replace(
+            job.REPORT_SETTINGS,
+            periods=(job.PROJECT_PERIODS[0], job.PROJECT_PERIODS[2]),
+            task_forces=(),
+        ),
+    )
 
 
 def _site() -> MagicMock:
@@ -111,11 +194,21 @@ def _section(
     ranked = pageviews._ranked_data(articles, views, stop, config.delta)
     retained = pageviews._retained_rankings(ranked, config, stop, tag, tag)
     population = pageviews._ranking_data(retained, tag, config)
-    return (
-        rendering._render_section(population, stop, config, tag),
-        population.top,
-        population.gain,
+    prepared = pageviews.PageviewData(
+        stop - dt.timedelta(days=1),
+        (population,),
+        ReportResult("pageviews", {"rankings": retained}),
     )
+    report = rendering.build_report(
+        prepared,
+        settings=replace(
+            job.REPORT_SETTINGS,
+            periods=(config,),
+            project_tag=tag,
+            task_forces=(),
+        ),
+    )
+    return report.text, population.top, population.gain
 
 
 class TestPreparedRendering(TestCase):
@@ -170,8 +263,287 @@ class TestPreparedRendering(TestCase):
         assert report.result is result
         assert report.daily_top == "A"
         assert report.daily_top_gain == 1
-        assert "top=daily/42" in report.text
+        assert _items(report.text)[0]["site_rank"] == rows["site_rank"][0]
+        assert _items(report.text)[0]["duration"] == "daily"
         assert report.result.tables["rankings"].equals(rows)
+
+
+class TestJSONRendering(TestCase):
+    """Preserve list facts and safe invocation boundaries."""
+
+    @staticmethod
+    def test_daily_and_monthly_lists_keep_their_own_observations() -> None:
+        """Render independent site ranks and inclusive dates."""
+        sections = _sections(_example_report().text)
+        assert [section["metadata"] for section in sections] == [
+            {
+                "project": job.PROJECT,
+                "duration": "daily",
+                "start": [2026, 9, 30],
+                "end": [2026, 9, 30],
+                "total_pages": 2,
+                "total_views": 13_492,
+            },
+            {
+                "project": job.PROJECT,
+                "duration": "monthly",
+                "start": [2026, 9, 1],
+                "end": [2026, 9, 30],
+                "total_pages": 2,
+                "total_views": 404_760,
+            },
+        ]
+        assert [section["items"][0]["site_rank"] for section in sections] == [
+            42,
+            87,
+        ]
+        assert [section["items"][0]["views"] for section in sections] == [
+            13_492,
+            404_760,
+        ]
+        for section in sections:
+            assert section["items"][1] == {
+                "title": "Luna Abyss",
+                "assessments": ["未评", "低"],
+                "views": None,
+                "rank": 2,
+                "previous_rank": None,
+            }
+
+    @staticmethod
+    def _population(
+        period: str = "daily",
+        **values: str | int | None,
+    ) -> pageviews.RankingData:
+        """Prepare one article with overridable observed facts.
+
+        Args:
+            period: Backend interval identity for this ranking.
+            **values: Replacement cells for the small prepared fixture.
+
+        Returns:
+            Complete one-article ranking with its observed total.
+        """
+        row = {
+            "title": "遊戲甲",
+            "class": "B",
+            "importance": "低",
+            "views": 7,
+            "rank": 1,
+            "old_rank": None,
+            "site_rank": 42,
+            "site_period": "daily",
+            **values,
+        }
+        return pageviews.RankingData(
+            "vg",
+            period,
+            pl.DataFrame([row]),
+            row["title"],
+            None,
+            1,
+            row["views"],
+        )
+
+    @staticmethod
+    def _report(
+        populations: tuple[pageviews.RankingData, ...],
+        settings: rendering.ReportSettings,
+    ) -> rendering.PageviewReport:
+        """Render fixture populations with unchanged reusable tables.
+
+        Args:
+            populations: Prepared complete ranking fixtures.
+            settings: Selected period and group presentation.
+
+        Returns:
+            Rendered report and retained first fixture table.
+        """
+        return rendering.build_report(
+            pageviews.PageviewData(
+                _DAY,
+                populations,
+                ReportResult("pageviews", {"rankings": populations[0].rows}),
+            ),
+            settings=settings,
+        )
+
+    def test_json_strings_cannot_escape_the_invocation(self) -> None:
+        """Round-trip sensitive strings without nested wikitext."""
+        title = '遊戲|{{unsafe|x=1}}<nowiki>& "quoted" \\path'
+        project = 'Project }} {{danger}} <!-- comment --> | & "x"'
+        report = self._report(
+            (self._population(title=title),),
+            replace(
+                job.REPORT_SETTINGS,
+                project=project,
+                periods=(job.PROJECT_PERIODS[0],),
+                task_forces=(),
+            ),
+        )
+        sections = _sections(report.text)
+        assert len(sections) == 1
+        assert sections[0]["items"][0]["title"] == title
+        assert sections[0]["metadata"]["project"] == project
+        assert report.text.count("{{") == 1
+        assert report.text.count("}}") == 1
+        assert "\\u007c" in report.text
+        assert "\\u003c" in report.text
+        assert "\\u0026" in report.text
+        assert "[[File:" not in report.text
+
+    @staticmethod
+    def test_json_layout_keeps_arrays_and_items_on_single_lines() -> None:
+        """Keep compact rows readable without altering their facts."""
+        templates = mwparserfromhell.parse(
+            _example_report().text,
+        ).filter_templates()
+        for invocation in templates:
+            encoded = str(invocation.get("data").value).strip()
+            payload = json.loads(encoded)
+            lines = encoded.splitlines()
+            item_lines = [
+                line for line in lines if line.startswith('    {"title":')
+            ]
+            assert len(item_lines) == len(payload["items"])
+            assert [
+                json.loads(line.strip().removesuffix(","))
+                for line in item_lines
+            ] == payload["items"]
+            assert '"assessments": ["典范", "高"]' in item_lines[0]
+            assert '    "end": [2026, 9, 30],' in lines
+            assert "}}" not in encoded
+
+    def test_empty_display_uses_a_compact_empty_array(self) -> None:
+        """Keep empty populations valid without placeholder items."""
+        population = self._population()
+        report = self._report(
+            (
+                replace(
+                    population,
+                    rows=population.rows.clear(),
+                    article_count=0,
+                    total_views=0,
+                    top=None,
+                ),
+            ),
+            replace(
+                job.REPORT_SETTINGS,
+                periods=(job.PROJECT_PERIODS[0],),
+                task_forces=(),
+            ),
+        )
+        assert '  "items": []' in report.text.splitlines()
+        assert _sections(report.text)[0]["items"] == []
+
+    def test_each_list_has_only_its_metadata_and_items(self) -> None:
+        """Keep lists independent and headings outside JSON."""
+        daily = job.PROJECT_PERIODS[0]
+        alternate = replace(daily, key="same-day", heading="Same day")
+        populations = (self._population(), self._population("same-day"))
+        report = self._report(
+            populations,
+            replace(
+                job.REPORT_SETTINGS,
+                periods=(daily, alternate),
+                task_forces=(),
+            ),
+        )
+        sections = _sections(report.text)
+        assert [section["metadata"]["duration"] for section in sections] == [
+            "daily",
+            "same-day",
+        ]
+        for section in sections:
+            assert set(section) == {"metadata", "items"}
+            assert section["metadata"] == {
+                "project": job.PROJECT,
+                "duration": section["metadata"]["duration"],
+                "start": [2026, 1, 10],
+                "end": [2026, 1, 10],
+                "total_pages": 1,
+                "total_views": 7,
+            }
+            assert section["items"] == [
+                {
+                    "title": "遊戲甲",
+                    "assessments": ["B", "低"],
+                    "views": 7,
+                    "rank": 1,
+                    "previous_rank": None,
+                    "site_rank": 42,
+                },
+            ]
+        assert "== 專題總瀏覽量 ==" in report.text
+        assert "=== Same day ===" in report.text
+        assert report.result.tables["rankings"] is populations[0].rows
+
+    def test_null_observations_remain_distinct_from_zero(self) -> None:
+        """Keep null totals, zero counts, and unknown previous ranks."""
+        for views in (None, 0):
+            with self.subTest(views=views):
+                report = self._report(
+                    (self._population(views=views, site_rank=None),),
+                    replace(
+                        job.REPORT_SETTINGS,
+                        periods=(job.PROJECT_PERIODS[0],),
+                        task_forces=(),
+                    ),
+                )
+                assert (
+                    _sections(report.text)[0]["metadata"]["total_views"]
+                    == views
+                )
+                item = _items(report.text)[0]
+                assert item["views"] == views
+                assert item["previous_rank"] is None
+                assert "site_rank" not in item
+
+    def test_unobserved_zero_is_null_without_changing_calculations(
+        self,
+    ) -> None:
+        """Distinguish absent intervals from actual observed sums."""
+        weekly = job.PROJECT_PERIODS[1]
+        for observed, views, expected in (
+            (False, 0, None),
+            (True, 0, 0),
+            (True, 23, 23),
+        ):
+            with self.subTest(observed=observed, views=views):
+                population = self._population(
+                    "weekly",
+                    observed=observed,
+                    views=views,
+                    site_rank=None,
+                )
+                report = self._report(
+                    (population,),
+                    replace(
+                        job.REPORT_SETTINGS,
+                        periods=(weekly,),
+                        task_forces=(),
+                    ),
+                )
+                section = _sections(report.text)[0]
+                assert section["items"][0]["views"] == expected
+                assert section["metadata"]["total_views"] == views
+                assert section["items"][0]["rank"] == 1
+                assert (
+                    report.result.tables["rankings"].item(0, "views") == views
+                )
+                assert report.result.tables["rankings"] is population.rows
+
+    def test_missing_assessments_keep_two_string_slots(self) -> None:
+        """Use explicit unknown assessments instead of array holes."""
+        report = self._report(
+            (self._population(**{"class": None, "importance": None}),),
+            replace(
+                job.REPORT_SETTINGS,
+                periods=(job.PROJECT_PERIODS[0],),
+                task_forces=(),
+            ),
+        )
+        assert _items(report.text)[0]["assessments"] == ["未评", "未知"]
 
 
 class TestPeriodAggregation(TestCase):
@@ -280,9 +652,9 @@ class TestPeriodAggregation(TestCase):
                 config,
                 "vg",
             )
-            item = mwparserfromhell.parse(text).filter_templates()[1]
+            item = _items(text)[0]
             assert title == "A59"
-            assert str(item.get("old_rank").value) == "60"
+            assert item["previous_rank"] == articles.height
             assert gain == articles.height - 1
 
     @staticmethod
@@ -323,27 +695,16 @@ class TestPeriodAggregation(TestCase):
             config,
             "vg",
         )
-        templates = mwparserfromhell.parse(text).filter_templates()
-        header = templates[0]
-        items = templates[1:-1]
+        section = _sections(text)[0]
+        items = _items(text)
         assert top == "A"
         assert gain == 1
-        assert str(header.get("total_views").value) == "16"
-        assert str(header.get("page_count").value) == "3"
-        assert [str(item.get("rank").value) for item in items] == [
-            "1",
-            "1",
-            "",
-        ]
-        assert str(items[0].get("old_rank").value) == "2"
-        assert all(not item.has("old_views") for item in items)
-        item_lines = [
-            line for line in text.splitlines() if "{{PJ:VG/HOT/item|" in line
-        ]
-        assert len(item_lines) == len(items)
-        assert all(
-            line.startswith("# {{PJ:VG/HOT/item|") for line in item_lines
-        )
+        assert section["metadata"]["total_views"] == sum((8, 8))
+        assert section["metadata"]["total_pages"] == articles.height
+        assert [item["rank"] for item in items] == [1, 1, None]
+        assert [items[0]["previous_rank"]] == [2]
+        assert all("old_views" not in item for item in items)
+        assert [item["title"] for item in items] == ["A", "B", "C"]
 
 
 class TestSiteTopRanks(TestCase):
@@ -410,24 +771,30 @@ class TestSiteTopRanks(TestCase):
             call(site, dt.date(2026, 9, 30), stop),
             call(site, dt.date(2026, 9, 1), stop),
         ]
-        items = [
-            template
-            for template in mwparserfromhell.parse(
-                report.text,
-            ).filter_templates()
-            if str(template.name) == "PJ:VG/HOT/item"
+        items = _items(report.text)
+        assert [item["rank"] for item in items] == [1, 2, 1, 2, 1]
+        assert [item.get("site_rank") for item in items] == [
+            701,
+            None,
+            None,
+            42,
+            42,
         ]
-        assert [str(item.get("rank").value) for item in items] == [
-            "1",
-            "2",
-            "1",
-            "2",
-            "1",
+        assert [item["duration"] for item in items] == [
+            "daily",
+            "daily",
+            "monthly",
+            "monthly",
+            "monthly",
         ]
-        assert [
-            str(item.get("top").value) if item.has("top") else None
-            for item in items
-        ] == ["daily/701", None, None, "monthly/42", "monthly/42"]
+        sections = _sections(report.text)
+        assert len(sections) == len(periods) + len(settings.task_forces)
+        assert [section["metadata"]["start"] for section in sections] == [
+            [2026, 9, 30],
+            [2026, 9, 1],
+            [2026, 9, 1],
+        ]
+        assert [item["title"] for item in sections[2]["items"]] == ["B"]
         assert report.result is not None
         rankings = report.result.tables["rankings"]
         assert rankings.height == len(items)
@@ -510,12 +877,9 @@ class TestSiteTopRanks(TestCase):
         assert report.result.tables["totals"].get_column(
             "total_views",
         ).to_list() == [8, 0]
-        items = [
-            node
-            for node in mwparserfromhell.parse(report.text).filter_templates()
-            if str(node.name) == "PJ:VG/HOT/item"
-        ]
+        items = _items(report.text)
         assert len(items) == 1
+        assert _sections(report.text)[1]["items"] == []
 
     @staticmethod
     def test_rolling_month_omits_top_without_requesting_site_ranks() -> None:
@@ -558,16 +922,11 @@ class TestSiteTopRanks(TestCase):
                 ),
             )
         urlopen.assert_not_called()
-        items = [
-            template
-            for template in mwparserfromhell.parse(
-                report.text,
-            ).filter_templates()
-            if str(template.name) == "PJ:VG/HOT/item"
-        ]
-        assert str(items[0].get("start").value) == "2026-09-02"
-        assert str(items[0].get("end").value) == "2026-10-01"
-        assert not items[0].has("top")
+        items = _items(report.text)
+        assert items[0]["start"] == [2026, 9, 2]
+        assert items[0]["end"] == [2026, 10, 1]
+        assert "site_rank" not in items[0]
+        assert items[0]["duration"] == "monthly"
 
     def test_unavailable_site_top_defers_complete_report(self) -> None:
         """Defer reports after required top-list requests fail."""
@@ -689,18 +1048,13 @@ class TestSiteTopRanks(TestCase):
         load_cache.return_value.save.assert_called_once()
         assert report.data_date == dt.date(2025, 12, 31)
         assert report.yearly_top == "A"
-        items = [
-            template
-            for template in mwparserfromhell.parse(
-                report.text,
-            ).filter_templates()
-            if str(template.name) == "PJ:VG/HOT/item"
-        ]
+        items = _items(report.text)
         assert len(items) == 1
-        assert str(items[0].get("start").value) == "2025-01-01"
-        assert str(items[0].get("end").value) == "2025-12-31"
-        assert str(items[0].get("views").value) == "12"
-        assert not items[0].has("top")
+        assert items[0]["start"] == [2025, 1, 1]
+        assert items[0]["end"] == [2025, 12, 31]
+        assert [items[0]["views"]] == [12]
+        assert "site_rank" not in items[0]
+        assert items[0]["duration"] == "yearly"
 
 
 class TestReportState(TestCase):
@@ -757,31 +1111,37 @@ class TestReportState(TestCase):
                 _STOP,
                 settings=job.REPORT_SETTINGS,
             )
-        headers = [
-            template
-            for template in mwparserfromhell.parse(
-                report.text,
-            ).filter_templates()
-            if str(template.name) == "PJ:VG/HOT/header"
-        ]
+        sections = _sections(report.text)
         expected_count = len(job.PROJECT_PERIODS) + len(
             job.TASK_FORCES,
         )
-        assert len(headers) == expected_count
-        item_lines = [
-            line
-            for line in report.text.splitlines()
-            if "{{PJ:VG/HOT/item|" in line
-        ]
-        assert len(item_lines) == (
+        assert len(sections) == expected_count
+        assert len(_items(report.text)) == (
             2 * len(job.PROJECT_PERIODS) + len(job.TASK_FORCES)
         )
+        assert [
+            section["metadata"]["total_pages"] for section in sections
+        ] == ([2] * len(job.PROJECT_PERIODS) + [1] * len(job.TASK_FORCES))
+        assert [item["title"] for item in sections[0]["items"]] == [
+            "A",
+            "B",
+        ]
+        assert sections[0]["items"][0]["assessments"] == ["A", "高"]
+        task_sections = sections[len(job.PROJECT_PERIODS) :]
         assert all(
-            line.startswith("# {{PJ:VG/HOT/item|") for line in item_lines
+            section["items"][0]["assessments"] == ["A", "不适用"]
+            for section in task_sections
         )
         assert [
-            str(template.get("page_count").value) for template in headers
-        ] == (["2"] * len(job.PROJECT_PERIODS) + ["1"] * len(job.TASK_FORCES))
+            section["metadata"]["project"] for section in task_sections
+        ] == [
+            "电子游戏/宝可梦工作组",
+            "电子游戏/我的世界",
+            "电子游戏/史克威尔艾尼克斯工作组",
+            "电子游戏/世嘉工作组",
+            "电子游戏/任天堂工作组",
+            "电子游戏/米哈游工作组",
+        ]
         assert (
             report.daily_top
             == report.weekly_top
@@ -983,19 +1343,11 @@ class TestReportState(TestCase):
             "Fixture",
             "Fixture/Custom",
         ]
-        headers = [
-            template
-            for template in mwparserfromhell.parse(
-                report.text,
-            ).filter_templates()
-            if str(template.name) == "PJ:VG/HOT/header"
-        ]
-        assert [str(header.get("limit").value) for header in headers] == [
-            "1",
-            "2",
-        ]
-        assert str(headers[1].get("start").value) == "2026-01-04"
-        assert "Weekly fixture" in report.text
+        sections = _sections(report.text)
+        assert [len(section["items"]) for section in sections] == [1, 2]
+        assert sections[1]["metadata"]["start"] == [2026, 1, 4]
+        assert sections[1]["metadata"]["project"] == "Fixture/Custom"
+        assert "=== Weekly fixture ===" in report.text
         assert "== Weekly subprojects ==" in report.text
         assert "工作組月瀏覽量" not in report.text
         assert report.weekly_top is None

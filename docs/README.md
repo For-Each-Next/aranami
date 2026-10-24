@@ -18,3 +18,7 @@ All project documentation in this directory is maintained in English.
 apply to changes in their directories.
 
 Completed changes are recorded in the [changelog](../CHANGELOG.md).
+
+The JSON-driven HOT report uses separately maintained on-wiki Lua and CSS.
+The [architecture contract](architecture.md#pageviews) describes its data format
+and the wiki-page installation dependency.

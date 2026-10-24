@@ -315,9 +315,9 @@
     "zh-hant": "關閉"
   },
   "ops.timing_note": {
-    "en": "The card shows the whole routine's elapsed time. Each row shows that report's own execution time, excluding time waiting for earlier reports.",
-    "zh-hans": "卡片显示整项任务的执行时间；下表显示各报告本次执行的独立用时，不包含等待前序报告的时间。",
-    "zh-hant": "卡片顯示整項任務的執行時間；下表顯示各報告本次執行的獨立用時，不包含等待前序報告的時間。"
+    "en": "Each row shows that report's own execution time, excluding time waiting for earlier reports.",
+    "zh-hans": "下表显示各报告本次执行的独立用时，不包含等待前序报告的时间。",
+    "zh-hant": "下表顯示各報告本次執行的獨立用時，不包含等待前序報告的時間。"
   },
   "ops.column_status": {
     "en": "Status",
@@ -494,20 +494,90 @@
     "zh-hans": "执行时间",
     "zh-hant": "執行時間"
   },
-  "ops.state_duration": {
-    "en": "({duration})",
-    "zh-hans": "（执行时间{duration}）",
-    "zh-hant": "（執行時間{duration}）"
+  "ops.execution_started": {
+    "en": "Started at ",
+    "zh-hans": "执行开始于",
+    "zh-hant": "執行開始於"
   },
-  "ops.column_time": {
-    "en": "Last run: ",
-    "zh-hans": "最近执行：",
-    "zh-hant": "最近執行："
+  "progress.preparing": {
+    "en": "Preparing",
+    "zh-hans": "准备中",
+    "zh-hant": "準備中"
+  },
+  "progress.publishing": {
+    "en": "Publishing",
+    "zh-hans": "发布中",
+    "zh-hant": "發布中"
+  },
+  "progress.pageviews_readiness": {
+    "en": "Checking daily availability",
+    "zh-hans": "检查当日数据",
+    "zh-hant": "檢查當日資料"
+  },
+  "progress.pageviews_download": {
+    "en": "Fetching pageviews",
+    "zh-hans": "抓取浏览量",
+    "zh-hant": "擷取瀏覽量"
+  },
+  "progress.pageviews_aggregate": {
+    "en": "Calculating rankings",
+    "zh-hans": "计算排名",
+    "zh-hant": "計算排名"
+  },
+  "progress.count": {
+    "en": "{phase} ({current}/{total})",
+    "zh-hans": "{phase}（{current}/{total}）",
+    "zh-hant": "{phase}（{current}/{total}）"
+  },
+  "progress.pageviews_date": {
+    "en": "Updating pageviews for {date}",
+    "zh-hans": "更新{date}记录",
+    "zh-hant": "更新{date}紀錄"
+  },
+  "progress.report_date": {
+    "en": "Updating report for {date}",
+    "zh-hans": "更新{date}报告",
+    "zh-hant": "更新{date}報告"
+  },
+  "progress.routine.dyks": {
+    "en": "Updating DYK recommendations",
+    "zh-hans": "更新新条目推荐",
+    "zh-hant": "更新新條目推薦"
+  },
+  "progress.routine.new_pages": {
+    "en": "Updating new-page records",
+    "zh-hans": "更新新进条目记录",
+    "zh-hant": "更新新進條目紀錄"
+  },
+  "progress.routine.assessment_lists": {
+    "en": "Updating assessment lists",
+    "zh-hans": "更新条目评级列表",
+    "zh-hant": "更新條目評級列表"
+  },
+  "progress.routine.pageviews": {
+    "en": "Updating pageview records",
+    "zh-hans": "更新浏览记录",
+    "zh-hant": "更新瀏覽紀錄"
+  },
+  "progress.routine.enwp_key_articles": {
+    "en": "Updating English Wikipedia comparisons",
+    "zh-hans": "更新英文维基比较报告",
+    "zh-hant": "更新英文維基比較報告"
+  },
+  "progress.routine.pexbot": {
+    "en": "Updating database reports",
+    "zh-hans": "更新数据库报告",
+    "zh-hant": "更新資料庫報告"
+  },
+  "ops.execution_finished": {
+    "en": "Finished at ",
+    "zh-hans": "执行完毕于",
+    "zh-hant": "執行完畢於"
   },
   "ops.next_run": {
-    "en": "Next run: ",
-    "zh-hans": "下次执行：",
-    "zh-hant": "下次執行："
+    "en": "Next run scheduled for ",
+    "zh-hans": "下次执行预定于",
+    "zh-hant": "下次執行預定於"
   },
   "time.minutes_ago": {
     "en": "({count} min ago)",
@@ -543,6 +613,41 @@
     "en": "Scheduler state is stale",
     "zh-hans": "调度状态已过期",
     "zh-hant": "排程狀態已過期"
+  },
+  "server.heading": {
+    "en": "Server status",
+    "zh-hans": "服务器状态",
+    "zh-hant": "伺服器狀態"
+  },
+  "server.running": {
+    "en": "Running",
+    "zh-hans": "运行中",
+    "zh-hant": "運行中"
+  },
+  "server.paused": {
+    "en": "Running; scheduled work is paused",
+    "zh-hans": "运行中，定时任务已暂停",
+    "zh-hant": "運行中，排程任務已暫停"
+  },
+  "server.stopped": {
+    "en": "Stopped",
+    "zh-hans": "已停止",
+    "zh-hant": "已停止"
+  },
+  "server.missing": {
+    "en": "Unavailable; no current server observation",
+    "zh-hans": "无法确认，尚无服务器状态记录",
+    "zh-hant": "無法確認，尚無伺服器狀態紀錄"
+  },
+  "server.stale": {
+    "en": "Unavailable; the last server observation is stale",
+    "zh-hans": "无法确认，上次服务器状态记录已过期",
+    "zh-hant": "無法確認，上次伺服器狀態紀錄已過期"
+  },
+  "server.observed": {
+    "en": "Last observed at ",
+    "zh-hans": "最近记录于",
+    "zh-hant": "最近紀錄於"
   },
   "ops.schedule_stopped": {
     "en": "Scheduler stopped",
