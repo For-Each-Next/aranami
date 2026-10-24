@@ -21,7 +21,6 @@ from urllib.parse import unquote, urlsplit
 
 import polars as pl
 import pywikibot
-from pywikibot.pagegenerators import PreloadingGenerator
 
 from backend.website import backlog, homepage, pageviews
 from backend.website.extracts import MAX_EXTRACT_BYTES, ExtractCache
@@ -89,7 +88,6 @@ class WikiReader:
         self.site = site
         self.now = dt.datetime.now(dt.UTC)
         self.sources: dict[str, dict[str, str]] = {}
-        self._pages: dict[str, pywikibot.Page] = {}
         self._texts: dict[tuple[str, dt.datetime | None], str] = {}
         self._resolved: dict[str, str] = {}
 
@@ -99,18 +97,6 @@ class WikiReader:
             "label": title,
             "url": f"https://zh.wikipedia.org/w/index.php?oldid={revision}",
         }
-
-    def preload(self, titles: list[str]) -> None:
-        """Preload current source texts in API batches.
-
-        Args:
-            titles: Source titles to read on this site.
-        """
-        pages = (
-            pywikibot.Page(self.site, title) for title in dict.fromkeys(titles)
-        )
-        for page in PreloadingGenerator(pages):
-            self._pages[page.title()] = page
 
     @staticmethod
     def summary(title: str, variant: str) -> str | None:
@@ -245,8 +231,7 @@ class WikiReader:
         """
         key = (title, None)
         if key not in self._texts:
-            requested = pywikibot.Page(self.site, title)
-            page = self._pages.get(requested.title(), requested)
+            page = pywikibot.Page(self.site, title)
             self._texts[key] = page.get()
             self._remember(title, page.latest_revision_id)
         return self._texts[key]
@@ -267,16 +252,7 @@ class WikiReader:
         cutoff = min(before.astimezone(dt.UTC), self.now)
         key = (title, cutoff)
         if key not in self._texts:
-            requested = pywikibot.Page(self.site, title)
-            page = self._pages.get(requested.title())
-            if page is not None:
-                revision = page.latest_revision
-                stamp = revision.timestamp.replace(tzinfo=dt.UTC)
-                if revision.text is not None and stamp < cutoff:
-                    self._texts[key] = revision.text
-                    self._remember(title, revision.revid)
-                    return revision.text
-            page = requested
+            page = pywikibot.Page(self.site, title)
             revision = next(
                 iter(
                     page.revisions(

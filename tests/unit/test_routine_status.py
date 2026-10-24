@@ -56,6 +56,46 @@ def _record(
 class TestRoutineStatus(TestCase):
     """Keep independent, ordered routine snapshots safe to consume."""
 
+    def test_failure_details_are_optional_bounded_and_cleared(self) -> None:
+        """Keep safe failure facts and clear them in new runs."""
+        with TemporaryDirectory() as directory:
+            destination = Path(directory)
+            failed = {
+                **_record(status="failed"),
+                "failure_reason": "TimeoutError",
+                "failure_date": "2026-10-17",
+            }
+            assert write_routine_status(failed, directory=destination)
+            path = destination / "routine-status.json"
+            original = path.read_bytes()
+            for field, value in (
+                ("failure_reason", "secret=/private/token"),
+                ("failure_reason", "A" * 81),
+                ("failure_reason", "TimeoutError\nsecret"),
+                ("failure_reason", 1),
+                ("failure_date", "2026-02-30"),
+                ("failure_date", "20261017"),
+                ("failure_date", True),
+                ("status", "updated"),
+                ("status", "running"),
+                ("status", "deferred"),
+            ):
+                with (
+                    self.subTest(field=field, value=value),
+                    self.assertLogs(_LOGGER, level="WARNING"),
+                ):
+                    assert not write_routine_status(
+                        {**failed, field: value},
+                        directory=destination,
+                    )
+                assert path.read_bytes() == original
+            older = {**failed, "run_id": "7" * 32, "failure_reason": "OSError"}
+            assert not write_routine_status(older, directory=destination)
+            assert path.read_bytes() == original
+            fresh = _record(status="running", run_id="9" * 32)
+            assert write_routine_status(fresh, directory=destination)
+            assert json.loads(path.read_text())["routines"]["dyks"] == fresh
+
     def test_confirmed_report_dates_are_optional_and_validated(self) -> None:
         """Retain canonical dates while accepting previous snapshots."""
         with TemporaryDirectory() as directory:

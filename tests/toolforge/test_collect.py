@@ -236,70 +236,26 @@ class TestRevisionBoundaries(TestCase):
         assert [row["text"] for row in rows] == ["1", "2", "3"]
         assert all(row["timestamp"].tzinfo is dt.UTC for row in rows)
 
-    def test_preloaded_older_latest_revision_avoids_history_request(
+    def test_at_reuses_the_observed_historical_revision(
         self,
     ) -> None:
-        """Reuse a source last edited before its display cutoff."""
-        self.page.title.return_value = "Template:Daily"
-        self.page.latest_revision = SimpleNamespace(
-            revid=3,
-            text="cached display",
-            timestamp=pywikibot.Timestamp.fromISOformat(
-                "2026-10-17T23:59:59Z",
-            ),
-        )
-        with (
-            patch(
-                "backend.website.collect.pywikibot.Page",
-                return_value=self.page,
-            ),
-            patch(
-                "backend.website.collect.PreloadingGenerator",
-                return_value=[self.page],
-            ),
+        """Read an exclusive historical cutoff once per refresh."""
+        with patch(
+            "backend.website.collect.pywikibot.Page",
+            return_value=self.page,
         ):
-            self.reader.preload(["Template:Daily"])
-            assert (
-                self.reader.at(
-                    "Template:Daily",
-                    dt.datetime(2026, 10, 18, tzinfo=dt.UTC),
+            for _ in range(2):
+                assert (
+                    self.reader.at(
+                        "Template:Daily",
+                        dt.datetime(2026, 10, 18, tzinfo=dt.UTC),
+                    )
+                    == "3"
                 )
-                == "cached display"
-            )
-        self.page.revisions.assert_not_called()
+        self.page.revisions.assert_called_once()
         assert self.reader.sources["Template:Daily"]["url"].endswith("oldid=3")
 
-    def test_preloaded_latest_at_cutoff_uses_historical_revision(self) -> None:
-        """Reject cached text at the exclusive cutoff."""
-        self.page.title.return_value = "Template:Daily"
-        self.page.latest_revision = SimpleNamespace(
-            revid=4,
-            text="later edit",
-            timestamp=pywikibot.Timestamp.fromISOformat(
-                "2026-10-18T00:00:00Z",
-            ),
-        )
-        with (
-            patch(
-                "backend.website.collect.pywikibot.Page",
-                return_value=self.page,
-            ),
-            patch(
-                "backend.website.collect.PreloadingGenerator",
-                return_value=[self.page],
-            ),
-        ):
-            self.reader.preload(["Template:Daily"])
-            assert (
-                self.reader.at(
-                    "Template:Daily",
-                    dt.datetime(2026, 10, 18, tzinfo=dt.UTC),
-                )
-                == "3"
-            )
-        self.page.revisions.assert_called_once()
-
-    def test_missing_today_keeps_preloaded_yesterday_fallback(self) -> None:
+    def test_missing_today_reads_yesterday_fallback_revision(self) -> None:
         """Keep yesterday's fallback when today's archive is absent."""
         today = "Wikipedia:优良条目/2026年10月18日"
         yesterday = "Wikipedia:优良条目/2026年10月17日"
@@ -308,26 +264,21 @@ class TestRevisionBoundaries(TestCase):
         missing.revisions.return_value = []
         available = Mock()
         available.title.return_value = yesterday
-        available.latest_revision = SimpleNamespace(
-            revid=10,
-            text="{{Wikipedia:优良条目/Game}}",
-            timestamp=pywikibot.Timestamp.fromISOformat(
-                "2026-10-17T12:00:00Z",
-            ),
-        )
-        with (
-            patch(
-                "backend.website.collect.pywikibot.Page",
-                side_effect=lambda _site, title: (
-                    missing if title == today else available
+        available.revisions.return_value = [
+            SimpleNamespace(
+                revid=10,
+                text="{{Wikipedia:优良条目/Game}}",
+                timestamp=pywikibot.Timestamp.fromISOformat(
+                    "2026-10-17T12:00:00Z",
                 ),
             ),
-            patch(
-                "backend.website.collect.PreloadingGenerator",
-                return_value=[available],
+        ]
+        with patch(
+            "backend.website.collect.pywikibot.Page",
+            side_effect=lambda _site, title: (
+                missing if title == today else available
             ),
         ):
-            self.reader.preload([today, yesterday])
             items = homepage.collect_good(
                 dt.date(2026, 10, 18),
                 dt.date(2026, 10, 19),
@@ -337,7 +288,7 @@ class TestRevisionBoundaries(TestCase):
             )
         assert items[0]["date"] == "2026-10-18"
         missing.revisions.assert_called_once()
-        available.revisions.assert_not_called()
+        available.revisions.assert_called_once()
 
 
 class TestTitleResolution(TestCase):

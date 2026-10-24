@@ -4,6 +4,23 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.2 (2026-10-24 11:28 UTC)
+
+Overview: Simplified dashboard navigation and article lists, exposed report
+failure details, removed obsolete code, and condensed the documentation.
+
+- Removed the home TOC item from page templates without CSS hiding or a live-script
+  workaround, preserving the brand link and in-page section anchors.
+- Displayed localized report-update failures with observed target dates and safe
+  exception identifiers, retaining generic fallbacks for older observations.
+- Limited the dashboard's popular-article and DYK sections to six entries each.
+- Made maintenance-category cards compact rows with left-aligned names and
+  right-aligned article counts.
+- Removed unused homepage preloading, retired job aliases, and obsolete interface
+  messages and connection attributes while preserving saved-state readers.
+- Shortened the guides and project overview, retaining essential commands and
+  contracts, and recorded the permanent navigation fix in TODO.md.
+
 ### 0.7.1 (2026-10-24 10:47 UTC)
 
 Overview: Corrected Pageviews new-entry trends, improved daily-report labels

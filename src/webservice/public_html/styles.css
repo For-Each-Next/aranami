@@ -260,14 +260,24 @@ main {
 }
 
 .backlog-task {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+}
+
+.backlog-label {
+    min-width: 0;
+    text-align: start;
 }
 
 .backlog-count {
     color: #54595d;
     font-size: .875rem;
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+    white-space: nowrap;
 }
 
 .routine-card h3 {

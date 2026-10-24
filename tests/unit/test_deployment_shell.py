@@ -71,8 +71,7 @@ assert name == "toolforge", name
 if args[:2] == ["jobs", "dump"]:
     Path(args[args.index("-f") + 1]).write_text("jobs-before-promotion\n")
 elif args[:2] == ["jobs", "show"]:
-    assert args[2] in {"aranami-hub", "aranami-web", "aranami",
-                        "aranami-dashboard", "aranami-logs"}
+    assert args[2] in {"aranami-hub", "aranami-web"}
 elif args[:2] == ["jobs", "delete"]:
     pass
 elif args[:2] == ["jobs", "run"]:
@@ -218,9 +217,6 @@ class TestDeploymentShell(TestCase):
         assert not {
             "aranami-hub",
             "aranami-web",
-            "aranami",
-            "aranami-dashboard",
-            "aranami-logs",
         }.intersection(deleted)
 
     def test_setup_failure_leaves_old_source_and_runtime_data_untouched(
@@ -264,7 +260,7 @@ class TestDeploymentShell(TestCase):
             if command[:3] == ["toolforge", "jobs", "delete"]
         )
         assert run < stopped
-        assert {"aranami-hub", "aranami-web", "aranami-logs"} <= {
+        assert {"aranami-hub", "aranami-web"} == {
             command[3]
             for command in commands
             if command[:3] == ["toolforge", "jobs", "delete"]

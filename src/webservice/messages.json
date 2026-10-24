@@ -1,9 +1,4 @@
 {
-  "page.title": {
-    "en": "Video games dashboard · Aranami",
-    "zh-hans": "电子游戏专题看板 · Aranami",
-    "zh-hant": "電子遊戲專題看板 · Aranami"
-  },
   "page.description": {
     "en": "Chinese Wikipedia video-game highlights, popularity, maintenance worklists, and report update status.",
     "zh-hans": "中文维基百科电子游戏专题看板：佳作展示、动态热门、维护列表与站内报告更新状态。",
@@ -38,11 +33,6 @@
     "en": "About Aranami",
     "zh-hans": "关于Aranami",
     "zh-hant": "關於Aranami"
-  },
-  "nav.dashboard": {
-    "en": "Dashboard",
-    "zh-hans": "专题看板",
-    "zh-hant": "專題看板"
   },
   "server.environment_heading": {
     "en": "Environment and resource use",
@@ -774,6 +764,16 @@
     "zh-hans": "失败",
     "zh-hant": "失敗"
   },
+  "state.FailedRecordDate": {
+    "en": "Record update for {date} failed",
+    "zh-hans": "{date}记录更新失败",
+    "zh-hant": "{date}紀錄更新失敗"
+  },
+  "state.FailedReason": {
+    "en": "{failure}: {reason}",
+    "zh-hans": "{failure}：{reason}",
+    "zh-hant": "{failure}：{reason}"
+  },
   "state.Deferred": {
     "en": "Waiting to retry",
     "zh-hans": "待重试",
@@ -843,11 +843,6 @@
     "en": "The log date or text query is invalid.",
     "zh-hans": "日志日期或文字查询无效。",
     "zh-hant": "日誌日期或文字查詢無效。"
-  },
-  "logs.page_title": {
-    "en": "Aranami logs",
-    "zh-hans": "Aranami日志",
-    "zh-hant": "Aranami日誌"
   },
   "logs.heading": {
     "en": "Run logs",

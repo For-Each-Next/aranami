@@ -1,9 +1,6 @@
 # Aranami documentation
 
-The [project overview](../README.md) describes what Aranami does and the
-reports and data it produces.
-
-Choose the guide for your role:
+See the [project overview](../README.md) for reports and UTC schedules.
 
 | Audience | Guide | What it helps you do |
 |---|---|---|
@@ -12,13 +9,7 @@ Choose the guide for your role:
 | Application developer | [Development](development.md) | Prepare a workspace, change application code, run offline checks, and prepare a release |
 | System-level developer | [Architecture](architecture.md) | Preserve component ownership, data/report contracts, storage, logging, status, and lifecycle behavior |
 
-Aranami is developed and tested locally; Toolforge is its only runtime.
-All project documentation in this directory is maintained in English.
-[Repository instructions](../AGENTS.md) and package-scoped instructions
-apply to changes in their directories.
-
-Completed changes are recorded in the [changelog](../CHANGELOG.md).
-
-The JSON-driven HOT report uses separately maintained on-wiki Lua and CSS.
-The [architecture contract](architecture.md#pageviews) describes its data format
-and the wiki-page installation dependency.
+Read [repository instructions](../AGENTS.md) before contributing and the
+[changelog](../CHANGELOG.md) for completed changes. Documentation is in English;
+Toolforge is the only runtime. HOT report Lua/CSS is maintained on-wiki; see
+[its contract](architecture.md#pageviews).

@@ -6,9 +6,9 @@ and helps editors find articles to improve. Its main focus is
 
 The [dashboard](https://aranami.toolforge.org/) brings together main-page
 highlights, upcoming quality content, popular articles, maintenance
-worklists, and report update results. It supports English, Simplified
-Chinese, and Traditional Chinese. The [About page](https://aranami.toolforge.org/about/)
-introduces the tool to general readers.
+worklists, and report update results in English, Simplified Chinese, and
+Traditional Chinese. The [About page](https://aranami.toolforge.org/about/)
+includes the server monitor.
 
 ## Scheduled tasks
 
@@ -24,49 +24,21 @@ A successful check can finish with **no update needed**.
 | [English Wikipedia comparisons][english] | Daily, `23:24` | Important and high-quality English articles, their Chinese counterparts, and relevant changes. |
 | [Database reports][database] | Daily, `00:00` | Delegated refresh requests for subscribed PexBot reports within the configured project scope. |
 
-New pages skips further automatic work for the current UTC day after the
-complete retained window through yesterday is confirmed. Missing retained
-dates are filled when needed.
+New pages and Pageviews fill missing daily reports and retain confirmed
+completion across restarts. Pageviews uses an 18:00 UTC reporting boundary;
+incomplete data retries hourly. PexBot reports already edited that UTC day
+are not requested again.
 
-Pageviews uses an **18:00 UTC reporting boundary**, not midnight. It
-fetches available history once and saves each missing daily report in order
-through the latest eligible complete day. It retries incomplete or
-unavailable data hourly and waits for the next cycle once current.
-Confirmed completion survives server restarts.
-
-English comparisons and database reports refresh current state on their
-daily schedules.
-Database reports already edited by PexBot that UTC day are not requested
-again. Manual runs revalidate destinations rather than bypassing checks.
-
-The website's five datasets refresh independently, by default 24 hours
-after each successful collection. Failed refreshes retain the last valid
-data and retry hourly. Website visits are read-only.
+The website's five datasets refresh independently every 24 hours after
+success. Failures retain valid data and retry hourly; visits are read-only.
 
 ## How it works
 
-One Python 3.15 backend hub fetches source data, parses source pages,
-calculates changes, and manages stored results, caches, logs, and status.
-The wiki updater formats prepared data and replaces only the configured
-`<!-- aranami ... -->` ranges on selected destinations, preserving surrounding
-text.
-
-Complete report tables and metadata are retained before publication,
-including review targets and changes used in edit summaries. A separate
-read-only Flask website renders saved backend data as complete HTML pages,
-served by Waitress.
-
-Logs are ordinary, readable English diagnostics showing what data was
-collected and which wiki pages were checked or edited. Structured status
-is stored separately: routine and per-page starts, finishes, durations,
-outcomes, and confirmed edit counts. The website displays these saved
-observations.
-The dashboard advances running times locally every second and synchronizes
-routine/page statuses every five seconds, keeping status popups in place.
-Execution times use whole seconds, with two decimal places for subsecond results.
-While a routine is running, its card shows the current execution and available
-progress rather than a next-execution row. The log viewer includes a compact
-server-state display, uptime, and source version.
+One Python 3.15 hub collects data and retains complete reports before wiki
+publication. The updater changes only configured `<!-- aranami ... -->`
+ranges, preserving surrounding text. A separate website serves saved data,
+live execution status, and readable logs. Aranami runs only on Toolforge;
+this repository is for development, offline tests, and source deployments.
 
 ## Documentation
 
@@ -80,13 +52,7 @@ Choose the guide for your role:
 - [System-level developer](docs/architecture.md): component boundaries,
   data contracts, publication safety, scheduling, and engineering rules.
 
-See the [documentation index](docs/README.md) and [change history](CHANGELOG.md)
-for the full reference.
-
-Aranami runs only on Toolforge; the local repository is for development,
-testing, and preparing deployments. Runtime files stay outside the uploaded
-source tree. The [administrator guide](docs/administration.md) covers the
-runtime layout, validated deployment, and recovery workflow.
+See the [documentation index](docs/README.md) and [change history](CHANGELOG.md).
 
 ## License
 

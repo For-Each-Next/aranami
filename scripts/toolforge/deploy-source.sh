@@ -103,10 +103,10 @@ toolforge jobs run "$setup_job" --image python3.13 --mount=all \
 # --wait is not evidence of a successful container exit: require exact proof.
 python3 "$validator" receipt "$stage" "$receipt"
 setup_started=false
-for job in aranami-hub aranami-web aranami aranami-dashboard aranami-logs; do
+for job in aranami-hub aranami-web; do
     if toolforge jobs show "$job" >/dev/null 2>&1; then toolforge jobs delete "$job"; fi
 done
-wait_stopped 'app.kubernetes.io/name in (aranami-hub,aranami-web,aranami,aranami-dashboard,aranami-logs)'
+wait_stopped 'app.kubernetes.io/name in (aranami-hub,aranami-web)'
 if [ -e app.previous ]; then
     mv app.previous "$backup/older-app"
     rotated_previous=true

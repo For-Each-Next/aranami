@@ -521,12 +521,24 @@ class PresentationTests(unittest.TestCase):
     def test_highlight_semantics(self) -> None:
         """Keep dates, scripts, and unavailable sections distinct."""
         assert merged_items({}, ("featured", "good"))["items"] is None
+        self.data["snapshot"]["pageviews"]["items"] = [
+            {
+                **self.data["article"],
+                "title": f"Popular game {index}",
+                "rank": index,
+            }
+            for index in range(1, 14)
+        ]
         sections = {
             row["key"]: row["items"]
             for row in homepage_sections(self.data["snapshot"])
         }
         assert sections["recognized"][0]["title"] == "Scheduled game"
-        assert len(sections["dyk"]) == 12
+        assert len(sections["pageviews"]) == 6
+        assert len(sections["dyk"]) == 6
+        assert sections["pageviews"][-1]["title"] == "Popular game 6"
+        assert sections["dyk"][-1]["title"] == "DYK game 6"
+        assert len(self.data["snapshot"]["pageviews"]["items"]) == 13
         assert len(sections["news_history"]) == 8
         article = self.data["article"]
         assert article_extract(article, "zh")[1] == article["extract_zh"]
@@ -617,9 +629,10 @@ class PresentationTests(unittest.TestCase):
                 " &amp; 中文" in output
             )
             assert output.count('<script src="/live.js" defer></script>') == 1
-            assert "DYK game 13" not in output
+            assert "DYK game 6" in output
+            assert "DYK game 7" not in output
             assert "News game 7" in output
-            assert output.count('class="article-extract"') == 24
+            assert output.count('class="article-extract"') == 18
             assert output.count('class="extract-attribution"') == 4
             assert output.count('scope="col"') == 5
             assert "<details" not in output
@@ -631,6 +644,21 @@ class PresentationTests(unittest.TestCase):
             assert 'popovertargetaction="hide" autofocus' in output
             assert '<span aria-hidden="true">⏸️</span>' in output
             assert 'class="routine-status"' in output
+            task = re.search(
+                r'<a href="/maintenance/\?task=references&amp;page=1" '
+                r'class="backlog-task">(.*?)</a>',
+                output,
+            )
+            assert task is not None
+            label = Interface(locale).label(
+                self.data["snapshot"]["backlog"]["groups"][0]["label"],
+                "",
+            )
+            count = Interface(locale).text("backlog.count", count=1)
+            assert task[1] == (
+                f'<span class="backlog-label">{label}</span>'
+                f'<span class="backlog-count">{count}</span>'
+            )
             assert "5.000" not in output
             assert "&lt;Latest &amp; safe&gt;" in output
             assert "2026-10-20 18:59 UTC" in output
@@ -958,6 +986,14 @@ class PresentationTests(unittest.TestCase):
         assert "max-height: calc(100dvh - 48px)" in styles
         assert ".relative-time {" in styles
         assert "font-size: .85em" in styles
+        task = re.search(r"\.backlog-task \{([^}]+)\}", styles)
+        count = re.search(r"\.backlog-count \{([^}]+)\}", styles)
+        assert task is not None
+        assert count is not None
+        assert "grid-template-columns: minmax(0, 1fr) auto" in task[1]
+        assert "padding: 10px 16px" in task[1]
+        assert "text-align: end" in count[1]
+        assert "white-space: nowrap" in count[1]
         assert not list(root.rglob("*.php"))
         assert list(root.rglob("*.js")) == [root / "public_html" / "live.js"]
         assert not list(root.rglob("*.mjs"))
@@ -1047,6 +1083,9 @@ class LiveVisibilityTests(unittest.TestCase):
             header = output.split("</header>")[0]
             footer = output.split("<footer>")[1]
             assert header.index("</h1>") < header.index('class="page-toc"')
+            contents = header.split('<nav class="page-toc"')[1]
+            assert 'href="/"' not in contents
+            assert 'class="brand"' in header
             for anchor in (
                 "#homepage-pageviews",
                 "#homepage-recognized",
@@ -1127,6 +1166,73 @@ class LiveVisibilityTests(unittest.TestCase):
             card = self._card(output)
             assert "Updated report for" not in card
             assert ">Updated</button>" in card
+
+    def test_failed_report_reasons_use_observed_dates_and_escaped_text(
+        self,
+    ) -> None:
+        """Localize failure facts in cards and destination details."""
+        status = self.data["status"]
+        event = status["routines"]["routines"]["pageviews"]
+        report = status["reports"]["reports"]["first"]
+        for record in (event, report):
+            record.update(
+                status="failed",
+                failure_date="2026-10-19",
+                failure_reason="TimeoutError <script>unsafe</script> & retry",
+            )
+        event["report_date"] = "2026-10-17"
+        for locale, label in (
+            ("en", "Record update for October 19, 2026 failed: "),
+            ("zh-hans", "2026年10月19日记录更新失败\uff1a"),
+            ("zh-hant", "2026年10月19日紀錄更新失敗\uff1a"),
+        ):
+            with self.subTest(locale=locale):
+                for output in self._outputs(locale):
+                    card = self._card(output)
+                    escaped = (
+                        label
+                        + "TimeoutError &lt;script&gt;unsafe&lt;/script&gt;"
+                        " &amp; retry"
+                    )
+                    assert card.count(escaped) == 2
+                    assert "❌" in card
+                    assert "<script>unsafe</script>" not in card
+                    assert "Updated report for" not in card
+                    assert "2026年10月17日" not in card
+
+    def test_failed_report_details_preserve_unknown_dates_and_reasons(
+        self,
+    ) -> None:
+        """Keep unknown failure dates and reasons unknown."""
+        event = self.data["status"]["routines"]["routines"]["pageviews"]
+        event.update(status="failed", report_date="2026-10-17")
+        for fields, label in (
+            ({"failure_reason": "TimeoutError"}, "Failed: TimeoutError"),
+            (
+                {"failure_date": "2026-10-19"},
+                "Record update for October 19, 2026 failed",
+            ),
+            ({}, "Failed"),
+        ):
+            with self.subTest(fields=fields):
+                event.pop("failure_date", None)
+                event.pop("failure_reason", None)
+                event.update(fields)
+                for output in self._outputs("en"):
+                    card = self._card(output)
+                    assert f">{label}</button>" in card
+                    assert "October 17, 2026" not in card
+                    assert "October 18, 2026" not in card
+        event.update(
+            status="updated",
+            report_date=None,
+            failure_date="2026-10-19",
+            failure_reason="TimeoutError",
+        )
+        for output in self._outputs("en"):
+            card = self._card(output)
+            assert ">Updated</button>" in card
+            assert "TimeoutError" not in card
 
     def test_running_progress_uses_saved_dates_and_counts(self) -> None:
         """Separate dated status labels from phase and counters."""
@@ -1548,12 +1654,15 @@ class LiveVisibilityTests(unittest.TestCase):
                 locale,
                 self.now,
             )
-            notice = re.search(r'<p id="live-notice"([^>]*)>', live)
+            notice = re.search(
+                r'<p id="live-notice"([^>]*)>([^<]+)</p>',
+                live,
+            )
             assert notice is not None
             assert "hidden" in notice[1]
+            assert 'role="status"' in notice[1]
+            assert notice[2] == Interface(locale).text("ops.reconnecting")
             assert removed not in live
-            assert 'data-live=""' in live
-            assert "data-reconnecting=" in live
 
 
 if __name__ == "__main__":
