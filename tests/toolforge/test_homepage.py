@@ -417,16 +417,6 @@ class HomepageTests(unittest.TestCase):
             "Wikipedia:优良条目/2026年1月2日",
         ]
 
-    @staticmethod
-    def test_sources_include_current_and_fallback_daily_pages() -> None:
-        """Preload daily sources, fallbacks, and ITN auxiliary lists."""
-        sources = homepage.source_titles(dt.date(2026, 1, 1))
-        assert "Wikipedia:典范条目/2025年12月31日" in sources
-        assert "Wikipedia:优良条目/2026年1月1日" in sources
-        assert "Wikipedia:历史上的今天/1月1日" in sources
-        assert "Template:Itn/Ongoing" in sources
-        assert "Template:Itn/Recentdeaths" in sources
-
 
 if __name__ == "__main__":
     unittest.main()
@@ -459,7 +449,12 @@ class UpcomingTests(unittest.TestCase):
                 "{{Wikipedia:优良条目/Game}}"
             ),
         }
-        titles = homepage.upcoming_source_titles(start, end)
+        days = [start + dt.timedelta(days=offset) for offset in range(30)]
+        titles = [
+            f"{root}{day.year}年{day.month}月{day.day}日"
+            for root in ("Wikipedia:典范条目/", "Wikipedia:优良条目/")
+            for day in days
+        ]
         read = Mock(
             side_effect=[
                 sources.get(title, NoPageError(Mock())) for title in titles
@@ -507,12 +502,14 @@ class UpcomingTests(unittest.TestCase):
             )
             == []
         )
-        assert [call.args[0] for call in read.call_args_list] == (
-            homepage.upcoming_source_titles(
-                self.end,
-                self.end + dt.timedelta(days=30),
-            )
-        )
+        titles = [call.args[0] for call in read.call_args_list]
+        expected_source_count = 60
+        assert len(titles) == expected_source_count
+        assert titles[:2] == [
+            "Wikipedia:典范条目/2026年10月19日",
+            "Wikipedia:典范条目/2026年10月20日",
+        ]
+        assert titles[-1] == "Wikipedia:优良条目/2026年11月17日"
 
     def test_upcoming_rejects_unknown_existing_schedule(self) -> None:
         """Keep unreadable future slots unavailable."""

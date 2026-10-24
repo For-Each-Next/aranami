@@ -83,6 +83,56 @@ def _reports(directory: Path) -> dict[str, dict[str, object]]:
 class TestReportUpdateLifecycle(TestCase):
     """Measure actual page attempts without deriving state from logs."""
 
+    def test_failure_details_are_bounded_and_new_attempts_clear_them(
+        self,
+    ) -> None:
+        """Retain failure facts without stale private details."""
+        with TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            failed = {
+                **_record(status="failed"),
+                "failure_reason": "RuntimeError",
+                "failure_date": "2026-10-19",
+            }
+            assert report_status.write_report_update(
+                failed,
+                directory=destination,
+            )
+            path = destination / "report-updates.json"
+            original = path.read_bytes()
+            for field, value in (
+                ("failure_reason", "<script>alert('token')</script>"),
+                ("failure_reason", "A" * 81),
+                ("failure_reason", "RuntimeError\nsecret"),
+                ("failure_reason", []),
+                ("failure_date", "2026-02-30"),
+                ("failure_date", "20261019"),
+                ("failure_date", 1),
+                ("status", "updated"),
+                ("status", "deferred"),
+            ):
+                with (
+                    self.subTest(field=field, value=value),
+                    self.assertLogs(_LOGGER, level="WARNING"),
+                ):
+                    assert not report_status.write_report_update(
+                        {**failed, field: value},
+                        directory=destination,
+                    )
+                assert path.read_bytes() == original
+            stale = {**failed, "update_id": "7" * 32}
+            assert not report_status.write_report_update(
+                stale,
+                directory=destination,
+            )
+            assert path.read_bytes() == original
+            running = _record(status="running", update_id="9" * 32)
+            assert report_status.write_report_update(
+                running,
+                directory=destination,
+            )
+            assert next(iter(_reports(destination).values())) == running
+
     @staticmethod
     def test_start_precedes_work_and_finish_retains_measured_result() -> None:
         """Record running before storage and success afterward."""
@@ -327,6 +377,10 @@ class TestReportUpdateLifecycle(TestCase):
                 row["title"]: row for row in _reports(destination).values()
             }
             assert records["Wikipedia:Failed"]["status"] == "failed"
+            assert (
+                records["Wikipedia:Failed"]["failure_reason"] == "RuntimeError"
+            )
+            assert "failure_date" not in records["Wikipedia:Failed"]
             assert records["Wikipedia:Unknown"]["status"] == "unconfirmed"
             assert records["Wikipedia:Unconfirmed"]["status"] == "unconfirmed"
             assert all(

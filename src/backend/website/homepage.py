@@ -58,51 +58,6 @@ def _date_label(day: dt.date) -> str:
     return f"{day.year}年{day.month}月{day.day}日"
 
 
-def source_titles(start: dt.date, end: dt.date | None = None) -> list[str]:
-    """Return archive source titles for batched page preloading.
-
-    Args:
-        start: Inclusive UTC display date.
-        end: Exclusive UTC date, or none for one display day.
-
-    Returns:
-        Daily displays, yesterday's fallbacks, and live bulletins.
-    """
-    end = end or start + dt.timedelta(days=1)
-    return [
-        *(
-            root + _date_label(day)
-            for root in (_FEATURED_ROOT, _GOOD_ROOT)
-            for day in _days(start - dt.timedelta(days=1), end)
-        ),
-        "Template:Dyk",
-        "Template:Itn",
-        "Template:Itn/Ongoing",
-        "Template:Itn/Recentdeaths",
-        *(
-            f"{_HISTORY_ROOT}{day.month}月{day.day}日"
-            for day in _days(start, end)
-        ),
-    ]
-
-
-def upcoming_source_titles(start: dt.date, end: dt.date) -> list[str]:
-    """Return daily sources for scheduled featured and good slots.
-
-    Args:
-        start: Inclusive scheduled UTC date.
-        end: Exclusive scheduled UTC date.
-
-    Returns:
-        Featured and good daily pages without fallback dates.
-    """
-    return [
-        root + _date_label(day)
-        for root in (_FEATURED_ROOT, _GOOD_ROOT)
-        for day in _days(start, end)
-    ]
-
-
 def _days(start: dt.date, end: dt.date) -> Iterable[dt.date]:
     """Yield display days used to select independently archived sources.
 

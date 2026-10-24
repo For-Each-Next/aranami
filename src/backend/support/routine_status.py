@@ -27,6 +27,10 @@ from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING
 
+from backend.support.failure_status import (
+    FAILURE_FIELDS,
+    validate_failure_details,
+)
 from shared.support.files import read_json_object
 
 if TYPE_CHECKING:
@@ -215,11 +219,12 @@ def _validated_record(value: object) -> dict[str, object]:
     if (
         not isinstance(value, Mapping)
         or not set(value) >= _FIELDS
-        or set(value) - _FIELDS - {"progress", "report_date"}
+        or set(value) - _FIELDS - {"progress", "report_date"} - FAILURE_FIELDS
     ):
         message = "Routine status records require their complete fields."
         raise ValueError(message)
     record = dict(value)
+    validate_failure_details(record)
     if "progress" in record:
         record["progress"] = validate_progress(record["progress"])
     report_date = record.get("report_date")

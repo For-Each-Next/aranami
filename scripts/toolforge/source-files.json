@@ -32,6 +32,7 @@
     "src/backend/support/completion.py",
     "src/backend/support/dyk_cache.py",
     "src/backend/support/execution.py",
+    "src/backend/support/failure_status.py",
     "src/backend/support/http.py",
     "src/backend/support/logs.py",
     "src/backend/support/page_cache.py",

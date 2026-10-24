@@ -27,6 +27,11 @@ from time import perf_counter
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from backend.support.failure_status import (
+    FAILURE_FIELDS,
+    exception_failure_reason,
+    validate_failure_details,
+)
 from shared.support.files import read_json_object
 
 if TYPE_CHECKING:
@@ -142,10 +147,15 @@ def _validated_record(value: object) -> dict[str, object]:
     Raises:
         ValueError: A record field or outcome is invalid.
     """
-    if not isinstance(value, Mapping) or set(value) != _FIELDS:
+    if (
+        not isinstance(value, Mapping)
+        or not set(value) >= _FIELDS
+        or set(value) - _FIELDS - FAILURE_FIELDS
+    ):
         message = "Report update metadata requires its complete fields."
         raise ValueError(message)
     record = dict(value)
+    validate_failure_details(record)
     report_update_key(record["site"], record["title"])
     for name, pattern in (
         ("routine", _ROUTINE),
@@ -468,13 +478,22 @@ class ReportUpdate:
         self._attempt_started = True
         self.start()
 
-    def finish(self, outcome: str, confirmed_edits: int | None) -> None:
+    def finish(
+        self,
+        outcome: str,
+        confirmed_edits: int | None,
+        *,
+        failure_reason: str | None = None,
+        failure_date: dt.date | None = None,
+    ) -> None:
         """Record terminal metadata using actual measured elapsed time.
 
         Args:
             outcome: Updated, no_update, failed, deferred, preview, or
                 unconfirmed; use the corresponding lowercase value.
             confirmed_edits: Saved edit count, or null when unknown.
+            failure_reason: Observed safe exception class identifier.
+            failure_date: Attempted report date, never a confirmed date.
 
         Raises:
             ValueError: The supplied terminal outcome is unsupported.
@@ -492,6 +511,10 @@ class ReportUpdate:
             ),
             confirmed_edits=0 if self.dry else confirmed_edits,
         )
+        if failure_reason is not None:
+            record["failure_reason"] = failure_reason
+        if failure_date is not None:
+            record["failure_date"] = failure_date.isoformat()
         write_report_update(
             record,
             expected_attempt=(self.update_id, self.run_id),
@@ -549,9 +572,13 @@ def track_report_update(
     update.start_attempt()
     try:
         yield update
-    except BaseException:
+    except BaseException as error:
         if not update.finished:
-            update.finish("failed", confirmed_edits=None)
+            update.finish(
+                "failed",
+                confirmed_edits=None,
+                failure_reason=exception_failure_reason(error),
+            )
         raise
     else:
         if not update.finished:

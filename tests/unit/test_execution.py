@@ -12,6 +12,7 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from backend.services.zhwiki import pexbot as pexbot_data
+from backend.support.routine_status import report_progress
 from shared.support.cache import clear_runtime_cache
 from updater.jobs import JobContext, ProposedEdit, job_run, pexbot
 
@@ -640,6 +641,42 @@ class TestRoutineStatusLifecycle(TestCase):
         assert record["report_date"] == "2026-10-17"
         assert record["status"] == "no_update"
         assert record["progress"] is None
+
+    def test_failure_facts_use_attempted_dates_and_omit_private_messages(
+        self,
+    ) -> None:
+        """Separate failed catch-up dates from earlier saved reports."""
+        context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
+        error = TimeoutError("https://private/?token=SECRET /private/key")
+        with (
+            self.assertRaises(TimeoutError),
+            job_run("pageviews", context=context),
+            context.report_attempt("Wikipedia:Failure fixture"),
+        ):
+            context.confirm_report_date(dt.date(2026, 10, 16))
+            report_progress("preparing", report_date=dt.date(2026, 10, 17))
+            raise error
+        record = self._record("pageviews")
+        assert record["status"] == "failed"
+        assert record["report_date"] == "2026-10-16"
+        assert record["failure_date"] == "2026-10-17"
+        assert record["failure_reason"] == "TimeoutError"
+        assert record["progress"] is None
+        reports = json.loads(
+            (self.root / "state/report-updates.json").read_text(),
+        )["reports"]
+        destination = next(iter(reports.values()))
+        assert destination["failure_reason"] == "TimeoutError"
+        assert destination["failure_date"] == "2026-10-17"
+        for filename in ("routine-status.json", "report-updates.json"):
+            content = (self.root / "state" / filename).read_text()
+            assert "SECRET" not in content
+            assert "/private" not in content
+        newer = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
+        with job_run("pageviews", context=newer):
+            assert "failure_reason" not in self._record("pageviews")
+        assert "failure_reason" not in self._record("pageviews")
+        assert "failure_date" not in self._record("pageviews")
 
     def test_terminal_states_preserve_confirmed_and_unknown_counts(
         self,

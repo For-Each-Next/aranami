@@ -252,9 +252,7 @@ class _Page:
         Returns:
             A result button retaining a generic fallback after expiry.
         """
-        fallback = self.text(
-            f"state.{_STATES[event['status']]}" if event else "ops.no_record",
-        )
+        fallback = self._outcome_label(event)
         label = fallback
         if _completed_daily_report(routine, event):
             label = self.text(
@@ -281,6 +279,35 @@ class _Page:
             aria_haspopup="dialog",
             data_progress_label=label if progress is not None else None,
             data_progress_fallback=fallback if progress is not None else None,
+        )
+
+    def _outcome_label(self, event: Record | None) -> str:
+        """Describe an outcome using its saved failure observations.
+
+        Args:
+            event: Routine or destination outcome with failure facts.
+
+        Returns:
+            Localized text, with a generic label for older records.
+        """
+        if event is None:
+            return self.text("ops.no_record")
+        if event["status"] != "failed":
+            return self.text(f"state.{_STATES[event['status']]}")
+        failure_date = event.get("failure_date")
+        reason = event.get("failure_reason")
+        label = (
+            self.text(
+                "state.FailedRecordDate",
+                date=self.interface.date(failure_date),
+            )
+            if failure_date
+            else self.text("state.Failed")
+        )
+        return (
+            self.text("state.FailedReason", failure=label, reason=reason)
+            if reason
+            else label
         )
 
     def document(
@@ -353,7 +380,6 @@ class _Page:
                 if navigation is not None
                 else tag(
                     "nav",
-                    tag("a", self.text("nav.dashboard"), href="/"),
                     tag("a", self.text("nav.backlog"), href="/#backlog"),
                     class_="page-toc",
                     aria_label=self.text("nav.contents"),
@@ -705,6 +731,7 @@ class _Page:
                                 group.get("label"),
                                 group["category"],
                             ),
+                            class_="backlog-label",
                         ),
                         tag(
                             "span",
@@ -815,7 +842,7 @@ class _Page:
                     ),
                     scope="row",
                 ),
-                tag("td", self.text(f"state.{_STATES[record['status']]}")),
+                tag("td", self._outcome_label(record)),
                 tag(
                     "td",
                     _time(
@@ -987,9 +1014,6 @@ class _Page:
                 class_="context",
                 role="status",
                 hidden=True,
-                # Older open tabs still read these connection labels.
-                data_live="",
-                data_reconnecting=self.text("ops.reconnecting"),
             ),
             missing,
             tag("div", *cards, class_="card-grid"),
@@ -1350,7 +1374,6 @@ def render_dashboard(
     sections = homepage_sections(snapshot)
     navigation = tag(
         "nav",
-        tag("a", page.text("nav.dashboard"), href="/", aria_current="page"),
         *(
             tag(
                 "a",

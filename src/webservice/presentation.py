@@ -30,7 +30,7 @@ _DAY_MINUTES = 1440
 _SCHEDULE_MAX_AGE = 120
 _PAGE_SIZE = 50
 _MAX_URL_LENGTH = 4096
-_DISPLAY_LIMIT = 12
+_DISPLAY_LIMIT = 6
 _VOID_ELEMENTS = frozenset({"meta", "link", "img", "input"})
 _QUALITY = (
     ("FA", "fa", "典范", "典範"),
