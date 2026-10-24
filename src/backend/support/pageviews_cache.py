@@ -224,7 +224,7 @@ class PageviewsCache:
         """Atomically save active articles within the retention window.
 
         Cache write failures are logged and do not affect publication.
-        Call this only after the target-day availability guard passes.
+        Call this only after the required availability checks pass.
 
         Args:
             titles: Current articles whose histories remain useful.

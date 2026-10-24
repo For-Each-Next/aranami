@@ -15,6 +15,7 @@ import polars as pl
 
 from backend.services.zhwiki import pageviews
 from updater.jobs import pageviews as job
+from updater.services.zhwiki import pageviews as rendering
 
 _FIRST = dt.date(2026, 10, 16)
 _TARGET = dt.date(2026, 10, 18)
@@ -54,6 +55,12 @@ def _observations(*days: dt.date) -> pl.DataFrame:
 
 class TestDownloadFallback(TestCase):
     """Validate candidates independently of publication and caches."""
+
+    def setUp(self) -> None:
+        """Isolate history tests from readiness probes."""
+        readiness = patch.object(pageviews, "_require_day_ready")
+        readiness.start()
+        self.addCleanup(readiness.stop)
 
     def test_shorter_endpoints_are_fresh_and_feed_every_daily_report(
         self,
@@ -241,10 +248,9 @@ class TestDownloadFallback(TestCase):
             for request in fetch.call_args_list
         )
 
-    def test_healthy_endpoint_does_not_conceal_missing_intermediate_day(
-        self,
-    ) -> None:
-        """Reject an earlier day despite a healthy download endpoint."""
+    @staticmethod
+    def test_healthy_endpoint_zeroes_historical_gaps() -> None:
+        """Preserve raw gaps while reporting historical zeroes."""
         with (
             TemporaryDirectory() as directory,
             chdir(directory),
@@ -259,7 +265,13 @@ class TestDownloadFallback(TestCase):
                 "fetch_data_dataframe",
                 return_value=_observations(_TARGET),
             ) as fetch,
-            patch.object(pageviews.PageviewsCache, "save") as save,
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=pl.DataFrame(
+                    schema={"title": pl.String, "top": pl.Int64},
+                ),
+            ),
         ):
             site = _site()
             assert (
@@ -271,15 +283,275 @@ class TestDownloadFallback(TestCase):
                 )
                 == _TARGET
             )
-            with self.assertRaises(pageviews.PageviewsUnavailableError):
-                pageviews.prepare_report(
-                    site,
-                    _FIRST + dt.timedelta(days=1),
-                    settings=_SETTINGS,
-                    prefetch_stop=_TARGET + dt.timedelta(days=1),
+            prepared = pageviews.prepare_report(
+                site,
+                _FIRST + dt.timedelta(days=1),
+                settings=_SETTINGS,
+                prefetch_stop=_TARGET + dt.timedelta(days=1),
+            )
+            daily = prepared.rankings[0]
+            assert daily.period == "daily"
+            assert daily.rows.get_column("views").to_list() == [0, 0]
+            assert daily.rows.get_column("old_views").to_list() == [0, 0]
+            assert daily.rows.get_column("rank").to_list() == [1, 1]
+            assert daily.rows.get_column("old_rank").to_list() == [1, 1]
+            assert daily.rows.get_column("observed").to_list() == [
+                False,
+                False,
+            ]
+            assert daily.rows.get_column("old_observed").to_list() == [
+                False,
+                False,
+            ]
+            assert daily.total_views == 0
+            totals = prepared.result.tables["totals"].filter(
+                pl.col("period") == "daily",
+            )
+            assert totals.item(0, "observed_articles") == 0
+            assert totals.item(0, "previous_observed_articles") == 0
+            report = rendering.build_report(
+                prepared,
+                settings=replace(job.REPORT_SETTINGS, task_forces=()),
+            )
+            assert "|views=0|rank=1|old_rank=1" in report.text
+            cache = pageviews.PageviewsCache.load(site.hostname())
+            history = cache.get("A0")
+            assert history is not None
+            assert history.filter(pl.col("date") == _FIRST).is_empty()
+            assert (
+                history.filter(pl.col("date") == _TARGET).item(
+                    0,
+                    "pageview",
                 )
+                == 0
+            )
+            measured = pageviews.prepare_report(
+                site,
+                _TARGET + dt.timedelta(days=1),
+                settings=_SETTINGS,
+            )
+            assert measured.rankings[0].rows.get_column(
+                "observed",
+            ).to_list() == [True, True]
+            totals = measured.result.tables["totals"].filter(
+                pl.col("period") == "daily",
+            )
+            assert totals.item(0, "observed_articles") == _members().height
             assert fetch.call_count == _members().height
-            save.assert_not_called()
+
+    @staticmethod
+    def test_later_run_refills_gaps_from_fresh_full_histories() -> None:
+        """Recover historical gaps from a later full download."""
+        missing = _FIRST + dt.timedelta(days=1)
+        later = _TARGET + dt.timedelta(days=1)
+        initial = pl.DataFrame(
+            [(_FIRST, 5), (_TARGET, 7)],
+            schema=_SCHEMA,
+            orient="row",
+        )
+        refreshed = pl.DataFrame(
+            [(_FIRST, 5), (missing, 3), (_TARGET, 7), (later, 9)],
+            schema=_SCHEMA,
+            orient="row",
+        )
+        site = _site()
+        with (
+            TemporaryDirectory() as directory,
+            chdir(directory),
+            patch.object(
+                pageviews,
+                "_project_articles",
+                return_value=_members(1),
+            ),
+            patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+                side_effect=[initial, refreshed],
+            ) as fetch,
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=pl.DataFrame(
+                    schema={"title": pl.String, "top": pl.Int64},
+                ),
+            ),
+        ):
+            with pageviews.download_batch():
+                pageviews.prepare_downloads(
+                    site,
+                    _FIRST,
+                    _TARGET,
+                    settings=_SETTINGS,
+                )
+                first = pageviews.prepare_report(
+                    site,
+                    later,
+                    settings=_SETTINGS,
+                )
+            assert first.rankings[0].rows.item(0, "old_views") == 0
+            assert first.rankings[0].rows.item(0, "old_observed") is False
+            weekly = first.rankings[1].rows
+            expected_first_total = 12
+            assert weekly.item(0, "views") == expected_first_total
+            history = pageviews.PageviewsCache.load(site.hostname()).get(
+                "A0",
+            )
+            assert history is not None
+            assert history.filter(pl.col("date") == missing).is_empty()
+
+            with pageviews.download_batch():
+                pageviews.prepare_downloads(
+                    site,
+                    later,
+                    later,
+                    settings=_SETTINGS,
+                )
+                second = pageviews.prepare_report(
+                    site,
+                    later + dt.timedelta(days=1),
+                    settings=_SETTINGS,
+                )
+            expected_downloads = 2
+            assert fetch.call_count == expected_downloads
+            assert fetch.call_args_list[-1] == call(
+                site,
+                "A0",
+                later + dt.timedelta(days=1) - dt.timedelta(days=800),
+                later + dt.timedelta(days=1),
+            )
+            weekly = second.rankings[1].rows
+            expected_total = 24
+            assert weekly.item(0, "views") == expected_total
+            assert weekly.item(0, "observed") is True
+            assert second.rankings[0].rows.item(0, "observed") is True
+            assert second.rankings[0].rows.item(0, "old_observed") is True
+            assert weekly.item(0, "start") == dt.date(2026, 10, 13)
+            assert weekly.item(0, "stop") == dt.date(2026, 10, 20)
+            report = rendering.build_report(
+                second,
+                settings=replace(job.REPORT_SETTINGS, task_forces=()),
+            )
+            assert "|start=2026-10-13|end=2026-10-19|views=24|" in (
+                report.text
+            )
+            history = pageviews.PageviewsCache.load(site.hostname()).get(
+                "A0",
+            )
+            assert history is not None
+            expected_recovered = 3
+            assert (
+                history.filter(pl.col("date") == missing).item(
+                    0,
+                    "pageview",
+                )
+                == expected_recovered
+            )
+
+    def test_accepted_batch_does_not_relax_other_reports(self) -> None:
+        """Limit zero fill to accepted identities and coverage."""
+        for changed in ("site", "project", "members", "history", "stop"):
+            site = _site()
+            report_site = _site()
+            settings = _SETTINGS
+            history_days = 800
+            stop = _FIRST + dt.timedelta(days=1)
+            if changed == "site":
+                report_site.hostname.return_value = "en.wikipedia.org"
+            elif changed == "project":
+                settings = replace(settings, project="Another project")
+            elif changed == "history":
+                history_days += 1
+            elif changed == "stop":
+                stop = _TARGET + dt.timedelta(days=2)
+            with (
+                self.subTest(changed=changed),
+                TemporaryDirectory() as directory,
+                chdir(directory),
+                pageviews.download_batch(),
+                patch.object(
+                    pageviews,
+                    "_project_articles",
+                    return_value=_members(),
+                ) as members,
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_data_dataframe",
+                    return_value=_observations(_TARGET),
+                ),
+                patch.object(pageviews.PageviewsCache, "save") as save,
+                patch.object(
+                    pageviews.pageviews,
+                    "fetch_top_dataframe",
+                ) as top,
+            ):
+                pageviews.prepare_downloads(
+                    site,
+                    _FIRST,
+                    _TARGET,
+                    settings=_SETTINGS,
+                )
+                if changed == "members":
+                    members.return_value = _members(3)
+                with self.assertRaises(pageviews.PageviewsUnavailableError):
+                    pageviews.prepare_report(
+                        report_site,
+                        stop,
+                        settings=settings,
+                        history_days=history_days,
+                        prefetch_stop=_TARGET + dt.timedelta(days=1),
+                    )
+                save.assert_not_called()
+                top.assert_not_called()
+
+    @staticmethod
+    def test_accepted_batch_still_omits_gateway_timeout_articles() -> None:
+        """Do not invent report zeroes for a failed article request."""
+        responses = [
+            HTTPError("https://example.test", 504, "", {}, None),
+            *[_observations(_TARGET)] * 99,
+        ]
+        with (
+            TemporaryDirectory() as directory,
+            chdir(directory),
+            pageviews.download_batch(),
+            patch.object(
+                pageviews,
+                "_project_articles",
+                return_value=_members(100),
+            ),
+            patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+                side_effect=responses,
+            ) as fetch,
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=pl.DataFrame(
+                    schema={"title": pl.String, "top": pl.Int64},
+                ),
+            ),
+        ):
+            site = _site()
+            pageviews.prepare_downloads(
+                site,
+                _FIRST,
+                _TARGET,
+                settings=_SETTINGS,
+            )
+            report = pageviews.prepare_report(
+                site,
+                _FIRST + dt.timedelta(days=1),
+                settings=_SETTINGS,
+                prefetch_stop=_TARGET + dt.timedelta(days=1),
+            )
+            daily = report.rankings[0].rows
+            expected_articles = 99
+            assert daily.height == expected_articles
+            assert "A0" not in daily.get_column("title").to_list()
+            assert daily.get_column("views").to_list() == [0] * daily.height
+            expected_downloads = 100
+            assert fetch.call_count == expected_downloads
 
     def test_empty_population_fails_without_downloads(self) -> None:
         """Never classify an empty project as a healthy endpoint."""

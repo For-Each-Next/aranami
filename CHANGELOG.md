@@ -4,6 +4,22 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.7
 
+### 0.6.4 (2026-10-24 06:59 UTC)
+
+Overview: Unblocked historical Pageviews catch-up with provisional zeroes,
+added cheap source-readiness probes, and reduced dashboard synchronization traffic.
+
+- Probed daily source readiness before full article downloads while preserving
+  endpoint coverage checks, chronological publication, and transport failures.
+- Counted historical gaps as zero in totals and daily averages after validation,
+  retaining observation flags and retrying missing measurements in later runs.
+- Advanced dashboard clocks locally each second and synchronized status every
+  fifteen seconds, preserving focus, popovers, freshness checks, and recovery.
+- Removed the routine synchronization hint and hid next-execution times during
+  active runs while retaining connection-failure warnings and saved schedules.
+- Removed redundant validation of accepted batches and updated source contracts
+  and verification guidance for provisional values and browser clocks.
+
 ### 0.6.3 (2026-10-24 05:24 UTC)
 
 Overview: Simplified public run logs and status cards, corrected independent

@@ -757,7 +757,8 @@ class PresentationTests(unittest.TestCase):
                 later + dt.timedelta(seconds=2),
             )
             assert waiting not in output
-            assert f"<td>{running}</td>" in output
+            assert f">{running}</td>" in output
+            assert 'data-clock="elapsed"' in output
             assert "2026-10-18 12:01:00 UTC" in output
             report.update(
                 status="updated",
@@ -794,6 +795,9 @@ class PresentationTests(unittest.TestCase):
             assert "&lt;Latest &amp; safe&gt;" in live
             assert 'id="tool-status"' in live
             assert 'id="live-uptime"' in live
+            assert f'data-server-time="{now.isoformat()}"' in live
+            assert 'data-schedule-expires="2026-10-18T12:02:00+00:00"' in live
+            assert 'data-clock="uptime"' in live
             assert "<script" not in live
             assert "<html" not in live
         fresh = render_live_status(
@@ -811,6 +815,31 @@ class PresentationTests(unittest.TestCase):
         )
         assert "uptime: unavailable" in stale
         assert "2026-10-20 18:59 UTC" not in stale
+        assert "data-schedule-expires" not in stale
+        assert 'data-clock="uptime"' not in stale
+
+    def test_only_active_observations_receive_timer_anchors(self) -> None:
+        """Keep completed and queued times fixed between syncs."""
+        status = self.data["status"]
+        report = status["reports"]["reports"]["first"]
+        for state in ("updated", "queued", "running"):
+            report["status"] = state
+            output = render_live_status(
+                status,
+                self.data["config"],
+                "en",
+                self.now,
+            )
+            assert ('data-clock="elapsed"' in output) == (state == "running")
+            assert "Status syncs automatically" not in output
+        report["started_at"] = None
+        output = render_live_status(
+            status,
+            self.data["config"],
+            "en",
+            self.now,
+        )
+        assert 'data-clock="elapsed"' not in output
 
     def test_routine_time_annotations_preserve_absolute_observations(
         self,
@@ -833,11 +862,15 @@ class PresentationTests(unittest.TestCase):
             self.now,
         )
         assert (
-            '2026-10-18 08:25 UTC</time><small class="relative-time">'
+            '2026-10-18 08:25 UTC</time><small class="relative-time" '
+            'data-clock="relative" '
+            'data-observed-at="2026-10-18T08:25:30+00:00">'
             "\uff083小时前\uff09</small>" in output
         )
         assert (
-            '2026-10-18 12:24 UTC<small class="relative-time">'
+            '2026-10-18 12:24 UTC<small class="relative-time" '
+            'data-clock="relative" '
+            'data-observed-at="2026-10-18T12:24:10+00:00">'
             "\uff0823分钟后\uff09</small>" in output
         )
         assert output.count('class="relative-time"') == 2
@@ -919,6 +952,61 @@ class PresentationTests(unittest.TestCase):
         assert not list(root.rglob("*.php"))
         assert list(root.rglob("*.js")) == [root / "public_html" / "live.js"]
         assert not list(root.rglob("*.mjs"))
+
+
+class LiveVisibilityTests(unittest.TestCase):
+    """Keep routine schedules and connection hints relevant to state."""
+
+    def setUp(self) -> None:
+        """Create saved observations and a deterministic clock."""
+        self.data = _fixtures()
+        self.now = dt.datetime(2026, 10, 18, 12, 0, 30, tzinfo=dt.UTC)
+
+    def test_running_routines_hide_next_run_until_finished(self) -> None:
+        """Hide the next-run row only during an observed active run."""
+        status = self.data["status"]
+        event = status["routines"]["routines"]["pageviews"]
+        scheduled = copy.deepcopy(status["schedule"])
+        for locale, label in (
+            ("en", "Next run: "),
+            ("zh-hans", "下次执行\uff1a"),
+            ("zh-hant", "下次執行\uff1a"),
+        ):
+            for state in ("running", "updated", "failed", "deferred"):
+                event["status"] = state
+                live = render_live_status(
+                    status,
+                    self.data["config"],
+                    locale,
+                    self.now,
+                )
+                card = re.search(
+                    r'<article[^>]*id="routine-pageviews"[^>]*>(.*?)</article>',
+                    live,
+                )
+                assert card is not None
+                assert (label in card[1]) == (state != "running")
+                assert status["schedule"] == scheduled
+
+    def test_connection_notice_only_describes_failures(self) -> None:
+        """Hide the failure notice until synchronization fails."""
+        for locale, removed in (
+            ("en", "Timers advance every second."),
+            ("zh-hans", "计时每秒更新"),
+            ("zh-hant", "計時每秒更新"),
+        ):
+            live = render_live_status(
+                self.data["status"],
+                self.data["config"],
+                locale,
+                self.now,
+            )
+            notice = re.search(r'<p id="live-notice"([^>]*)>', live)
+            assert notice is not None
+            assert "hidden" in notice[1]
+            assert removed not in live
+            assert 'data-live=""' in live
+            assert "data-reconnecting=" in live
 
 
 if __name__ == "__main__":

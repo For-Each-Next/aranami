@@ -479,11 +479,6 @@
     "zh-hans": "站内报告更新状态",
     "zh-hant": "站內報告更新狀態"
   },
-  "ops.live": {
-    "en": "Status refreshes automatically every second.",
-    "zh-hans": "状态每秒自动刷新。",
-    "zh-hant": "狀態每秒自動重新整理。"
-  },
   "ops.reconnecting": {
     "en": "Live updates are unavailable. Showing the last received status; retrying automatically.",
     "zh-hans": "暂时无法实时刷新，当前显示上次获取的状态，将自动重试。",
