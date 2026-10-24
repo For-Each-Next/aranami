@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import mwparserfromhell
 import polars as pl
 
+from backend.support.failure_status import ReportFailureError
 from backend.support.pageviews_cache import (
     HISTORY_DAYS,
     PageviewsCache,
@@ -115,7 +116,7 @@ class PageviewData:
     result: ReportResult
 
 
-class PageviewsUnavailableError(RuntimeError):
+class PageviewsUnavailableError(ReportFailureError):
     """Signal target-day observations are too incomplete to publish."""
 
 
@@ -136,6 +137,7 @@ class _DownloadBatch:
         default_factory=dict,
     )
     accepted: _AcceptedDownload | None = None
+    ready_days: set[tuple[str, dt.date]] = field(default_factory=set)
     active: bool = True
 
 
@@ -148,7 +150,6 @@ class _AcceptedDownload:
     titles: frozenset[str]
     start: dt.date
     stop: dt.date
-    missing_percent: int
 
 
 _DOWNLOAD_BATCH: ContextVar[_DownloadBatch | None] = ContextVar(
@@ -178,6 +179,7 @@ def download_batch() -> Iterator[None]:
         batch.projects.clear()
         batch.top_lists.clear()
         batch.accepted = None
+        batch.ready_days.clear()
         _DOWNLOAD_BATCH.reset(token)
 
 
@@ -280,7 +282,14 @@ def _require_daily_count(
             f"(allowed {missing_percent}%); stopping this download "
             "without publishing that date."
         )
-        raise PageviewsUnavailableError(message)
+        raise PageviewsUnavailableError(
+            message,
+            failure_context={
+                "missing": missing,
+                "total": total,
+                "missing_percent": missing_percent,
+            },
+        )
 
 
 def require_daily_observations(
@@ -527,8 +536,9 @@ def prepare_downloads(  # ruff: ignore[too-many-arguments]
 ) -> dt.date:
     """Download a healthy catch-up range, shortening its end if needed.
 
-    Probe the latest eligible date before full downloads, then try an
-    earlier date if the probes or full-population endpoint check fail.
+    Verify the site's daily total, top list, and leading articles before
+    full downloads, then try an earlier date if the day is unpublished.
+    Individual missing records do not impose a percentage cutoff.
     Every history attempt starts fresh. The first healthy batch stays
     in memory for chronological reports, which count historical gaps
     as provisional zeroes. This never writes a snapshot or a report.
@@ -539,7 +549,8 @@ def prepare_downloads(  # ruff: ignore[too-many-arguments]
         target_date: Latest date permitted by actual source readiness.
         settings: Project membership and ranking intervals.
         history_days: Minimum history buffer for the earliest report.
-        missing_percent: Allowed missing percentage, capped at one.
+        missing_percent: Legacy limit for unverified direct preparation;
+            verified daily batches do not apply a percentage cutoff.
 
     Returns:
         Latest usable download end date, inclusive.
@@ -612,7 +623,6 @@ def prepare_downloads(  # ruff: ignore[too-many-arguments]
                 frozenset(titles),
                 start,
                 candidate + dt.timedelta(days=1),
-                min(missing_percent, _MISSING_PERCENT_LIMIT),
             )
             return candidate
 
@@ -642,12 +652,48 @@ def _top_ranks(
     return ranks
 
 
+def _site_day_total(site: BaseSite, data_date: dt.date) -> int:
+    """Distinguish an unpublished site day from a failed source request.
+
+    Returns:
+        Total human traffic across all 24 UTC hours.
+
+    Raises:
+        PageviewsUnavailableError: Hours are absent or traffic is zero.
+        PageviewsDeferredError: The total could not be verified.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    try:
+        total = pageviews.fetch_project_total(site, data_date)
+    except (OSError, TypeError, ValueError) as error:
+        missing = isinstance(error, pageviews.IncompletePageviewsDayError) or (
+            isinstance(error, urllib.error.HTTPError)
+            and error.code == HTTPStatus.NOT_FOUND
+        )
+        if isinstance(error, urllib.error.HTTPError):
+            error.close()
+        message = (
+            f"Pageviews readiness for {data_date}: site-wide daily total "
+            "is unavailable; full histories were not requested."
+        )
+        exception = (
+            PageviewsUnavailableError if missing else PageviewsDeferredError
+        )
+        raise exception(message) from error
+    if total == 0:
+        message = (
+            f"Pageviews readiness for {data_date}: site-wide daily total "
+            "contains no traffic; full histories were not requested."
+        )
+        raise PageviewsUnavailableError(message)
+    return total
+
+
 def _require_day_ready(site: BaseSite, data_date: dt.date) -> None:
     """Probe daily publication before downloading project histories.
 
-    An available daily top list and up to three of its leading articles'
-    single-day records cheaply detect unpublished days. This is a
-    preflight, not a replacement for the full-population endpoint guard.
+    Require all 24 UTC site-wide hours, positive total, daily top list,
+    and up to three leading articles' single-day records. These signals
+    distinguish an unpublished day from sparse individual histories.
     Probe responses never substitute for the full article histories.
 
     Args:
@@ -658,9 +704,14 @@ def _require_day_ready(site: BaseSite, data_date: dt.date) -> None:
         PageviewsUnavailableError: The top list or a probe is absent.
         PageviewsDeferredError: A source request or response failed.
     """
+    batch = _DOWNLOAD_BATCH.get()
+    key = site.hostname(), data_date
+    if batch is not None and batch.active and key in batch.ready_days:
+        return
     stop = data_date + dt.timedelta(days=1)
     report_progress("pageviews_readiness")
     logger.info("Checking Pageviews readiness for %s", data_date)
+    total = _site_day_total(site, data_date)
     try:
         top = _top_ranks(site, data_date, stop)
     except (OSError, TypeError, ValueError) as error:
@@ -710,6 +761,16 @@ def _require_day_ready(site: BaseSite, data_date: dt.date) -> None:
             current=index,
             total=len(probes),
         )
+    if batch is not None and batch.active:
+        batch.ready_days.add(key)
+    logger.info(
+        "Pageviews ready for %s: all 24 UTC hours, %d site-wide human "
+        "views, daily top "
+        "list available, %d leading article probes passed",
+        data_date,
+        total,
+        len(probes),
+    )
 
 
 def _download_candidate(
@@ -719,17 +780,17 @@ def _download_candidate(
     data_date: dt.date,
     missing_percent: int,
 ) -> None:
-    """Fill the active batch until endpoint absence exceeds the limit.
+    """Download histories after overall day availability is verified.
 
     Args:
         site: Source wiki identity.
         titles: Complete distinct project population.
         start: Earliest history needed by the first unpublished report.
         data_date: Inclusive candidate download end date.
-        missing_percent: Allowed endpoint missing percentage.
+        missing_percent: Legacy direct-preparation setting.
 
     Raises:
-        PageviewsUnavailableError: The endpoint fails its daily guard.
+        PageviewsUnavailableError: No article has a daily record.
         PageviewsDeferredError: Transient source retries were exhausted.
     """  # ruff: ignore[docstring-extraneous-exception]
     total = len(titles)
@@ -758,7 +819,6 @@ def _download_candidate(
             ).is_empty()
         ):
             missing += 1
-            _require_daily_count(data_date, missing, total, missing_percent)
         if index % 100 == 0 or index == total:
             logger.info("Downloaded %d/%d article histories", index, total)
             report_progress(
@@ -766,6 +826,12 @@ def _download_candidate(
                 current=index,
                 total=total,
             )
+    if missing == total:
+        message = (
+            f"Pageviews unavailable for {data_date}: none of the {total} "
+            "selected articles has a daily observation."
+        )
+        raise PageviewsUnavailableError(message)
     logger.info(
         "Downloaded Pageviews through %s: %d/%d articles have "
         "daily observations",
@@ -1221,8 +1287,9 @@ def _report_observations(  # ruff: ignore[too-many-arguments]
         and accepted.titles == frozenset(titles)
         and accepted.start <= start
         and accepted.stop >= max(stop, prefetch_stop or stop)
-        and accepted.missing_percent <= missing_percent
     )
+    if zero_missing:
+        _require_day_ready(site, data_date)
     views = aggregate_views(
         site,
         titles,
@@ -1230,7 +1297,7 @@ def _report_observations(  # ruff: ignore[too-many-arguments]
         cache=cache,
         history_days=history_days,
         prefetch_stop=prefetch_stop,
-        missing_percent=missing_percent,
+        missing_percent=None if zero_missing else missing_percent,
         zero_missing=zero_missing,
     )
     if not zero_missing:

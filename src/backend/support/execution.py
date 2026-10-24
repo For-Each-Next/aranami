@@ -16,7 +16,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
-from backend.support.failure_status import exception_failure_reason
+from backend.support.failure_status import exception_failure_details
 from backend.support.logs import open_run_log
 from backend.support.report_status import ReportUpdate, report_update_key
 from backend.support.routine_status import (
@@ -87,8 +87,9 @@ class _TaskResult:
         run_id: Unique identity guarding the latest routine status.
         progress: Optional bounded activity for this running routine.
         report_date: Latest daily report confirmed saved or unchanged.
-        failure_reason: Safe exception class identifying the failure.
+        failure_reason: Safe identifier for the underlying failure.
         failure_date: Observed report date attempted when work failed.
+        failure_context: Optional observed missing-data counts.
     """
 
     name: str
@@ -108,6 +109,7 @@ class _TaskResult:
     report_date: dt.date | None = None
     failure_reason: str | None = None
     failure_date: dt.date | None = None
+    failure_context: dict[str, int] | None = None
     progress: dict[str, object] | None = field(
         default_factory=lambda: {
             "phase": "preparing",
@@ -171,6 +173,8 @@ def _save_task_status(task: _TaskResult, *, dry: bool) -> None:
             record["failure_reason"] = task.failure_reason
         if task.failure_date is not None:
             record["failure_date"] = task.failure_date.isoformat()
+        if task.failure_context is not None:
+            record["failure_context"] = dict(task.failure_context)
     if task.finished_at is None:
         record.update({
             "status": "running",
@@ -363,8 +367,8 @@ class RuntimeContext[EditT: Publication]:
                 update.finish(
                     "failed",
                     confirmed_edits=0,
-                    failure_reason=exception_failure_reason(error),
                     failure_date=self._attempted_report_date(),
+                    **exception_failure_details(error),
                 )
             raise
 
@@ -388,6 +392,7 @@ class RuntimeContext[EditT: Publication]:
         outcome: str,
         *,
         confirmed_edits: int | None,
+        error: BaseException | None = None,
     ) -> None:
         """Record a backend check or externally delegated outcome.
 
@@ -395,10 +400,12 @@ class RuntimeContext[EditT: Publication]:
             title: Registered destination on this context's wiki.
             outcome: Actual status, independent of diagnostic logs.
             confirmed_edits: Saved count, or null for delegated writes.
+            error: Cause whose safe facts accompany a failed outcome.
         """
         self._report_update(self.site.dbName(), title).finish(
             outcome,
             confirmed_edits,
+            **(exception_failure_details(error) if error is not None else {}),
         )
 
     def confirm_report_date(self, day: dt.date | None) -> None:
@@ -466,6 +473,7 @@ class RuntimeContext[EditT: Publication]:
                     confirmed_edits=0,
                     failure_reason=self._active_task.failure_reason,
                     failure_date=self._active_task.failure_date,
+                    failure_context=self._active_task.failure_context,
                 )
         self._active_task = None
 
@@ -630,8 +638,8 @@ class RuntimeContext[EditT: Publication]:
                 update.finish(
                     "failed",
                     confirmed_edits=0,
-                    failure_reason=exception_failure_reason(error),
                     failure_date=self._attempted_report_date(),
+                    **exception_failure_details(error),
                 )
             raise
         if not update.finished:
@@ -754,8 +762,8 @@ class RuntimeContext[EditT: Publication]:
             update.finish(
                 "failed",
                 confirmed_edits=None,
-                failure_reason=exception_failure_reason(error),
                 failure_date=self._attempted_report_date(),
+                **exception_failure_details(error),
             )
             raise
         update.finish(
@@ -803,7 +811,9 @@ def routine_run[EditT: Publication](
                 yield active
         except Exception as error:
             task.status = "failed"
-            task.failure_reason = exception_failure_reason(error)
+            details = exception_failure_details(error)
+            task.failure_reason = details["failure_reason"]
+            task.failure_context = details.get("failure_context")
             active.notes.append(
                 f"Routine {name} failed: {type(error).__name__}: {error}. "
                 "See the daily log.",

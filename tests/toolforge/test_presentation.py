@@ -1167,10 +1167,10 @@ class LiveVisibilityTests(unittest.TestCase):
             assert "Updated report for" not in card
             assert ">Updated</button>" in card
 
-    def test_failed_report_reasons_use_observed_dates_and_escaped_text(
+    def test_unknown_failure_identifiers_never_expose_diagnostic_text(
         self,
     ) -> None:
-        """Localize failure facts in cards and destination details."""
+        """Use localized fallbacks for unknown private details."""
         status = self.data["status"]
         event = status["routines"]["routines"]["pageviews"]
         report = status["reports"]["reports"]["first"]
@@ -1182,21 +1182,30 @@ class LiveVisibilityTests(unittest.TestCase):
             )
         event["report_date"] = "2026-10-17"
         for locale, label in (
-            ("en", "Record update for October 19, 2026 failed: "),
-            ("zh-hans", "2026年10月19日记录更新失败\uff1a"),
-            ("zh-hant", "2026年10月19日紀錄更新失敗\uff1a"),
+            (
+                "en",
+                (
+                    "Record update for October 19, 2026 failed: "
+                    "The update could not be completed; "
+                    "see run logs for details"
+                ),
+            ),
+            (
+                "zh-hans",
+                "2026年10月19日记录更新失败\uff1a无法完成更新\uff0c具体原因请查看运行日志",
+            ),
+            (
+                "zh-hant",
+                "2026年10月19日紀錄更新失敗\uff1a無法完成更新\uff0c個別原因請查看執行日誌",
+            ),
         ):
             with self.subTest(locale=locale):
                 for output in self._outputs(locale):
                     card = self._card(output)
-                    escaped = (
-                        label
-                        + "TimeoutError &lt;script&gt;unsafe&lt;/script&gt;"
-                        " &amp; retry"
-                    )
-                    assert card.count(escaped) == 2
+                    assert card.count(label) == 2
                     assert "❌" in card
                     assert "<script>unsafe</script>" not in card
+                    assert "TimeoutError" not in card
                     assert "Updated report for" not in card
                     assert "2026年10月17日" not in card
 
@@ -1207,7 +1216,10 @@ class LiveVisibilityTests(unittest.TestCase):
         event = self.data["status"]["routines"]["routines"]["pageviews"]
         event.update(status="failed", report_date="2026-10-17")
         for fields, label in (
-            ({"failure_reason": "TimeoutError"}, "Failed: TimeoutError"),
+            (
+                {"failure_reason": "TimeoutError"},
+                "Failed: The request timed out",
+            ),
             (
                 {"failure_date": "2026-10-19"},
                 "Record update for October 19, 2026 failed",
@@ -1233,6 +1245,37 @@ class LiveVisibilityTests(unittest.TestCase):
             card = self._card(output)
             assert ">Updated</button>" in card
             assert "TimeoutError" not in card
+
+    def test_http_causes_are_human_readable_in_every_status_view(self) -> None:
+        """Localize service outages in initial and live responses."""
+        status = self.data["status"]
+        for record in (
+            status["routines"]["routines"]["pageviews"],
+            status["reports"]["reports"]["first"],
+        ):
+            record.update(status="failed", failure_reason="HTTP503")
+        for locale, reason in (
+            (
+                "en",
+                "The external service is temporarily unavailable (HTTP 503)",
+            ),
+            ("zh-hans", "外部服务暂时不可用\uff08HTTP 503\uff09"),
+            ("zh-hant", "外部服務暫時無法使用\uff08HTTP 503\uff09"),
+        ):
+            for output in self._outputs(locale):
+                card = self._card(output)
+                assert card.count(reason) == 2
+                assert "HTTP503" not in card
+
+    def test_legacy_exception_groups_have_a_readable_fallback(self) -> None:
+        """Never present a Python exception-group name to readers."""
+        event = self.data["status"]["routines"]["routines"]["pageviews"]
+        event.update(status="failed", failure_reason="ExceptionGroup")
+        for locale in ("en", "zh-hans", "zh-hant"):
+            for output in self._outputs(locale):
+                card = self._card(output)
+                assert "ExceptionGroup" not in card
+                assert "❌" in card
 
     def test_running_progress_uses_saved_dates_and_counts(self) -> None:
         """Separate dated status labels from phase and counters."""

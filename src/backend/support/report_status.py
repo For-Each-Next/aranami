@@ -29,7 +29,7 @@ from uuid import uuid4
 
 from backend.support.failure_status import (
     FAILURE_FIELDS,
-    exception_failure_reason,
+    exception_failure_details,
     validate_failure_details,
 )
 from shared.support.files import read_json_object
@@ -485,6 +485,7 @@ class ReportUpdate:
         *,
         failure_reason: str | None = None,
         failure_date: dt.date | None = None,
+        failure_context: dict[str, int] | None = None,
     ) -> None:
         """Record terminal metadata using actual measured elapsed time.
 
@@ -492,8 +493,9 @@ class ReportUpdate:
             outcome: Updated, no_update, failed, deferred, preview, or
                 unconfirmed; use the corresponding lowercase value.
             confirmed_edits: Saved edit count, or null when unknown.
-            failure_reason: Observed safe exception class identifier.
+            failure_reason: Safe identifier for the underlying failure.
             failure_date: Attempted report date, never a confirmed date.
+            failure_context: Observed missing-data counts, if available.
 
         Raises:
             ValueError: The supplied terminal outcome is unsupported.
@@ -515,6 +517,8 @@ class ReportUpdate:
             record["failure_reason"] = failure_reason
         if failure_date is not None:
             record["failure_date"] = failure_date.isoformat()
+        if failure_context is not None:
+            record["failure_context"] = dict(failure_context)
         write_report_update(
             record,
             expected_attempt=(self.update_id, self.run_id),
@@ -577,7 +581,7 @@ def track_report_update(
             update.finish(
                 "failed",
                 confirmed_edits=None,
-                failure_reason=exception_failure_reason(error),
+                **exception_failure_details(error),
             )
         raise
     else:

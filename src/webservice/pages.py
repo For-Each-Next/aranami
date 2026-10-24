@@ -21,6 +21,7 @@ from webservice.presentation import (
     assessment_code,
     element as tag,
     event_duration,
+    failure_description,
     fragment,
     homepage_sections,
     local_url,
@@ -295,7 +296,7 @@ class _Page:
         if event["status"] != "failed":
             return self.text(f"state.{_STATES[event['status']]}")
         failure_date = event.get("failure_date")
-        reason = event.get("failure_reason")
+        reason = failure_description(event, self.interface)
         label = (
             self.text(
                 "state.FailedRecordDate",
