@@ -1466,6 +1466,14 @@ class LiveVisibilityTests(unittest.TestCase):
                 ),
             ),
             (
+                "assessment_log",
+                (
+                    "Updating assessment change log",
+                    "更新评级变更日志",
+                    "更新評級變更日誌",
+                ),
+            ),
+            (
                 "pageviews",
                 ("Updating pageview records", "更新浏览记录", "更新瀏覽紀錄"),
             ),

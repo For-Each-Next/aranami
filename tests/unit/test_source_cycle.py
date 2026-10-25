@@ -38,7 +38,9 @@ def _membership() -> pl.DataFrame:
             "page_id": [1],
             "page_namespace": [0],
             "page_title": ["Video_game"],
+            "page_revision": [101],
             "talk_page_id": [None],
+            "talk_revision": [None],
             "pa_class": ["B"],
             "pa_importance": ["High"],
         },
@@ -46,7 +48,9 @@ def _membership() -> pl.DataFrame:
             "page_id": pl.Int64,
             "page_namespace": pl.Int64,
             "page_title": pl.String,
+            "page_revision": pl.Int64,
             "talk_page_id": pl.Int64,
+            "talk_revision": pl.Int64,
             "pa_class": pl.String,
             "pa_importance": pl.String,
         },
@@ -117,6 +121,9 @@ class TestMembershipCycle(TestCase):
         assert same["full_title"].to_list() == ["Video game"]
         assert same["pa_class"].to_list() == ["B"]
         assert same["talk_page_id"].to_list() == [None]
+        assert same["page_revision"].to_list() == [101]
+        assert same["talk_revision"].to_list() == [None]
+        assert same["talk_title"].to_list() == [None]
 
     def test_failed_replica_read_is_retried_within_the_pass(self) -> None:
         """Retain successful retries after failed requests."""

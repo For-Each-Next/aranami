@@ -22,6 +22,7 @@ A successful check can finish with **no update needed**.
 | [New-article recommendations (DYK)][dyk] | Hourly, `HH:00` | Completed DYK entries, current nominees, assessments, and cumulative statistics. |
 | [New pages][new-pages] | Daily, `00:07` | Keyword-selected new pages and pages rewritten from redirects, with assessments to help editors review them. |
 | [Article assessments][assessments] | Hourly, `HH:31` | Six assessment and review lists: Bplus, BPAN, A, AL, ACC, and PPR. |
+| [Assessment change log][assessment-log] | Daily, `00:00:00` | A reusable full project assessment snapshot, plus removals, new assessments, reassessments, and renames grouped by observation date. |
 | [Pageview rankings][pageviews] | Daily cycle from `18:00`; normal first attempt `18:59`, retries at `HH:59` | Daily, weekly, monthly, seasonal, yearly, and monthly task-force rankings. |
 | [English Wikipedia comparisons][english] | Daily, `23:24` | Important and high-quality English articles, their Chinese counterparts, and relevant changes. |
 | [Database reports][database] | Daily, `00:00` | Delegated refresh requests for subscribed PexBot reports within the configured project scope. |
@@ -63,6 +64,7 @@ See the [documentation index](docs/README.md) and [change history](CHANGELOG.md)
 [dyk]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新条目推荐
 [new-pages]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新进条目/关键词筛选
 [assessments]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目
+[assessment-log]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/评级/日志
 [pageviews]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/热门条目
 [english]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科重要条目
 [database]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告

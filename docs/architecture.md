@@ -432,6 +432,35 @@ backfills use `Updated class icons.` and describe older records.
 
 ### Membership and DYK changes
 
+The assessment log compares daily project assessment snapshots by subject
+page ID. The `00:00:00 UTC` trigger retains all PageAssessments rows and source
+columns as Parquet using date-specific `project-assessments` report bundles.
+Each date keeps its first complete snapshot, independent of wiki publication;
+retries reuse it. Manifests preserve actual collection times and the scheduled
+midnight boundary separately. Other consumers use the backend's
+`project_assessments.read_snapshot` without starting clients or collecting.
+Previews reuse existing production snapshots or write only preview bundles.
+A missing member is a departure from the set, not proof of deletion;
+renames and assessment changes remain distinct. The first observation seeds a
+baseline without reporting all existing pages as additions. First-time markers
+and evidence-based historical backfill are separate wiki maintenance actions.
+A newer daily observation with no changes records its date and `無變更`.
+Do not label the initial self-comparison or unobserved gaps as unchanged;
+same-day retries retain existing entries without duplicate headings. Retained
+no-change dates follow the same publication recovery and pruning rules.
+
+Reuse durable report bundles for its current and original membership tables.
+The live managed body must match either the latest proposal or the original
+baseline digest carried through unsuccessful proposals. This recovers lost
+save responses without consuming changes after repeated failed saves. Retained
+proposals carry unsaved dated history and compare the next snapshot with the
+latest observation, preserving removals followed by restorations. Preview
+bundles never advance the production baseline; missing or changed managed
+ranges, malformed snapshots, and empty project results prevent publication.
+Keep `reports/` durable: disposable membership caches cannot recover removals.
+Dates/times describe observations, not inferred edit times. Retain thirty UTC
+dates by default, configurable with the `assessment-log` range's `days` option.
+
 Membership snapshots use stable page IDs in Parquet, not wiki output, to track
 renames, assessments, and DYK transitions. Validate against exact destination
 text and advance only after confirmed publication. Dry runs may seed originals

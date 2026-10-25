@@ -178,7 +178,7 @@ class TestPublicLogEvents(TestCase):
                 updated=None,
                 duration_seconds=float("nan"),
             ),
-            _event("run_started", tasks=7),
+            _event("run_started", tasks=8),
         ]
         with TemporaryDirectory() as directory:
             root = Path(directory)

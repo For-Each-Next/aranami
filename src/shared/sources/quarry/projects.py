@@ -30,7 +30,9 @@ _PAGE_SCHEMA = {
     "page_id": pl.Int64,
     "page_namespace": pl.Int64,
     "page_title": pl.String,
+    "page_revision": pl.Int64,
     "talk_page_id": pl.Int64,
+    "talk_revision": pl.Int64,
     "pa_class": pl.String,
     "pa_importance": pl.String,
 }
@@ -68,8 +70,11 @@ def query_pages_by_wikiproject(
 
     Returns:
         Page and nullable talk-page IDs, namespace and database titles,
-        full titles, quality, and importance. An active source cycle
-        reuses the same database and project read across consumers.
+        full subject and nullable talk titles, quality, and importance.
+        Revision IDs describe the current subject and talk revisions at
+        observation time, not the edits that caused assessment changes.
+        An active source cycle reuses the same database and project read
+        across consumers.
     """
     database = site.dbName()
     frame = read_membership(
@@ -77,18 +82,27 @@ def query_pages_by_wikiproject(
         project_name,
         lambda: _project_membership(database, project_name),
     )
-    titles = pl.Series(
-        "full_title",
-        (
-            pywikibot.Page(site, title, namespace).title()
-            for namespace, title in frame.select(
-                "page_namespace",
-                "page_title",
-            ).iter_rows()
-        ),
-        dtype=pl.String,
+    titles: list[str] = []
+    talk_titles: list[str | None] = []
+    for namespace, title, talk_id in frame.select(
+        "page_namespace",
+        "page_title",
+        "talk_page_id",
+    ).iter_rows():
+        page = pywikibot.Page(site, title, namespace)
+        titles.append(page.title())
+        talk = (
+            page.toggleTalkPage()
+            if talk_id is not None
+            and not page.isTalkPage()
+            and namespace + 1 in site.namespaces
+            else None
+        )
+        talk_titles.append(talk.title() if talk is not None else None)
+    return frame.with_columns(
+        pl.Series("full_title", titles, dtype=pl.String),
+        pl.Series("talk_title", talk_titles, dtype=pl.String),
     )
-    return frame.with_columns(titles)
 
 
 def _project_membership(database: str, project_name: str) -> pl.DataFrame:
@@ -110,7 +124,9 @@ def _project_membership(database: str, project_name: str) -> pl.DataFrame:
             page.c.page_id,
             page.c.page_namespace,
             page.c.page_title,
+            page.c.page_latest.label("page_revision"),
             talk.c.page_id.label("talk_page_id"),
+            talk.c.page_latest.label("talk_revision"),
             assessment.pa_class,
             assessment.pa_importance,
         )

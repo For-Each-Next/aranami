@@ -49,6 +49,11 @@ TASK_DEFINITIONS: dict[str, TaskDefinition] = {
         },
         minute=31,
     ),
+    "assessment_log": TaskDefinition(
+        pages={"report": "WikiProject:电子游戏/评级/日志"},
+        hour="0",
+        minute=0,
+    ),
     "pageviews": TaskDefinition(
         pages={"report": "WikiProject:电子游戏/热门条目"},
         minute=59,

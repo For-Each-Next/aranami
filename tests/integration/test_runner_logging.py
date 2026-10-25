@@ -27,6 +27,7 @@ _ROUTINES = (
     "dyks",
     "new_pages",
     "assessment_lists",
+    "assessment_log",
     "pageviews",
     "enwp_key_articles",
     "pexbot",
@@ -266,7 +267,7 @@ class TestRunnerLoggingIntegration(TestCase):
             assert outcomes[0]["updated"] == 0
             assert "Traceback (most recent call last):" in content
             assert "Simulated DYK source failure." in content
-            assert "6 jobs, 1 failures" in content
+            assert "7 jobs, 1 failures" in content
             raw_events = next(
                 (root / "logs").glob("events.*.jsonl"),
             ).read_text()
@@ -331,7 +332,7 @@ class TestRunnerLoggingIntegration(TestCase):
                 encoding="utf-8",
             )
             assert "- status: partly success" in summary
-            assert "  - task 4: pageviews — deferred" in summary
+            assert "  - task 5: pageviews — deferred" in summary
             assert "HTTP Error 504: Gateway Timeout" in summary
             assert "complete wikitext" not in summary
             assert summary.count("  - task ") == len(_ROUTINES)
@@ -344,10 +345,10 @@ class TestRunnerLoggingIntegration(TestCase):
             )
             outcomes = _routine_results(calls)
             assert len(outcomes) == len(_ROUTINES)
-            assert outcomes[3]["routine"] == "pageviews"
-            assert outcomes[3]["status"] == "deferred"
-            assert outcomes[3]["updated"] == 0
-            assert "6 jobs, 0 failures, 1 deferred" in log
+            assert outcomes[4]["routine"] == "pageviews"
+            assert outcomes[4]["status"] == "deferred"
+            assert outcomes[4]["updated"] == 0
+            assert "7 jobs, 0 failures, 1 deferred" in log
 
     @staticmethod
     def test_selected_task_uses_supplied_date_and_writes_one_preview() -> None:

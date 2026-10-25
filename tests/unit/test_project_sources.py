@@ -439,7 +439,9 @@ class TestProjectStatements(TestCase):
             "page_id",
             "page_namespace",
             "page_title",
+            "page_revision",
             "talk_page_id",
+            "talk_revision",
             "pa_class",
             "pa_importance",
         )
@@ -455,7 +457,9 @@ class TestProjectStatements(TestCase):
         assert name in compiled.params.values()
         assert name not in str(compiled)
         assert "talk.page_namespace" in str(compiled)
-        assert "revision" not in str(compiled)
+        assert "JOIN revision" not in str(compiled)
+        assert "page.page_latest AS page_revision" in str(compiled)
+        assert "talk.page_latest AS talk_revision" in str(compiled)
         assert "page_props" not in str(compiled)
         assert tuple(statement.selected_columns.keys()) == columns
         assert result.is_empty()
@@ -463,11 +467,55 @@ class TestProjectStatements(TestCase):
             "page_id": pl.Int64,
             "page_namespace": pl.Int64,
             "page_title": pl.String,
+            "page_revision": pl.Int64,
             "talk_page_id": pl.Int64,
+            "talk_revision": pl.Int64,
             "pa_class": pl.String,
             "pa_importance": pl.String,
             "full_title": pl.String,
+            "talk_title": pl.String,
         }
+
+    @staticmethod
+    def test_project_references_use_the_same_membership_observation() -> None:
+        """Keep nullable revision references without extra reads."""
+        site = OfflineSite("zh", "wikipedia")
+        columns = (
+            "page_id",
+            "page_namespace",
+            "page_title",
+            "page_revision",
+            "talk_page_id",
+            "talk_revision",
+            "pa_class",
+            "pa_importance",
+        )
+        with patch(
+            "shared.sources.quarry.query._fetch",
+            return_value=(
+                columns,
+                [
+                    (7, 0, "Video_game", 101, 11, 102, "B", "High"),
+                    (8, 14, "Games", 103, 12, 104, "Category", None),
+                    (9, 0, "No_talk", 105, None, None, None, None),
+                ],
+            ),
+        ) as fetch:
+            result = projects.query_pages_by_wikiproject(site, "Games")
+        fetch.assert_called_once()
+        assert result["full_title"].to_list() == [
+            "Video game",
+            "Category:Games",
+            "No talk",
+        ]
+        assert result["talk_title"].to_list() == [
+            "Talk:Video game",
+            "Category talk:Games",
+            None,
+        ]
+        assert result["page_revision"].to_list() == [101, 103, 105]
+        assert result["talk_revision"].to_list() == [102, 104, None]
+        assert result["talk_page_id"].to_list() == [11, 12, None]
 
     @staticmethod
     def test_membership_queries_bind_namespaces_names_and_page_ids() -> None:

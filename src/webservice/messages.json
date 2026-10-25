@@ -564,6 +564,11 @@
     "zh-hans": "更新条目评级列表",
     "zh-hant": "更新條目評級列表"
   },
+  "progress.routine.assessment_log": {
+    "en": "Updating assessment change log",
+    "zh-hans": "更新评级变更日志",
+    "zh-hant": "更新評級變更日誌"
+  },
   "progress.routine.pageviews": {
     "en": "Updating pageview records",
     "zh-hans": "更新浏览记录",
@@ -703,6 +708,11 @@
     "en": "Article assessments",
     "zh-hans": "条目评级",
     "zh-hant": "條目評級"
+  },
+  "routine.assessment_log": {
+    "en": "Assessment change log",
+    "zh-hans": "评级变更日志",
+    "zh-hant": "評級變更日誌"
   },
   "routine.pageviews": {
     "en": "Pageview rankings",

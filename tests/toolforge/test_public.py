@@ -218,7 +218,7 @@ class PublicWebsiteTests(unittest.TestCase):
             assert self.request("/api/dashboard")[0] == 503
             config = json.loads(self.request("/api/config")[2])
             assert config["version"]
-            assert len(config["routines"]["routines"]) == 6
+            assert len(config["routines"]["routines"]) == 7
         directory = self.runtime / "cache" / "toolforge"
         directory.mkdir(parents=True)
         snapshot = directory / "dashboard.json"

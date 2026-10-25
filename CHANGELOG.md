@@ -4,6 +4,24 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.5 (2026-10-25 12:07 UTC)
+
+Overview: Added reusable daily project assessment snapshots and a Chinese
+video-game change log with durable membership comparisons.
+
+- Retained complete project PageAssessments in daily Parquet snapshots at
+  the `00:00 UTC` trigger, preserving actual collection times for reuse.
+- Recorded assessment changes in natural sentences with bold page links and
+  simplified rating labels in `WikiProject:电子游戏/评级/日志`.
+- Preserved removals and no-change dates through failed saves and restorations,
+  reusing shared queries and storage with isolated previews.
+- Logged newer unchanged daily observations as `無變更`, without duplicate
+  headings, conflicting markers, or invented initial/gap-date observations.
+- Added localized status labels and offline coverage for membership changes,
+  publication recovery, managed ranges, and first-observation baselines.
+- Initialized the wiki's managed range through October 24 as a separate
+  action, retaining the complete current project baseline.
+
 ### 0.7.4 (2026-10-24 16:30 UTC)
 
 Overview: Rebuilt the read-only website with FastAPI, WebSocket status pushes,

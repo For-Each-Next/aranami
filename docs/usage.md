@@ -55,6 +55,7 @@ Use these identifiers in `tasks`:
 | `dyks` | Completed DYK entries, nominees, and statistics | Every hour at `:00` |
 | `new_pages` | Daily keyword-matched new/conversion entries | Daily at `00:07` |
 | `assessment_lists` | Project assessment and review lists | Every hour at `:31` |
+| `assessment_log` | Full project assessment snapshot and observed changes | Daily at `00:00:00` |
 | `pageviews` | Rankings for each missing eligible date | Every hour at `:59` while behind/deferred |
 | `enwp_key_articles` | Current English importance/quality comparisons | Daily at `23:24` |
 | `pexbot` | Subscribed report refresh requests | Daily at `00:00` |
@@ -123,6 +124,10 @@ Preserve paired markers and text outside their managed ranges:
 <!-- aranami begin="page_views" history-days="800" -->
 ...popularity report...
 <!-- aranami end="page_views" -->
+
+<!-- aranami begin="assessment-log" days="30" -->
+...retained assessment changes...
+<!-- aranami end="assessment-log" -->
 ```
 
 Missing, malformed, duplicate, reversed, or ambiguous required markers prevent
@@ -130,6 +135,53 @@ publication. Keep labeled-section tags outside them. Pageviews retains its
 `<!-- report date YYYY-MM-DD -->` checkpoint. See the
 [managed-range contracts](architecture.md#managed-ranges-and-on-wiki-configuration)
 for settings; changing targets, schedules, or definitions requires deployment.
+
+### Assessment change log
+
+`assessment_log` runs daily at `00:00:00 UTC` and updates
+`WikiProject:电子游戏/评级/日志`, ordering each day's subsections as renames,
+reassessments, additions to the assessment set, and removals.
+A removal means an existing page ID disappeared from the project's assessment
+set; it does not establish that the page was deleted. Stable page IDs distinguish
+renames from departures and arrivals. Dated sections use the UTC observation
+date, with the actual timestamp retained in metadata; comparisons are not a
+complete edit history. Main page links and assessment values are bold, with
+simplified assessment labels and unbolded discussion/revision links. Entries
+sort by numeric namespace and then title within each subsection.
+
+Each UTC date retains one immutable full project PageAssessments snapshot as
+Parquet through the shared report store, with all source columns available for
+other work. Its `project-assessments` identity distinguishes the wiki, project,
+and date. Capture precedes the destination read, so a wiki read or edit failure
+does not discard that day's reusable source data. The manifest records the
+actual observation time; a delayed run never claims it collected at midnight.
+Repeated runs reuse that date's observation,
+and a manual report anchor cannot create a historical snapshot from current data.
+
+Other Toolforge workflows can call
+`backend.services.project_assessments.read_snapshot(site, project, day)` to read
+an existing date without querying sources. It returns a validated report bundle
+or `None` when that date has no snapshot; the full assessment table is
+`bundle.tables["members"]`. The corresponding `members.parquet` lives in that
+date's `reports/<report-key>/<generation>/` bundle. Preview snapshots stay under
+`dry-run/reports/` and cannot replace production observations.
+
+The `assessment-log` range retains 30 UTC dates by default, including today;
+`days` accepts 1 through 365. Repeated checks append within the same daily
+sections. A newer daily snapshot with no changes adds its date heading and
+`無變更`; repeated checks preserve existing entries without duplicating the day.
+Unobserved dates are not filled. The first successful observation establishes
+the current baseline without claiming changes or no changes, and repeating
+that initial date does not add a no-change entry. Failed publication
+and previews do not advance the live baseline. Unsaved dated events survive
+retries, including a removal followed by a later restoration.
+
+Creating the initial marker pair and backfilling several days of verified
+historical changes is a separate, one-time wiki edit. This initialization is
+not part of the recurring source task. Historical entries require actual
+historical observations; the current assessment set alone cannot reconstruct
+past removals. Keep the markers after initialization so normal updates preserve
+all text outside the range.
 
 ### Pageviews data readiness
 

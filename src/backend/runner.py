@@ -129,7 +129,8 @@ def run_once(
             availability cutoff.
         dry: Record proposed edits locally without wiki writes or
             external PexBot refresh requests.
-        tasks: Routine names to run, or omit for all six. For example,
+        tasks: Routine names, or omit for all configured routines.
+            For example,
             ``["new_pages"]`` runs only new-page discovery. A single
             name is accepted. Empty selections make no wiki requests.
         clear_cache: Delete disposable ``cache/`` data before running.

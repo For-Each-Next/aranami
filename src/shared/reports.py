@@ -16,7 +16,7 @@ import os
 import re
 import shutil
 import tempfile
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
@@ -594,12 +594,19 @@ class ReportStore:
         _atomic_json(bundle.path / "manifest.json", manifest)
         _sync_directory(bundle.path)
 
-    def read(self, key: str, *, previous: bool = False) -> ReportBundle | None:
+    def read(
+        self,
+        key: str,
+        *,
+        previous: bool = False,
+        locked: bool = False,
+    ) -> ReportBundle | None:
         """Read a complete bundle with verified schemas and hashes.
 
         Args:
             key: Stable internal report identity.
             previous: Select the retained predecessor of the latest.
+            locked: Caller already holds this store's lock for the key.
 
         Returns:
             Validated report, or null without a selected generation.
@@ -607,7 +614,7 @@ class ReportStore:
         _validate_key(key)
         if not (self.root / key).exists():
             return None
-        with self.locked(key):
+        with nullcontext() if locked else self.locked(key):
             selection = self._selection(key)
             generation = selection["previous" if previous else "latest"]
             return (

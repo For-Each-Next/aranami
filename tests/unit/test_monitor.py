@@ -20,6 +20,7 @@ from apscheduler.triggers.cron import CronTrigger
 from backend import monitor
 from updater.jobs import (
     assessment_lists,
+    assessment_log,
     dyks,
     enwp_key_articles,
     new_pages,
@@ -139,6 +140,7 @@ class TestMonitor(TestCase):
             "dyks": dyks.run,
             "new_pages": new_pages.run,
             "assessment_lists": assessment_lists.run,
+            "assessment_log": assessment_log.run,
             "pageviews": pageviews.run,
             "enwp_key_articles": enwp_key_articles.run,
             "pexbot": pexbot.run,
@@ -180,6 +182,7 @@ class TestMonitor(TestCase):
                 tzinfo=dt.UTC,
             ),
             "pageviews": dt.datetime(2026, 10, 3, 0, 59, tzinfo=dt.UTC),
+            "assessment_log": dt.datetime(2026, 10, 4, 0, 0, tzinfo=dt.UTC),
             "enwp_key_articles": dt.datetime(
                 2026,
                 10,
