@@ -15,15 +15,22 @@ import math
 import os
 import re
 import tempfile
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
 
+import mwparserfromhell
 import polars as pl
 import pywikibot
 
+from backend.services import project_assessments
 from backend.website import backlog, homepage, newsletter, pageviews, reviews
 from backend.website.extracts import MAX_EXTRACT_BYTES, ExtractCache
+from backend.website.newsletter_history import (
+    collect_article_history,
+    prepared_news,
+)
 from shared.newsletter import Issue
 from shared.sources.quarry.projects import query_pages_by_wikiproject
 from shared.sources.summaries import fetch_summary
@@ -143,8 +150,15 @@ class WikiReader:
         self.site = site
         self.now = dt.datetime.now(dt.UTC)
         self.sources: dict[str, dict[str, str]] = {}
+        self.source_page_ids: dict[str, int | None] = {}
         self._texts: dict[tuple[str, dt.datetime | None], str] = {}
+        self._text_revisions: dict[tuple[str, dt.datetime | None], int] = {}
+        self._text_page_ids: dict[
+            tuple[str, dt.datetime | None],
+            int | None,
+        ] = {}
         self._resolved: dict[str, str] = {}
+        self._resolved_page_ids: dict[str, int | None] = {}
 
     def _remember(self, title: str, revision: int) -> None:
         """Keep one audited revision link per source page."""
@@ -180,6 +194,27 @@ class WikiReader:
         self.resolve_many([title])
         return self._resolved[title]
 
+    def resolve_page_id(self, title: str) -> int | None:
+        """Return a subject's final page ID from title resolution.
+
+        Args:
+            title: Article title or alias from a source record.
+
+        Returns:
+            The canonical target's positive ID, or none when the API
+            explicitly reports a missing or invalid page. Primed titles
+            reuse their existing response without another request.
+
+        Raises:
+            ValueError: A present page ID is absent or malformed, the
+                target is omitted, or a redirect cycle is detected.
+        """
+        self.resolve_many([title])
+        if title not in self._resolved_page_ids:
+            message = "The title-resolution query has no valid target page ID."
+            raise ValueError(message)
+        return self._resolved_page_ids[title]
+
     def resolve_many(self, titles: Iterable[str]) -> None:
         """Prime canonical titles in read-only batches of at most fifty.
 
@@ -208,7 +243,7 @@ class WikiReader:
         titles: list[str],
         result: dict[str, object],
     ) -> None:
-        """Cache a title batch, retaining normalized missing pages.
+        """Cache canonical titles and known target page identities.
 
         Args:
             titles: Requested titles represented in this response.
@@ -229,8 +264,9 @@ class WikiReader:
         ):
             message = "The title-resolution pages are malformed."
             raise ValueError(message)
-        known = {page["title"] for page in pages}
+        known = {page["title"]: page for page in pages}
         resolved = {}
+        page_ids = {}
         for title in titles:
             current = title
             seen = set()
@@ -243,8 +279,16 @@ class WikiReader:
             if current not in known:
                 message = "The title-resolution query omitted a target."
                 raise ValueError(message)
-            resolved.update(dict.fromkeys([title, current, *seen], current))
+            aliases = [title, current, *seen]
+            resolved.update(dict.fromkeys(aliases, current))
+            page = known[current]
+            identifier = page.get("pageid")
+            if page.get("missing") is True or page.get("invalid") is True:
+                page_ids.update(dict.fromkeys(aliases))
+            elif type(identifier) is int and identifier > 0:
+                page_ids.update(dict.fromkeys(aliases, identifier))
         self._resolved.update(resolved)
+        self._resolved_page_ids.update(page_ids)
 
     @staticmethod
     def _resolution_links(query: dict[str, object]) -> dict[str, str]:
@@ -288,7 +332,14 @@ class WikiReader:
         if key not in self._texts:
             page = pywikibot.Page(self.site, title)
             self._texts[key] = page.get()
-            self._remember(title, page.latest_revision_id)
+            self._text_revisions[key] = page.latest_revision_id
+            self._text_page_ids[key] = (
+                page.pageid
+                if type(page.pageid) is int and page.pageid > 0
+                else None
+            )
+        self._remember(title, self._text_revisions[key])
+        self.source_page_ids[title] = self._text_page_ids[key]
         return self._texts[key]
 
     def at(self, title: str, before: dt.datetime) -> str:
@@ -323,8 +374,39 @@ class WikiReader:
             if revision is None or revision.text is None:
                 raise pywikibot.exceptions.NoPageError(page)
             self._texts[key] = revision.text
-            self._remember(title, revision.revid)
+            self._text_revisions[key] = revision.revid
+            self._text_page_ids[key] = (
+                page.pageid
+                if type(page.pageid) is int and page.pageid > 0
+                else None
+            )
+        self._remember(title, self._text_revisions[key])
+        self.source_page_ids[title] = self._text_page_ids[key]
         return self._texts[key]
+
+    def redirect_target(self, text: str) -> str | None:
+        """Read a local redirect target from supplied historical text.
+
+        Args:
+            text: Exact source revision, never fetched again here.
+
+        Returns:
+            Canonical local target title, or none for ordinary content.
+
+        Raises:
+            ValueError: The redirect points to another wiki.
+        """
+        code = mwparserfromhell.parse(text)
+        for comment in code.filter_comments():
+            code.remove(comment)
+        match = self.site.redirect_regex.match(str(code))
+        if match is None:
+            return None
+        target = pywikibot.Page(self.site, match[1])
+        if target.site != self.site:
+            message = "Historical source redirects must stay on this wiki."
+            raise ValueError(message)
+        return target.title(with_section=False)
 
     def history(
         self,
@@ -1234,12 +1316,16 @@ def _report_plan(
             if name == "reviews"
             else "zh:all-access:user:top1000:limit12:lookback7:extracts-v3"
             if name == "pageviews"
-            else "quarterly-newsletter-v5:original-source-subpages"
+            else "quarterly-newsletter-v8:internal-counts:talk-notices"
             if name == "newsletter"
+            else f"days:{days}:extracts-v3:talk-news-v1"
+            if name == "news_history"
             else f"days:{days}:extracts-v3"
         )
         if name in {"newsletter", "recognized", "news_history"}:
             source_id += f":draft:{Issue.upcoming(clock.date()).value}"
+        if name == "newsletter":
+            source_id += f":day:{clock.date()}"
         identity = hashlib.sha256(
             f"dashboard-v2:{name}:{source_id}:{intervals[name]}".encode(),
         ).hexdigest()
@@ -1349,6 +1435,97 @@ def _dashboard_snapshot(
     }
 
 
+def _newsletter_counts(membership: pl.DataFrame) -> dict[str, int] | None:
+    """Count observed articles and recognized assessment classes.
+
+    Args:
+        membership: Current replica rows or a retained daily snapshot.
+
+    Returns:
+        Article totals and FA/FL/GA/Bplus counts, or none without class
+        columns. Topics and DYK totals cannot be inferred from classes.
+    """
+    if not {"page_namespace", "pa_class"}.issubset(membership.columns):
+        return None
+    grade = (
+        pl
+        .col("pa_class")
+        .fill_null("unassessed")
+        .str.strip_chars()
+        .str.to_lowercase()
+        .str.replace(r"[级級]$", "")
+    )
+    articles = membership.filter(pl.col("page_namespace") == 0)
+    return articles.select(
+        grade.is_in(_NEWSLETTER_ARTICLE_CLASSES).sum().alias("total"),
+        *(
+            grade.is_in(aliases).sum().alias(key)
+            for key, aliases in (
+                ("fa", ("fa", "典范", "典範")),
+                ("fl", ("fl", "特色列表", "典表")),
+                ("ga", ("ga", "优良", "優良")),
+                ("bplus", ("bplus", "b+", "乙上")),
+            )
+        ),
+    ).row(0, named=True)
+
+
+def _newsletter_overview_at(
+    read: WikiReader,
+    day: dt.date,
+) -> tuple[dict[str, int], str] | None:
+    """Read daily counts with their actual retained observation time.
+
+    Args:
+        read: Configured wiki identity for the internal report store.
+        day: Exact snapshot date, without a nearest-date fallback.
+
+    Returns:
+        Counts and their actual observation time, or none for an
+        unobserved date. This function never collects missing history.
+    """
+    snapshot = project_assessments.read_snapshot(read.site, "电子游戏", day)
+    if snapshot is None:
+        return None
+    counts = _newsletter_counts(snapshot.tables["members"])
+    return (
+        (counts, snapshot.manifest["calculated_at"])
+        if counts is not None
+        else None
+    )
+
+
+def _retained_events(
+    read: WikiReader,
+    membership: pl.DataFrame,
+    cache: dict[str, pl.DataFrame],
+    *,
+    now: dt.datetime,
+    path: Path | None,
+) -> pl.DataFrame:
+    """Reuse successful talk-page collection within a dashboard pass.
+
+    Args:
+        read: Configured read-only wiki source.
+        membership: Complete current project membership.
+        cache: Shared results belonging to this dashboard invocation.
+        now: Aware observation time for the durable history archive.
+        path: Archive destination, or none for memory.
+
+    Returns:
+        Complete retained events, collecting only on the first request.
+        Failed collection never populates the shared cache.
+    """
+    if "events" not in cache:
+        cache["events"] = collect_article_history(
+            read.site,
+            membership,
+            now=now,
+            path=path,
+        )
+    return cache["events"]
+
+
 def _collect_report(  # ruff: ignore[too-many-arguments]
     name: str,
     read: WikiReader | None,
@@ -1358,6 +1535,10 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
     *,
     cache_directory: Path | None = None,
     now: dt.datetime | None = None,
+    history_path: Path | None = None,
+    today_history_path: Path | None = None,
+    article_history_cache: dict[str, pl.DataFrame],
+    prior_facts: dict | None = None,
 ) -> object:
     """Collect and validate one complete independent source result.
 
@@ -1373,39 +1554,39 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
     )
     today = end - dt.timedelta(days=1)
     days = (end - start).days
-    if read is None or (members is None and name != "newsletter"):
+    if read is None or membership is None or members is None:
         message = "Project membership is unavailable."
         raise RuntimeError(message)
-    if name == "newsletter":
-        if membership is None:
-            try:
-                membership = query_pages_by_wikiproject(read.site, "电子游戏")
-            except Exception as error:  # ruff: ignore[blind-except]
-                _LOGGER.warning(
-                    "Newsletter current article count unavailable (%s).",
-                    type(error).__name__,
-                )
-        current_counts = (
-            {
-                "total": membership.filter(
-                    (pl.col("page_namespace") == 0)
-                    & pl
-                    .col("pa_class")
-                    .fill_null("unassessed")
-                    .str.to_lowercase()
-                    .str.replace(r"[级級]$", "")
-                    .is_in(
-                        _NEWSLETTER_ARTICLE_CLASSES,
-                    ),
-                ).height,
-            }
-            if membership is not None and "pa_class" in membership.columns
-            else None
+    events = None
+    if name in {"newsletter", "news_history"}:
+        events = _retained_events(
+            read,
+            membership,
+            article_history_cache,
+            now=now or dt.datetime.now(dt.UTC),
+            path=history_path,
         )
+    if name == "newsletter":
+        members = set(
+            membership.filter(pl.col("page_namespace") == 0)[
+                "full_title"
+            ].to_list(),
+        )
+
         data = newsletter.collect_newsletter(
             read,
             now=now or dt.datetime.now(dt.UTC),
-            current_counts=current_counts,
+            current_counts=_newsletter_counts(membership),
+            overview_at=partial(_newsletter_overview_at, read),
+            prior_facts=prior_facts,
+            members=members,
+            member_ids=set(
+                membership.filter(pl.col("page_namespace") == 0)[
+                    "page_id"
+                ].to_list(),
+            ),
+            article_history=events,
+            today_history_path=today_history_path,
         )
     elif name == "reviews":
         data = reviews.collect_reviews(
@@ -1435,14 +1616,16 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
             )
             options = (
                 {"history": read.history}
-                if section in {"dyk", "news"}
+                if section == "dyk"
                 else {}
                 if section == "upcoming"
                 else {"read_at": read.at}
             )
             displays[section] = _assessed_section(
                 section,
-                getattr(homepage, "collect_" + section)(
+                prepared_news(events, *bounds)
+                if section == "news"
+                else getattr(homepage, "collect_" + section)(
                     *bounds,
                     members,
                     read,
@@ -1513,6 +1696,10 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
     cache_directory: Path | None = None,
     now: dt.datetime | None = None,
     refresh_intervals: Mapping[str, float] | None = None,
+    history_path: Path | None = Path("reports/newsletter-history-v1.parquet"),
+    today_history_path: Path | None = Path(
+        "cache/today-in-history-v1.parquet",
+    ),
 ) -> dict[str, object]:
     """Refresh due Chinese reports and preserve independent successes.
 
@@ -1523,6 +1710,8 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
         cache_directory: Private persisted report envelopes.
         now: Optional aware UTC clock used for due selection.
         refresh_intervals: Independent report intervals in seconds.
+        history_path: Durable Parquet history, or none for memory.
+        today_history_path: Wiki-wide OTD cache, or none for memory.
 
     Returns:
         Schema-two snapshot with actual successful refresh timestamps,
@@ -1552,13 +1741,12 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
     read = membership = members = None
     try:
         read = WikiReader(pywikibot.Site("zh", "wikipedia"))
-        if any(name != "newsletter" for name in plan["due"]):
-            membership = query_pages_by_wikiproject(read.site, "电子游戏")
-            members = set(
-                membership.filter(pl.col("page_namespace") == 0)[
-                    "full_title"
-                ].to_list(),
-            )
+        membership = query_pages_by_wikiproject(read.site, "电子游戏")
+        members = set(
+            membership.filter(pl.col("page_namespace") == 0)[
+                "full_title"
+            ].to_list(),
+        )
     except Exception as error:  # ruff: ignore[blind-except]
         _LOGGER.log(
             logging.ERROR,
@@ -1577,6 +1765,7 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
         if read is not None
         else None
     )
+    article_history_cache = {}
     for name in plan["due"]:
         _LOGGER.info("Refreshing website %s data.", _REPORT_LABELS[name])
         previous = plan["caches"][name]
@@ -1600,6 +1789,12 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
                 period,
                 cache_directory=cache_directory,
                 now=clock,
+                history_path=history_path,
+                today_history_path=today_history_path,
+                article_history_cache=article_history_cache,
+                prior_facts=(previous or {}).get("data")
+                if name == "newsletter"
+                else None,
             )
             if extracts is not None:
                 data = _with_extracts(name, data, extracts)

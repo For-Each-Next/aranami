@@ -2,7 +2,8 @@
 
 The collector supplies actual source wikitext. Recognized issue metadata
 and seven overview figures become explicit slots; every other byte of
-the verified layout is retained, except omitted authored-section links.
+the verified layout is retained. Missing authored-section navigation
+links are restored without checking whether their pages exist.
 Unknown layouts remain unavailable rather than becoming a new design.
 """
 
@@ -42,6 +43,7 @@ _DELTA = re.compile(
 _SLOT = re.compile(r"@@aranami:([a-z_:]+)@@")
 _NUMBER = re.compile(r"第([0-9一二三四五六七八九十廿卅百零〇兩]+)號")
 _FORBIDDEN_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_AUTHORED_LINKS = (("專題", "專題報導：<待定>"), ("訪談", "訪談：<待定>"))
 
 
 def _slot(name: str) -> str:
@@ -109,6 +111,56 @@ def _overview_slots(text: str) -> tuple[str, str, str, dict] | None:
     )
 
 
+def _content_links(text: str, issue: str) -> str | None:
+    """Restore missing authored links in the verified contents columns.
+
+    Returns:
+        Source retaining all existing markup and labels, or none when
+        the contents block and its issue links cannot be identified.
+    """
+    start = text.find(">本期內容</div>")
+    stop = text.find(">專題導覽</div>", start)
+    if start < 0 or stop < 0:
+        return None
+    columns = list(
+        re.finditer(
+            r'<div class="columns"[^>]*>(.*?)</div>',
+            text[start:stop],
+            re.DOTALL,
+        ),
+    )
+    if len(columns) != 1:
+        return None
+    column = columns[0]
+    body = column[1]
+    links = list(
+        re.finditer(
+            r"\[\[([^|\r\n\[\]]+/簡訊/"
+            + re.escape(issue)
+            + r")/(特優內容|宣告|專題|訪談)\|[^\r\n]*?\]\]",
+            body,
+        ),
+    )
+    suffixes = [link[2] for link in links]
+    if (
+        not {"特優內容", "宣告"}.issubset(suffixes)
+        or len(set(suffixes)) != len(suffixes)
+        or len({link[1] for link in links}) != 1
+    ):
+        return None
+    newline = "\r\n" if "\r\n" in body else "\n"
+    missing = [
+        f"* [[{links[0][1]}/{suffix}|{label}]]{newline}"
+        for suffix, label in _AUTHORED_LINKS
+        if suffix not in suffixes
+    ]
+    if not missing:
+        return text
+    added = ("" if body.endswith("\n") else newline) + "".join(missing)
+    insertion = start + column.end(1)
+    return text[:insertion] + added + text[insertion:]
+
+
 def prepare_main_layout(text: str, source_issue: Issue) -> dict | None:
     """Prepare a prior issue's real wikitext as a reusable layout.
 
@@ -132,6 +184,7 @@ def prepare_main_layout(text: str, source_issue: Issue) -> dict | None:
         not _bounded_text(text)
         or "@@aranami:" in text
         or not all(value in text for value in required)
+        or (text := _content_links(text, source_issue.value)) is None
     ):
         return None
     numbered = list(_NUMBER.finditer(text))
@@ -152,14 +205,6 @@ def prepare_main_layout(text: str, source_issue: Issue) -> dict | None:
         return None
     text = text.replace(asof, _slot("overview_asof"))
     text = text.replace(source_issue.quarter_label, _slot("quarter"))
-    text = re.sub(
-        r"^\* \[\[[^\r\n]*?/簡訊/"
-        + re.escape(source_issue.value)
-        + r"/(?:專題|訪談)\|[^\r\n]*\]\]\r?\n?",
-        "",
-        text,
-        flags=re.MULTILINE,
-    )
     issue_names = {
         source_issue.previous: "previous_issue",
         source_issue.value: "issue",

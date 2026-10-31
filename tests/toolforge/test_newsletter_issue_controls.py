@@ -88,7 +88,7 @@ class NewsletterIssueControlsTests(unittest.TestCase):
             "2027-01",
             "2027-04",
         }
-        assert "00:00 UTC" in after.text
+        assert "00:00 UTC" not in after.text
         assert 'type="month"' not in after.text
 
     def test_automatic_choice_uses_utc_instead_of_local_midnight(self) -> None:
@@ -120,6 +120,13 @@ class NewsletterIssueControlsTests(unittest.TestCase):
                 assert "issue=2027-01" in response.text
                 assert "<fieldset" in response.text
                 assert "<legend>" in response.text
+                assert "hidden data-newsletter-issue-form" in response.text
+                assert 'type="submit"' not in response.text
+                assert "<noscript>" in response.text
+                assert (
+                    f'href="/newsletter/?issue=2027-01&amp;lang={locale}"'
+                    in response.text
+                )
 
     def test_explicit_older_issue_is_kept_as_a_selected_radio(self) -> None:
         """Retain valid bookmarked issue choices in the native form."""

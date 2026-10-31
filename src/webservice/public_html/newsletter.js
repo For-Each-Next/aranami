@@ -1,5 +1,16 @@
 "use strict";
 
+// Issue changes navigate to saved drafts through the native read-only form.
+const issueForm = document.querySelector("[data-newsletter-issue-form]");
+if (issueForm) {
+    for (const radio of issueForm.querySelectorAll('input[name="issue"]')) {
+        radio.addEventListener("change", () => {
+            if (radio.checked) issueForm.requestSubmit();
+        });
+    }
+    issueForm.hidden = false;
+}
+
 // Copy the editor's current draft; no content leaves this page.
 for (const button of document.querySelectorAll("[data-newsletter-copy]")) {
     const editor = document.getElementById(button.dataset.newsletterCopy);

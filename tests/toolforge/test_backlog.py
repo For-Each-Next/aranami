@@ -174,7 +174,7 @@ class TestMaintenanceBacklog(TestCase):
             result = collect_backlog(site, members)
         read.assert_called_once_with(site, [1, 2, 3, 4, 5, 6])
         groups = {group["key"]: group for group in result["groups"]}
-        critical_keys = ["csd", "copyvio", "afd", "notability"]
+        critical_keys = ["afd", "csd", "copyvio", "notability"]
         assert list(groups)[: len(critical_keys)] == critical_keys
         assert result["total"] == 5  # ruff: ignore[magic-value-comparison]
         assert {key: groups[key]["count"] for key in critical_keys} == {
@@ -193,7 +193,7 @@ class TestMaintenanceBacklog(TestCase):
         assert groups["afd"]["category"] == "条目删除候选"
         assert groups["csd"]["category"] == "快速删除候选"
         assert groups["copyvio"]["category"] == "怀疑侵犯版权页面"
-        assert groups["afd"]["items"][0]["issues"] == ["csd", "afd"]
+        assert groups["afd"]["items"][0]["issues"] == ["afd", "csd"]
         for item in groups["csd"]["items"]:
             assert item["oldest_issue_month"] is None
             assert item["oldest_issue_category"] is None

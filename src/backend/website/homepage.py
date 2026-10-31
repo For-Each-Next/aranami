@@ -44,6 +44,8 @@ if TYPE_CHECKING:
     ]
     type SnapshotReader = Callable[[str, dt.datetime], str]
     type BatchResolver = Callable[[Iterable[str]], None]
+    type PageIdResolver = Callable[[str], int | None]
+    type SubjectWriter = Callable[[pl.DataFrame], None]
 
 _FEATURED_ROOT = "Wikipedia:典范条目/"
 _GOOD_ROOT = "Wikipedia:优良条目/"
@@ -792,6 +794,9 @@ def collect_history(  # ruff: ignore[too-many-arguments]
     resolve: Callable[[str], str] | None = None,
     resolve_many: BatchResolver | None = None,
     read_at: SnapshotReader | None = None,
+    member_ids: set[int] | None = None,
+    resolve_page_id: PageIdResolver | None = None,
+    retain_subjects: SubjectWriter | None = None,
 ) -> list[dict[str, str]]:
     """Find historical-anniversary subjects on selected calendar dates.
 
@@ -803,6 +808,12 @@ def collect_history(  # ruff: ignore[too-many-arguments]
         resolve: Optional canonical-title and redirect resolver.
         resolve_many: Optional batch primer for the canonical resolver.
         read_at: Optional source snapshots before each UTC day's end.
+        member_ids: Project article IDs for identity-based selection.
+            When supplied, title membership is not used.
+        resolve_page_id: Resolve a subject link to its final article ID,
+            or none for a missing/invalid target.
+        retain_subjects: Receive all resolved primary subjects before
+            project filtering when article IDs are used.
 
     Returns:
         Primary anniversary subjects dated by their homepage display.
@@ -810,6 +821,9 @@ def collect_history(  # ruff: ignore[too-many-arguments]
     Raises:
         ValueError: The interval or display contract is unsupported.
     """
+    if member_ids is not None and not callable(resolve_page_id):
+        message = "Anniversary article-ID selection requires an ID resolver."
+        raise ValueError(message)
     displays = []
     for day in _days(start, end):
         label = f"{day.month}月{day.day}日"
@@ -836,9 +850,74 @@ def collect_history(  # ruff: ignore[too-many-arguments]
         (title for _day, titles in displays for title in titles),
         resolve_many,
     )
+    if member_ids is not None:
+        return _history_by_id(
+            displays,
+            member_ids,
+            resolve,
+            resolve_page_id,
+            retain_subjects,
+        )
     records = [
         item
         for day, titles in displays
         for item in _items(titles, day, resolve)
     ]
     return _finish(records, members)
+
+
+def _history_by_id(
+    displays: list[tuple[dt.date, list[str]]],
+    member_ids: set[int],
+    resolve: Callable[[str], str] | None,
+    resolve_page_id: PageIdResolver,
+    retain_subjects: SubjectWriter | None,
+) -> list[dict[str, str]]:
+    """Retain unfiltered primary subjects and select project identities.
+
+    Returns:
+        Unique article-ID/display-day appearances using current titles.
+
+    Raises:
+        ValueError: A resolver returns an invalid article identity.
+    """
+    rows = []
+    for day, titles in displays:
+        for title in titles:
+            linked = _title(title)
+            target = _title(resolve(linked) if resolve else linked)
+            identifier = resolve_page_id(linked)
+            if identifier is not None and (
+                type(identifier) is not int or identifier <= 0
+            ):
+                message = "Anniversary subject has an invalid article ID."
+                raise ValueError(message)
+            rows.append({
+                "date": day,
+                "linked_title": linked,
+                "target_title": target,
+                "target_page_id": identifier,
+            })
+    subjects = pl.DataFrame(
+        rows,
+        schema={
+            "date": pl.Date,
+            "linked_title": pl.String,
+            "target_title": pl.String,
+            "target_page_id": pl.Int64,
+        },
+    ).unique(maintain_order=True)
+    if retain_subjects is not None:
+        retain_subjects(subjects)
+    selected = (
+        subjects
+        .filter(pl.col("target_page_id").is_in(member_ids))
+        .unique(subset=["target_page_id", "date"], keep="first")
+        .sort(["date", "target_title"], descending=[True, False])
+        .select("date", "target_title")
+    )
+    return [
+        item
+        for day, title in selected.iter_rows()
+        for item in _items([title], day, None)
+    ]

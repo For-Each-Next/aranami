@@ -399,6 +399,11 @@
     "zh-hans": "{routine}：页面更新",
     "zh-hant": "{routine}：頁面更新"
   },
+  "ops.details_link": {
+    "en": "Details…",
+    "zh-hans": "详情…",
+    "zh-hant": "詳情…"
+  },
   "ops.close": {
     "en": "Close",
     "zh-hans": "关闭",
@@ -635,9 +640,9 @@
     "zh-hant": "更新新進條目紀錄"
   },
   "progress.routine.assessment_lists": {
-    "en": "Updating assessment lists",
-    "zh-hans": "更新条目评级列表",
-    "zh-hant": "更新條目評級列表"
+    "en": "Updating recognized content lists",
+    "zh-hans": "更新认证条目列表",
+    "zh-hant": "更新認證條目列表"
   },
   "progress.routine.assessment_log": {
     "en": "Updating assessment change log",
@@ -780,9 +785,9 @@
     "zh-hant": "新進條目"
   },
   "routine.assessment_lists": {
-    "en": "Article assessments",
-    "zh-hans": "条目评级",
-    "zh-hant": "條目評級"
+    "en": "Recognized content",
+    "zh-hans": "认证条目",
+    "zh-hant": "認證條目"
   },
   "routine.assessment_log": {
     "en": "Assessment change log",
@@ -1619,6 +1624,11 @@
     "zh-hans": "专题简讯",
     "zh-hant": "專題簡訊"
   },
+  "nav.tools": {
+    "en": "Tools",
+    "zh-hans": "工具",
+    "zh-hant": "工具"
+  },
   "newsletter.heading": {
     "en": "Video games newsletter drafts",
     "zh-hans": "电子游戏专题简讯草稿",
@@ -1634,30 +1644,10 @@
     "zh-hans": "期刊月份",
     "zh-hant": "期刊月份"
   },
-  "newsletter.generate": {
-    "en": "Show collected issue",
-    "zh-hans": "查看已获取的本期数据",
-    "zh-hant": "查看已取得的本期資料"
-  },
-  "newsletter.period": {
-    "en": "Reporting period",
-    "zh-hans": "报道期间",
-    "zh-hant": "報導期間"
-  },
   "newsletter.unavailable": {
     "en": "Source collection for this issue has not completed yet. The next issue is collected automatically; generated wikitext appears here when data is ready.",
     "zh-hans": "本期来源数据尚未完成获取。系统会自动获取下一期数据，完成后在此显示生成的维基代码。",
     "zh-hant": "本期來源資料尚未完成取得。系統會自動取得下一期資料，完成後在此顯示產生的維基代碼。"
-  },
-  "newsletter.editorial": {
-    "en": "Review the fetched statistics and source revisions before pasting. A source that is unavailable is identified rather than counted as zero.",
-    "zh-hans": "粘贴前请检查已获取的统计数据和来源版本。无法获取的来源会明确标示，不会计为零。",
-    "zh-hant": "貼上前請檢查已取得的統計資料和來源版本。無法取得的來源會明確標示，不會計為零。"
-  },
-  "newsletter.edit_help": {
-    "en": "You can edit and manually select the wikitext below. Edits stay in this page and are lost when you reload or choose another issue.",
-    "zh-hans": "可以编辑或手动选取下方的维基代码。修改仅保留在当前页面，重新载入或选择其他期刊后会丢失。",
-    "zh-hant": "可以編輯或手動選取下方的維基代碼。修改僅保留在目前頁面，重新載入或選擇其他期刊後會遺失。"
   },
   "newsletter.contents": {
     "en": "Issue pages",
@@ -1684,11 +1674,6 @@
     "zh-hans": "已选取维基代码。请按Ctrl+C或Command+C复制。",
     "zh-hant": "已選取維基代碼。請按Ctrl+C或Command+C複製。"
   },
-  "newsletter.sources": {
-    "en": "Source revisions",
-    "zh-hans": "来源版本",
-    "zh-hant": "來源版本"
-  },
   "newsletter.page.main": {
     "en": "Main page",
     "zh-hans": "主页",
@@ -1708,16 +1693,6 @@
     "en": "Choose January, April, July, or October from 2020 through 2099.",
     "zh-hans": "请选择2020年至2099年的1月、4月、7月或10月。",
     "zh-hant": "請選擇2020年至2099年的1月、4月、7月或10月。"
-  },
-  "newsletter.in_progress": {
-    "en": "This issue is being prepared as the quarter progresses. Figures cover the reporting dates shown and are refreshed automatically.",
-    "zh-hans": "本期简讯随本季度进展持续准备。统计范围为上方显示的报道日期，数据会自动刷新。",
-    "zh-hant": "本期簡訊隨本季度進展持續準備。統計範圍為上方顯示的報導日期，資料會自動重新整理。"
-  },
-  "newsletter.automatic": {
-    "en": "The current draft is selected automatically and advances at 00:00 UTC on January 1, April 1, July 1, and October 1.",
-    "zh-hans": "自动选择当前期刊，并在1月1日、4月1日、7月1日和10月1日的00:00 UTC切换至下一期。",
-    "zh-hant": "自動選擇目前期刊，並在1月1日、4月1日、7月1日和10月1日的00:00 UTC切換至下一期。"
   },
   "newsletter.choice.current": {
     "en": "Current draft",

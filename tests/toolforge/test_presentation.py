@@ -15,6 +15,7 @@ import datetime as dt
 import json
 import re
 import sys
+import tempfile
 import unittest
 from html import unescape
 from pathlib import Path
@@ -32,6 +33,7 @@ from webservice.pages import (
     render_live_status,
     render_logs,
     render_maintenance,
+    render_newsletter,
 )
 from webservice.presentation import (
     Interface,
@@ -232,7 +234,7 @@ def write_interface_fixtures(destination: Path) -> None:
     text. It contains no runtime data and performs no external requests.
 
     Args:
-        destination: Directory receiving five HTML pages per locale.
+        destination: Directory receiving six HTML pages per locale.
     """
     fixture = _fixtures()
     fixture["config"]["routines"] = routine_configuration()
@@ -347,6 +349,22 @@ def write_interface_fixtures(destination: Path) -> None:
                 now=now,
             ),
             "error": render_error("backlog.not_found", locale),
+            "newsletter": render_newsletter(
+                {
+                    "issue": "2027-01",
+                    "available": True,
+                    "pages": [
+                        {
+                            "title": "WikiProject:電子遊戲/簡訊/2027-01"
+                            + suffix,
+                            "url": "https://zh.wikipedia.org/wiki/Fixture",
+                            "text": "{{模板|標題}}\n" + "長條目名稱" * 100,
+                        }
+                        for suffix in ("", "/特優內容", "/宣告")
+                    ],
+                },
+                locale,
+            ),
         }
         for surface, document in documents.items():
             (directory / f"{surface}.html").write_text(document)
@@ -459,6 +477,34 @@ class ReviewPresentationTests(unittest.TestCase):
             0
         ]
         assert self.en.text("empty.section") in section
+
+
+class ContentsNavigationTests(unittest.TestCase):
+    """Keep every full page on the shared contents layout."""
+
+    def test_all_pages_share_accessible_contents_navigation(self) -> None:
+        """Keep desktop and mobile contents linked to their sections."""
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            write_interface_fixtures(directory)
+            for fixture in directory.glob("*/*.html"):
+                with self.subTest(fixture=fixture.relative_to(directory)):
+                    output = fixture.read_text()
+                    assert output.count('class="contents-panel"') == 1
+                    assert output.count('class="contents-mobile"') == 1
+                    contents = re.search(
+                        r'<aside class="contents-panel">(.*?)</aside>',
+                        output,
+                        re.DOTALL,
+                    )
+                    assert contents is not None
+                    targets = re.findall(r'href="#([^"]+)"', contents[1])
+                    assert targets
+                    assert len(targets) % 2 == 0
+                    midpoint = len(targets) // 2
+                    assert targets[:midpoint] == targets[midpoint:]
+                    identifiers = set(re.findall(r'\bid="([^"]+)"', output))
+                    assert set(targets) <= identifiers
 
 
 class PresentationTests(unittest.TestCase):
@@ -987,10 +1033,15 @@ class PresentationTests(unittest.TestCase):
                 output,
             )
             assert line is not None
-            assert line[1].endswith("</button>")
+            interface = Interface(locale)
+            opening, closing = (
+                (" (", ")") if locale == "en" else ("\uff08", "\uff09")
+            )
+            details = interface.text("ops.details_link")
+            assert line[1].startswith('<span class="status-label">')
+            assert f"</span>{opening}<button" in line[1]
+            assert line[1].endswith(f">{details}</button>{closing}")
             assert "data-clock" not in line[1]
-            assert "(" not in line[1]
-            assert "\uff08" not in line[1]
             assert '<button type="button" class="status-link"' in line[1]
             assert "<div" not in line[1]
             assert "<br" not in line[1]
@@ -1356,7 +1407,10 @@ class LiveVisibilityTests(unittest.TestCase):
                     ):
                         for output in self._outputs(locale):
                             card = self._card(output, routine)
-                            assert label in card
+                            assert (
+                                f'<span class="status-label">{label}</span>'
+                                in card
+                            )
                             assert 'data-status="updated"' in card
 
     def test_contents_links_only_visible_dashboard_sections(self) -> None:
@@ -1487,7 +1541,7 @@ class LiveVisibilityTests(unittest.TestCase):
         for output in self._outputs("en"):
             card = self._card(output)
             assert "Updated report for" not in card
-            assert ">Updated</button>" in card
+            assert '<span class="status-label">Updated</span>' in card
 
     def test_unknown_failure_identifiers_never_expose_diagnostic_text(
         self,
@@ -1554,7 +1608,7 @@ class LiveVisibilityTests(unittest.TestCase):
                 event.update(fields)
                 for output in self._outputs("en"):
                     card = self._card(output)
-                    assert f">{label}</button>" in card
+                    assert f'<span class="status-label">{label}</span>' in card
                     assert "October 17, 2026" not in card
                     assert "October 18, 2026" not in card
         event.update(
@@ -1565,7 +1619,7 @@ class LiveVisibilityTests(unittest.TestCase):
         )
         for output in self._outputs("en"):
             card = self._card(output)
-            assert ">Updated</button>" in card
+            assert '<span class="status-label">Updated</span>' in card
             assert "TimeoutError" not in card
 
     def test_http_causes_are_human_readable_in_every_status_view(self) -> None:
@@ -1634,23 +1688,25 @@ class LiveVisibilityTests(unittest.TestCase):
         ):
             for output in self._outputs(locale):
                 card = self._card(output)
-                button = re.search(
-                    r'<button[^>]*class="status-link"[^>]*>(.*?)</button>',
+                status_label = re.search(
+                    r'<span[^>]*class="status-label"[^>]*>(.*?)</span>',
                     card,
                 )
                 line = re.search(
                     r'<li class="routine-progress context"[^>]*>(.*?)</li>',
                     card,
                 )
-                assert button is not None
-                assert button[1] == label
-                assert f'data-progress-label="{label}"' in button[0]
-                assert f'data-progress-fallback="{fallback}"' in button[0]
+                assert status_label is not None
+                assert status_label[1] == label
+                assert f'data-progress-label="{label}"' in status_label[0]
+                assert (
+                    f'data-progress-fallback="{fallback}"' in status_label[0]
+                )
                 assert line is not None
                 assert line[1] == note
                 assert "data-progress-active" in line[0]
                 assert "2026" not in line[1]
-                assert "2,000/13,500" not in button[1]
+                assert "2,000/13,500" not in status_label[1]
 
     def test_progress_phases_and_unknown_counters_remain_explicit(
         self,
@@ -1674,7 +1730,7 @@ class LiveVisibilityTests(unittest.TestCase):
                 self.now,
             )
             assert f"data-progress-active>{expected}</li>" in output
-            assert ">Updating pageview records</button>" in output
+            assert ">Updating pageview records</span>" in output
         for current, total, expected in (
             (None, None, "Fetching pageviews"),
             (None, 13500, "Fetching pageviews"),
@@ -1724,9 +1780,9 @@ class LiveVisibilityTests(unittest.TestCase):
             (
                 "assessment_lists",
                 (
-                    "Updating assessment lists",
-                    "更新条目评级列表",
-                    "更新條目評級列表",
+                    "Updating recognized content lists",
+                    "更新认证条目列表",
+                    "更新認證條目列表",
                 ),
             ),
             (
@@ -1774,12 +1830,12 @@ class LiveVisibilityTests(unittest.TestCase):
             ):
                 for output in self._outputs(locale):
                     card = self._card(output, routine)
-                    assert f">{label}</button>" in card
+                    assert f">{label}</span>" in card
                     assert f'data-progress-label="{label}"' in card
                     assert "data-progress-active" in card
 
     def test_dated_other_routines_keep_generic_report_labels(self) -> None:
-        """Keep other report dates on buttons, not phase notes."""
+        """Keep other report dates in status labels, not phase notes."""
         status = self.data["status"]
         config = self.data["config"]["routines"]
         config["routines"] = {"new_pages": config["routines"]["pageviews"]}
@@ -1800,7 +1856,7 @@ class LiveVisibilityTests(unittest.TestCase):
         ):
             for output in self._outputs(locale):
                 card = self._card(output, "new_pages")
-                assert f">{label}</button>" in card
+                assert f">{label}</span>" in card
                 assert f"data-progress-active>{note}</li>" in card
 
     def test_progress_requires_fresh_active_observations(self) -> None:
@@ -1839,7 +1895,9 @@ class LiveVisibilityTests(unittest.TestCase):
                     assert "data-progress-active" not in card
                     assert "data-progress-label" not in card
                     assert "data-progress-fallback" not in card
-                    assert f">{fallback}</button>" in card
+                    assert (
+                        f'<span class="status-label">{fallback}</span>' in card
+                    )
 
     def test_progress_requires_the_current_monitor_session(self) -> None:
         """Hide old running records after a monitor restart."""
@@ -1864,7 +1922,7 @@ class LiveVisibilityTests(unittest.TestCase):
                     if visible
                     else "Running"
                 )
-                assert f">{label}</button>" in card
+                assert f">{label}</span>" in card
                 assert ("data-progress-active" in card) is visible
                 assert ("data-progress-label" in card) is visible
 

@@ -1390,16 +1390,17 @@ def render_newsletter(
     ]
     context.update(
         navigation=navigation,
-        issue=value["issue"],
-        period=value["period"],
         available=value["available"],
-        complete=value.get("complete", True),
-        updated=page.source_updated(value.get("updated_at")),
         locale=page.interface.locale,
         issue_choices=[
             {
                 "value": choice,
                 "checked": choice == value["issue"],
+                "url": local_url(
+                    "/newsletter/",
+                    issue=choice,
+                    lang=page.interface.locale,
+                ),
                 "label": page.text(
                     "newsletter.choice.current"
                     if choice == automatic
@@ -1422,10 +1423,6 @@ def render_newsletter(
                 strict=value["available"],
             )
             if value["available"]
-        ],
-        sources=[
-            wiki_link(source["url"], source["label"])
-            for source in value.get("sources", [])
         ],
     )
     return _render("newsletter.html", context)

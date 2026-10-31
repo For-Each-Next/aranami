@@ -183,6 +183,7 @@ class TestRevisionBoundaries(TestCase):
         self.reader = WikiReader(self.site)
         self.reader.now = dt.datetime(2026, 10, 18, 12, tzinfo=dt.UTC)
         self.page = Mock()
+        self.page.pageid = 42
         self.page._revisions = {  # ruff: ignore[private-member-access]
             number: SimpleNamespace(
                 revid=number,
@@ -221,6 +222,54 @@ class TestRevisionBoundaries(TestCase):
         ):
             assert self.reader.at("Template:Daily", boundary) == "3"
         assert self.reader.sources["Template:Daily"]["url"].endswith("oldid=3")
+        assert (
+            self.reader.source_page_ids["Template:Daily"] == self.page.pageid
+        )
+
+    def test_redirect_target_uses_historical_text_and_local_aliases(
+        self,
+    ) -> None:
+        """Parse historical redirects without fetching current text."""
+        self.site.redirects.return_value = ["REDIRECT", "重定向"]
+        self.site.redirect_regex = pywikibot.site.BaseSite.redirect_regex.fget(
+            self.site,
+        )
+        target = Mock(site=self.site)
+        target.title.return_value = "Wikipedia:历史上的今天/10月17日"
+        with patch(
+            "backend.website.collect.pywikibot.Page",
+            return_value=target,
+        ) as page:
+            assert (
+                self.reader.redirect_target(
+                    "<!-- old source -->#重定向 "
+                    "[[Wikipedia:历史上的今天/10月17日#top]]",
+                )
+                == target.title.return_value
+            )
+            target.title.assert_called_once_with(with_section=False)
+            page.assert_called_once()
+            assert (
+                self.reader.redirect_target("{{Otd/format|date=10月17日}}")
+                is None
+            )
+        target.get.assert_not_called()
+        self.page.get.assert_not_called()
+
+    def test_redirect_to_another_wiki_is_rejected(self) -> None:
+        """Keep cached anniversary evidence within Chinese Wikipedia."""
+        self.site.redirects.return_value = ["REDIRECT"]
+        self.site.redirect_regex = pywikibot.site.BaseSite.redirect_regex.fget(
+            self.site,
+        )
+        with (
+            patch(
+                "backend.website.collect.pywikibot.Page",
+                return_value=Mock(),
+            ),
+            self.assertRaisesRegex(ValueError, "stay on this wiki"),
+        ):
+            self.reader.redirect_target("#REDIRECT [[en:Other source]]")
 
     def test_history_keeps_carry_in_and_excludes_end_boundary(self) -> None:
         """Retain the previous state and every in-window revision."""
@@ -235,6 +284,53 @@ class TestRevisionBoundaries(TestCase):
             )
         assert [row["text"] for row in rows] == ["1", "2", "3"]
         assert all(row["timestamp"].tzinfo is dt.UTC for row in rows)
+
+    def test_overwritten_anniversary_uses_completed_day_revision(
+        self,
+    ) -> None:
+        """Read the recurring OTD source as it stood before midnight."""
+        source = "Wikipedia:历史上的今天/10月17日"
+        self.reader.now = dt.datetime(2027, 10, 20, tzinfo=dt.UTC)
+        self.page._revisions = {  # ruff: ignore[private-member-access]
+            number: SimpleNamespace(
+                revid=number,
+                timestamp=pywikibot.Timestamp.fromISOformat(stamp),
+                text=(
+                    "{{Otd/format|date=10月17日|event1="
+                    f"1996: '''[[{title}]]''' with [[Incidental]]."
+                    "}}"
+                ),
+            )
+            for number, stamp, title in (
+                (1, "2025-10-17T20:00:00Z", "Prior year"),
+                (2, "2026-10-17T11:00:00Z", "Earlier in day"),
+                (3, "2026-10-17T23:59:59Z", "At day end"),
+                (4, "2026-10-18T00:00:00Z", "Following midnight"),
+                (5, "2027-10-17T12:00:00Z", "Overwritten next year"),
+            )
+        }
+        self.page.get.side_effect = AssertionError("Unexpected current text")
+        with patch(
+            "backend.website.collect.pywikibot.Page",
+            return_value=self.page,
+        ) as page:
+            rows = homepage.collect_history(
+                dt.date(2026, 10, 17),
+                dt.date(2026, 10, 18),
+                None,
+                self.reader,
+                read_at=self.reader.at,
+            )
+        page.assert_called_once_with(self.site, source)
+        self.page.get.assert_not_called()
+        assert rows == [
+            {
+                "title": "At day end",
+                "url": "https://zh.wikipedia.org/wiki/At_day_end",
+                "date": "2026-10-17",
+            },
+        ]
+        assert self.reader.sources[source]["url"].endswith("oldid=3")
 
     def test_at_reuses_the_observed_historical_revision(
         self,
@@ -290,6 +386,33 @@ class TestRevisionBoundaries(TestCase):
         missing.revisions.assert_called_once()
         available.revisions.assert_called_once()
 
+    def test_cached_reads_restore_the_matching_source_revision(self) -> None:
+        """Restore source links after interleaved cached reads."""
+        title = "Template:Daily"
+        before = dt.datetime(2026, 10, 17, tzinfo=dt.UTC)
+        after = dt.datetime(2026, 10, 18, tzinfo=dt.UTC)
+        self.page.get.return_value = "4"
+        self.page.latest_revision_id = 4
+        with patch(
+            "backend.website.collect.pywikibot.Page",
+            return_value=self.page,
+        ):
+            for read, expected in (
+                (lambda: self.reader(title), "4"),
+                (lambda: self.reader.at(title, before), "1"),
+                (lambda: self.reader.at(title, after), "3"),
+                (lambda: self.reader.at(title, before), "1"),
+                (lambda: self.reader(title), "4"),
+                (lambda: self.reader.at(title, after), "3"),
+            ):
+                with self.subTest(expected=expected):
+                    assert read() == expected
+                    assert self.reader.sources[title]["url"].endswith(
+                        "oldid=" + expected,
+                    )
+        self.page.get.assert_called_once()
+        assert self.page.revisions.call_count == 2  # ruff: ignore[magic-value-comparison]
+
 
 class TestTitleResolution(TestCase):
     """Resolve bounded batches before project membership checks."""
@@ -322,6 +445,17 @@ class TestTitleResolution(TestCase):
         assert reader.resolve("Intermediate") == "Game"
         assert reader.resolve("繁體名稱") == "Game"
         assert reader.resolve("missing_name") == "Missing name"
+        for title in (
+            "old_name",
+            "Old name",
+            "Intermediate",
+            "繁體名稱",
+            "简体名称",
+            "Game",
+        ):
+            assert reader.resolve_page_id(title) == 1
+        assert reader.resolve_page_id("missing_name") is None
+        assert reader.resolve_page_id("Missing name") is None
         site.simple_request.assert_called_once_with(
             action="query",
             prop="info",
@@ -330,6 +464,45 @@ class TestTitleResolution(TestCase):
             converttitles=True,
             formatversion=2,
         )
+
+    @staticmethod
+    def test_invalid_page_has_no_target_id_without_another_query() -> None:
+        """Keep invalid titles distinct from present pages."""
+        site = Mock()
+        site.simple_request.return_value.submit.return_value = {
+            "query": {"pages": [{"title": "Invalid", "invalid": True}]},
+        }
+        reader = WikiReader(site)
+        assert reader.resolve_page_id("Invalid") is None
+        assert reader.resolve("Invalid") == "Invalid"
+        assert reader.resolve_page_id("Invalid") is None
+        site.simple_request.assert_called_once()
+
+    def test_missing_or_malformed_present_ids_never_become_missing(
+        self,
+    ) -> None:
+        """Reject unknown IDs while preserving title-only callers."""
+        for fields in (
+            {},
+            {"pageid": None},
+            {"pageid": "1"},
+            {"pageid": True},
+            {"pageid": 0},
+            {"pageid": -1},
+            {"pageid": 1.0},
+            {"missing": False},
+            {"invalid": None},
+        ):
+            with self.subTest(fields=fields):
+                site = Mock()
+                site.simple_request.return_value.submit.return_value = {
+                    "query": {"pages": [{"title": "Game", **fields}]},
+                }
+                reader = WikiReader(site)
+                assert reader.resolve("Game") == "Game"
+                with self.assertRaisesRegex(ValueError, "target page ID"):
+                    reader.resolve_page_id("Game")
+                site.simple_request.assert_called_once()
 
     @staticmethod
     def test_batches_are_bounded_and_cached_subjects_are_not_requested() -> (
@@ -383,7 +556,7 @@ class TestTitleResolution(TestCase):
                 site.simple_request.return_value.submit.return_value = result
                 reader = WikiReader(site)
                 with self.assertRaisesRegex(ValueError, message):
-                    reader.resolve_many(["Loop"])
+                    reader.resolve_page_id("Loop")
 
 
 class TestSnapshotPublication(TestCase):

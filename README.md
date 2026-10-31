@@ -29,18 +29,20 @@ A successful check can finish with **no update needed**.
 | [Pageview rankings][pageviews] | Daily cycle from `18:00`; normal first attempt `18:59`, retries at `HH:59` | Daily, weekly, monthly, seasonal, yearly, and monthly task-force rankings. |
 | [English Wikipedia comparisons][english] | Daily, `23:24` | Important and high-quality English articles, their Chinese counterparts, and relevant changes. |
 | [Database reports][database] | Daily, `00:00` | Delegated refresh requests for subscribed PexBot reports within the configured project scope. |
+| [Newsletter drafts](https://aranami.toolforge.org/newsletter/) | Daily, `00:00` | Quarterly drafts through yesterday, using database membership and recorded article and homepage history. |
+| Newsletter history archive | Hourly, `HH:00` | New or changed project talk-page histories, retained in Parquet for daily newsletter generation. |
 
 New pages and Pageviews fill missing daily reports and retain confirmed
 completion across restarts. Pageviews uses an 18:00 UTC reporting boundary;
 incomplete data retries hourly. PexBot reports already edited that UTC day
 are not requested again.
 
-The website refreshes content reviews hourly and its other six datasets
+The website refreshes content reviews hourly and its other five datasets
 independently every 24 hours after success. Review cards link to active
 discussions and show assessments, introductions, and known start dates and
 durations. Failures retain valid data and retry hourly; visits are read-only.
-At `00:00 UTC` on 1 January, April, July, and October, the newsletter refreshes
-the completed quarter and advances its default issue to the next publication.
+The newsletter refreshes at `00:00 UTC` every day. On 1 January, April, July,
+and October it closes the completed quarter and advances its default issue.
 
 ## How it works
 

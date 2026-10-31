@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% macro section_links() %}
+{% block contents_links %}
 <ul>
   {% if reviews %}<li><a href="#reviews">{{ t.reviews.heading }}</a></li>{% endif %}
   {% if sections %}<li><a href="#homepage">{{ t.homepage.heading }}</a>
@@ -8,19 +8,6 @@
   {% if backlog %}<li><a href="#backlog">{{ t.nav.backlog }}</a></li>{% endif %}
   <li><a href="#tool-status">{{ t.ops.heading }}</a></li>
 </ul>
-{% endmacro %}
-{% block layout_class %} page-layout--with-contents{% endblock %}
-{% block navigation %}
-<aside class="contents-panel">
-  <nav class="page-toc contents-desktop" aria-label="{{ t.nav.contents }}">
-    <p class="contents-heading">{{ t.nav.contents }}</p>
-    {{ section_links() }}
-  </nav>
-  <details class="contents-mobile">
-    <summary>{{ t.nav.contents }}</summary>
-    <nav class="page-toc" aria-label="{{ t.nav.contents }}">{{ section_links() }}</nav>
-  </details>
-</aside>
 {% endblock %}
 {% block content %}
 {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}

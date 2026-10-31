@@ -201,7 +201,9 @@ Allow the canonical `wss://aranami.toolforge.org` origin explicitly in CSP;
 some browsers do not include WebSocket schemes in `connect-src 'self'`.
 
 Pages work with ordinary links, GET forms, and native controls without
-JavaScript. `/api/live` reads saved status only and renders existing live
+JavaScript. Every page shares the dashboard's left contents panel on desktop
+and native collapsible contents control on narrow screens.
+`/api/live` reads saved status only and renders existing live
 regions, never website datasets or logs. `/api/live/ws` pushes the same
 localized snapshot when saved status changes and periodically renews it.
 Subscriptions accept no mutations or collection commands. Fixed assets live in
@@ -307,18 +309,91 @@ calendar identities live in `shared.newsletter`; the public controller passes
 validated saved facts to `updater.services.newsletter` for wikitext projection
 and then to the webservice renderer for HTML. No request starts collection,
 publishes wiki text, or writes runtime data. Browser edits are ephemeral.
+The header's native Tools disclosure contains newsletter and run-log links.
+Issue radios navigate directly to saved drafts, with ordinary links available
+without JavaScript. Copy actions use Codex primary progressive buttons.
+Source revisions remain internal provenance rather than a displayed list.
 
 The independent daily newsletter report in `backend.website` fetches sources
 for the current publication quarter and its successor. It prepares the next
 issue while the reporting quarter is still in progress, with an explicit
 exclusive observation cutoff through the latest completed UTC day. Historical
-reads, DYK, quality revisions, awards, curated new pages, and saved homepage
+reads, DYK, quality revisions, awards, curated new pages, and homepage
 appearances use that same cutoff. Quarterly completion is separate from data
-availability. Supplemental current article totals use a fresh membership count
-with their own observation timestamp, rather than a historical quarter-end label.
-Missing daily records retain their confirmed minimum count and
-coverage gaps. No-data selections show collection state without copyable
+availability. The overview retains all four content links even when the linked
+pages have not been created. Supplemental current article totals use a fresh
+membership count with their own observation timestamp, rather than a historical
+quarter-end label. Assessment totals use internal project snapshots and current
+membership rather than parsing the assessment log or recognized-content pages.
+Retain each internal snapshot's actual collection time; a delayed observation
+must not be labeled as an exact quarter-end count. Reuse saved overview counts
+only for the same issue and observation boundary when no newer source exists.
+Missing daily records retain their confirmed minimum count and coverage gaps
+internally. Copied drafts retain all three quarter months, using the registered
+counts available at collection time without minimum-count or gap annotations.
+Unelapsed months therefore have zero registered articles in the draft without
+changing their unknown observation state in saved facts.
+No-data selections show collection state without copyable
 empty templates. Features and interviews are outside this numeric generator.
+
+Newsletter homepage lists use the current Wiki Replica PageAssessments query
+to select project articles, then collect each issue's full elapsed quarter
+independently of the dashboard's rolling 100-day window. Featured, good, and
+Today in history sources use revisions before each display day's UTC end;
+news uses article talk-page ITN notices without reading news-template histories.
+Historical display dates do not imply historical
+project membership. Resolve source titles before membership matching and retain
+revision links with each section. Missing membership or unreadable history
+fails the refresh and preserves the previous complete newsletter observation.
+Legacy snapshots may still use fully covered dashboard periods.
+
+`cache/today-in-history-v1.parquet` separately retains unfiltered raw OTD
+source text and exact revision IDs for the last 100 completed UTC days.
+Recurring month/day pages are keyed by the full display date, so a later year's
+overwrites cannot change an earlier observation. Daily newsletter preparation
+parses cached sources before resolving titles and applying project membership.
+Retain all bold primary article links with their resolved target titles and
+article page IDs, independently of project scope. Reuse the batched title query's
+page IDs, including normalization, Chinese conversion, and redirect mappings.
+Join current project scope by target article ID; incidental links and missing
+targets do not establish membership. Refresh this derived subject metadata at
+analysis time and retain its own observation timestamp, without changing the
+historical source evidence. Concurrent writers keep the newest subject analysis.
+Historical redirects are followed at the same daily cutoff. Retain the
+requested page identity, redirect revisions, and final target page/revision
+IDs; page ID alone never identifies historical content. Loops, missing targets,
+or unreadable revisions prevent replacing the section's saved facts.
+Older dates are read historically without extending retention. This cache is
+disposable; corrupt entries are rebuilt and cache clearing loses no report facts.
+
+Article-history candidates come from replica project membership joined with
+verified Chinese Article history categories and template transclusions.
+Include current, failed, and former FA/FL/GA statuses, A/Bplus reviews,
+past-news, DYK, and anniversary notices. Categories only select sources;
+the audited module's actions/results and explicit dates establish events.
+Preload talk pages and pair text with its actual returned revision ID.
+Recorded FA/FL/GA/A/Bplus additions and removals replace project-list edit
+dates; DYK dates come from Article history or DYKtalk. Recorded ITNtalk events
+provide newsletter news dates. OTD talk notices
+remain supplemental metadata and never replace daily display-revision proof.
+Retain unknown dates but exclude them from dated quarter lists with a caveat.
+
+`reports/newsletter-history-v1.parquet` durably retains versioned talk snapshots
+and their nested event rows. Initial collection backfills all recorded dates;
+hourly `HH:00 UTC` scans compare replica revisions and parser/alias identity,
+then preload only changed sources. Earlier observed revisions and departed
+project members stay on disk; current newsletter projection uses the latest
+snapshot under current membership and titles. Atomic locked merges prevent
+partial writes and lost concurrent updates. Incomplete batches, corrupt files,
+or exceeded bounds fail rather than replace retained history with an empty set.
+Keep this archive outside disposable caches and source payloads. The standalone
+backfill command is documented in [Usage](usage.md#prepare-a-quarterly-newsletter).
+Hourly archive scans do not regenerate the newsletter between daily refreshes.
+
+News carried into the quarter retains an unknown first-appearance date.
+Observed featured, news, and Today in history lists receive matching column
+sections even when the prior issue's layout omitted them; absent or empty new
+sections do not add headings.
 
 The numeric sections follow the October 2026 issue (main revision
 94691317; quality revision 94683150). Newsletter facts use the existing bounded
@@ -338,11 +413,12 @@ observed grade breakdown remains omitted rather than inheriting old numbers.
 
 Native issue radios default to `Issue.upcoming()` for the UTC request date.
 The cache key includes this automatic selection so the default changes at
-the quarter boundary even if the previous page is still cached. A quarterly
-`00:00 UTC` cron refresh queues behind any active website pass. Quarter-scoped
-source identities make newsletter and homepage observations due at that
-boundary, independently of their normal refresh intervals. The completed
-issue and new draft remain separate saved observations.
+the quarter boundary even if the previous page is still cached. A daily
+`00:00 UTC` cron refresh queues behind any active website pass. Date-scoped
+newsletter identities make each newly completed day due regardless of the
+last successful refresh time. Quarter-scoped homepage identities still make
+those observations due at the quarter boundary. Failures retry hourly.
+The completed issue and new draft remain separate saved observations.
 
 ## Polars and Parquet
 

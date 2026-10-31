@@ -49,6 +49,82 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
     """Preserve observed changes and missing data in generated text."""
 
     @staticmethod
+    def test_article_history_quality_uses_recorded_status_changes() -> None:
+        """Describe milestones with their recorded status dates."""
+        changes = [
+            {
+                "date": "2026-10-02",
+                "grade": grade,
+                "action": action,
+                "title": title,
+            }
+            for grade, action, title in (
+                ("FA", "added", "新典範"),
+                ("FL", "removed", "舊列表"),
+                ("GA", "removed", "舊優良"),
+                ("A", "added", "甲級遊戲"),
+                ("Bplus", "removed", "乙上級遊戲"),
+            )
+        ]
+        text = _render({
+            "quality_changes": changes,
+            "quality_source": "article_history",
+            "history_undated": {"quality": 2},
+        })[1]["text"]
+        assert "5次有明確日期的評級變動" in text
+        assert "認證條目列表變動" not in text
+        assert "新增典範條目" in text
+        assert "撤銷特色列表" in text
+        assert "{{icon|DGA}}&thinsp;撤銷優良條目" in text
+        assert "{{icon|A}}&thinsp;新增甲級條目" in text
+        assert "{{icon|Bplus}}&thinsp;撤銷乙上級條目" in text
+        assert (
+            "另保留2項日期不詳的評級變動紀錄，未列入本期按日期統計。" in text
+        )
+        assert "（無已知日期的變動）" in text
+        assert "列表新增" not in text
+        assert "列表移除" not in text
+
+    @staticmethod
+    def test_undated_homepage_records_have_a_separate_caveat() -> None:
+        """Keep unknown dates separate from dated article lists."""
+        pages = _render({
+            "quality_changes": [],
+            "quality_source": "article_history",
+            "history_undated": {
+                "quality": 1,
+                "dyk": 2,
+                "news": 3,
+                "history": 4,
+            },
+            "dyk": [],
+        })
+        quality, announcements = pages[1]["text"], pages[2]["text"]
+        assert "未記錄到本期有明確日期的評級變動" in quality
+        assert "（無變動）" not in quality
+        assert (
+            "（新條目推薦2項、新聞動態3項、歷史上的今天4項）" in announcements
+        )
+        assert "未列入本期按日期列出的條目。" in announcements
+        assert "=== 在首頁上 ===\n\n另保留日期不詳" in announcements
+        assert "日期不詳的評級變動" not in announcements
+        assert "@@aranami:" not in announcements
+
+    @staticmethod
+    def test_zero_undated_counts_do_not_add_notices() -> None:
+        """Omit caveats when all stored events have known dates."""
+        pages = _render({
+            "quality_changes": [],
+            "quality_source": "article_history",
+            "history_undated": dict.fromkeys(
+                ("quality", "dyk", "news", "history"),
+                0,
+            ),
+        })
+        assert "日期不詳" not in pages[1]["text"]
+        assert "日期不詳" not in pages[2]["text"]
+
+    @staticmethod
     def test_previous_issue_layout_survives_generated_data_changes() -> None:
         """Keep original markup outside the generated fields."""
         source = (
@@ -96,8 +172,8 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "[[主题:电子游戏|主題]]（[[主题讨论:电子游戏|討論]]）" in main
         assert "[[維基專題討論:電子遊戲/簡訊|討論本期簡訊]]" in main
         assert "~~{{void}}~~" in main
-        assert "/2027-01/專題" not in main
-        assert "/2027-01/訪談" not in main
+        assert "/2027-01/專題|專題報導：<待定>]]" in main
+        assert "/2027-01/訪談|訪談：<待定>]]" in main
         assert "@@aranami:" not in main
 
     @staticmethod
@@ -222,10 +298,11 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             assert "{{div col|colwidth=27em}}" in text
             assert "{{div col end}}" in text
         assert (
-            "* [[:展示遊戲|展示遊戲]]<small>（12月31日）</small>"
+            "* [[:展示遊戲]]<small>（12月31日）</small>"
             in sections["優良條目"]
         )
-        assert "額外展示" not in announcements
+        assert "==== 特色內容 ====" in announcements
+        assert "額外展示" in announcements
         assert "==== 新聞動態 ====" not in announcements
         assert "==== 歷史上的今天 ====" not in announcements
         snapshot["homepage"]["good"] = []
@@ -252,6 +329,108 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         )[0]
         assert "來源資料暫未取得" in good
         assert "\n（無）\n" not in good
+
+    @staticmethod
+    def test_new_news_and_history_sections_preserve_source_style() -> None:
+        """Show observed sections absent from the prior issue."""
+        announcements = _render({
+            "homepage": {
+                "featured": [],
+                "good": [],
+                "news": [
+                    {
+                        "title": "延續新聞",
+                        "date": "2026-10-01",
+                        "date_kind": "window_start",
+                    },
+                    {
+                        "title": "新新聞",
+                        "date": "2026-10-08",
+                        "date_kind": "appearance",
+                    },
+                ],
+                "history": [{"title": "歷史遊戲", "date": "2026-10-15"}],
+            },
+        })[2]["text"]
+        for label in ("新聞動態", "歷史上的今天"):
+            heading = f"==== {label} ===="
+            assert announcements.count(heading) == 1
+            assert announcements.index(heading) < announcements.index(
+                "=== ACG專題獎 ===",
+            )
+            assert (
+                heading + "\n\n"
+                f"以下條目曾登上首頁的「{label}」區塊。\n"
+                "{{div col|colwidth=27em}}\n"
+            ) in announcements
+        assert (
+            "* [[:延續新聞]]<small>（期初已在首頁，首次日期不詳）</small>"
+        ) in announcements
+        assert "* [[:新新聞]]<small>（10月8日）</small>" in announcements
+        assert ("* [[:歷史遊戲]]<small>（10月15日）</small>") in announcements
+        assert "10月1日" not in announcements
+        assert "==== 特色內容 ====" not in announcements
+
+    @staticmethod
+    def test_existing_news_section_is_filled_without_duplicate() -> None:
+        """Keep an existing news section's authored surrounding text."""
+        layouts = subpage_layouts()
+        announcement = layouts["宣告"]
+        announcement["homepage_rows"]["news"] = (
+            "* @@aranami:title@@<small>（@@aranami:date@@）</small>"
+        )
+        announcement["text"] = announcement["text"].replace(
+            "=== ACG專題獎 ===",
+            "==== 新聞動態 ====\n\n保留的說明。\n"
+            "@@aranami:homepage:news@@\n\n=== ACG專題獎 ===",
+        )
+        text = _render({
+            "subpage_layouts": layouts,
+            "homepage": {
+                "news": [
+                    {
+                        "title": "延續新聞",
+                        "date": "2026-10-01",
+                        "date_kind": "window_start",
+                    },
+                ],
+                "featured": None,
+                "history": [],
+            },
+        })[2]["text"]
+        assert text.count("==== 新聞動態 ====") == 1
+        assert "保留的說明。" in text
+        assert "期初已在首頁，首次日期不詳" in text
+        assert "10月1日" not in text
+        assert "==== 特色內容 ====" not in text
+        assert "==== 歷史上的今天 ====" not in text
+
+    @staticmethod
+    def test_article_links_keep_apostrophes_without_redundant_labels() -> None:
+        """Keep title apostrophes and meaningful user labels."""
+        title = "Let's Go!陰陽師"
+        pages = _render({
+            "quality_changes": [
+                {
+                    "date": "2026-10-01",
+                    "grade": "fa",
+                    "action": "added",
+                    "title": title,
+                },
+            ],
+            "dyk": [{"title": title, "date": "2026-11-01"}],
+            "newcomers": ["O'Brien"],
+        })
+        for page in pages[1:]:
+            text = page["text"]
+            assert "[[:Let's Go!陰陽師]]" in text
+            assert "Let&#39;" not in text
+            assert "陰陽師|" not in text
+            assert any(
+                str(link.title) == ":" + title and link.text is None
+                for link in mwparserfromhell.parse(text).filter_wikilinks()
+            )
+        assert "[[:User:O'Brien|O'Brien]]" in pages[2]["text"]
 
     @staticmethod
     def test_hostile_link_titles_remain_literal_wikitext() -> None:
@@ -287,8 +466,8 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "[[:User:Game" in output[2]["text"]
 
     @staticmethod
-    def test_in_progress_issue_has_no_future_no_change_claims() -> None:
-        """Render dates without blank or future-month templates."""
+    def test_in_progress_issue_retains_all_quarter_months() -> None:
+        """Fill the full quarter using collected figures."""
         pages = _render({
             "observation_end": "2026-10-31",
             "complete": False,
@@ -307,15 +486,17 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "* 13,025篇條目" in pages[0]["text"]
         assert "資料期間：" not in pages[0]["text"]
         assert "=== 2026年10月 ===" in pages[1]["text"]
-        assert "=== 2026年11月 ===" not in pages[1]["text"]
-        assert "=== 2026年12月 ===" not in pages[1]["text"]
+        assert "=== 2026年11月 ===" in pages[1]["text"]
+        assert "=== 2026年12月 ===" in pages[1]["text"]
+        assert "（截至10月30日）" not in pages[1]["text"]
         assert "* 10月計12篇" in pages[2]["text"]
-        assert "* 11月計" not in pages[2]["text"]
+        assert "* 11月計0篇。" in pages[2]["text"]
+        assert "* 12月計0篇。" in pages[2]["text"]
         assert "待補" not in "\n".join(page["text"] for page in pages)
 
     @staticmethod
-    def test_incomplete_register_uses_known_minimum_counts() -> None:
-        """Show fetched records despite missing daily observations."""
+    def test_register_figures_omit_collection_diagnostics() -> None:
+        """Copy all months while retaining gaps in saved facts."""
         pages = _render({
             "observation_end": "2026-10-31",
             "new_pages_data": {
@@ -342,9 +523,11 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         })
         text = pages[2]["text"]
         assert "18篇" in text
-        assert "另有2日登記未完整" in text
-        assert "* 10月計至少18篇" in text
-        assert "* 11月計" not in text
+        assert "* 10月計18篇。" in text
+        assert "* 11月計0篇。" in text
+        assert "* 12月計0篇。" in text
+        assert "至少" not in text
+        assert "登記未完整" not in text
 
     @staticmethod
     def test_current_counter_observation_is_separate_from_event_window() -> (
@@ -359,6 +542,18 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "截至2026年10月31日，[[维基专题" in text
         assert "補充現況統計觀察時間" not in text
         assert "截至2026年10月30日，[[维基专题" not in text
+
+    @staticmethod
+    def test_closed_issue_labels_delayed_snapshot_observation() -> None:
+        """Keep a later snapshot distinct from quarter-end figures."""
+        text = _render({
+            "observation_end": "2027-01-01",
+            "complete": True,
+            "overview_observed_at": "2027-01-01T18:00:00+00:00",
+            "overview": {"total": 13025},
+        })[0]["text"]
+        assert "截至2027年1月1日，[[维基专题" in text
+        assert "截至2026年第四季底" not in text
 
 
 if __name__ == "__main__":

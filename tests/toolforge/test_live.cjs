@@ -122,6 +122,9 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
     const subject = "Updating records for October 20, 2026";
     const button = new Element("BUTTON", {
         id: "status-button", commandfor: "popover", command: "show-modal",
+    }, "Details…");
+    const statusLabel = new Element("SPAN", {
+        id: "status-label",
         ...(completed ? {} : {
             "data-progress-label": subject,
             "data-progress-fallback": "Running",
@@ -156,7 +159,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
     const root = new Element("SECTION", {
         id: logs ? "live-server-status" : "tool-status", ...clockAttributes,
     }, "", logs ? [server, notice] : [
-        button, clock, popup, schedule, notice, ...(completed ? [] : [progress]),
+        statusLabel, button, clock, popup, schedule, notice, ...(completed ? [] : [progress]),
     ]);
     const uptime = new Element("SPAN", {
         ...clockAttributes,
@@ -178,7 +181,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
             return this.roots.map(search).find(Boolean) ?? null;
         },
     };
-    return { document, button, clock, popup, relative, schedule, server, progress, notice, root, uptime, runtime, memory };
+    return { document, button, statusLabel, clock, popup, relative, schedule, server, progress, notice, root, uptime, runtime, memory };
 }
 
 function browser(logs = false, resources = false, options = {}) {
@@ -448,37 +451,40 @@ test("synchronization keeps existing modal dialogs and freezes completed timers"
     assert.equal(page.popup.open, true);
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.document.getElementById("status-button"), page.button);
-    assert.equal(page.button.textContent, "No update");
-    assert.equal(page.button.hasAttribute("data-progress-label"), false);
-    assert.equal(page.button.hasAttribute("data-progress-fallback"), false);
+    assert.equal(page.statusLabel.textContent, "No update");
+    assert.equal(page.button.textContent, "Details…");
+    assert.equal(page.statusLabel.hasAttribute("data-progress-label"), false);
+    assert.equal(page.statusLabel.hasAttribute("data-progress-fallback"), false);
     assert.equal(page.clock.hasAttribute("data-clock"), false);
     const completed = page.clock.textContent;
     assert.equal(completed, "(14.30 s)");
     page.jump(3000);
     assert.equal(page.clock.textContent, completed);
-    assert.equal(page.button.textContent, "No update");
+    assert.equal(page.statusLabel.textContent, "No update");
 });
 
 test("subject labels and phase counts synchronize without replacing buttons", async () => {
     const page = browser();
     page.popup.open = true;
     page.document.activeElement = page.button;
-    assert.equal(page.button.textContent, "Updating records for October 20, 2026");
+    assert.equal(page.statusLabel.textContent, "Updating records for October 20, 2026");
+    assert.equal(page.button.textContent, "Details…");
     assert.equal(page.progress.textContent, "Fetching pageviews (2,000/13,500)");
     await page.respond();
-    const labelNode = page.button.firstChild;
+    const labelNode = page.statusLabel.firstChild;
     page.jump(1000);
-    assert.equal(page.button.firstChild, labelNode);
+    assert.equal(page.statusLabel.firstChild, labelNode);
     assert.equal(page.progress.textContent, "Fetching pageviews (2,000/13,500)");
     page.jump(4000);
     assert.equal(page.requests.length, 2);
     const next = fixture(5000);
     const subject = "Updating records for October 21, 2026";
-    next.button.setAttribute("data-progress-label", subject);
-    next.button.textContent = subject;
+    next.statusLabel.setAttribute("data-progress-label", subject);
+    next.statusLabel.textContent = subject;
     next.progress.textContent = "Fetching pageviews (3,000/13,500)";
     await page.respond(next);
-    assert.equal(page.button.textContent, subject);
+    assert.equal(page.statusLabel.textContent, subject);
+    assert.equal(page.button.textContent, "Details…");
     assert.equal(page.progress.textContent, "Fetching pageviews (3,000/13,500)");
     assert.equal(page.document.getElementById("status-button"), page.button);
     assert.equal(page.document.activeElement, page.button);
@@ -617,7 +623,8 @@ test("failed syncs retain observations, expire schedules, and recover", async ()
     assert.equal(page.uptime.textContent, "Uptime unavailable");
     assert.equal(page.progress.hidden, true);
     assert.equal(page.progress.textContent, "Fetching pageviews (2,000/13,500)");
-    assert.equal(page.button.textContent, "Running");
+    assert.equal(page.statusLabel.textContent, "Running");
+    assert.equal(page.button.textContent, "Details…");
     assert.equal(page.button.hidden, false);
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
@@ -626,7 +633,7 @@ test("failed syncs retain observations, expire schedules, and recover", async ()
     assert.equal(page.notice.hidden, true);
     assert.equal(page.schedule.hasAttribute("data-schedule-time"), true);
     assert.equal(page.progress.hidden, false);
-    assert.equal(page.button.textContent, "Updating records for October 20, 2026");
+    assert.equal(page.statusLabel.textContent, "Updating records for October 20, 2026");
     assert.equal(page.document.getElementById("status-button"), page.button);
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
@@ -722,7 +729,7 @@ test("native WebSocket pushes preserve controls and use the page locale", async 
     assert.equal(page.document.getElementById("status-button"), page.button);
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
-    assert.equal(page.button.textContent, "No update");
+    assert.equal(page.statusLabel.textContent, "No update");
     assert.equal(page.clock.textContent, "(14.30 s)");
     assert.equal(page.clock.hasAttribute("data-clock"), false);
     assert.equal(page.notice.hidden, true);
@@ -759,11 +766,11 @@ test("a delayed HTTP snapshot cannot overwrite a more recent pushed result", asy
     page.jump(1000);
     page.push(fixture(1000, true));
     await page.respond(fixture(0));
-    assert.equal(page.button.textContent, "No update");
+    assert.equal(page.statusLabel.textContent, "No update");
     assert.equal(page.clock.textContent, "(14.30 s)");
     assert.equal(page.root.dataset.serverTime, stamp(1000));
     page.push(fixture(0)); // The same monotonic rule applies to pushed snapshots.
-    assert.equal(page.button.textContent, "No update");
+    assert.equal(page.statusLabel.textContent, "No update");
     assert.equal(page.warnings.length, 0);
 });
 

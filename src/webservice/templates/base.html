@@ -19,9 +19,14 @@
       <a href="/" class="brand"><img src="/aranami.svg" width="36" height="36" alt=""><span>Aranami</span></a>
       <nav class="global-navigation" aria-label="{{ t.nav.global }}">
         <a href="/"{% if navigation and navigation.path == '/' %} aria-current="page"{% endif %}>{{ t.nav.dashboard }}</a>
-        <a href="/newsletter/"{% if navigation and navigation.path == '/newsletter/' %} aria-current="page"{% endif %}>{{ t.nav.newsletter }}</a>
-        <a href="/logs/"{% if navigation and navigation.path == '/logs/' %} aria-current="page"{% endif %}>{{ t.nav.logs }}</a>
         <a href="/about/"{% if navigation and navigation.path == '/about/' %} aria-current="page"{% endif %}>{{ t.nav.about }}</a>
+        <details class="navigation-tools">
+          <summary>{{ t.nav.tools }}</summary>
+          <ul class="navigation-tools-list">
+            <li><a href="/newsletter/"{% if navigation and navigation.path == '/newsletter/' %} aria-current="page"{% endif %}>{{ t.nav.newsletter }}</a></li>
+            <li><a href="/logs/"{% if navigation and navigation.path == '/logs/' %} aria-current="page"{% endif %}>{{ t.nav.logs }}</a></li>
+          </ul>
+        </details>
       </nav>
       <nav class="language-switcher" aria-label="{{ t.nav.language }}">
         <span class="language-label">{{ t.nav.language }}</span>
@@ -35,8 +40,17 @@
       </nav>
     </div>
   </header>
-  <div class="shell page-layout{% block layout_class %}{% endblock %}">
-    {% block navigation %}{% endblock %}
+  <div class="shell page-layout">
+    <aside class="contents-panel">
+      <nav class="page-toc contents-desktop" aria-label="{{ t.nav.contents }}">
+        <p class="contents-heading">{{ t.nav.contents }}</p>
+        {% block contents_links %}<ul><li><a href="#main">{{ heading }}</a></li></ul>{% endblock %}
+      </nav>
+      <details class="contents-mobile">
+        <summary>{{ t.nav.contents }}</summary>
+        <nav class="page-toc" aria-label="{{ t.nav.contents }}">{{ self.contents_links() }}</nav>
+      </details>
+    </aside>
     <main id="main" tabindex="-1">
       <div class="page-heading"><h1>{{ heading }}</h1></div>
       <div class="page-content">{% block content %}{% endblock %}</div>

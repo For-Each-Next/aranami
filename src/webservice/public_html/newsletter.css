@@ -1,14 +1,9 @@
 /* Newsletter editing follows the shared Codex colors and native controls. */
 .newsletter-controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 1rem;
     margin-block: 1.5rem;
 }
 
 .newsletter-issues {
-    flex: 1 1 16rem;
     min-width: 0;
     margin: 0;
     padding: 0;
@@ -55,13 +50,7 @@
     color: var(--color-subtle, #54595d);
 }
 
-.newsletter-help {
-    display: block;
-    color: var(--color-subtle, #54595d);
-    font-size: 0.875rem;
-}
-
-.newsletter-contents {
+.newsletter-issue-links {
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem 1.5rem;
@@ -118,8 +107,4 @@
 
 .newsletter-copy-controls button {
     flex-shrink: 0;
-}
-
-.newsletter-sources li {
-    overflow-wrap: anywhere;
 }

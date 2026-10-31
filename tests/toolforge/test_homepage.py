@@ -9,6 +9,7 @@ import datetime as dt
 import unittest
 from unittest.mock import Mock
 
+import polars as pl
 from pywikibot.exceptions import NoPageError
 
 from backend.website import homepage
@@ -420,6 +421,139 @@ class HomepageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HistoryIdentityTests(unittest.TestCase):
+    """Verify primary article IDs and unfiltered observations."""
+
+    def setUp(self) -> None:
+        """Use a completed daily source without external requests."""
+        self.start = dt.date(2026, 10, 18)
+        self.end = self.start + dt.timedelta(days=1)
+
+    @staticmethod
+    def test_history_membership_uses_resolved_primary_article_ids() -> None:
+        """Cache main subjects before filtering article identities."""
+        day = dt.date(2026, 10, 31)
+        read = Mock(
+            return_value="""
+{{Otd/format
+|date=10月31日
+|event1=[[马丁·路德]]发表'''[[九十五条论纲旧名]]'''。
+|event2='''[[九十五条论纲别名]]'''。
+|event3='''[[其他主条目]]'''。
+|event4='''[[已删除主条目]]'''。
+}}
+""",
+        )
+        titles = {
+            "九十五条论纲旧名": "九十五条论纲",
+            "九十五条论纲别名": "九十五条论纲",
+            "其他主条目": "其他主条目",
+            "已删除主条目": "已删除主条目",
+        }
+        identities = {
+            "九十五条论纲旧名": 101,
+            "九十五条论纲别名": 101,
+            "其他主条目": 202,
+            "已删除主条目": None,
+        }
+        prime = Mock()
+        retain = Mock()
+        items = homepage.collect_history(
+            day,
+            day + dt.timedelta(days=1),
+            {"过期的数据库标题", "马丁·路德"},
+            read,
+            resolve=titles.__getitem__,
+            resolve_many=prime,
+            member_ids={101},
+            resolve_page_id=identities.__getitem__,
+            retain_subjects=retain,
+        )
+        assert [(row["title"], row["date"]) for row in items] == [
+            ("九十五条论纲", "2026-10-31"),
+        ]
+        prime.assert_called_once()
+        assert set(prime.call_args.args[0]) == set(titles)
+        retain.assert_called_once()
+        subjects = retain.call_args.args[0]
+        assert subjects.schema == {
+            "date": pl.Date,
+            "linked_title": pl.String,
+            "target_title": pl.String,
+            "target_page_id": pl.Int64,
+        }
+        assert subjects.to_dicts() == [
+            {
+                "date": day,
+                "linked_title": title,
+                "target_title": target,
+                "target_page_id": identities[title],
+            }
+            for title, target in titles.items()
+        ]
+
+    def test_empty_history_membership_still_retains_unfiltered_subjects(
+        self,
+    ) -> None:
+        """Retain subjects even when this project is empty."""
+        retain = Mock()
+        items = homepage.collect_history(
+            self.start,
+            self.end,
+            {"游戏甲"},
+            Mock(
+                return_value=(
+                    "{{Otd/format|date=10月18日|event1='''[[游戏甲]]'''}}"
+                ),
+            ),
+            member_ids=set(),
+            resolve_page_id=Mock(return_value=101),
+            retain_subjects=retain,
+        )
+        assert items == []
+        retain.assert_called_once()
+        assert retain.call_args.args[0]["target_page_id"].to_list() == [101]
+
+    def test_history_without_main_subjects_retains_typed_empty_frame(
+        self,
+    ) -> None:
+        """Distinguish an analyzed empty day from missing metadata."""
+        retain = Mock()
+        resolve = Mock()
+        items = homepage.collect_history(
+            self.start,
+            self.end,
+            None,
+            Mock(
+                return_value=(
+                    "{{Otd/format|date=10月18日|event1=[[旁支链接]]}}"
+                ),
+            ),
+            member_ids={101},
+            resolve_page_id=resolve,
+            retain_subjects=retain,
+        )
+        assert items == []
+        resolve.assert_not_called()
+        retain.assert_called_once()
+        subjects = retain.call_args.args[0]
+        assert subjects.is_empty()
+        assert subjects.schema["target_page_id"] == pl.Int64
+
+    def test_history_id_membership_requires_identity_resolver(self) -> None:
+        """Reject incomplete identity selection before source reads."""
+        read = Mock()
+        with self.assertRaisesRegex(ValueError, "requires an ID resolver"):
+            homepage.collect_history(
+                self.start,
+                self.end,
+                None,
+                read,
+                member_ids=set(),
+            )
+        read.assert_not_called()
 
 
 class UpcomingTests(unittest.TestCase):

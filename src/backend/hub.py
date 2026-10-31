@@ -20,6 +20,8 @@ from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
 
+import pywikibot
+
 from backend import monitor
 from backend.server import (
     DashboardHTTPServer,
@@ -35,8 +37,13 @@ from backend.website.collect import (
     report_intervals,
     save_snapshot,
 )
+from backend.website.newsletter_history import (
+    DEFAULT_PATH,
+    collect_article_history,
+)
 from shared.deployment import project_version
 from shared.sources.cycle import source_cycle
+from shared.sources.quarry.projects import query_pages_by_wikiproject
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -141,14 +148,34 @@ def refresh_website(updater: DashboardUpdater) -> None:
         updater.refresh()
 
 
-def finalize_newsletter(updater: DashboardUpdater) -> None:
-    """Collect the completed quarter before preparing the next issue.
+def refresh_newsletter(updater: DashboardUpdater) -> None:
+    """Collect newsletter history through the latest completed UTC day.
 
     Args:
         updater: Collector whose active refresh must finish first.
     """
     with source_cycle():
         updater.refresh(wait=True)
+
+
+def refresh_article_history() -> None:
+    """Archive changed project talk pages in an independent hourly pass.
+
+    This callback refreshes source evidence only. Newsletter generation
+    continues to use completed UTC days through the website collector.
+    """
+    with source_cycle():
+        site = pywikibot.Site("zh", "wikipedia")
+        events = collect_article_history(
+            site,
+            query_pages_by_wikiproject(site, "电子游戏"),
+            now=dt.datetime.now(dt.UTC),
+            path=DEFAULT_PATH,
+        )
+        _LOGGER.info(
+            "Hourly article-history scan retained %d project events.",
+            events.height,
+        )
 
 
 def run(config: HubConfig) -> None:
@@ -226,15 +253,24 @@ def run(config: HubConfig) -> None:
         resources.callback(scheduler.shutdown, wait=True)
         if updater is not None:
             scheduler.add_job(
-                finalize_newsletter,
+                refresh_article_history,
                 trigger="cron",
-                month="1,4,7,10",
-                day=1,
+                minute=0,
+                second=0,
+                timezone=dt.UTC,
+                id="newsletter-history",
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=None,
+            )
+            scheduler.add_job(
+                refresh_newsletter,
+                trigger="cron",
                 hour=0,
                 minute=0,
                 second=0,
                 timezone=dt.UTC,
-                id="newsletter-quarter",
+                id="newsletter-daily",
                 args=(updater,),
                 max_instances=1,
                 coalesce=True,

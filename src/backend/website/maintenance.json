@@ -10,11 +10,27 @@
       },
       "tasks": [
         {
+          "key": "afd",
+          "label": {
+            "en": "Deletion discussions",
+            "zh-hans": "存废讨论",
+            "zh-hant": "存廢討論"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "条目删除候选",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        },
+        {
           "key": "csd",
           "label": {
-            "en": "Speedy deletion (CSD)",
-            "zh-hans": "快速删除（CSD）",
-            "zh-hant": "快速刪除（CSD）"
+            "en": "Speedy deletion",
+            "zh-hans": "快速删除",
+            "zh-hant": "快速刪除"
           },
           "rules": [
             {
@@ -28,9 +44,9 @@
         {
           "key": "copyvio",
           "label": {
-            "en": "Copyright concerns (CV)",
-            "zh-hans": "版权问题（CV）",
-            "zh-hant": "版權問題（CV）"
+            "en": "Copyright validation",
+            "zh-hans": "版权验证",
+            "zh-hant": "版權驗證"
           },
           "rules": [
             {
@@ -50,22 +66,6 @@
               "name": "指明來源的內容疑似拷貝後貼上的頁面",
               "talk_page": false,
               "monthly": true
-            }
-          ]
-        },
-        {
-          "key": "afd",
-          "label": {
-            "en": "Deletion discussions (AfD)",
-            "zh-hans": "存废讨论（AfD）",
-            "zh-hant": "存廢討論（AfD）"
-          },
-          "rules": [
-            {
-              "kind": "category",
-              "name": "条目删除候选",
-              "talk_page": false,
-              "monthly": false
             }
           ]
         },

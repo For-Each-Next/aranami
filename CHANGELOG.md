@@ -4,6 +4,42 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.8 (2026-10-31 12:10 UTC)
+
+Overview: Improved quarterly newsletter drafts with daily collection, retained
+article history, and verified historical homepage evidence. Prepared complete
+quarterly draft layouts from internal statistics and talk-page news notices.
+Simplified editing and navigation, maintenance labels, and report details.
+
+- Refreshed newsletter drafts at `00:00 UTC` through the previous completed day,
+  closing completed quarters at their boundary and retrying failures hourly.
+- Collected featured, good, news, and anniversary appearances across each issue,
+  preserving dated source evidence and using talk-page ITN notices for news.
+- Backfilled DYK, ITN, anniversary notices, and FA/FL/GA/A/Bplus milestones from
+  verified article histories, retaining undated events separately.
+- Retained versioned talk-page history in durable Parquet archives and refreshed
+  changed sources hourly, preserving prior evidence through incomplete reads.
+- Cached 100 completed days of unfiltered anniversary sources with historical
+  redirect provenance, matching primary articles by resolved project page IDs.
+- Simplified draft editing, corrected localized Copy controls, and preserved
+  generated links, literal apostrophes, and all four newsletter contents links.
+- Kept all three reporting months in copyable drafts using collected figures,
+  without source-version lists or new-page collection-gap annotations.
+- Reused internal assessment observations for newsletter counts and quality
+  changes instead of rereading published assessment lists and logs.
+- Unified every website page around the dashboard's left contents panel,
+  with a collapsible contents control on narrow screens.
+- Opened saved issues directly from the selector and retained ordinary issue
+  links for use without JavaScript.
+- Moved Newsletter and Run logs into the native Tools menu while preserving
+  localized labels and current-page highlighting.
+- Ordered critical issues as deletion discussions, speedy deletion, copyright
+  validation, and notability, with concise labels in all three languages.
+- Separated report status text from its Details action, removed status dots,
+  and renamed assessment lists to recognized content.
+- Consolidated newsletter usage guidance while retaining detailed architecture
+  contracts for historical evidence and cache recovery.
+
 ### 0.7.7 (2026-10-31 10:33 UTC)
 
 Overview: Refined the multilingual dashboard with Codex components, clearer

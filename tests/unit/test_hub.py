@@ -14,9 +14,11 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import Mock, call, patch
 
+import polars as pl
+
 from backend import hub
 from backend.support.logs import open_run_log
-from shared.sources.cycle import read_top_pageviews
+from shared.sources.cycle import read_membership, read_top_pageviews
 
 
 class TestHubConfiguration(TestCase):
@@ -34,6 +36,74 @@ class TestHubConfiguration(TestCase):
 
 class TestHubDispatch(TestCase):
     """Share one disposable source cycle between both outputs."""
+
+    @staticmethod
+    def test_hourly_history_only_archives_in_a_fresh_source_cycle() -> None:
+        """Archive current members without regenerating drafts."""
+        stamp = dt.datetime(2026, 10, 31, 13, tzinfo=dt.UTC)
+        clock = Mock(UTC=dt.UTC)
+        clock.datetime.now.return_value = stamp
+        members = pl.DataFrame({"page_id": [1]})
+        fetch = Mock(return_value=members)
+
+        def membership(_site: object, project: str) -> pl.DataFrame:
+            """Reuse replica data within this independent pass.
+
+            Returns:
+                The current project membership fixture.
+            """
+            return read_membership("zhwiki", project, fetch)
+
+        def collect(
+            _site: object,
+            observed: pl.DataFrame,
+            *,
+            now: dt.datetime,
+            path: Path,
+        ) -> pl.DataFrame:
+            """Check archive settings and repeat a shared metadata read.
+
+            Returns:
+                Synthetic recorded events without writing files.
+            """
+            assert now is stamp
+            assert path == Path("reports/newsletter-history-v1.parquet")
+            assert observed.equals(members)
+            assert read_membership("zhwiki", "电子游戏", fetch).equals(members)
+            return pl.DataFrame({"kind": ["dyk", "news"]})
+
+        with (
+            patch.object(hub, "dt", clock),
+            patch.object(hub.pywikibot, "Site") as site,
+            patch.object(
+                hub,
+                "query_pages_by_wikiproject",
+                side_effect=membership,
+            ) as query,
+            patch.object(
+                hub,
+                "collect_article_history",
+                side_effect=collect,
+            ) as archive,
+            patch.object(hub, "refresh_newsletter") as newsletter,
+            patch.object(hub, "refresh_website") as website,
+            patch.object(hub._LOGGER, "info") as logged,
+        ):
+            hub.refresh_article_history()
+            hub.refresh_article_history()
+        assert fetch.call_count == 2  # ruff: ignore[magic-value-comparison]
+        assert site.call_args_list == [call("zh", "wikipedia")] * 2
+        assert (
+            query.call_args_list == [call(site.return_value, "电子游戏")] * 2
+        )
+        assert archive.call_count == 2  # ruff: ignore[magic-value-comparison]
+        clock.datetime.now.assert_called_with(dt.UTC)
+        logged.assert_called_with(
+            "Hourly article-history scan retained %d project events.",
+            2,
+        )
+        newsletter.assert_not_called()
+        website.assert_not_called()
 
     @staticmethod
     def test_dispatch_reuses_sources_and_preserves_schedule_advice() -> None:
@@ -103,10 +173,8 @@ class TestHubDispatch(TestCase):
         updater.refresh.assert_not_called()
 
     @staticmethod
-    def test_quarter_finalization_waits_with_an_independent_source_cycle() -> (
-        None
-    ):
-        """Queue final collection with per-cycle source reuse."""
+    def test_daily_newsletter_waits_with_an_independent_source_cycle() -> None:
+        """Queue daily collection with per-cycle source reuse."""
         fetch = Mock(return_value={"views": 12})
 
         def collect(*, wait: bool) -> None:
@@ -121,8 +189,8 @@ class TestHubDispatch(TestCase):
                 )
 
         updater = Mock(refresh=Mock(side_effect=collect))
-        hub.finalize_newsletter(updater)
-        hub.finalize_newsletter(updater)
+        hub.refresh_newsletter(updater)
+        hub.refresh_newsletter(updater)
         assert updater.refresh.call_args_list == [call(wait=True)] * 2
         assert fetch.call_count == 2  # ruff: ignore[magic-value-comparison]
 
@@ -269,24 +337,40 @@ class TestHubLifecycle(TestCase):
         assert options["max_instances"] == 1
         assert options["coalesce"]
         assert options["next_run_time"].tzinfo is dt.UTC
-        quarter_jobs = [
+        daily_jobs = [
             job
             for job in scheduler.add_job.call_args_list
-            if job.kwargs.get("id") == "newsletter-quarter"
+            if job.kwargs.get("id") == "newsletter-daily"
         ]
-        assert len(quarter_jobs) == 1
-        quarter = quarter_jobs[0]
-        assert quarter.args == (hub.finalize_newsletter,)
-        assert quarter.kwargs == {
+        assert len(daily_jobs) == 1
+        daily = daily_jobs[0]
+        assert daily.args == (hub.refresh_newsletter,)
+        assert daily.kwargs == {
             "trigger": "cron",
-            "month": "1,4,7,10",
-            "day": 1,
             "hour": 0,
             "minute": 0,
             "second": 0,
             "timezone": dt.UTC,
-            "id": "newsletter-quarter",
+            "id": "newsletter-daily",
             "args": (updater,),
+            "max_instances": 1,
+            "coalesce": True,
+            "misfire_grace_time": None,
+        }
+        history_jobs = [
+            job
+            for job in scheduler.add_job.call_args_list
+            if job.kwargs.get("id") == "newsletter-history"
+        ]
+        assert len(history_jobs) == 1
+        hourly = history_jobs[0]
+        assert hourly.args == (hub.refresh_article_history,)
+        assert hourly.kwargs == {
+            "trigger": "cron",
+            "minute": 0,
+            "second": 0,
+            "timezone": dt.UTC,
+            "id": "newsletter-history",
             "max_instances": 1,
             "coalesce": True,
             "misfire_grace_time": None,

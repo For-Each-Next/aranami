@@ -400,7 +400,8 @@ class NewsletterRouteTests(unittest.TestCase):
         assert response.status_code == HTTPStatus.OK
         assert dangerous not in response.text
         assert "&lt;/textarea&gt;&lt;script&gt;" in response.text
-        assert "&lt;img src=x onerror=alert(1)&gt;" in response.text
+        assert "onerror=alert(1)" not in response.text
+        assert "newsletter-sources" not in response.text
         assert path.read_bytes() == original
         assert list(self.runtime.rglob("*")) == [
             self.runtime / "cache",

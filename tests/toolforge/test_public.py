@@ -296,7 +296,7 @@ class PublicWebsiteTests(unittest.TestCase):
             assert status == 200
             assert headers["Cache-Control"] == "no-store"
             assert "Accept-Language" in headers["Vary"]
-            assert b">Running</button>" in body
+            assert b'<span class="status-label">Running</span>' in body
             assert b'id="live-uptime"' in body
             record.update(
                 status="updated",
@@ -306,7 +306,7 @@ class PublicWebsiteTests(unittest.TestCase):
             )
             assert write_routine_status(record, directory=directory)
             body = self.request("/api/live")[2]
-            assert b">Updated</button>" in body
+            assert b'<span class="status-label">Updated</span>' in body
             assert b"Finished at " in body
             assert b"(33 sec)" not in body
             assert b"32.89" not in body
@@ -317,7 +317,10 @@ class PublicWebsiteTests(unittest.TestCase):
             assert self.request("/api/live", "HEAD")[2] == b""
             assert self.request("/api/live", "POST")[0] == 405
             (directory / "routine-status.json").write_text("invalid")
-            assert b">No record</button>" in self.request("/api/live")[2]
+            assert (
+                b'<span class="status-label">No record</span>'
+                in self.request("/api/live")[2]
+            )
         assert not (self.runtime / "cache").exists()
 
     def test_log_selection_filter_limits_and_full_download(self) -> None:

@@ -1,8 +1,9 @@
 """Generate three newsletter pages from automatically collected facts.
 
 The page structure follows the October 2026 newsletter (main revision
-94691317; quality revision 94683150). In-progress issues use the actual
-observation cutoff. No empty draft is produced without collected data.
+94691317; quality revision 94683150). Drafts retain all three months,
+filling their slots with the figures collected so far.
+No empty draft is produced without collected data.
 This renderer performs no source reads, publication, or runtime writes.
 """
 
@@ -28,7 +29,7 @@ _STAT_KEYS = ("total", "fa", "fl", "ga", "dyk", "bplus", "topics")
 _TEN = 10
 _HUNDRED = 100
 _LINK_ENTITIES = str.maketrans({
-    character: f"&#{ord(character)};" for character in "[]{}|'\r\n"
+    character: f"&#{ord(character)};" for character in "[]{}|\r\n"
 })
 
 
@@ -36,11 +37,16 @@ def _link(target: str, label: str | None = None) -> str:
     """Return a literal wiki link without interpreting label markup.
 
     Escape HTML and wiki delimiters even when source facts were manually
-    prepared. The leading colon prevents file embeds or categorization.
+    prepared. Keep ordinary apostrophes and omit redundant labels. The
+    leading colon prevents file embeds or categorization.
     """
     title = escape(target, quote=False).translate(_LINK_ENTITIES)
+    title = f"{':' if not title.startswith(':') else ''}{title}"
+    if label is None or label == target:
+        return f"[[{title}]]"
     text = escape(label or target, quote=False).translate(_LINK_ENTITIES)
-    return f"[[{':' if not title.startswith(':') else ''}{title}|{text}]]"
+    text = re.sub(r"'{2,}", lambda match: "&#39;" * len(match[0]), text)
+    return f"[[{title}|{text}]]"
 
 
 def _date_label(value: str) -> str:
@@ -108,7 +114,8 @@ def _main(issue: Issue, facts: Mapping[str, object]) -> str:
     )
     asof = (
         f"截至{issue.quarter_label}底"
-        if facts.get("complete", _observation_end(issue, facts) == issue.end)
+        if not observed
+        and facts.get("complete", _observation_end(issue, facts) == issue.end)
         else f"截至{through.year}年{through.month}月{through.day}日"
     )
     values = {
@@ -202,14 +209,16 @@ def _quality_months(issue: Issue, facts: Mapping, layout: Mapping) -> str:
         .group_by("month", "grade", "action", maintain_order=True)
         .agg(pl.col("title").unique(maintain_order=True).alias("titles"))
     )
-    labels = {"fa": "典範條目", "fl": "特色列表", "ga": "優良條目"}
+    labels = {
+        "fa": "典範條目",
+        "fl": "特色列表",
+        "ga": "優良條目",
+        "a": "甲級條目",
+        "bplus": "乙上級條目",
+    }
+    historical = facts.get("quality_source") == "article_history"
     result = []
     for month in range(issue.start.month, issue.start.month + 3):
-        if dt.date(issue.start.year, month, 1) >= _observation_end(
-            issue,
-            facts,
-        ):
-            continue
         lines = []
         for row in grouped.filter(
             pl.col("month") == f"{issue.start.year}-{month:02}",
@@ -221,8 +230,12 @@ def _quality_months(issue: Issue, facts: Mapping, layout: Mapping) -> str:
                     {
                         "icon": "DGA"
                         if grade == "ga" and not added
+                        else "Bplus"
+                        if grade == "bplus"
                         else grade.upper(),
-                        "label": labels[grade]
+                        "label": ("新增" if added else "撤銷") + labels[grade]
+                        if historical
+                        else labels[grade]
                         + ("列表新增" if added else "列表移除"),
                         "titles": "、".join(
                             _link(title) for title in row["titles"]
@@ -236,7 +249,12 @@ def _quality_months(issue: Issue, facts: Mapping, layout: Mapping) -> str:
                 {
                     "month_year": issue.start.year,
                     "month": month,
-                    "month_rows": "\n".join(lines) or layout["empty_month"],
+                    "month_rows": "\n".join(lines)
+                    or (
+                        "（無已知日期的變動）"
+                        if historical
+                        else layout["empty_month"]
+                    ),
                 },
             ),
         )
@@ -256,15 +274,23 @@ def _quality(issue: Issue, facts: Mapping[str, object]) -> str:
     if changes is None:
         summary = _UNAVAILABLE
     else:
-        period = issue.quarter_label
-        if _observation_end(issue, facts) < issue.end:
-            through = _observation_end(issue, facts) - dt.timedelta(days=1)
-            period += f"（截至{through.month}月{through.day}日）"
-        summary = f"電子遊戲專題於{period}間，"
+        summary = f"電子遊戲專題於{issue.quarter_label}間，"
+        if facts.get("quality_source") == "article_history":
+            summary += (
+                f"依條目里程碑記錄，共有{len(changes)}次有明確日期的評級變動。"
+                if changes
+                else "條目里程碑未記錄到本期有明確日期的評級變動。"
+            )
+        else:
+            summary += (
+                f"一共記錄了{len(changes)}次認證條目列表變動。"
+                if changes
+                else "認證條目列表無變動。"
+            )
+    undated = (facts.get("history_undated") or {}).get("quality", 0)
+    if undated:
         summary += (
-            f"一共記錄了{len(changes)}次認證條目列表變動。"
-            if changes
-            else "認證條目列表無變動。"
+            f"另保留{undated}項日期不詳的評級變動紀錄，未列入本期按日期統計。"
         )
     return _fill(
         layout["text"],
@@ -290,13 +316,44 @@ def _source_homepage_rows(rows: object, prototype: str) -> str:
                 prototype,
                 {
                     "title": _link(row["title"]),
-                    "date": _date_label(row["date"]),
+                    "date": "期初已在首頁，首次日期不詳"
+                    if row.get("date_kind") == "window_start"
+                    else _date_label(row["date"]),
                 },
             )
             for row in rows
         )
         or "（無）"
     )
+
+
+def _additional_homepage_sections(facts: Mapping, layout: Mapping) -> str:
+    """Add observed sections absent from the preceding issue's layout.
+
+    Returns:
+        Nonempty sections using the source's bullet prototype and its
+        verified newsletter column format, or an empty string.
+    """
+    homepage = facts.get("homepage") or {}
+    prototypes = layout["homepage_rows"]
+    prototype = next(iter(prototypes.values()))
+    sections = []
+    for kind, label in (
+        ("featured", "特色內容"),
+        ("news", "新聞動態"),
+        ("history", "歷史上的今天"),
+    ):
+        rows = homepage.get(kind)
+        if kind in prototypes or not rows:
+            continue
+        sections.append(
+            f"==== {label} ====\n\n"
+            f"以下條目曾登上首頁的「{label}」區塊。\n"
+            "{{div col|colwidth=27em}}\n"
+            + _source_homepage_rows(rows, prototype)
+            + "\n{{div col end}}\n\n",
+        )
+    return "".join(sections)
 
 
 def _source_awards(facts: Mapping, layout: Mapping) -> str:
@@ -325,20 +382,17 @@ def _source_awards(facts: Mapping, layout: Mapping) -> str:
 
 
 def _source_new_pages(issue: Issue, facts: Mapping, layout: Mapping) -> str:
-    """Fill the original new-page count and monthly prose templates.
+    """Fill all quarterly count slots with the figures collected so far.
 
     Returns:
-        Updated source prose, excluding charts without observed grades.
+        Complete monthly prose without collection diagnostics, excluding
+        charts without observed grades. Facts retain coverage gaps.
     """
     data = facts.get("new_pages_data")
     if data is None:
         return str(facts.get("new_pages") or _UNAVAILABLE)
     count = data["total"]
-    value = (
-        f"{count:,}"
-        if count is not None
-        else f"至少{data.get('known_count', 0):,}"
-    )
+    value = f"{count if count is not None else data.get('known_count', 0):,}"
     lines = [
         _fill(
             layout["new_pages_summary"],
@@ -348,31 +402,18 @@ def _source_new_pages(issue: Issue, facts: Mapping, layout: Mapping) -> str:
             },
         ),
     ]
-    if data.get("missing_days"):
-        lines.append(f"本期另有{data['missing_days']}日登記未完整。")
-    for row in data["months"]:
-        if row.get("observed_days") == 0:
-            continue
-        count = row["count"]
-        if count is None and "known_count" not in row:
-            continue
-        value = (
-            f"{count:,}"
-            if count is not None
-            else f"至少{row['known_count']:,}"
-        )
-        detail = (
-            f"（另有{row['missing_days']}日登記未完整）"
-            if row.get("missing_days")
-            else ""
-        )
+    months = {row["month"]: row for row in data["months"]}
+    for month in range(issue.start.month, issue.start.month + 3):
+        row = months.get(f"{issue.start.year}-{month:02}", {})
+        count = row.get("count")
+        registered = count if count is not None else row.get("known_count", 0)
         lines.append(
             _fill(
                 layout["new_pages_month"],
                 {
-                    "month": int(row["month"][-2:]),
-                    "count": value,
-                    "grade_details": detail,
+                    "month": month,
+                    "count": f"{registered:,}",
+                    "grade_details": "",
                 },
             ),
         )
@@ -416,7 +457,58 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
                 else str(size),
             },
         )
-    return _fill(layout["text"], values)
+    values["additional_homepage"] = _additional_homepage_sections(
+        facts,
+        layout,
+    )
+    undated = facts.get("history_undated") or {}
+    labels = (
+        ("dyk", "新條目推薦"),
+        ("news", "新聞動態"),
+        ("history", "歷史上的今天"),
+    )
+    unknown = "、".join(
+        f"{label}{undated[kind]}項"
+        for kind, label in labels
+        if undated.get(kind)
+    )
+    values["homepage_undated"] = (
+        f"\n\n另保留日期不詳的紀錄（{unknown}），未列入本期按日期列出的條目。"
+        if unknown
+        else ""
+    )
+    template = layout["text"].replace(
+        "=== ACG專題獎 ===",
+        "@@aranami:additional_homepage@@=== ACG專題獎 ===",
+        1,
+    )
+    template = template.replace(
+        "=== 在首頁上 ===",
+        "=== 在首頁上 ===@@aranami:homepage_undated@@",
+        1,
+    )
+    return _fill(template, values)
+
+
+def _source_links(facts: Mapping[str, object]) -> list[dict]:
+    """Combine original and homepage revision evidence for display.
+
+    Returns:
+        Unique source links in first-seen order, preserving the original
+        label when several sections used the same revision.
+    """
+    groups = [
+        facts.get("sources", []),
+        *(
+            observation.get("sources", [])
+            for observation in (facts.get("homepage_sources") or {}).values()
+        ),
+    ]
+    sources = {}
+    for group in groups:
+        for source in group:
+            sources.setdefault(source["url"], source)
+    return list(sources.values())
 
 
 def render_issue(
@@ -460,7 +552,7 @@ def render_issue(
         "available": available,
         "complete": bool(facts.get("complete", end == issue.end)),
         "updated_at": facts.get("updated_at"),
-        "sources": facts.get("sources", []),
+        "sources": _source_links(facts),
         "pages": [
             {
                 "label": suffix or "主頁",

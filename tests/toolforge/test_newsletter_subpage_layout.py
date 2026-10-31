@@ -104,13 +104,13 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
         assert (
             "以下條目曾登上首頁的「新條目推薦」區塊。\n"
             "{{div col|colwidth=27em}}\n"
-            "* [[:推薦遊戲|推薦遊戲]]<small>（11月5日）</small>\n"
+            "* [[:推薦遊戲]]<small>（11月5日）</small>\n"
             "{{div col end}}"
         ) in text
         assert (
             "以下條目曾登上首頁的「優良條目」區塊。\n"
             "{{div col|colwidth=27em}}\n"
-            "* [[:優良遊戲|優良遊戲]]<small>（12月9日）</small>\n"
+            "* [[:優良遊戲]]<small>（12月9日）</small>\n"
             "{{div col end}}"
         ) in text
         templates = mwparserfromhell.parse(text).filter_templates()

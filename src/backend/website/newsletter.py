@@ -19,7 +19,8 @@ import mwparserfromhell
 import polars as pl
 from pywikibot.exceptions import NoPageError
 
-from backend.services.zhwiki.dyks import article_members
+from backend.website.newsletter_history import prepared_news
+from backend.website.newsletter_homepage import collect_newsletter_homepage
 from backend.website.newsletter_layout import (
     prepare_main_layout,
     valid_main_layout,
@@ -37,23 +38,16 @@ from shared.support.regions import region_content
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from pathlib import Path
 
 _STAT_KEYS = ("total", "fa", "fl", "ga", "dyk", "bplus", "topics")
-_COUNT_PAGES = {
-    "fa": "WikiProject:电子游戏/认证条目/FA",
-    "fl": "WikiProject:电子游戏/认证条目/FL",
-    "ga": "WikiProject:电子游戏/认证条目/GA",
-    "bplus": "WikiProject:电子游戏/认证条目/Bplus",
-    "topics": "WikiProject:电子游戏/认证条目/GT",
-}
+_HOMEPAGE_KEYS = {"featured", "good", "news", "history"}
 _DYK_PAGE = "WikiProject:电子游戏/新条目推荐"
 _AWARDS_PAGE = "Module:ACGaward/list"
 _MAX_TEXT = 250_000
 _MAX_ROWS = 5000
-_MAX_REVISIONS = 500
 _MAX_SOURCES = 1600
 _MAX_ISSUES = 4
-_MAX_STATES = 500_000
 _MAX_COUNT = 10_000_000
 _AWARD_PLACES = 5
 _AWARD_THRESHOLD = 10
@@ -74,47 +68,6 @@ def _read_optional(read: Callable[[str], str], title: str) -> str | None:
         return read(title)
     except NoPageError:
         return None
-
-
-def _count(text: str | None) -> int | None:
-    """Read the verified literal labelled count section.
-
-    Returns:
-        The reported count, or none if the section is unavailable.
-    """
-    if text is None:
-        return None
-    managed = region_content(text, "assessment-count")
-    if managed is not None and re.fullmatch(r"\s*[\d,]+\s*", managed):
-        return int(managed.strip().replace(",", ""))
-    matches = re.findall(
-        r'<section\s+begin=["\']?count["\']?\s*/>\s*([\d,]+)'
-        r'\s*<section\s+end=["\']?count["\']?\s*/>',
-        text,
-        re.IGNORECASE,
-    )
-    return int(matches[0].replace(",", "")) if len(matches) == 1 else None
-
-
-def _summary_total(text: str | None, boundary: dt.datetime) -> int | None:
-    """Read an exact reporting day's observed article total.
-
-    Returns:
-        The observed total, or none without that day's summary.
-    """
-    if text is None:
-        return None
-    day = boundary.date() - dt.timedelta(days=1)
-    expected = f"{day.year}年{day.month}月{day.day}日"
-    for section in mwparserfromhell.parse(text).get_sections(
-        levels=[3],
-        include_lead=False,
-    ):
-        headings = section.filter_headings(recursive=False)
-        if headings and str(headings[0].title).strip() == expected:
-            match = re.search(r"'''总条目'''([\d,]+)篇。", str(section))
-            return int(match[1].replace(",", "")) if match else None
-    return None
 
 
 def _dyk(
@@ -244,152 +197,6 @@ def _announcements(text: str | None) -> str | None:
     return None
 
 
-def _members(text: str) -> list[str] | None:
-    """Read the recognized-content list, checking its count.
-
-    Returns:
-        Unique titles, or none if the verified contract differs.
-    """
-    match = re.search(
-        r'<section\s+begin=["\']?list["\']?\s*/>(.*?)'
-        r'<section\s+end=["\']?list["\']?\s*/>',
-        text,
-        re.DOTALL | re.IGNORECASE,
-    )
-    if match is None:
-        return None
-    titles = [
-        str(link.title).lstrip(":").strip().replace("_", " ")
-        for link in mwparserfromhell.parse(match[1]).filter_wikilinks()
-    ]
-    if len(titles) != len(set(titles)) or _count(text) != len(titles):
-        return None
-    return titles
-
-
-def _quality_changes(
-    read: object,
-    issue: Issue,
-    provenance: dict,
-    through: dt.date,
-) -> list | None:
-    """Compare list revisions without inventing review dates.
-
-    Returns:
-        Observed list changes, or none without complete history.
-    """
-    if not callable(getattr(read, "history", None)):
-        return None
-    changes = []
-    for grade in ("fa", "fl", "ga"):
-        title = _COUNT_PAGES[grade]
-        try:
-            history = read.history(title, issue.start, through)
-        except NoPageError:
-            return None
-        if not history or len(history) > _MAX_REVISIONS:
-            return None
-        revisions, members = [], []
-        for index, row in enumerate(history):
-            stamp = row["timestamp"]
-            titles = _members(row["text"])
-            if (
-                titles is None
-                or len(titles) > _MAX_ROWS
-                or (index == 0 and stamp.date() >= issue.start)
-            ):
-                return None
-            if type(row.get("revision")) is int:
-                url = f"https://zh.wikipedia.org/w/index.php?oldid={row['revision']}"
-                provenance[url] = {"label": title, "url": url}
-            revisions.append({
-                "index": index,
-                "date": stamp.date().isoformat(),
-            })
-            members.extend(
-                {"index": index, "title": name, "present": True}
-                for name in titles
-            )
-        observations = pl.DataFrame(
-            members,
-            schema={
-                "index": pl.Int64,
-                "title": pl.String,
-                "present": pl.Boolean,
-            },
-        )
-        if (
-            observations.get_column("title").n_unique() * len(revisions)
-            > _MAX_STATES
-        ):
-            return None
-        states = (
-            pl
-            .DataFrame(
-                revisions,
-                schema={"index": pl.Int64, "date": pl.String},
-            )
-            .join(observations.select("title").unique(), how="cross")
-            .join(observations, on=["index", "title"], how="left")
-            .with_columns(pl.col("present").fill_null(value=False))
-            .sort("title", "index")
-            .with_columns(
-                pl.col("present").shift().over("title").alias("previous"),
-            )
-            .filter(
-                pl.col("previous").is_not_null()
-                & (pl.col("present") != pl.col("previous"))
-                & (pl.col("date") >= issue.start.isoformat())
-                & (pl.col("date") < through.isoformat()),
-            )
-            .select(
-                "date",
-                "title",
-                pl.lit(grade.upper()).alias("grade"),
-                pl
-                .when("present")
-                .then(pl.lit("added"))
-                .otherwise(pl.lit("removed"))
-                .alias("action"),
-            )
-        )
-        changes.append(states)
-    return (
-        pl.concat(changes).sort("date", "grade", "action", "title").to_dicts()
-    )
-
-
-def _overview(
-    read_at: Callable[[str, dt.datetime], str],
-    boundary: dt.datetime,
-) -> tuple[dict[str, int | None], str | None]:
-    """Prepare historical counts and their DYK source.
-
-    Returns:
-        Nullable counts and the retained historical DYK text.
-    """
-
-    def read(title: str) -> str:
-        """Apply one exclusive boundary to every overview source.
-
-        Returns:
-            The historical source text.
-        """
-        return read_at(title, boundary)
-
-    counts = dict.fromkeys(_STAT_KEYS)
-    counts["total"] = _summary_total(
-        _read_optional(read, "WikiProject:电子游戏/评级/日志"),
-        boundary,
-    )
-    for key, title in _COUNT_PAGES.items():
-        counts[key] = _count(_read_optional(read, title))
-    dyk_text = _read_optional(read, _DYK_PAGE)
-    if dyk_text is not None and 'begin="dyk"' in dyk_text:
-        counts["dyk"] = len(article_members(dyk_text, range_name="dyk"))
-    return counts, dyk_text
-
-
 def _previous_main_layout(
     read: Callable[[str], str],
     issue: Issue,
@@ -438,11 +245,92 @@ def _previous_subpage_layout(
     return None
 
 
-def _issue_facts(
+def _apply_article_history(
+    facts: dict,
+    events: pl.DataFrame,
+    issue: Issue,
+    through: dt.date,
+    provenance: dict,
+) -> None:
+    """Use recorded talk-page dates for quarterly newsletter facts."""
+    dated = events.filter(
+        pl.col("date").is_between(issue.start, through, closed="left"),
+    )
+    facts["quality_source"] = "article_history"
+    undated = events.filter(pl.col("date").is_null()).group_by("kind").len()
+    facts["history_undated"] = {
+        **dict.fromkeys(("dyk", "news", "history", "quality"), 0),
+        **dict(undated.iter_rows()),
+    }
+    facts["dyk"] = (
+        dated
+        .filter(pl.col("kind") == "dyk")
+        .select("title", pl.col("date").dt.to_string("%Y-%m-%d"))
+        .unique()
+        .sort("date", "title")
+        .to_dicts()
+    )
+    facts["quality_changes"] = (
+        dated
+        .filter(pl.col("kind") == "quality")
+        .select(
+            pl.col("date").dt.to_string("%Y-%m-%d"),
+            "title",
+            "grade",
+            "action",
+        )
+        .unique()
+        .sort("date", "grade", "action", "title")
+        .to_dicts()
+    )
+    for title, revision in (
+        events
+        .filter(
+            pl.col("date").is_null()
+            | pl.col("date").is_between(issue.start, through, closed="left"),
+        )
+        .select("title", "revision_id")
+        .unique()
+        .iter_rows()
+    ):
+        url = f"https://zh.wikipedia.org/w/index.php?oldid={revision}"
+        provenance[url] = {"label": f"Talk:{title}", "url": url}
+    if "homepage" in facts:
+        facts["homepage"]["news"] = prepared_news(events, issue.start, through)
+    facts["available"] = True
+
+
+def _retain_overview(
+    facts: dict,
+    prior: Mapping[str, object] | None,
+    issue: Issue,
+) -> None:
+    """Reuse saved counts and timestamps for identical periods."""
+    if not prior or prior.get("issue") != issue.value:
+        return
+    facts["previous_overview"].update(prior.get("previous_overview") or {})
+    if (
+        prior.get("observation_end") == facts["observation_end"]
+        and prior.get("complete") == facts["complete"]
+    ):
+        facts["overview"].update(prior.get("overview") or {})
+        facts["overview_observed_at"] = prior.get("overview_observed_at")
+
+
+def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments]
     read: object,
     issue: Issue,
     now: dt.datetime,
     current_counts: Mapping[str, int] | None,
+    *,
+    members: set[str] | None,
+    member_ids: set[int] | None,
+    article_history: pl.DataFrame | None,
+    today_history_path: Path | None,
+    overview_at: (
+        Callable[[dt.date], tuple[Mapping[str, int | None], str] | None] | None
+    ),
+    prior: Mapping[str, object] | None,
 ) -> dict:
     """Prepare elapsed-quarter observations for one newsletter issue.
 
@@ -518,10 +406,19 @@ def _issue_facts(
         "subpage_layouts": subpage_layouts,
         "sources": [],
     }
+    _retain_overview(facts, prior, issue)
     if observation_end > issue.start and callable(getattr(read, "at", None)):
         start = dt.datetime.combine(issue.start, dt.time.min, dt.UTC)
         end = dt.datetime.combine(observation_end, dt.time.min, dt.UTC)
-        facts["previous_overview"], _ = _overview(historical, start)
+        if overview_at is not None:
+            baseline, _ = overview_at(issue.start) or ({}, None)
+            facts["previous_overview"].update(baseline)
+            latest, observed = overview_at(observation_end) or (
+                {},
+                facts["overview_observed_at"],
+            )
+            facts["overview"].update(latest)
+            facts["overview_observed_at"] = observed
         if main_layout and main_layout["source_issue"] == issue.previous:
             facts["previous_overview"] = {
                 key: value
@@ -529,17 +426,18 @@ def _issue_facts(
                 else main_layout["baseline_counts"][key]
                 for key, value in facts["previous_overview"].items()
             }
-        facts["overview"], dyk_text = _overview(historical, end)
         if not facts["complete"] and current_counts:
             facts["overview"].update(current_counts)
             facts["overview_observed_at"] = now.isoformat(timespec="seconds")
-        facts["dyk"] = _dyk(dyk_text, issue, observation_end)
-        facts["quality_changes"] = _quality_changes(
-            read,
-            issue,
-            provenance,
-            observation_end,
-        )
+        if article_history is None:
+            facts["dyk"] = _dyk(
+                _read_optional(
+                    lambda title: historical(title, end),
+                    _DYK_PAGE,
+                ),
+                issue,
+                observation_end,
+            )
         facts["new_pages_data"] = collect_new_pages(
             SimpleNamespace(at=historical),
             issue,
@@ -565,21 +463,52 @@ def _issue_facts(
             or facts["new_pages_data"]["known_count"] > 0
         )
     elif current_counts and callable(getattr(read, "at", None)):
-        boundary = dt.datetime.combine(issue.start, dt.time.min, dt.UTC)
-        baseline, _ = _overview(historical, boundary)
-        facts["previous_overview"] = baseline
-        facts["overview"] = {**baseline, **current_counts}
+        if overview_at is not None:
+            baseline, _ = overview_at(issue.start) or ({}, None)
+            facts["previous_overview"].update(baseline)
+        facts["overview"].update(current_counts)
         facts["overview_observed_at"] = now.isoformat(timespec="seconds")
         facts["available"] = True
+    if members is not None:
+        facts.update(
+            collect_newsletter_homepage(
+                read,
+                issue,
+                through=observation_end,
+                members=members,
+                member_ids=member_ids,
+                now=now,
+                history_path=today_history_path,
+            ),
+        )
+        facts["available"] |= any(
+            rows is not None for rows in facts["homepage"].values()
+        )
+    if article_history is not None and observation_end > issue.start:
+        _apply_article_history(
+            facts,
+            article_history,
+            issue,
+            observation_end,
+            provenance,
+        )
     facts["sources"] = list(provenance.values())
     return facts
 
 
-def collect_newsletter(
+def collect_newsletter(  # ruff: ignore[too-many-arguments]
     read: object,
     *,
     now: dt.datetime,
     current_counts: Mapping[str, int] | None = None,
+    members: set[str] | None = None,
+    member_ids: set[int] | None = None,
+    article_history: pl.DataFrame | None = None,
+    today_history_path: Path | None = None,
+    overview_at: (
+        Callable[[dt.date], tuple[Mapping[str, int | None], str] | None] | None
+    ) = None,
+    prior_facts: Mapping[str, object] | None = None,
 ) -> dict:
     """Collect drafts for the latest quarter and its successor.
 
@@ -587,6 +516,17 @@ def collect_newsletter(
         read: Current-page reader with historical ``at`` support.
         now: Aware collection time, separate from source dates.
         current_counts: Fresh counts used only for open quarters.
+        members: Current article titles from the project database query.
+            When supplied, collect quarter-specific homepage history.
+        member_ids: Project article IDs for anniversary scope joins.
+        article_history: Events recorded on project talk pages.
+            Complete snapshots supply DYK and quality events directly.
+        today_history_path: Separate wiki-wide daily-source archive.
+        overview_at: Read retained database counts for an exclusive UTC
+            date boundary with their actual observation timestamp.
+            Missing snapshots leave their counts unknown.
+        prior_facts: Previously validated saved issues. Retain their
+            overview counts only for identical reporting boundaries.
 
     Returns:
         Saved issue facts and original editorial drafts for the website.
@@ -611,7 +551,18 @@ def collect_newsletter(
     issues = (current, Issue.parse(current.next))
     result = {
         "issues": {
-            issue.value: _issue_facts(read, issue, now, current_counts)
+            issue.value: _issue_facts(
+                read,
+                issue,
+                now,
+                current_counts,
+                members=members,
+                member_ids=member_ids,
+                article_history=article_history,
+                today_history_path=today_history_path,
+                overview_at=overview_at,
+                prior=(prior_facts or {}).get("issues", {}).get(issue.value),
+            )
             for issue in issues
         },
     }
@@ -718,9 +669,126 @@ def _quality_row(value: object, issue: Issue, through: dt.date) -> bool:
     return (
         issue.start <= day < through
         and isinstance(value.get("grade"), str)
-        and value["grade"] in {"FA", "FL", "GA"}
+        and value["grade"] in {"FA", "FL", "GA", "A", "Bplus"}
         and isinstance(value.get("action"), str)
         and value["action"] in {"added", "removed"}
+    )
+
+
+def _homepage_row(
+    row: object,
+    section: str,
+    issue: Issue,
+    through: dt.date,
+) -> bool:
+    """Validate a primary subject and its observed display date.
+
+    Returns:
+        Whether the record belongs to this section and elapsed quarter.
+    """
+    if not isinstance(row, dict) or not _title(row.get("title")):
+        return False
+    try:
+        day = dt.date.fromisoformat(row["date"])
+    except KeyError, TypeError, ValueError:
+        return False
+    return (
+        issue.start <= day < through
+        and row["date"] == day.isoformat()
+        and _source({"label": row["title"], "url": row.get("url")})
+        and (
+            isinstance(row.get("kind"), str) and row["kind"] in {"fa", "fl"}
+            if section == "featured"
+            else row.get("kind") == "ga"
+            if section == "good"
+            else True
+        )
+        and (
+            row.get("date_kind") == "appearance"
+            or (row.get("date_kind") == "window_start" and day == issue.start)
+            if section == "news"
+            else row.get("date_kind") is None
+        )
+    )
+
+
+def _homepage_facts(  # ruff: ignore[too-many-return-statements]
+    facts: dict,
+    issue: Issue,
+    through: dt.date,
+) -> bool:
+    """Validate optional quarter-specific homepage data and evidence.
+
+    Returns:
+        Whether source coverage agrees, or legacy fields are absent.
+    """
+    if "homepage" not in facts:
+        return "homepage_sources" not in facts
+    sections = facts["homepage"]
+    sources = facts.get("homepage_sources")
+    if (
+        not isinstance(sections, dict)
+        or set(sections) != _HOMEPAGE_KEYS
+        or not isinstance(sources, dict)
+    ):
+        return False
+    if through == issue.start:
+        return all(rows is None for rows in sections.values()) and not sources
+    if set(sources) != _HOMEPAGE_KEYS:
+        return False
+    for section, rows in sections.items():
+        evidence = sources[section]
+        if (
+            rows is None
+            or not _rows(
+                rows,
+                lambda row, section=section: _homepage_row(
+                    row,
+                    section,
+                    issue,
+                    through,
+                ),
+            )
+            or not isinstance(evidence, dict)
+        ):
+            return False
+        if (
+            evidence.get("period")
+            != {"start": str(issue.start), "end": str(through)}
+            or evidence.get("updated_at") != facts["updated_at"]
+            or not isinstance(evidence.get("sources"), list)
+            or len(evidence["sources"]) > _MAX_SOURCES
+            or not all(_source(source) for source in evidence["sources"])
+        ):
+            return False
+    return True
+
+
+def _valid_overview_stamp(
+    facts: dict,
+    stamp: dt.datetime,
+    observation_end: dt.date,
+) -> bool:
+    """Check that actual overview observation belongs to its saved day.
+
+    Returns:
+        Whether no timestamp was retained or the aware observation is
+        within its boundary's day and no later than collection.
+    """
+    observed = facts.get("overview_observed_at")
+    if observed is None:
+        return True
+    try:
+        overview = dt.datetime.fromisoformat(observed)
+    except ValueError, TypeError:
+        return False
+    return (
+        overview.tzinfo is not None
+        and overview.utcoffset() is not None
+        and stamp.tzinfo is not None
+        and stamp.utcoffset() is not None
+        and overview.astimezone(dt.UTC).date() == observation_end
+        and overview <= stamp
     )
 
 
@@ -758,19 +826,28 @@ def _valid_issue(key: str, facts: object) -> bool:
         and (
             not facts["available"]
             or observation_end > issue.start
-            or facts.get("overview_observed_at") == facts["updated_at"]
+            or facts.get("overview_observed_at") is not None
         )
         and stamp.utcoffset() == dt.timedelta()
         and _counts(facts.get("overview"))
+        and _valid_overview_stamp(facts, stamp, observation_end)
+        and _counts(facts.get("previous_overview"))
         and (
-            facts.get("overview_observed_at") is None
+            facts.get("quality_source") is None
+            or facts["quality_source"] == "article_history"
+        )
+        and (
+            "history_undated" not in facts
             or (
-                facts["overview_observed_at"] == facts["updated_at"]
-                and not facts["complete"]
-                and observation_end >= issue.start
+                isinstance(facts["history_undated"], dict)
+                and set(facts["history_undated"])
+                == {"quality", "dyk", "news", "history"}
+                and all(
+                    type(count) is int and 0 <= count <= _MAX_COUNT
+                    for count in facts["history_undated"].values()
+                )
             )
         )
-        and _counts(facts.get("previous_overview"))
         and valid_main_layout(facts.get("main_layout"))
         and valid_subpage_layouts(facts.get("subpage_layouts"))
         and valid_new_pages(
@@ -778,6 +855,7 @@ def _valid_issue(key: str, facts: object) -> bool:
             issue,
             through=observation_end,
         )
+        and _homepage_facts(facts, issue, observation_end)
         and all(
             facts.get(name) is None or _text(facts[name])
             for name in ("quality", "new_pages", "announcements")

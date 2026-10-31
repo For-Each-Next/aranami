@@ -43,6 +43,10 @@ class DashboardFixture(TestCase):
             "backend.website.collect.newsletter.collect_newsletter",
             return_value={"issues": {}},
         )
+        self.article_history = self._patch(
+            "backend.website.collect.collect_article_history",
+            return_value=pl.DataFrame(),
+        )
         self.site = self._patch("backend.website.collect.pywikibot.Site")
         self._patch(
             "backend.website.collect.WikiReader",
@@ -51,6 +55,7 @@ class DashboardFixture(TestCase):
         self.membership = self._patch(
             "backend.website.collect.query_pages_by_wikiproject",
             return_value=pl.DataFrame({
+                "page_id": [11, 22],
                 "page_namespace": [0, 14],
                 "full_title": ["Game", "Category:Games"],
                 "pa_class": ["GA", "NA"],
@@ -227,6 +232,7 @@ class TestDashboardReportCache(DashboardFixture):
         """Reuse one title request across sections and restarts."""
         self.reader.summary.return_value = "第一句。第二句。"
         self.membership.return_value = pl.DataFrame({
+            "page_id": [11],
             "full_title": ["Game"],
             "page_namespace": [0],
             "pa_class": ["C"],
@@ -252,6 +258,11 @@ class TestDashboardReportCache(DashboardFixture):
                     ),
                 },
             ]
+        self.article_history.return_value = pl.DataFrame({
+            "title": ["Game"],
+            "kind": ["news"],
+            "date": [self.clock.date()],
+        })
         self.popularity.return_value["items"] = [
             {
                 "title": "Game",
@@ -317,8 +328,9 @@ class TestDashboardReportCache(DashboardFixture):
         assert self.site.call_count == 1
         assert self.membership.call_count == 2
         assert self.popularity.call_count == 2
-        for key in ("featured", "good", "upcoming", "dyk", "news", "history"):
+        for key in ("featured", "good", "upcoming", "dyk", "history"):
             assert self.collectors[key].call_count == 1
+        self.collectors["news"].assert_not_called()
         assert self.backlog.call_count == 1
         for key in REPORT_KEYS:
             if key not in {"pageviews", "reviews"}:
@@ -507,13 +519,12 @@ class TestDashboardReportCache(DashboardFixture):
         """Persist retry times before the first successful result."""
         self.membership.side_effect = RuntimeError("offline")
         failed = self._collect()
-        assert len(failed["errors"]) == len(REPORT_KEYS) - 1
+        assert len(failed["errors"]) == len(REPORT_KEYS)
         assert all(
             value["last_success_at"] is None
-            for name, value in failed["reports"].items()
-            if name != "newsletter"
+            for value in failed["reports"].values()
         )
-        assert failed["newsletter"] == {"issues": {}}
+        assert failed["newsletter"] is None
         self.site.reset_mock()
         self._collect(dt.timedelta(minutes=59))
         self.site.assert_not_called()
@@ -553,8 +564,6 @@ class TestDashboardReportCache(DashboardFixture):
         assert stale["pageviews"] == first["pageviews"]
         assert stale["backlog"] == first["backlog"]
         for key in REPORT_KEYS:
-            if key == "newsletter":
-                continue
             assert (
                 stale["reports"][key]["last_success_at"]
                 == first["reports"][key]["last_success_at"]
@@ -571,7 +580,10 @@ class TestDashboardReportCache(DashboardFixture):
         assert len(published) == len(REPORT_KEYS)
         assert published[-1] == result
         for collector in self.collectors.values():
-            assert collector.call_args.args[2] == {"Game"}
+            if collector is self.collectors["news"]:
+                collector.assert_not_called()
+            else:
+                assert collector.call_args.args[2] == {"Game"}
         assert self.collectors["upcoming"].call_args.args[:2] == (
             dt.date(2026, 10, 19),
             dt.date(2026, 11, 18),

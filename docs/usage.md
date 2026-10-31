@@ -53,30 +53,67 @@ credentials in diagnostics; see [runtime locations](administration.md#runtime-fo
 
 ## Prepare a quarterly newsletter
 
-Open `/newsletter/` for the automatically selected next quarterly issue.
-The hub fetches source data before publication and refreshes the draft daily
+Open the header's **Tools** menu and choose **Newsletter**, or visit
+`/newsletter/`, for the automatically selected next quarterly issue.
+The hub fetches source data before publication and refreshes at `00:00 UTC`
 as the reporting quarter progresses. The page provides separate editable
 wikitext for the main overview, `特優內容`, and `宣告`.
 All three pages keep the preceding issue's original wikitext design, including
 their banners, headings, columns, navigation, and count-change styling.
 For example, `/newsletter/?issue=2027-01` selects issue 29, covering October
 through December 2026. The issue radios offer the latest completed issue and
-the current draft. The default advances at exactly `00:00 UTC` on the first
-day of January, April, July, and October. The hub also refreshes the completed
-quarter at that boundary, including when its normal daily refresh is not due.
+the current draft; selecting one opens its saved data immediately. Without
+JavaScript, ordinary issue links provide the same selection. The default
+advances at exactly `00:00 UTC` on the first day of January, April, July, and
+October. That day's refresh closes the completed quarter even if the previous
+refresh succeeded just before midnight.
 Edit each draft, copy it, and preview it at the linked Wikipedia destination
 before saving. Manual selection and copying also work without JavaScript.
 Edits in these boxes last only until the page is reloaded or another issue is
 selected; the website does not save or publish them.
 
-Requests use saved data only. Each draft states its actual observation cutoff;
-an unfinished quarter uses completed UTC days rather than future quarter-end
-values. New-page counts distinguish complete records from confirmed minimums
-when some daily records are missing. Source revision links and observation
-times remain available for checking the generated numbers. A failed refresh
-retains the last successful draft. An issue without collected data shows its
-collection state instead of empty templates. Authored features and interviews
-are outside this generator.
+Requests use saved data only. Drafts retain all three reporting months and use
+the figures collected so far, including zero registered articles for months
+with no collected entries. The overview states its actual observation date.
+New-page prose uses the number of registered articles without collection-gap
+diagnostics; the saved facts retain coverage and unknown totals separately.
+A failed refresh retains the last
+successful draft. An issue without collected data shows its collection state
+instead of empty templates. Authored features and interviews
+are outside this generator. The overview always links to all four content
+pages, including the feature and interview pages before they are created.
+
+DYK and quality changes use dates recorded on article talk pages, including
+former FA, FL, and GA articles. News uses recorded `ITNtalk` dates without
+reading the homepage news bulletin. Unknown-date
+records remain retained and are identified separately from dated issue lists.
+Today in history reads each recurring daily subpage's last revision before
+the following UTC midnight; later edits to that subpage do not rewrite the day.
+
+The first collection backfills recorded project article history into
+`reports/newsletter-history-v1.parquet`. Hourly scans at `HH:00 UTC` fetch only
+changed talk-page revisions and retain earlier observations in the same file.
+The file survives cache clearing. To perform the initial backfill separately,
+run this in the configured Toolforge runtime with its pinned source and Python:
+
+```shell
+python -m backend.website.newsletter_history
+```
+
+The command reads Wiki Replicas and wiki text, writes the local Parquet archive,
+and makes no wiki edits. It can be repeated without duplicate source revisions.
+Do not run live collection from this development checkout.
+
+Today in history uses a separate `cache/today-in-history-v1.parquet` containing
+unfiltered daily source text and revision IDs for the last 100 completed UTC
+days. Daily analysis resolves each event's primary articles against current
+project membership, including redirected titles; incidental links are excluded.
+Historical source redirects use the same day-end cutoff and retain revision
+evidence. Older dates are fetched from history without extending cache
+retention. Clearing this source cache causes fresh historical reads without
+losing saved reports. See the
+[newsletter contracts](architecture.md#newsletter-drafts) for source identities,
+membership matching, and retained history rules.
 
 ## Routine names and UTC triggers
 

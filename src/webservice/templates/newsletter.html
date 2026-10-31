@@ -1,47 +1,42 @@
 {% extends "base.html" %}
+{% block contents_links %}
+<ul>
+  {% for draft in drafts %}<li><a href="#newsletter-page-{{ loop.index }}">{{ draft.heading }}</a></li>{% else %}<li><a href="#main">{{ heading }}</a></li>{% endfor %}
+</ul>
+{% endblock %}
 {% block assets %}
   <link rel="stylesheet" href="/newsletter.css">
   <script src="/newsletter.js" defer></script>
 {% endblock %}
 {% block content %}
 <p>{{ t.newsletter.intro }}</p>
-<form class="newsletter-controls" action="/newsletter/" method="get">
-  <fieldset class="newsletter-issues" aria-describedby="newsletter-quarter-help">
+<form class="newsletter-controls" action="/newsletter/" method="get" hidden data-newsletter-issue-form>
+  <fieldset class="newsletter-issues">
     <legend>{{ t.newsletter.issue }}</legend>
     <div class="newsletter-issue-options">
       {% for choice in issue_choices %}<label class="newsletter-issue-option" for="newsletter-issue-{{ loop.index }}"><input id="newsletter-issue-{{ loop.index }}" name="issue" type="radio" value="{{ choice.value }}"{% if choice.checked %} checked{% endif %} required><span>{{ choice.value }} <span class="newsletter-issue-state">({{ choice.label }})</span></span></label>{% endfor %}
     </div>
-    <span id="newsletter-quarter-help" class="newsletter-help">{{ t.newsletter.automatic }}</span>
   </fieldset>
   <input type="hidden" name="lang" value="{{ locale }}">
-  <button type="submit" class="button-primary">{{ t.newsletter.generate }}</button>
 </form>
-<div class="metadata"><p>{{ t.newsletter.period }}: {{ period }}</p>{% include "includes/source_updated.html" %}</div>
+<noscript>
+  <nav class="newsletter-issue-links" aria-label="{{ t.newsletter.issue }}">
+    {% for choice in issue_choices %}<a href="{{ choice.url }}"{% if choice.checked %} aria-current="page"{% endif %}>{{ choice.value }} ({{ choice.label }})</a>{% endfor %}
+  </nav>
+</noscript>
 {% if not available %}<p class="notice" role="status">{{ t.newsletter.unavailable }}</p>{% endif %}
-{% if available and not complete %}<p class="notice" role="status">{{ t.newsletter.in_progress }}</p>{% endif %}
 {% if available %}
-<p class="newsletter-guidance" id="newsletter-editorial">{{ t.newsletter.editorial }}</p>
-<p class="newsletter-help" id="newsletter-edit-help">{{ t.newsletter.edit_help }}</p>
-<nav class="newsletter-contents" aria-label="{{ t.newsletter.contents }}">
-  {% for draft in drafts %}<a href="#newsletter-page-{{ loop.index }}">{{ draft.heading }}</a>{% endfor %}
-</nav>
 {% for draft in drafts %}
 <section class="newsletter-draft" id="newsletter-page-{{ loop.index }}" aria-labelledby="newsletter-heading-{{ loop.index }}">
   <h2 id="newsletter-heading-{{ loop.index }}">{{ draft.heading }}</h2>
   <p class="newsletter-destination"><bdi lang="zh">{{ draft.link }}</bdi></p>
   <label for="newsletter-text-{{ loop.index }}">{{ t.newsletter.wikicode }} · {{ draft.heading }}</label>
-  <textarea id="newsletter-text-{{ loop.index }}" class="newsletter-text" rows="16" lang="zh" dir="ltr" spellcheck="false" aria-describedby="newsletter-editorial newsletter-edit-help">{{ draft.text }}</textarea>
+  <textarea id="newsletter-text-{{ loop.index }}" class="newsletter-text" rows="16" lang="zh" dir="ltr" spellcheck="false">{{ draft.text }}</textarea>
   <div class="newsletter-copy-controls">
-    <button type="button" hidden data-newsletter-copy="newsletter-text-{{ loop.index }}" data-copy-success="{{ t.newsletter.copied }}" data-copy-failure="{{ t.newsletter.copy_fallback }}" aria-describedby="newsletter-copy-status-{{ loop.index }}">{{ t.newsletter.copy }}</button>
+    <button type="button" class="cdx-button cdx-button--action-progressive cdx-button--weight-primary" hidden data-newsletter-copy="newsletter-text-{{ loop.index }}" data-copy-success="{{ t.newsletter.copied }}" data-copy-failure="{{ t.newsletter.copy_fallback }}" aria-describedby="newsletter-copy-status-{{ loop.index }}">{{ t.newsletter['copy'] }}</button>
     <span id="newsletter-copy-status-{{ loop.index }}" role="status" aria-live="polite" data-newsletter-status></span>
   </div>
 </section>
 {% endfor %}
-{% endif %}
-{% if sources %}
-<section class="newsletter-sources" aria-labelledby="newsletter-sources-heading">
-  <h2 id="newsletter-sources-heading">{{ t.newsletter.sources }}</h2>
-  <ul>{% for source in sources %}<li><bdi lang="zh">{{ source }}</bdi></li>{% endfor %}</ul>
-</section>
 {% endif %}
 {% endblock %}

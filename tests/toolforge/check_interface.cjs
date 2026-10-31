@@ -17,7 +17,7 @@ const assetRoot = path.resolve(__dirname, "../../src/webservice/public_html");
 const chromium = process.env.ARANAMI_CHROMIUM || "/Applications/Chromium.app/Contents/MacOS/Chromium";
 const widths = [320, 390, 600, 601, 639, 640, 768, 943, 944, 1120, 1440, 1680, 1920];
 const locales = ["en", "zh-hans", "zh-hant"];
-const surfaces = ["home", "maintenance", "logs", "about", "error"];
+const surfaces = ["home", "maintenance", "logs", "about", "error", "newsletter"];
 const failures = [];
 fs.mkdirSync(outputRoot, { recursive: true });
 
@@ -37,7 +37,7 @@ async function bounded(operation, label, milliseconds = 10000) {
 async function main() {
     const server = http.createServer((request, response) => {
         const pathname = new URL(request.url, "http://localhost").pathname;
-        const filename = (["/live.js", "/styles.css", "/codex.css", "/codex-select.svg", "/codex-select-disabled.svg", "/codex-license.html", "/favicon.svg", "/aranami.svg", "/report-icons.svg"].includes(pathname) || pathname.startsWith("/review-icons/"))
+        const filename = (["/live.js", "/newsletter.js", "/styles.css", "/newsletter.css", "/codex.css", "/codex-select.svg", "/codex-select-disabled.svg", "/codex-license.html", "/favicon.svg", "/aranami.svg", "/report-icons.svg"].includes(pathname) || pathname.startsWith("/review-icons/"))
             ? path.join(assetRoot, pathname) : path.join(fixtureRoot, pathname);
         if (!filename.startsWith(fixtureRoot + path.sep) && !filename.startsWith(assetRoot + path.sep)) {
             response.writeHead(404).end(); return;
@@ -129,7 +129,7 @@ async function main() {
                 unnamedNavigation: [...document.querySelectorAll('nav')].filter(nav => !nav.getAttribute('aria-label') && !nav.getAttribute('aria-labelledby')).length,
                 brokenContents: [...document.querySelectorAll('.page-toc a[href^="#"]')].filter(link => !document.getElementById(link.hash.slice(1))).map(link => link.hash),
                 unlabelledControls: [...document.querySelectorAll('input:not([type=hidden]), select')].filter(control => !control.labels?.length && !control.getAttribute('aria-label') && !control.getAttribute('aria-labelledby')).map(control => control.outerHTML),
-                forms: [...document.forms].map(form => ({method: form.method, action: form.getAttribute('action'), submit: Boolean(form.querySelector('button[type=submit], input[type=submit]'))}))
+                forms: [...document.forms].map(form => ({method: form.method, action: form.getAttribute('action'), submit: Boolean(form.querySelector('button[type=submit], input[type=submit]')), issueSelection: form.hasAttribute('data-newsletter-issue-form')}))
             }))()`);
             assert.equal(document.main, 1, "missing or duplicate main landmark");
             assert.equal(document.titles, 1, "missing or duplicate page heading");
@@ -141,7 +141,7 @@ async function main() {
             for (const form of document.forms) {
                 assert.equal(form.method, "get", "read-only controls require native GET forms");
                 assert.ok(form.action?.startsWith("/"), "form needs a local action");
-                assert.equal(form.submit, true, "form needs a native submit control");
+                assert.ok(form.submit || form.issueSelection, "form needs a native submit control or saved-issue navigation");
             }
         };
         const checkContents = async () => {
@@ -180,6 +180,7 @@ async function main() {
                 ]);
                 assert.ok(!navigation.errorText, `navigation failed: ${navigation.errorText}`);
                 await checkSemantics();
+                await checkContents();
                 const layout = await evaluate(`(() => {
                     const visible = element => { const box = element.getBoundingClientRect(); return box.width > 0 && box.height > 0 && getComputedStyle(element).display !== 'none'; };
                     return { viewport: innerWidth, page: document.documentElement.scrollWidth,
@@ -194,7 +195,6 @@ async function main() {
                     for (const columns of layout.columns) assert.equal(columns.headers, columns.cells);
                 }
                 if (surface === "home") {
-                    await checkContents();
                     const lists = await evaluate(`(() => [...document.querySelectorAll('ol.highlights')].map(list => ({
                         role: list.getAttribute('role'),
                         cards: [...list.children].map(card => ({ tag: card.tagName,
@@ -272,10 +272,10 @@ async function main() {
                     loaded,
                 ]);
                 await checkSemantics();
-                if (surface === "home") await checkContents();
+                await checkContents();
                 const available = await evaluate(`(() => ({
                     links: [...document.querySelectorAll('.global-navigation a')].every(link => link.getBoundingClientRect().height > 0),
-                    controls: [...document.querySelectorAll('form input:not([type=hidden]), form select, form button')].every(control => !control.disabled && control.getBoundingClientRect().height > 0),
+                    controls: [...document.querySelectorAll('form input:not([type=hidden]), form select, form button')].filter(control => !control.closest('form[hidden]')).every(control => !control.disabled && control.getBoundingClientRect().height > 0),
                     content: Boolean(document.querySelector('main')?.textContent.trim())
                 }))()`);
                 assert.equal(available.links, true, "navigation hidden without JavaScript");

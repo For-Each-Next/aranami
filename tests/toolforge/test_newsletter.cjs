@@ -30,6 +30,7 @@ function fixture(clipboard) {
     };
     vm.runInNewContext(source, {
         document: {
+            querySelector: () => null,
             querySelectorAll: () => [button],
             getElementById: () => editor,
         },
@@ -48,6 +49,42 @@ test("copy uses the current edited text and announces completion", async () => {
     assert.equal(status.textContent, "Copied");
     assert.equal(button.disabled, false);
     assert.equal(editor.focused, false);
+});
+
+test("issue selection submits the saved-issue GET form only on checked change", () => {
+    const radios = [true, false].map(checked => ({
+        checked,
+        addEventListener(event, handler) {
+            assert.equal(event, "change");
+            this.change = handler;
+        },
+    }));
+    const form = {
+        hidden: true,
+        submissions: 0,
+        querySelectorAll(selector) {
+            assert.equal(selector, 'input[name="issue"]');
+            return radios;
+        },
+        requestSubmit() { this.submissions++; },
+    };
+    vm.runInNewContext(source, {
+        document: {
+            querySelector(selector) {
+                assert.equal(selector, "[data-newsletter-issue-form]");
+                return form;
+            },
+            querySelectorAll: () => [],
+        },
+    });
+    assert.equal(form.hidden, false);
+    assert.equal(form.submissions, 0);
+    radios[0].checked = false;
+    radios[0].change();
+    assert.equal(form.submissions, 0);
+    radios[1].checked = true;
+    radios[1].change();
+    assert.equal(form.submissions, 1);
 });
 
 test("missing or rejected clipboard selects editable text for manual copying", async () => {

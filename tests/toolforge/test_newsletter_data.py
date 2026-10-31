@@ -9,8 +9,9 @@ import copy
 import datetime as dt
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+import polars as pl
 from pywikibot.exceptions import NoPageError
 
 from backend.website.newsletter import collect_newsletter, valid_newsletter
@@ -93,6 +94,214 @@ class Reader:
 class NewsletterDataTests(unittest.TestCase):
     """Keep historical observations and editorial drafts distinct."""
 
+    def test_news_uses_talk_notices_instead_of_template_history(self) -> None:
+        """Use recorded talk-page dates for news appearances."""
+        now = dt.datetime(2026, 10, 31, tzinfo=dt.UTC)
+        events = pl.DataFrame(
+            {
+                "title": ["Template subject", "Past news"],
+                "kind": ["news", "news"],
+                "date": [dt.date(2026, 10, 3), dt.date(2026, 10, 4)],
+                "grade": [None, None],
+                "action": ["appeared", "appeared"],
+                "revision_id": [60, 61],
+            },
+            schema_overrides={"date": pl.Date, "grade": pl.String},
+        )
+
+        def homepage(_read: object, issue: Issue, **options: object) -> dict:
+            """Supply valid independently collected homepage records.
+
+            Returns:
+                One subject whose precise date is proved by a template.
+            """
+            day = issue.start + dt.timedelta(days=1)
+            sections = {
+                key: [] for key in ("featured", "good", "news", "history")
+            }
+            sections["news"] = [
+                {
+                    "title": "Template subject",
+                    "date": str(day),
+                    "url": "https://zh.wikipedia.org/wiki/Template_subject",
+                    "date_kind": "appearance",
+                },
+            ]
+            return {
+                "homepage": sections,
+                "homepage_sources": {
+                    key: {
+                        "period": {
+                            "start": str(issue.start),
+                            "end": str(options["through"]),
+                        },
+                        "updated_at": now.isoformat(timespec="seconds"),
+                        "sources": [],
+                    }
+                    for key in sections
+                },
+            }
+
+        with patch(
+            "backend.website.newsletter.collect_newsletter_homepage",
+            side_effect=homepage,
+        ):
+            result = collect_newsletter(
+                Reader(),
+                now=now,
+                members={"Template subject", "Past news"},
+                article_history=events,
+            )
+        assert valid_newsletter(result)
+        news = result["issues"]["2027-01"]["homepage"]["news"]
+        assert [(row["title"], row["date"]) for row in news] == [
+            ("Past news", "2026-10-04"),
+            ("Template subject", "2026-10-03"),
+        ]
+
+    def test_article_events_replace_list_edit_dates_and_keep_unknowns(
+        self,
+    ) -> None:
+        """Use recorded dates and retain undated events separately."""
+        reader = Reader()
+        events = pl.DataFrame(
+            [
+                (
+                    "Former FA",
+                    "quality",
+                    "FA",
+                    "removed",
+                    dt.date(2026, 10, 3),
+                    50,
+                ),
+                ("List", "quality", "FL", "added", dt.date(2026, 10, 2), 51),
+                ("GA", "quality", "GA", "removed", dt.date(2026, 10, 1), 52),
+                ("DYK", "dyk", None, "appeared", dt.date(2026, 10, 5), 53),
+                ("Unknown", "dyk", None, "appeared", None, 54),
+                ("Today", "dyk", None, "appeared", dt.date(2026, 10, 31), 55),
+                ("Older", "dyk", None, "appeared", dt.date(2026, 9, 30), 56),
+            ],
+            schema={
+                "title": pl.String,
+                "kind": pl.String,
+                "grade": pl.String,
+                "action": pl.String,
+                "date": pl.Date,
+                "revision_id": pl.Int64,
+            },
+            orient="row",
+        )
+        result = collect_newsletter(
+            reader,
+            now=dt.datetime(2026, 10, 31, tzinfo=dt.UTC),
+            article_history=events,
+        )
+        facts = result["issues"]["2027-01"]
+        assert valid_newsletter(result)
+        assert facts["quality_source"] == "article_history"
+        assert facts["dyk"] == [{"title": "DYK", "date": "2026-10-05"}]
+        assert facts["history_undated"]["dyk"] == 1
+        assert [
+            (row["grade"], row["action"]) for row in facts["quality_changes"]
+        ] == [
+            ("GA", "removed"),
+            ("FL", "added"),
+            ("FA", "removed"),
+        ]
+        assert any(
+            source["url"].endswith("oldid=50") for source in facts["sources"]
+        )
+
+    def test_saved_homepage_history_has_issue_scoped_validation(self) -> None:
+        """Persist quarterly evidence and reject corrupt coverage."""
+        sections = ("featured", "good", "news", "history")
+        now = dt.datetime(2026, 10, 31, tzinfo=dt.UTC)
+
+        def homepage(_read: object, issue: Issue, **options: object) -> dict:
+            """Supply independently collected historical section facts.
+
+            Returns:
+                News and valid empty observations for other sections.
+            """
+            assert options["members"] == {"Game"}
+            return {
+                "homepage": {
+                    **{section: [] for section in sections},
+                    "news": [
+                        {
+                            "title": "Game",
+                            "url": "https://zh.wikipedia.org/wiki/Game",
+                            "date": str(issue.start),
+                            "date_kind": "window_start",
+                        },
+                    ],
+                },
+                "homepage_sources": {
+                    section: {
+                        "period": {
+                            "start": str(issue.start),
+                            "end": str(options["through"]),
+                        },
+                        "updated_at": now.isoformat(timespec="seconds"),
+                        "sources": [
+                            {
+                                "label": "Template:Itn",
+                                "url": "https://zh.wikipedia.org/w/index.php?oldid=42",
+                            },
+                        ],
+                    }
+                    for section in sections
+                },
+            }
+
+        with patch(
+            "backend.website.newsletter.collect_newsletter_homepage",
+            side_effect=homepage,
+        ) as collector:
+            result = collect_newsletter(
+                Reader(),
+                now=now,
+                members={"Game"},
+                member_ids={11},
+            )
+        assert collector.call_count == 2
+        assert all(
+            call.kwargs["member_ids"] == {11}
+            for call in collector.call_args_list
+        )
+        assert valid_newsletter(result)
+        facts = result["issues"]["2026-10"]
+        assert facts["homepage"]["news"][0]["date"] == "2026-07-01"
+        assert (
+            facts["homepage_sources"]["news"]["period"]["end"] == "2026-10-01"
+        )
+        for path, invalid in (
+            (("homepage", "news", 0, "date"), "2026-10-01"),
+            (("homepage", "news", 0, "title"), "Game]]"),
+            (("homepage", "news", 0, "url"), "javascript:alert(1)"),
+            (("homepage", "news", 0, "date_kind"), "scheduled"),
+            (
+                ("homepage", "featured"),
+                [
+                    {
+                        "title": "Game",
+                        "url": "https://zh.wikipedia.org/wiki/Game",
+                        "date": "2026-07-01",
+                        "kind": [],
+                    },
+                ],
+            ),
+            (("homepage", "history"), None),
+            (("homepage_sources", "news", "period", "start"), "2026-07-02"),
+            (("homepage_sources", "news", "sources"), [{"url": "invalid"}]),
+        ):
+            broken = copy.deepcopy(result)
+            target = broken["issues"]["2026-10"]
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = invalid
+            assert not valid_newsletter(broken), path
+
     def test_midnight_closes_previous_issue_and_starts_next_counters(
         self,
     ) -> None:
@@ -134,7 +343,7 @@ class NewsletterDataTests(unittest.TestCase):
         facts = result["issues"]["2027-01"]
         assert valid_newsletter(result)
         assert facts["period"] == "2026-10-01/2027-01-01"
-        assert facts["overview"]["ga"] == 7
+        assert facts["overview"]["ga"] is None
         assert facts["overview"]["total"] is None
         assert facts["dyk"] == [{"title": "Game", "date": "2026-12-31"}]
         assert facts["awards"] == [
@@ -174,7 +383,7 @@ class NewsletterDataTests(unittest.TestCase):
             "total": 112,
         }
         assert facts["dyk"] == [{"title": "Game", "date": "2026-10-15"}]
-        assert facts["overview"]["ga"] == 7
+        assert facts["overview"]["ga"] is None
         assert valid_newsletter(result)
         assert all(
             boundary <= dt.datetime(2026, 10, 31, tzinfo=dt.UTC)
@@ -243,6 +452,89 @@ class NewsletterDataTests(unittest.TestCase):
         assert result["issues"]["2026-10"]["overview_observed_at"] is None
         assert valid_newsletter(result)
 
+    def test_overview_uses_retained_database_boundary_counts(self) -> None:
+        """Use internal counts without reading wiki lists or logs."""
+        reader = Reader()
+        reader.existing[f"{ROOT}/2026-10"] = (
+            Path(__file__).parents[1]
+            / "fixtures"
+            / "newsletter-main-2026-10.wikitext"
+        ).read_text(encoding="utf-8")
+        snapshots = {
+            dt.date(2026, 10, 1): (
+                {"total": 100, "ga": 4},
+                "2026-10-01T00:00:00+00:00",
+            ),
+            dt.date(2027, 1, 1): (
+                {"total": 110, "ga": 5},
+                "2027-01-01T18:37:12+00:00",
+            ),
+        }
+        result = collect_newsletter(
+            reader,
+            now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
+            overview_at=snapshots.get,
+        )
+        facts = result["issues"]["2027-01"]
+        assert facts["overview"]["total"] == 110
+        assert facts["overview"]["ga"] == 5
+        assert facts["overview_observed_at"] == "2027-01-01T18:37:12+00:00"
+        output = render_issue(Issue.parse("2027-01"), facts)
+        assert "截至2027年1月1日" in output["pages"][0]["text"]
+        assert facts["previous_overview"]["ga"] == 4
+        assert all(
+            "/认证条目/" not in title and not title.endswith("评级/日志")
+            for title, _ in reader.calls
+        )
+        for invalid in (
+            "2027-01-01T18:00:00",
+            "2027-01-02T00:00:00+00:00",
+            "2026-12-31T23:59:59+00:00",
+            "2027-01-06T00:00:00+00:00",
+        ):
+            broken = copy.deepcopy(result)
+            broken["issues"]["2027-01"]["overview_observed_at"] = invalid
+            assert not valid_newsletter(broken)
+        future = copy.deepcopy(result)
+        future["issues"]["2027-01"]["updated_at"] = "2027-01-01T12:00:00+00:00"
+        assert not valid_newsletter(future)
+
+    def test_retained_overview_requires_matching_endpoint(self) -> None:
+        """Reuse saved counts only for the same reporting boundary."""
+        prior = collect_newsletter(
+            Reader(),
+            now=dt.datetime(2027, 1, 2, tzinfo=dt.UTC),
+            overview_at=lambda boundary: (
+                {"total": 110, "ga": 5},
+                f"{boundary}T"
+                + (
+                    "18:00:00+00:00"
+                    if boundary == dt.date(2027, 1, 1)
+                    else "00:00:00+00:00"
+                ),
+            ),
+        )
+        repeated = collect_newsletter(
+            Reader(),
+            now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
+            prior_facts=prior,
+        )
+        assert repeated["issues"]["2027-01"]["overview"]["ga"] == 5
+        assert repeated["issues"]["2027-01"]["overview_observed_at"] == (
+            "2027-01-01T18:00:00+00:00"
+        )
+        assert repeated["issues"]["2027-04"]["overview"]["ga"] is None
+        changed = collect_newsletter(
+            Reader(),
+            now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
+            prior_facts=prior,
+            overview_at=lambda boundary: (
+                {"ga": 6},
+                f"{boundary}T00:00:00+00:00",
+            ),
+        )
+        assert changed["issues"]["2027-01"]["overview"]["ga"] == 6
+
     def test_awards_keep_fifth_place_ties_and_newcomer_threshold(self) -> None:
         """Include every award user tied at fifth place."""
         reader = Reader()
@@ -283,54 +575,39 @@ class NewsletterDataTests(unittest.TestCase):
         """Retain additions and removals even within the same month."""
         reader = Reader()
 
-        def report(titles: list[str]) -> str:
-            """Build a synthetic verified list with its literal count.
-
-            Returns:
-                A count and list source with no external dependencies.
-            """
-            body = "\n".join(
-                f"# {{{{icon|GA}}}} [[:{name}]]" for name in titles
-            )
-            return (
-                f"<section begin=count/>{len(titles)}<section end=count/>"
-                f"<section begin=list/>{body}<section end=list/>"
-            )
-
-        reader.history = Mock(
-            return_value=[
-                {
-                    "timestamp": dt.datetime(2026, 9, 30, tzinfo=dt.UTC),
-                    "text": report(["Old"]),
-                    "revision": 10,
-                },
-                {
-                    "timestamp": dt.datetime(2026, 10, 5, tzinfo=dt.UTC),
-                    "text": report(["Old", "New"]),
-                    "revision": 11,
-                },
-                {
-                    "timestamp": dt.datetime(2026, 10, 8, tzinfo=dt.UTC),
-                    "text": report(["Old"]),
-                    "revision": 12,
-                },
+        reader.history = Mock(side_effect=AssertionError("List history read"))
+        events = pl.DataFrame(
+            [
+                ("New", "quality", "GA", "added", dt.date(2026, 10, 5), 11),
+                ("New", "quality", "GA", "removed", dt.date(2026, 10, 8), 12),
             ],
+            schema={
+                "title": pl.String,
+                "kind": pl.String,
+                "grade": pl.String,
+                "action": pl.String,
+                "date": pl.Date,
+                "revision_id": pl.Int64,
+            },
+            orient="row",
         )
         facts = collect_newsletter(
             reader,
             now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
+            article_history=events,
         )["issues"]["2027-01"]
+        reader.history.assert_not_called()
         changes = facts["quality_changes"]
-        assert len(changes) == 6
+        assert len(changes) == 2
         assert {
             (row["date"], row["action"], row["title"]) for row in changes
         } == {
             ("2026-10-05", "added", "New"),
             ("2026-10-08", "removed", "New"),
         }
-        assert {row["grade"] for row in changes} == {"FA", "FL", "GA"}
+        assert {row["grade"] for row in changes} == {"GA"}
         output = render_issue(Issue.parse("2027-01"), facts)
-        assert "[[:New|New]]" in output["pages"][1]["text"]
+        assert "[[:New]]" in output["pages"][1]["text"]
         assert "2026年10月" in output["pages"][1]["text"]
 
     def test_quality_missing_baseline_is_unknown(self) -> None:
