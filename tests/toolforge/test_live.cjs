@@ -410,13 +410,13 @@ test("stale samples retain permanent boot facts while server state expires", asy
         "data-observed-at": stamp(-259200000),
     });
     const boot = new Element("SPAN", { id: "server-start" },
-        " (2026-10-21 12:00:00 UTC, ", [age, new Text(")")]);
+        " (2026-10-21 12:00:00, ", [age, new Text(")")]);
     page.root.insertBefore(boot, page.notice);
     page.jump(1000);
-    assert.equal(boot.textContent, " (2026-10-21 12:00:00 UTC, 3 d ago)");
+    assert.equal(boot.textContent, " (2026-10-21 12:00:00, 3 d ago)");
     page.jump(120000);
     await page.settle();
-    assert.equal(boot.textContent, " (2026-10-21 12:00:00 UTC, 3 d ago)");
+    assert.equal(boot.textContent, " (2026-10-21 12:00:00, 3 d ago)");
     assert.equal(page.server.textContent, "Server unavailable");
 });
 

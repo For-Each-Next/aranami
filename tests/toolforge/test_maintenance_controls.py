@@ -114,6 +114,69 @@ class TestMaintenanceControls(unittest.TestCase):
             ):
                 maintenance_selection(parameters)
 
+    def test_regex_and_shared_grade_ranges(self) -> None:
+        """Filter a complete list by safe regex and inclusive ranks."""
+        rows = _snapshot()["backlog"]["groups"][0]["items"][:6]
+        for row, quality, importance in zip(
+            rows,
+            ("C", "乙", "A", "GA", None, "invented"),
+            ("Low", "High", "Top", "Mid", None, "invented"),
+            strict=True,
+        ):
+            row["assessment_class"] = quality
+            row["assessment_importance"] = importance
+        selection = maintenance_selection({
+            "task": ["references"],
+            "q": [r"^GAME 00[1-4]$"],
+            "regex": ["1"],
+            "quality": ["C"],
+            "quality_op": ["range"],
+            "quality_to": ["A"],
+            "importance": ["High"],
+            "importance_op": ["gte"],
+        })
+        assert maintenance_filter(rows, selection) == rows[1:3]
+        selection.update(quality="A", quality_to="C")
+        assert maintenance_filter(rows, selection) == rows[1:3]
+        assert (
+            maintenance_filter(
+                rows,
+                {
+                    "q": r"^(?-i:Game) \d+$",
+                    "regex": "1",
+                },
+            )
+            == rows
+        )
+        assert (
+            maintenance_filter(
+                rows,
+                {
+                    "q": r"^(?-i:GAME) \d+$",
+                    "regex": "1",
+                },
+            )
+            == []
+        )
+        assert maintenance_filter(
+            rows,
+            {
+                "importance": "Mid",
+                "importance_op": "lte",
+            },
+        ) == [rows[0], rows[3]]
+        for invalid in (
+            {"q": ["["], "regex": ["1"]},
+            {"q": [r"(a)\1"], "regex": ["1"]},
+            {"quality": ["Unknown"], "quality_op": ["gte"]},
+            {"importance": ["High"], "importance_op": ["range"]},
+        ):
+            with (
+                self.subTest(invalid=invalid),
+                self.assertRaises(ValueError),
+            ):
+                maintenance_selection({"task": ["references"], **invalid})
+
     @staticmethod
     def test_pagination_and_sort_keep_filter_state() -> None:
         """Show the second range with links and both jump forms."""
@@ -131,7 +194,11 @@ class TestMaintenanceControls(unittest.TestCase):
         assert ">51</td>" in output
         assert "Game 051" in output
         assert "Game 050" not in output
-        assert 'aria-current="true">Article title</a>' in output
+        assert (
+            '<option value="title" selected>Article title</option>' in output
+        )
+        assert 'class="sort-controls"' not in output
+        assert 'type="radio" name="order" value="asc" checked' in output
         links = re.findall(r'href="([^"]+)"[^>]*rel="(?:prev|next)"', output)
         assert len(links) == 4
         for link in links:

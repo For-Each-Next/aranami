@@ -105,9 +105,9 @@
     "zh-hant": "目錄"
   },
   "about.intro": {
-    "en": "Aranami ({name}, meaning “raging waves”) updates reports for Chinese Wikipedia’s video game WikiProject on Toolforge. Use this dashboard to browse articles, find maintenance tasks, check report updates, and read run logs.",
-    "zh-hans": "Aranami（{name}，意为「狂澜」）在Toolforge上为中文维基百科电子游戏专题更新报告。通过此看板，可以浏览条目、查找维护任务、查看报告更新状态及阅读运行日志。",
-    "zh-hant": "Aranami（{name}，意為「狂瀾」）在Toolforge上為中文維基百科電子遊戲專題更新報告。透過此看板，可以瀏覽條目、尋找維護任務、查看報告更新狀態及閱讀執行日誌。"
+    "en": "Aranami ({name}, “raging waves”) supports the {project} on {wikipedia}. It updates on-wiki reports and brings together content reviews, article highlights, maintenance tasks, and newsletter drafts.",
+    "zh-hans": "Aranami（{name}，意为「狂澜」）服务于{wikipedia}之{project}，自动更新站内报告，并汇集内容评审、条目佳作、维护任务与简讯草稿。",
+    "zh-hant": "Aranami（{name}，意為「狂瀾」）服務於{wikipedia}之{project}，自動更新站內報告，並彙整內容評審、條目佳作、維護任務與簡訊草稿。"
   },
   "about.contact": {
     "en": "If you have questions, contact {user}.",
@@ -330,24 +330,24 @@
     "zh-hant": "內容評審"
   },
   "reviews.started_days": {
-    "en": "Started {count} d ago",
-    "zh-hans": "{count}天前发起",
-    "zh-hant": "{count}天前發起"
+    "en": "Started {count} days ago",
+    "zh-hans": "{count}日前发起",
+    "zh-hant": "{count}日前發起"
   },
   "reviews.replied_days": {
-    "en": "Last reply {count} d ago",
-    "zh-hans": "{count}天前回应",
-    "zh-hant": "{count}天前回應"
+    "en": "Comments within {count} days",
+    "zh-hans": "{count}日内有留言",
+    "zh-hant": "{count}日內有留言"
   },
   "reviews.replied_hours": {
-    "en": "Last reply {count} h ago",
-    "zh-hans": "{count}小时前回应",
-    "zh-hant": "{count}小時前回應"
+    "en": "Comments within {count} hours",
+    "zh-hans": "{count}小时内有留言",
+    "zh-hant": "{count}小時內有留言"
   },
   "reviews.participants": {
-    "en": ", {count} participants",
-    "zh-hans": "，{count}参与者",
-    "zh-hant": "，{count}參與者"
+    "en": "{count} participants",
+    "zh-hans": "{count}讨论者",
+    "zh-hant": "{count}討論者"
   },
   "reviews.fac": {
     "en": "Featured article nomination",
@@ -1000,9 +1000,9 @@
     "zh-hant": "等待執行…"
   },
   "footer.uptime": {
-    "en": "Aranami ({version}) started {since} UTC, running for {duration}.",
-    "zh-hans": "Aranami ({version}) 自{since} UTC启动，已执行{duration}。",
-    "zh-hant": "Aranami ({version}) 自{since} UTC啟動，已執行{duration}。"
+    "en": "Aranami ({version}) started {since}, running for {duration}.",
+    "zh-hans": "Aranami ({version}) 自{since}启动，已执行{duration}。",
+    "zh-hant": "Aranami ({version}) 自{since}啟動，已執行{duration}。"
   },
   "footer.uptime_unknown": {
     "en": "Aranami ({version}) uptime: unavailable",
@@ -1120,9 +1120,9 @@
     "zh-hant": "尚無每日日誌。"
   },
   "logs.column_date": {
-    "en": "Date (UTC)",
-    "zh-hans": "日期（UTC）",
-    "zh-hant": "日期（UTC）"
+    "en": "Date",
+    "zh-hans": "日期",
+    "zh-hant": "日期"
   },
   "logs.column_file": {
     "en": "Log file",
@@ -1210,14 +1210,14 @@
     "zh-hant": "前往"
   },
   "backlog.direction.asc": {
-    "en": "Ascending",
-    "zh-hans": "升序",
-    "zh-hant": "升冪"
+    "en": "Forward",
+    "zh-hans": "顺序",
+    "zh-hant": "順序"
   },
   "backlog.direction.desc": {
-    "en": "Descending",
-    "zh-hans": "降序",
-    "zh-hant": "降冪"
+    "en": "Reverse",
+    "zh-hans": "逆序",
+    "zh-hant": "逆序"
   },
   "backlog.direction.oldest": {
     "en": "Oldest first",
@@ -1618,5 +1618,160 @@
     "en": "Selected issue",
     "zh-hans": "所选期刊",
     "zh-hant": "所選期刊"
+  },
+  "about.wikipedia": {
+    "en": "Chinese Wikipedia",
+    "zh-hans": "中文维基百科",
+    "zh-hant": "中文維基百科"
+  },
+  "about.project": {
+    "en": "video game WikiProject",
+    "zh-hans": "电子游戏专题",
+    "zh-hant": "電子遊戲專題"
+  },
+  "about.credits": {
+    "en": "Credits",
+    "zh-hans": "鸣谢与许可",
+    "zh-hant": "致謝與授權"
+  },
+  "about.codex": {
+    "en": "Interface components:",
+    "zh-hans": "界面组件：",
+    "zh-hant": "介面元件："
+  },
+  "backlog.regex": {
+    "en": "Regular expression",
+    "zh-hans": "正则表达式",
+    "zh-hant": "正規表示式"
+  },
+  "backlog.compare.heading": {
+    "en": "Comparison",
+    "zh-hans": "比较方式",
+    "zh-hant": "比較方式"
+  },
+  "backlog.compare.eq": {
+    "en": "Equals",
+    "zh-hans": "等于",
+    "zh-hant": "等於"
+  },
+  "backlog.compare.gte": {
+    "en": "At least (≥)",
+    "zh-hans": "至少（≥）",
+    "zh-hant": "至少（≥）"
+  },
+  "backlog.compare.lte": {
+    "en": "At most (≤)",
+    "zh-hans": "至多（≤）",
+    "zh-hant": "至多（≤）"
+  },
+  "backlog.compare.range": {
+    "en": "Between (inclusive)",
+    "zh-hans": "范围（含两端）",
+    "zh-hant": "範圍（含兩端）"
+  },
+  "backlog.compare.endpoint": {
+    "en": "Other end of range",
+    "zh-hans": "范围另一端",
+    "zh-hant": "範圍另一端"
+  },
+  "newsletter.history.calendar": {
+    "en": "Saved data dates",
+    "zh-hans": "已保存的数据日期",
+    "zh-hant": "已儲存的資料日期"
+  },
+  "newsletter.history.previous_month": {
+    "en": "Previous month",
+    "zh-hans": "上个月",
+    "zh-hant": "上個月"
+  },
+  "newsletter.history.next_month": {
+    "en": "Next month",
+    "zh-hans": "下个月",
+    "zh-hant": "下個月"
+  },
+  "reviews.started_months": {
+    "en": "Started {count} months ago",
+    "zh-hans": "{count}个月前发起",
+    "zh-hant": "{count}個月前發起"
+  },
+  "reviews.started_hours": {
+    "en": "Started {count} hours ago",
+    "zh-hans": "{count}小时前发起",
+    "zh-hant": "{count}小時前發起"
+  },
+  "reports.intro": {
+    "en": "These jobs update reports on Chinese Wikipedia.",
+    "zh-hans": "这些任务更新中文维基百科站内的报告。",
+    "zh-hant": "這些任務更新中文維基百科站內的報告。"
+  },
+  "reports.history_note": {
+    "en": "One row per job invocation. Select a task to read its recorded stages.",
+    "zh-hans": "每行记录一次任务执行。点击任务可查看各阶段记录。",
+    "zh-hant": "每行記錄一次任務執行。點選任務可查看各階段紀錄。"
+  },
+  "reports.stage.started": {
+    "en": "Started",
+    "zh-hans": "开始",
+    "zh-hant": "開始"
+  },
+  "reports.stage.fetching": {
+    "en": "Reading source data",
+    "zh-hans": "读取来源数据",
+    "zh-hant": "讀取來源資料"
+  },
+  "reports.stage.preparing": {
+    "en": "Preparing report",
+    "zh-hans": "整理报告",
+    "zh-hant": "整理報告"
+  },
+  "reports.stage.database_updated": {
+    "en": "Report data saved",
+    "zh-hans": "已更新报告数据",
+    "zh-hant": "已更新報告資料"
+  },
+  "reports.stage.saving": {
+    "en": "Checking and submitting page",
+    "zh-hans": "检查并提交页面",
+    "zh-hant": "檢查並提交頁面"
+  },
+  "reports.stage.saved": {
+    "en": "Page saved",
+    "zh-hans": "页面已保存",
+    "zh-hant": "頁面已儲存"
+  },
+  "reports.stage.save_failed": {
+    "en": "Page save failed",
+    "zh-hans": "页面保存失败",
+    "zh-hant": "頁面儲存失敗"
+  },
+  "reports.stage.no_update": {
+    "en": "No page changes needed",
+    "zh-hans": "无需提交页面",
+    "zh-hant": "無需提交頁面"
+  },
+  "reports.stage.deferred": {
+    "en": "Waiting to retry",
+    "zh-hans": "等待重试",
+    "zh-hant": "等待重試"
+  },
+  "reports.stage.unconfirmed": {
+    "en": "Save outcome unconfirmed",
+    "zh-hans": "保存结果未确认",
+    "zh-hant": "儲存結果未確認"
+  },
+  "reports.stage.finished": {
+    "en": "Finished",
+    "zh-hans": "结束",
+    "zh-hant": "結束"
+  },
+  "reports.stage_truncated": {
+    "en": "Some intermediate stages were omitted from this bounded history.",
+    "zh-hans": "部分中间阶段因记录数量限制而省略。",
+    "zh-hant": "部分中間階段因紀錄數量限制而省略。"
+  },
+  "reports.count": {
+    "en": "Matching job invocations for {date}: {count}.",
+    "zh-hans": "{date}匹配的任务执行记录：{count}条。",
+    "zh-hant": "{date}符合篩選的任務執行紀錄：{count}筆。"
   }
 }

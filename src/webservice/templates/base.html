@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
   <meta name="description" content="{{ t.page.description }}">
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/aranami-icon.png">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/codex.css">
   {% if live %}<script src="/live.js" defer></script>{% endif %}
+  <script src="/navigation.js" defer></script>
   {% block assets %}{% endblock %}
   <title>{{ heading }} · Aranami</title>
 </head>
@@ -16,12 +18,11 @@
   <a href="#main" class="skip">{{ t.nav.skip }}</a>
   <header class="masthead">
     <div class="shell header-inner">
-      <a href="/" class="brand"><img src="/aranami.svg" width="36" height="36" alt=""><span>Aranami</span></a>
+      <a href="/" class="brand"><img src="/aranami-wordmark.png" width="205" height="47" alt="Aranami"></a>
       <nav class="global-navigation" aria-label="{{ t.nav.global }}">
         <a href="/"{% if navigation and navigation.path == '/' %} aria-current="page"{% endif %}>{{ t.nav.dashboard }}</a>
         <a href="/maintenance/"{% if navigation and navigation.path == '/maintenance/' %} aria-current="page"{% endif %}>{{ t.nav.backlog }}</a>
         <a href="/reports/"{% if navigation and navigation.path == '/reports/' %} aria-current="page"{% endif %}>{{ t.nav.reports }}</a>
-        <a href="/about/"{% if navigation and navigation.path == '/about/' %} aria-current="page"{% endif %}>{{ t.nav.about }}</a>
         <details class="navigation-tools">
           <summary>{{ t.nav.tools }}</summary>
           <ul class="navigation-tools-list">
@@ -30,14 +31,18 @@
         </details>
       </nav>
       <nav class="language-switcher" aria-label="{{ t.nav.language }}">
-        <span class="language-label">{{ t.nav.language }}</span>
+        <details class="navigation-tools language-menu">
+        <summary><span aria-hidden="true">文</span>{{ t.nav.language }}</summary>
+        <ul class="navigation-tools-list">
         {% if navigation %}
-          {% for language in navigation.languages %}<a href="{{ language.url }}" lang="{{ language.tag }}" hreflang="{{ language.tag }}"{% if language.current %} aria-current="true"{% endif %}>{{ language.label }}</a>{% endfor %}
+          {% for language in navigation.languages %}<li><a href="{{ language.url }}" lang="{{ language.tag }}" hreflang="{{ language.tag }}"{% if language.current %} aria-current="true"{% endif %}>{{ language.label }}</a></li>{% endfor %}
         {% else %}
-          <a href="?lang=en" lang="en">English</a>
-          <a href="?lang=zh-hans" lang="zh-Hans">简体中文</a>
-          <a href="?lang=zh-hant" lang="zh-Hant">繁體中文</a>
+          <li><a href="?lang=en" lang="en">English</a></li>
+          <li><a href="?lang=zh-hans" lang="zh-Hans">简体中文</a></li>
+          <li><a href="?lang=zh-hant" lang="zh-Hant">繁體中文</a></li>
         {% endif %}
+        </ul>
+        </details>
       </nav>
     </div>
   </header>
@@ -47,8 +52,8 @@
         <p class="contents-heading">{{ t.nav.contents }}</p>
         {% block contents_links %}<ul><li><a href="#main">{{ heading }}</a></li></ul>{% endblock %}
       </nav>
-      <details class="contents-mobile">
-        <summary>{{ t.nav.contents }}</summary>
+      <details class="contents-mobile navigation-tools">
+        <summary><span class="contents-icon" aria-hidden="true">☰</span>{{ t.nav.contents }}</summary>
         <nav class="page-toc" aria-label="{{ t.nav.contents }}">{{ self.contents_links() }}</nav>
       </details>
     </aside>
@@ -60,8 +65,7 @@
   <footer>
     <div class="shell footer-inner">
       <p class="footer-uptime">{% if footer %}{% include "includes/uptime.html" %}{% endif %}</p>
-      <nav aria-label="Aranami"><a href="/about/">{{ t.nav.about }}</a>{{ project_link }}</nav>
-      <p class="extract-attribution">{{ extract_attribution.before }}<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>{{ extract_attribution.after }}</p>
+      <nav aria-label="Aranami"><a href="/about/"{% if navigation and navigation.path == '/about/' %} aria-current="page"{% endif %}>{{ t.nav.about }}</a>{{ project_link }}</nav>
     </div>
   </footer>
 </body>

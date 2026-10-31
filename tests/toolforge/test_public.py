@@ -257,8 +257,8 @@ class PublicWebsiteTests(unittest.TestCase):
                     assert b"Aranami" in body
                     assert b'<script src="/live.js" defer>' in body
                     if target == "/about/":
-                        assert b'id="server-runtime"' not in body
-                        assert b'id="live-server-status"' not in body
+                        assert b'id="server-runtime"' in body
+                        assert b'id="live-server-status"' in body
                         assert b'id="live-uptime"' in body
                         assert b"data-clock-messages=" in body
                     if target == "/logs/":
@@ -323,7 +323,7 @@ class PublicWebsiteTests(unittest.TestCase):
             assert "References &lt;&amp;&gt;" in text
             assert "Sources &lt;&amp;&gt;" in text
             assert 'href="/maintenance/?task=sources&amp;page=1"' in text
-            assert "2026-10-31 12:00 UTC" in text
+            assert "2026-10-31 12:00" in text
             assert 'href="/maintenance/?lang=en"' in text
             head = self.request("/maintenance/?lang=zh-hant", "HEAD")
             assert head[0] == 200
@@ -349,7 +349,7 @@ class PublicWebsiteTests(unittest.TestCase):
             status, _, body = self.request("/maintenance/?lang=en")
             assert status == 200
             assert b"No articles currently need maintenance." in body
-            assert b"2026-10-31 12:00 UTC" in body
+            assert b"2026-10-31 12:00" in body
             assert b"temporarily unavailable" not in body
 
     def test_live_status_bypasses_page_cache_and_never_collects(self) -> None:
@@ -448,11 +448,41 @@ class PublicWebsiteTests(unittest.TestCase):
         assert value["events"] == events[-100:]
         assert value["truncated"]
         assert value["query"] == "[x]"
+        state = self.runtime / "state"
+        state.mkdir(exist_ok=True)
+        (state / "job-history.json").write_text(
+            json.dumps({
+                "schema": 1,
+                "runs": [
+                    {
+                        "run_id": f"{index:032x}",
+                        "routine": "pageviews",
+                        "started_at": event["time"],
+                        "finished_at": None,
+                        "status": "running",
+                        "duration_seconds": None,
+                        "truncated": False,
+                        "stages": [
+                            {
+                                "kind": "started",
+                                "time": event["time"],
+                                "title": "",
+                            },
+                        ],
+                    }
+                    for index, event in enumerate(events[-100:])
+                ],
+            }),
+        )
         with (
             patch("pywikibot.Site", side_effect=AssertionError("No sources")),
             patch(
                 "backend.public._PublicViews._dashboard",
                 side_effect=AssertionError("No dataset reads"),
+            ),
+            patch(
+                "backend.public.log_excerpt",
+                side_effect=AssertionError("Reports do not read daily events"),
             ),
         ):
             human = self.request("/reports/")[2].decode()
@@ -462,7 +492,7 @@ class PublicWebsiteTests(unittest.TestCase):
         assert rows.count("<tr>") == 25
         assert "Pageview rankings" in rows
         assert "Running" in rows
-        assert "2026-10-23 12:02:29 UTC" in rows
+        assert "2026-10-23 12:02:29" in rows
         assert '<form action="/reports/"' in human
         assert 'href="/reports/?date=2026-10-23' in human
         assert "the Pageview rankings task started." not in human
@@ -495,7 +525,7 @@ class PublicWebsiteTests(unittest.TestCase):
         filtered = self.request(
             "/reports/?date=2026-10-23&order=asc&page=2&status=running",
         )[2].decode()
-        assert "2026-10-23 12:01:15 UTC" in filtered
+        assert "2026-10-23 12:01:15" in filtered
         assert 'href="/reports/?date=2026-10-23' in filtered
         assert "lang=zh-hant" in filtered
         assert (

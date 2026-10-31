@@ -56,40 +56,9 @@ test("copy preserves literal displayed wikitext and announces completion", async
     assert.equal(display.focused, false);
 });
 
-test("issue selection submits the saved-issue GET form only on checked change", () => {
-    const radios = [true, false].map(checked => ({
-        checked,
-        addEventListener(event, handler) {
-            assert.equal(event, "change");
-            this.change = handler;
-        },
-    }));
-    const form = {
-        hidden: true,
-        submissions: 0,
-        querySelectorAll(selector) {
-            assert.equal(selector, 'input[name="issue"]');
-            return radios;
-        },
-        requestSubmit() { this.submissions++; },
-    };
-    vm.runInNewContext(script, {
-        document: {
-            querySelector(selector) {
-                assert.equal(selector, "[data-newsletter-issue-form]");
-                return form;
-            },
-            querySelectorAll: () => [],
-        },
-    });
-    assert.equal(form.hidden, false);
-    assert.equal(form.submissions, 0);
-    radios[0].checked = false;
-    radios[0].change();
-    assert.equal(form.submissions, 0);
-    radios[1].checked = true;
-    radios[1].change();
-    assert.equal(form.submissions, 1);
+test("issue selection has no automatic change submission", () => {
+    assert.equal(script.includes("requestSubmit"), false);
+    assert.equal(script.includes('input[name="issue"]'), false);
 });
 
 test("missing or rejected clipboard selects source text for manual copying", async () => {
@@ -136,4 +105,66 @@ test("highlighting preserves exact source text and never creates source HTML", (
     }
     const comment = display.children.find(child => child.className === "newsletter-token-comment");
     assert.equal(comment.textContent, "<!-- {{hidden}} -->");
+});
+
+function calendarFixture(locale = "en") {
+    function node() {
+        return {
+            children: [], attrs: {}, handlers: {}, textContent: "", hidden: true,
+            append(child) { this.children.push(child); },
+            replaceChildren() { this.children = []; },
+            setAttribute(name, value) { this.attrs[name] = value; },
+            addEventListener(name, handler) { this.handlers[name] = handler; },
+            focus() { this.focused = true; },
+        };
+    }
+    const input = {value: "2026-10-30", hidden: false};
+    const fields = Object.fromEntries(["selected", "month", "previous", "next", "weekdays", "days"].map(key => [`[data-calendar-${key}]`, node()]));
+    fields.summary = node();
+    const calendar = node();
+    calendar.dataset = {dates: JSON.stringify(["2026-10-28", "2026-10-30", "2026-11-03"])};
+    calendar.querySelector = selector => fields[selector];
+    vm.runInNewContext(script, {
+        document: {
+            documentElement: {lang: locale},
+            querySelector: () => calendar,
+            querySelectorAll: () => [],
+            getElementById: () => input,
+            createElement: () => node(),
+        },
+        Intl, Date,
+    });
+    const buttons = () => fields["[data-calendar-days]"].children.flatMap(row => row.children.flatMap(cell => cell.children));
+    return {input, fields, calendar, buttons};
+}
+
+test("calendar starts on Sunday and disables every unavailable date", () => {
+    const {input, fields, calendar, buttons} = calendarFixture();
+    assert.equal(calendar.hidden, false);
+    assert.equal(input.hidden, true);
+    assert.equal(input.type, "hidden");
+    assert.deepEqual(fields["[data-calendar-weekdays]"].children[0].children.map(day => day.textContent), ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
+    assert.deepEqual(buttons().filter(button => !button.disabled).map(button => button.attrs["aria-label"]), ["2026-10-28", "2026-10-30"]);
+    assert.equal(buttons().find(button => button.textContent === "29").disabled, true);
+    assert.equal(fields["[data-calendar-previous]"].disabled, true);
+    assert.equal(fields["[data-calendar-next]"].disabled, false);
+    const firstRow = fields["[data-calendar-days]"].children[0].children;
+    assert.equal(firstRow.findIndex(cell => cell.children.length > 0), 4);
+});
+
+test("calendar browses months and selects dates without submitting", () => {
+    const {input, fields, calendar, buttons} = calendarFixture("zh-Hant");
+    fields["[data-calendar-next]"].handlers.click();
+    assert.equal(fields["[data-calendar-next]"].disabled, true);
+    assert.equal(fields["[data-calendar-previous]"].disabled, false);
+    assert.deepEqual(buttons().filter(button => !button.disabled).map(button => button.attrs["aria-label"]), ["2026-11-03"]);
+    const target = buttons().find(button => button.attrs["aria-label"] === "2026-11-03");
+    target.handlers.click();
+    assert.equal(input.value, "2026-11-03");
+    assert.equal(fields["[data-calendar-selected]"].textContent, "2026-11-03");
+    assert.equal(calendar.open, false);
+    assert.equal(fields.summary.focused, true);
+    assert.equal(buttons().find(button => button.attrs["aria-label"] === "2026-11-03").attrs["aria-pressed"], "true");
+    fields["[data-calendar-previous]"].handlers.click();
+    assert.equal(fields["[data-calendar-month]"].textContent.includes("10"), true);
 });

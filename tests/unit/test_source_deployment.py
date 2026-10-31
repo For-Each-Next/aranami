@@ -156,8 +156,9 @@ class TestSourcePayload(TestCase):
             name for name in self.payload if Path(name).suffix == ".png"
         }
         assert png_files == {
-            "src/webservice/public_html/review-icons/peer-review.png",
-            "src/webservice/public_html/review-icons/project-peer-review.png",
+            "src/webservice/public_html/aranami-icon.png",
+            "src/webservice/public_html/aranami-wordmark.png",
+            "src/webservice/public_html/favicon.png",
         }
         assert all(
             self.payload[name].startswith(b"\x89PNG\r\n\x1a\n")
@@ -187,6 +188,7 @@ class TestSourcePayload(TestCase):
             name for name in self.payload if Path(name).suffix == ".js"
         } == {
             "src/webservice/public_html/live.js",
+            "src/webservice/public_html/navigation.js",
             "src/webservice/public_html/newsletter.js",
         }
         assert (

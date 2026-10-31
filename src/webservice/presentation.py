@@ -384,16 +384,16 @@ def timestamp(value: object) -> dt.datetime | None:
 
 
 def utc_time(value: object, *, seconds: bool = False) -> str:
-    """Display actual source timestamps in UTC.
+    """Display actual source timestamps in UTC without a zone label.
 
     Returns:
-        A UTC display string, or an explicit unknown marker.
+        A date and time without a zone suffix, or an unknown marker.
     """
     instant = timestamp(value)
     if instant is None:
         return "—"
     return instant.strftime(
-        "%Y-%m-%d %H:%M:%S UTC" if seconds else "%Y-%m-%d %H:%M UTC",
+        "%Y-%m-%d %H:%M:%S" if seconds else "%Y-%m-%d %H:%M",
     )
 
 
@@ -487,6 +487,11 @@ def maintenance_selection(
         "q",
         "quality",
         "importance",
+        "regex",
+        "quality_op",
+        "quality_to",
+        "importance_op",
+        "importance_to",
     }
     if set(parameters) - allowed or any(
         len(values) != 1 for values in parameters.values()
@@ -496,7 +501,7 @@ def maintenance_selection(
     values = {key: items[0] for key, items in parameters.items()}
     values.setdefault("page", "1")
     values.setdefault("sort", "oldest")
-    for key in ("q", "quality", "importance"):
+    for key in ("q", "quality", "importance", "quality_to", "importance_to"):
         if not values.get(key):
             values.pop(key, None)
     values.setdefault(
@@ -512,13 +517,64 @@ def maintenance_selection(
         "q": r"[^\x00-\x1f\x7f]{1,200}",
         "quality": "|".join(code for code, *_ in _QUALITY) + "|Unknown",
         "importance": "|".join(code for code, *_ in _IMPORTANCE),
+        "regex": "1",
+        "quality_op": "eq|gte|lte|range",
+        "importance_op": "eq|gte|lte|range",
+        "quality_to": "|".join(_RANKS["class"]),
+        "importance_to": "|".join(_RANKS["importance"]),
     }
     if "task" not in values or any(
         not re.fullmatch(patterns[key], value) for key, value in values.items()
     ):
         message = "Invalid maintenance query."
         raise ValueError(message)
+    for key, dimension in (("quality", "class"), ("importance", "importance")):
+        operation = values.get(f"{key}_op", "eq")
+        if operation != "eq" and (
+            values.get(key) not in _RANKS[dimension]
+            or (operation == "range" and f"{key}_to" not in values)
+        ):
+            message = "A comparable assessment is required for a range."
+            raise ValueError(message)
+    if values.get("regex") and values.get("q"):
+        try:
+            pl.select(pl.lit("validate").str.contains("(?i)" + values["q"]))
+        except pl.exceptions.PolarsError as error:
+            message = "Invalid title regular expression."
+            raise ValueError(message) from error
     return values
+
+
+def assessment_condition(
+    code: pl.Expr,
+    dimension: str,
+    selected: str,
+    operation: str = "eq",
+    endpoint: str | None = None,
+) -> pl.Expr:
+    """Build a shared grade comparison for quality or importance.
+
+    Args:
+        code: Canonical assessment, with missing facts preserved.
+        dimension: Assessment dimension whose established ranks apply.
+        selected: Exact grade or first comparable endpoint.
+        operation: Equality, minimum, maximum, or inclusive range.
+        endpoint: Second endpoint for a range, in either order.
+
+    Returns:
+        A Polars predicate; unranked observations never match a range.
+    """
+    if operation == "eq":
+        return code == selected
+    ranks = _RANKS[dimension]
+    rank = code.replace_strict(ranks, default=None, return_dtype=pl.Int64)
+    boundary = ranks[selected]
+    if operation == "gte":
+        return rank >= boundary
+    if operation == "lte":
+        return rank <= boundary
+    lower, upper = sorted((boundary, ranks[endpoint]))
+    return rank.is_between(lower, upper)
 
 
 def maintenance_filter(
@@ -533,7 +589,8 @@ def maintenance_filter(
 
     Returns:
         Original observations with source order and fields kept. Title
-        search is literal and case-insensitive. Missing quality is
+        search is case-insensitive, with an optional Rust regular
+        expression. Missing quality is
         unassessed; unrecognized values remain unknown.
     """
     if not any(selection.get(key) for key in ("q", "quality", "importance")):
@@ -548,11 +605,11 @@ def maintenance_filter(
     ).with_row_index("position")
     conditions = []
     if query := selection.get("q"):
+        title = pl.col("title")
         conditions.append(
-            pl
-            .col("title")
-            .str.to_lowercase()
-            .str.contains(
+            title.str.contains("(?i)" + query)
+            if selection.get("regex")
+            else title.str.to_lowercase().str.contains(
                 query.lower(),
                 literal=True,
             ),
@@ -572,7 +629,15 @@ def maintenance_filter(
                 _ALIASES[dimension],
                 default=fallback,
             )
-            conditions.append(code == selected)
+            conditions.append(
+                assessment_condition(
+                    code,
+                    dimension,
+                    selected,
+                    selection.get(f"{key}_op", "eq"),
+                    selection.get(f"{key}_to"),
+                ),
+            )
     positions = frame.filter(*conditions).get_column("position")
     return [items[position] for position in positions]
 
@@ -961,7 +1026,7 @@ def uptime(
             minutes=minutes % _HOUR_MINUTES,
             seconds=seconds % _MINUTE,
         ),
-        since=utc_time(schedule["started_at"]).removesuffix(" UTC"),
+        since=utc_time(schedule["started_at"]),
     )
 
 

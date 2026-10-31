@@ -102,8 +102,8 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             "dyk": [],
         })
         quality, announcements = pages[1]["text"], pages[2]["text"]
-        assert "未記錄到本期有明確日期的評級變動" in quality
-        assert "（無變動）" not in quality
+        assert "共有0次有明確日期的評級變動" in quality
+        assert "（無變動）" in quality
         assert (
             "（新條目推薦2項、新聞動態3項、歷史上的今天4項）" in announcements
         )
@@ -250,7 +250,10 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
     @staticmethod
     def test_empty_quality_months_keep_initial_placeholder_rows() -> None:
         """Keep every monthly grade slot and separate source status."""
-        observed = _render({"quality_changes": []})[1]["text"]
+        observed = _render({
+            "quality_changes": [],
+            "observation_end": "2026-10-31",
+        })[1]["text"]
         unknown = _render({"quality_changes": None})[1]["text"]
         months = ("2026年10月", "2026年11月", "2026年12月")
         for month in months:
@@ -276,6 +279,35 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "（無已知日期的變動）" not in observed
         assert "（無變動）" not in unknown
         assert "來源資料暫未取得" in unknown
+
+    @staticmethod
+    def test_compact_month_restores_later_backfill() -> None:
+        """Compact empty elapsed months without freezing their facts."""
+        facts = {
+            "quality_changes": [],
+            "quality_source": "article_history",
+            "observation_end": "2026-11-01",
+        }
+        quality = _render(facts)[1]["text"]
+        assert "=== 2026年10月 ===\n（無變動）" in quality
+        assert (
+            "=== 2026年11月 ===\n* {{icon|FA}}&thinsp;當選典範條目：（無）"
+        ) in quality
+        facts["observation_end"] = "2026-11-04"
+        facts["quality_changes"] = [
+            {
+                "date": "2026-10-24",
+                "grade": "GA",
+                "action": "added",
+                "title": "晚加入專題的條目",
+            },
+        ]
+        backfilled = _render(facts)[1]["text"]
+        october = backfilled.partition("=== 2026年10月 ===")[2].partition(
+            "=== 2026年11月 ===",
+        )[0]
+        assert "當選優良條目：[[:晚加入專題的條目]]" in october
+        assert "（無變動）" not in october
 
     @staticmethod
     def test_homepage_observations_require_complete_saved_coverage() -> None:

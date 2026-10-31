@@ -224,6 +224,30 @@ class ParserTests(TestCase):
         assert row["participant_count"] == 2
 
     @staticmethod
+    def test_project_review_starts_in_an_earlier_nested_comment() -> None:
+        """Find the earlier opening under a newer lead followup."""
+        row = talk_review(
+            "== 甲級條目評審 ==\n"
+            "Three months inactive. [[User:Reviewer]] "
+            "2026年6月20日 (六) 13:16 (UTC)\n"
+            "=== Reviewer's comments ===\n"
+            "Opening review. [[User talk:Reviewer]] "
+            "2026年2月5日 (四) 14:15 (UTC)\n"
+            ": Reply [[U:Author]] 2026年2月5日 (四) 22:55 (UTC)\n"
+            "{{DYKEntry/archive|article=豐川祥子|closeframe=1}}\n"
+            "* DYK vote [[User:Unrelated]] "
+            "2026年2月2日 (一) 11:36 (UTC)\n{{DYKvoteF}}\n"
+            "== Other discussion ==\n"
+            "[[User:Other]] 2020年1月1日 (三) 00:00 (UTC)\n",
+            "acc",
+            title="豐川祥子",
+            talk="Talk:豐川祥子",
+        )[0]
+        assert row["started_at"] == "2026-02-05T14:15:00+00:00"
+        assert row["replied_at"] == "2026-02-05T22:55:00+00:00"
+        assert row["participant_count"] == 2
+
+    @staticmethod
     def test_dyk_nominator_and_candidate_boundaries() -> None:
         """Keep DYK comments with their own candidate and nominator."""
         rows = community_reviews(
@@ -560,6 +584,21 @@ class CollectionTests(TestCase):
             for item in row["items"]:
                 item["participant_count"] = 0
         pl.DataFrame(rows, schema=frame.schema).write_parquet(path)
+        self.site.simple_request.reset_mock()
+        assert self._collect() == first
+        assert any(
+            call.kwargs["prop"] == "revisions"
+            for call in self.site.simple_request.call_args_list
+        )
+
+    def test_outdated_parser_cache_is_reparsed(self) -> None:
+        """Refresh unchanged revisions when parsing semantics change."""
+        first = self._collect()
+        path = self.cache / "review-sources-v1.parquet"
+        frame = pl.read_parquet(path).with_columns(
+            pl.lit(1, dtype=pl.Int64).alias("parser_version"),
+        )
+        frame.write_parquet(path)
         self.site.simple_request.reset_mock()
         assert self._collect() == first
         assert any(

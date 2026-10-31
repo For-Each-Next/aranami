@@ -13,12 +13,15 @@ proposals (95249932), FLC proposals (95117299), Preload FLN/auto
 candidates (95258998), Module:DYKEntry (94743983), and WikiProject
 Video games (92848131). DYKEntry's nominator parameter follows its
 documentation (62936050), checked on 31 October 2026.
+Talk:豐川祥子 (93157031) places the opening in a nested section and an
+unrelated DYKEntry/archive discussion after the project review.
 See https://zh.wikipedia.org/w/index.php?oldid=REVISION.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import operator
 import re
 from contextlib import suppress
 from functools import partial
@@ -78,6 +81,8 @@ _PROJECT_HEADINGS = {
     "reassess": r"重新[評评][級级估]|重[評评]|reassessment",
 }
 _USER_NAMESPACES = {
+    "u",
+    "ut",
     "user",
     "user talk",
     "用户",
@@ -174,7 +179,17 @@ def _discussion_text(code: Wikicode) -> str:
         adjacent without reading quoted examples.
     """
     parts = []
+    archived_dyk = False
     for node in code.nodes:
+        if isinstance(node, Template):
+            name = str(node.name).strip().removeprefix("Template:").casefold()
+            if name == "dykentry/archive":
+                archived_dyk = True
+            elif name == "dykvotef":
+                archived_dyk = False
+            continue
+        if archived_dyk:
+            continue
         if isinstance(node, Text | Wikilink):
             parts.append(str(node))
         elif isinstance(node, Tag):
@@ -436,6 +451,9 @@ def talk_review(text: str, kind: str, *, title: str, talk: str) -> list[dict]:
 
     Returns:
         One category-backed request, even without a matching discussion.
+        The earliest signed comment in the selected section, including
+        subsections, establishes its start; newer lead followups do not
+        replace that opening. An unsigned lead date remains a fallback.
     """
     heading = (
         review_heading(text, kind) if kind not in _PROJECT_HEADINGS else None
@@ -463,14 +481,28 @@ def talk_review(text: str, kind: str, *, title: str, talk: str) -> list[dict]:
         (s for s in reversed(sections) if _plain_heading(s) == heading),
         None,
     )
-    started = _started(section) if section is not None else None
+    comments = _signed_comments(section) if section is not None else []
+    opening = min(comments, key=operator.itemgetter(1), default=None)
+    started = (
+        opening[1]
+        if opening is not None
+        else _started(section)
+        if section is not None
+        else None
+    )
     return [
         _row(
             title,
             kind,
             _url(talk, heading),
             started,
-            _activity(section, started) if section is not None else None,
+            _activity(
+                section,
+                started,
+                nominator=opening[0] if opening else None,
+            )
+            if section is not None
+            else None,
         ),
     ]
 

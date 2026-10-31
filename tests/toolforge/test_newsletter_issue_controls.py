@@ -120,13 +120,8 @@ class NewsletterIssueControlsTests(unittest.TestCase):
                 assert "issue=2027-01" in response.text
                 assert "<fieldset" in response.text
                 assert "<legend>" in response.text
-                assert "hidden data-newsletter-issue-form" in response.text
-                assert 'type="submit"' not in response.text
-                assert "<noscript>" in response.text
-                assert (
-                    f'href="/newsletter/?issue=2027-01&amp;lang={locale}"'
-                    in response.text
-                )
+                assert "hidden data-newsletter-issue-form" not in response.text
+                assert 'type="submit"' in response.text
 
     def test_explicit_older_issue_is_kept_as_a_selected_radio(self) -> None:
         """Retain valid bookmarked issue choices in the native form."""

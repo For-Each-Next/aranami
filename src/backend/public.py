@@ -28,6 +28,7 @@ lazy import uvicorn
 
 from backend.support.events import event_extra
 from backend.support.http import encoded_response, read_only_headers
+from backend.support.job_history import read_job_history
 from backend.support.logs import open_run_log
 from backend.support.page_cache import PageCache
 from backend.support.public_data import (
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
 _ASSETS = Path(__file__).resolve().parents[1] / "webservice" / "public_html"
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_QUERY_BYTES = 4096
+_MAX_HISTORY_QUERY_BYTES = 1024
 _MAX_HEADER_BYTES = 64 * 1024
 _MAX_PORT = 65535
 _CHUNK_BYTES = 64 * 1024
@@ -367,6 +369,34 @@ def _log_controls(selection: dict[str, list[str]]) -> dict[str, str]:
     return controls
 
 
+def _history_selection(
+    selection: dict[str, list[str]],
+    dates: list[str],
+) -> tuple[str | None, str, dict[str, str]]:
+    """Validate a history date and filter independently of log files.
+
+    Returns:
+        The selected date, text filter, and presentation controls.
+
+    Raises:
+        ValueError: A control is repeated, unsupported, or malformed.
+    """
+    controls = _log_controls(selection)
+    if set(selection) - {"date", "q"} or any(
+        len(values) != 1 for values in selection.values()
+    ):
+        message = "Invalid report history selection."
+        raise ValueError(message)
+    day = selection.get("date", [dates[0] if dates else None])[0]
+    query = selection.get("q", [""])[0].strip()
+    if len(query.encode()) > _MAX_HISTORY_QUERY_BYTES or (
+        day is not None and dt.date.fromisoformat(day).isoformat() != day
+    ):
+        message = "Invalid report history date or query."
+        raise ValueError(message)
+    return day, query, controls
+
+
 def _page_error(key: str, locale: str, status: HTTPStatus) -> Response:
     """Return the common localized document for request failures."""
     return _html(pages.render_error(key, locale), locale, status)
@@ -453,7 +483,9 @@ class _PublicViews:
         """Return a page cached by locale and saved-input identity."""
         path = request.url.path
         locale = _request_locale(request)
-        if path in {"/logs/", "/reports/"}:
+        if path == "/reports/":
+            return self.reports(request, locale=locale)
+        if path == "/logs/":
             return self.logs(request, locale=locale)
         try:
             query = request.scope.get("query_string", b"").decode("ascii")
@@ -780,6 +812,57 @@ class _PublicViews:
         return Response(
             content,
             media_type=_CONTENT_TYPES[relative.suffix],
+        )
+
+    def reports(self, request: Request, *, locale: str) -> Response:
+        """Read per-job history independently of diagnostic logs.
+
+        Returns:
+            A Reports page or a localized invalid-selection response.
+        """
+        try:
+            runs = read_job_history(
+                self.runtime / "state" / "job-history.json",
+            )["runs"]
+        except OSError, ValueError, TypeError, OverflowError, RecursionError:
+            runs = []
+        dates = sorted(
+            {row["started_at"][:10] for row in runs},
+            reverse=True,
+        )
+        try:
+            selection = parse_qs(
+                request.scope.get("query_string", b"").decode("ascii"),
+                keep_blank_values=True,
+                errors="strict",
+                max_num_fields=7,
+            )
+            day, query, controls = _history_selection(selection, dates)
+        except ValueError, UnicodeError:
+            return _page_error(
+                "logs.invalid_query",
+                locale,
+                HTTPStatus.BAD_REQUEST,
+            )
+        if day is not None and day not in dates:
+            return _page_error("logs.not_found", locale, HTTPStatus.NOT_FOUND)
+        return _html(
+            pages.render_reports(
+                {
+                    "runs": [
+                        row for row in runs if row["started_at"][:10] == day
+                    ],
+                    "dates": dates,
+                    "date": day,
+                    "query": query,
+                    **controls,
+                },
+                locale,
+                status=saved_status(self.runtime),
+                config=_configuration(),
+                navigation=_navigation(request, locale),
+            ),
+            locale,
         )
 
     def logs(

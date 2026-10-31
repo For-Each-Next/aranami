@@ -1,10 +1,19 @@
 {% extends "base.html" %}
+{% block contents_links %}<ul><li><a href="#main">{{ t.nav.about }}</a></li><li><a href="#server-status-heading">{{ t.server.heading }}</a></li><li><a href="#credits">{{ t.about.credits }}</a></li></ul>{% endblock %}
 {% block content %}
 <div class="prose">
-  <p>{{ before_name }}<span lang="ja"><a href="https://en.wiktionary.org/wiki/%E8%8D%92%E6%B3%A2">荒波</a></span>{{ after_name }}</p>
+  <p>{{ introduction }}</p>
   <p>{{ before_user }}<a href="https://zh.wikipedia.org/wiki/User:For_Each_..._Next">For Each ... Next</a>{{ after_user }}</p>
+  {% include "includes/server.html" %}
   <p><a href="/logs/">{{ t.nav.logs }}</a></p>
-  <p class="context">{{ t.about.icons }} <a href="https://doc.wikimedia.org/codex/latest/icons/overview.html">Wikimedia Design, OOUI team and other contributors</a> · <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a></p>
-  <p class="context"><a href="/review-icons/credits.html">{{ t.about.review_icons }}</a></p>
+  <section aria-labelledby="credits"><h2 id="credits">{{ t.about.credits }}</h2>
+    <p>Aranami · <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0-1.0</a></p>
+    <ul>
+      <li>{{ extract_attribution.before }}<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>{{ extract_attribution.after }}</li>
+      <li>{{ t.about.codex }} <a href="https://doc.wikimedia.org/codex/latest/">Wikimedia Codex</a> · <a href="/codex-license.html">GPL-2.0-or-later</a></li>
+      <li>{{ t.about.icons }} <a href="https://doc.wikimedia.org/codex/latest/icons/overview.html">Wikimedia Design, OOUI team and other contributors</a> · <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a></li>
+      <li><a href="/review-icons/credits.html">{{ t.about.review_icons }}</a></li>
+    </ul>
+  </section>
 </div>
 {% endblock %}

@@ -105,7 +105,12 @@ and failed/malformed response recovery:
 
 ```shell
 node --test tests/toolforge/test_live.cjs
+node --test tests/toolforge/test_newsletter.cjs
 ```
+
+Newsletter checks cover literal copying, Sunday-first date selection, disabled
+unavailable dates, and issue changes waiting for explicit submission. Retain
+native form submission and date selection when JavaScript is unavailable.
 
 Render synthetic pages and check all three locales at thirteen widths from
 320 to 1920 CSS pixels:
@@ -121,6 +126,10 @@ external services or npm dependencies. It writes a JSON result and sample
 screenshots, checking overflow, log download visibility/column alignment,
 and modal focus, background inertness, dismissal, and restoration. Browser
 and local-loopback permission are required. Inspect the screenshots as well.
+Focused 320- and 1440-pixel cases also verify language-menu keyboard focus,
+comparison-range endpoints, and each report invocation's history dialog in
+all locales. Calendar cases open the picker and check Sunday-first columns,
+saved-date availability, and pending issue changes.
 These effective-width checks do not establish real-device touch behavior,
 Safari/Firefox behavior, screen-reader speech, forced colors, or browser zoom.
 

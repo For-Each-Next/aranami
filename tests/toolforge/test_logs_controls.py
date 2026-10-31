@@ -1,4 +1,4 @@
-"""Verify report-event controls and diagnostic download access."""
+"""Verify invocation-history controls and separate diagnostic access."""
 
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ from webservice.presentation import Interface
 
 
 class LogControlsTests(unittest.TestCase):
-    """Exercise HTTP pages over bounded saved events."""
+    """Exercise HTTP pages over bounded saved job invocations."""
 
     def setUp(self) -> None:
-        """Provide sixty saved events and one downloadable daily log."""
+        """Provide sixty invocations and separate diagnostic files."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         runtime = Path(temporary.name)
@@ -49,6 +49,38 @@ class LogControlsTests(unittest.TestCase):
         (logs / "events.2026-10-23.jsonl").write_text(
             "\n".join(json.dumps(event) for event in self.events) + "\n",
         )
+        state = runtime / "state"
+        state.mkdir()
+        (state / "job-history.json").write_text(
+            json.dumps({
+                "schema": 1,
+                "runs": [
+                    {
+                        "run_id": f"{index:032x}",
+                        "routine": event["routine"],
+                        "started_at": event["time"],
+                        "finished_at": event["time"],
+                        "status": event["status"],
+                        "duration_seconds": event["duration_seconds"],
+                        "truncated": False,
+                        "stages": [
+                            {
+                                "kind": "started",
+                                "time": event["time"],
+                                "title": "",
+                            },
+                            {
+                                "kind": "finished",
+                                "time": event["time"],
+                                "title": "",
+                            },
+                        ],
+                    }
+                    for index, event in enumerate(self.events)
+                ],
+            }),
+        )
+        self.runtime = runtime
         self.client = TestClient(create_app(runtime))
         self.addCleanup(self.client.close)
 
@@ -84,10 +116,9 @@ class LogControlsTests(unittest.TestCase):
                     self.events[-2]["time"],
                 )
                 assert "60" in output
-                assert interface.text("logs.download") in output
-                assert output.index(" download>") < output.index(
-                    '<table class="logs-table">',
-                )
+                assert interface.text("logs.download") not in output
+                assert " download>" not in output
+                assert "job-history-" in listing
                 archive_output = self.client.get(
                     "/logs/",
                     headers={"Accept-Language": locale},
@@ -137,11 +168,12 @@ class LogControlsTests(unittest.TestCase):
         assert response.status_code == 200
         output = response.text
         assert self._listing(output).count("<tr>") == 5
-        assert "Matching recent events for 2026-10-23: 30." in output
+        assert "Matching job invocations for 2026-10-23: 30." in output
         assert 'value="failed" selected' in output
         assert 'value="asc" selected' in output
         assert (
-            "q=Pageview&amp;order=asc&amp;status=failed&amp;page=1" in output
+            "q=Pageview&amp;status=failed&amp;order=asc&amp;lang=en&amp;page=1"
+            in output
         )
         assert "Clear filters" in output
         assert "Page 2 of 2" in output
@@ -162,10 +194,8 @@ class LogControlsTests(unittest.TestCase):
             )
             assert response.status_code == 200
             assert Interface(locale).text("logs.no_matches") in response.text
-            assert 'href="/logs/?date=2026-10-23&amp;download=1"' in (
-                response.text
-            )
-            assert " download>" in response.text
+            assert "download=1" not in response.text
+            assert " download>" not in response.text
         for query in (
             "order=sideways",
             "page=0",
@@ -178,6 +208,19 @@ class LogControlsTests(unittest.TestCase):
                 response = self.client.get("/reports/?" + query)
                 assert response.status_code == 400
         assert self.client.get("/api/logs?order=asc").status_code == 400
+
+    def test_history_is_independent_of_diagnostic_files(self) -> None:
+        """Show saved invocations after diagnostic files are removed."""
+        for path in (self.runtime / "logs").iterdir():
+            path.unlink()
+        response = self.client.get("/reports/")
+        assert response.status_code == 200
+        assert self._listing(response.text).count("<tr>") == 25
+        assert self.client.get("/logs/").status_code == 200
+        (self.runtime / "state" / "job-history.json").write_text("{}")
+        response = self.client.get("/reports/")
+        assert response.status_code == 200
+        assert "job-history-" not in response.text
 
 
 if __name__ == "__main__":

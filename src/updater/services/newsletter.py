@@ -278,13 +278,21 @@ def _quality_months(issue: Issue, facts: Mapping, layout: Mapping) -> str:
                     },
                 ),
             )
+        month_end = dt.date(issue.start.year + month // 12, month % 12 + 1, 1)
+        completed_empty = (
+            changes is not None
+            and not titles
+            and month_end <= _observation_end(issue, facts)
+        )
         result.append(
             _fill(
                 layout["month_template"],
                 {
                     "month_year": issue.start.year,
                     "month": month,
-                    "month_rows": "\n".join(lines),
+                    "month_rows": "（無變動）"
+                    if completed_empty
+                    else "\n".join(lines),
                 },
             ),
         )
@@ -308,8 +316,6 @@ def _quality(issue: Issue, facts: Mapping[str, object]) -> str:
         if facts.get("quality_source") == "article_history":
             summary += (
                 f"依條目里程碑記錄，共有{len(changes)}次有明確日期的評級變動。"
-                if changes
-                else "條目里程碑未記錄到本期有明確日期的評級變動。"
             )
         else:
             summary += (

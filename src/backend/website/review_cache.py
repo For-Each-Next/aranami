@@ -26,6 +26,7 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_ROWS = 10_000
 _RETENTION = 30 * 24 * 3600
+_PARSER_VERSION = 2
 ITEM_SCHEMA = {
     **dict.fromkeys(
         ("title", "review_type", "review_url", "started_at", "replied_at"),
@@ -34,6 +35,7 @@ ITEM_SCHEMA = {
     "participant_count": pl.Int64,
 }
 _SCHEMA = {
+    "parser_version": pl.Int64,
     "source": pl.String,
     "kind": pl.String,
     "revision": pl.Int64,
@@ -109,6 +111,7 @@ def _load(path: Path | None, now: int) -> pl.DataFrame:
             return empty
         invalid = frame.filter(
             pl.any_horizontal(pl.all().is_null())
+            | (pl.col("parser_version") != _PARSER_VERSION)
             | (pl.col("revision") <= 0)
             | (pl.col("used_at") > now)
             | (pl.col("items").list.len() > _MAX_ROWS),
@@ -265,6 +268,7 @@ class ReviewCache:
             if key in changed:
                 items = parser(self._texts[revision] if revision else "")
                 self._rows[key] = {
+                    "parser_version": _PARSER_VERSION,
                     "source": key[0],
                     "kind": key[1],
                     "revision": revision,

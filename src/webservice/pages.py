@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import operator
 import secrets
 from functools import lru_cache
@@ -16,14 +17,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import escape
 
 from shared.newsletter import Issue
+from webservice.job_history import history_context
 from webservice.presentation import (
     Interface,
     article_extract,
     assessment_code,
     catalog,
-    duration,
     event_duration,
     failure_description,
     homepage_sections,
@@ -60,8 +62,6 @@ _STATES = {
     "unknown": "Result unavailable",
     "unconfirmed": "Result unavailable",
 }
-_LOG_EVENT_LIMIT = 100
-_LOG_PAGE_SIZE = 25
 _REPORT_ICONS = {
     "dyks": "lightbulb",
     "new_pages": "article-add",
@@ -71,28 +71,18 @@ _REPORT_ICONS = {
     "enwp_key_articles": "language",
     "pexbot": "robot",
 }
-# Module:PJ:VG/RVW, revision 92100885; reassessment uses Codex history.
+# Module:PJ:VG/RVW, revision 92100885, with credited vector equivalents.
+# Reassessment uses Codex history.
 _REVIEW_ICONS = {
     "fac": ("featured-candidate.svg", "Cscr-candidate.svg"),
     "flc": ("featured-candidate.svg", "Cscr-candidate.svg"),
     "acc": ("a-candidate.svg", "A_candidate.svg"),
     "gan": ("ga-candidate.svg", "GA_candidate.svg"),
     "bpan": ("bplus-candidate.svg", "Bplus_candidate.svg"),
-    "pr": ("peer-review.png", "Nuvola_apps_kedit.png"),
-    "ppr": ("project-peer-review.png", "Cvg_peerreview_icon.png"),
+    "pr": ("peer-review.svg", "Nuvola_apps_kedit.svg"),
+    "ppr": ("project-peer-review.svg", "Cvg_peerreview_icon.png"),
     "dykc": ("dyk-candidate.svg", "DYK_candidate.svg"),
 }
-_LOG_EVENT_KINDS = frozenset({
-    "service_started",
-    "service_stopping",
-    "service_stopped",
-    "routine_started",
-    "routine_finished",
-    "website_started",
-    "website_finished",
-    "run_started",
-    "run_finished",
-})
 
 
 @lru_cache(maxsize=1)
@@ -428,6 +418,40 @@ class _Page:
         """
         return {"time": _time(value)} if value is not None else None
 
+    def _review_elapsed(
+        self,
+        instant: dt.datetime,
+        now: dt.datetime,
+        event: str,
+    ) -> str:
+        """Describe whole opening ages and inclusive reply intervals.
+
+        Returns:
+            A localized month, day, or hour label. Starts use complete
+            calendar months; reply intervals round up to include the
+            observed comment in the stated time window.
+        """
+        seconds = (now - instant).total_seconds()
+        hours = int(seconds // 3600)
+        days = hours // 24
+        months = (
+            (now.year - instant.year) * 12
+            + now.month
+            - instant.month
+            - ((now.day, now.time()) < (instant.day, instant.time()))
+        )
+        unit = (
+            "months"
+            if event == "started" and months > 0
+            else "days"
+            if days
+            else "hours"
+        )
+        count = months if unit == "months" else days or hours
+        if event == "replied":
+            count = max(1, math.ceil(seconds / (86400 if days else 3600)))
+        return self.text(f"reviews.{event}_{unit}", count=count)
+
     def reviews(self, snapshot: Record, now: dt.datetime) -> Record | None:
         """Prepare complete review cards with observed elapsed time.
 
@@ -456,16 +480,10 @@ class _Page:
                 instant = timestamp(item.get(field))
                 if instant is None or instant > now:
                     continue
-                hours = int((now - instant).total_seconds() // 3600)
-                days = hours // 24
-                unit = "days" if event == "started" or days else "hours"
                 dates.append({
                     "value": item[field],
                     "label": utc_time(item[field], seconds=True),
-                    "elapsed": self.text(
-                        f"reviews.{event}_{unit}",
-                        count=days if unit == "days" else hours,
-                    ),
+                    "elapsed": self._review_elapsed(instant, now, event),
                     "participants": self.text(
                         "reviews.participants",
                         count=f"{item['participant_count']:,}",
@@ -786,7 +804,7 @@ class _Page:
                         minutes="{minutes}",
                         seconds="{seconds}",
                     ),
-                    since=utc_time(started).removesuffix(" UTC"),
+                    since=utc_time(started),
                 )
                 if started
                 else None,
@@ -794,7 +812,7 @@ class _Page:
                     "footer.uptime",
                     version=version,
                     duration="{duration}",
-                    since=utc_time(started).removesuffix(" UTC"),
+                    since=utc_time(started),
                 )
                 if started
                 else None,
@@ -906,115 +924,6 @@ class _Page:
             else None,
         )
         return card
-
-    def log_events(self, data: Record) -> list[Record]:
-        """Localize and filter saved run-event rows.
-
-        Args:
-            data: Validated events and presentation controls.
-
-        Returns:
-            UTC times, task names, results, and measured durations.
-            Unknown event kinds are omitted.
-        """
-        query = data.get("query", "").casefold()
-        status = data.get("status", "all")
-        events = []
-        for event in data.get("events", [])[-_LOG_EVENT_LIMIT:]:
-            content = self._log_event(event)
-            if content is None:
-                continue
-            if query and query not in content["searchable"].casefold():
-                continue
-            if status != "all" and content["status"] != status:
-                continue
-            events.append(content)
-        return sorted(
-            events,
-            key=operator.itemgetter("sort_time"),
-            reverse=data.get("order", "desc") == "desc",
-        )
-
-    def _log_event(self, event: Record) -> Record | None:
-        """Prepare a compact event row without diagnostic fields.
-
-        Returns:
-            Localized table cells, or none for an unsupported event.
-        """
-        kind = event.get("kind")
-        if kind not in _LOG_EVENT_KINDS:
-            return None
-        routine_key = f"routine.{event.get('routine')}"
-        service_key = f"logs.service.{event.get('service')}"
-        time = _time(event.get("time"), seconds=True)
-        status = (
-            "running"
-            if kind.endswith("started")
-            else event.get("status", "unknown")
-        )
-        task = (
-            self.text(routine_key)
-            if routine_key in catalog()
-            else self.text(service_key)
-            if service_key in catalog()
-            else self.text("logs.service.website")
-            if kind.startswith("website_")
-            else self.text("logs.run_task")
-        )
-        result = (
-            self.text("state.Running")
-            if status == "running"
-            else self._log_result(
-                status,
-                preview=event.get("dry") is True
-                and kind == "routine_finished",
-            )
-            if kind.endswith("finished")
-            else "—"
-        )
-        elapsed = (
-            duration(event["duration_seconds"], self.interface)
-            if event.get("duration_seconds") is not None
-            else "—"
-        )
-        return {
-            "time": time,
-            "sort_time": timestamp(event.get("time"))
-            or dt.datetime.min.replace(tzinfo=dt.UTC),
-            "task": task,
-            "status": status,
-            "result": result,
-            "duration": elapsed,
-            "searchable": " ".join((time["label"], task, result, elapsed)),
-        }
-
-    def _log_result(self, status: object, *, preview: bool = False) -> str:
-        """Localize outcomes without exposing unexpected identifiers.
-
-        Args:
-            status: Validated saved task or website outcome.
-            preview: Whether a routine only prepared proposed changes.
-
-        Returns:
-            Localized results. Successful previews report completion
-            without claiming that no changes were needed.
-        """
-        if preview and status in {"updated", "no_update"}:
-            return self.text("logs.result.updated")
-        key = (
-            status
-            if status
-            in {
-                "updated",
-                "no_update",
-                "failed",
-                "deferred",
-                "unconfirmed",
-                "partial",
-            }
-            else "unknown"
-        )
-        return self.text(f"logs.result.{key}")
 
 
 def render_dashboard(  # ruff: ignore[too-many-arguments]
@@ -1194,11 +1103,6 @@ def render_maintenance(
     page = _Page(locale)
     heading = page.interface.label(selected.get("label"), selected["category"])
     context = page.context(heading)
-    reverse = {
-        **selection,
-        "page": "1",
-        "order": "desc" if selection["order"] == "asc" else "asc",
-    }
     context.update(
         navigation=navigation,
         count=page.text("backlog.count", count=f"{selected['count']:,}"),
@@ -1229,6 +1133,10 @@ def render_maintenance(
                 ("importance", "importance"),
             )
         },
+        assessment_operations=[
+            {"value": code, "label": page.text(f"backlog.compare.{code}")}
+            for code in ("eq", "gte", "lte", "range")
+        ],
         clear_url=local_url(
             "/maintenance/",
             task=selection["task"],
@@ -1247,10 +1155,6 @@ def render_maintenance(
         sort_choices=[
             {
                 "label": page.text(key),
-                "url": local_url(
-                    "/maintenance/",
-                    **{**selection, "sort": sort, "page": "1"},
-                ),
                 "value": sort,
                 "current": sort == selection["sort"],
             }
@@ -1262,26 +1166,16 @@ def render_maintenance(
                 ("random", "backlog.sort.random"),
             )
         ],
-        reverse_url=local_url("/maintenance/", **reverse),
         direction_choices=[
             {
                 "value": order,
                 "label": page.text(
-                    "backlog.direction."
-                    + ("oldest" if order == "asc" else "newest")
-                    if selection["sort"] == "oldest"
-                    else f"backlog.direction.{order}",
+                    f"backlog.direction.{order}",
                 ),
                 "current": order == selection["order"],
             }
             for order in ("asc", "desc")
         ],
-        reverse_label=page.text(
-            "backlog.direction."
-            + ("oldest" if reverse["order"] == "asc" else "newest")
-            if selection["sort"] == "oldest"
-            else f"backlog.direction.{reverse['order']}",
-        ),
         cards=[page.worklist_card(item, groups) for item in portion["items"]],
         start=portion["offset"] + 1,
         previous=local_url(
@@ -1415,11 +1309,19 @@ def render_about(
             now or dt.datetime.now(dt.UTC),
         ),
     )
-    before_name, after_name = page.text("about.intro").split("{name}")
     before_user, after_user = page.text("about.contact").split("{user}")
     context.update(
-        before_name=before_name,
-        after_name=after_name,
+        introduction=escape(page.text("about.intro")).format(
+            name="荒波",
+            wikipedia=wiki_link(
+                title_url("中文维基百科"),
+                page.text("about.wikipedia"),
+            ),
+            project=wiki_link(
+                title_url("WikiProject:电子游戏"),
+                page.text("about.project"),
+            ),
+        ),
         before_user=before_user,
         after_user=after_user,
     )
@@ -1451,7 +1353,7 @@ def render_logs(  # ruff: ignore[too-many-arguments]
     page = _Page(locale)
     context = page.context(page.text("logs.heading"), live=True)
     context.update(navigation=navigation)
-    context.update(_log_context(page, data, path="/logs/"))
+    context.update(_log_archive(data))
     context.update(
         page.live_status(
             status or {},
@@ -1471,10 +1373,10 @@ def render_reports(  # ruff: ignore[too-many-arguments]
     now: dt.datetime | None = None,
     navigation: Record | None = None,
 ) -> str:
-    """Render saved update status and bounded execution-event rows.
+    """Render saved update status and per-invocation report history.
 
     Args:
-        data: Validated daily-file listing, selection, and run events.
+        data: Validated independent invocations and history controls.
         locale: Negotiated interface language.
         status: Validated routine and scheduler observations.
         config: Current source version and routine definitions.
@@ -1482,12 +1384,12 @@ def render_reports(  # ruff: ignore[too-many-arguments]
         navigation: Request route and language choices.
 
     Returns:
-        A status panel and filterable run log without source requests.
+        A status panel and filterable history with stage dialogs.
     """
     page = _Page(locale)
     context = page.context(page.text("reports.heading"), live=True)
     context.update(navigation=navigation)
-    context.update(_log_context(page, data, path="/reports/"))
+    context.update(history_context(page.interface, data))
     context.update(
         page.live_status(
             status or {},
@@ -1498,89 +1400,37 @@ def render_reports(  # ruff: ignore[too-many-arguments]
     return _render("reports.html", context)
 
 
-def _log_context(page: _Page, data: Record, *, path: str) -> Record:
-    """Prepare daily-file choices and bounded execution-event controls.
+def _log_archive(data: Record) -> Record:
+    """Prepare diagnostic file links without interpreting log content.
 
     Returns:
-        Localized archive links, selected table rows, and pagination.
+        File metadata, selected date, and separate download links.
     """
     files = data.get("files", [])
     selected_date = data.get("date") or (files[0]["date"] if files else None)
-    order = data.get("order", "desc")
-    selected_status = data.get("status", "all")
-    events = page.log_events(data)
-    page_count = max(1, (len(events) + _LOG_PAGE_SIZE - 1) // _LOG_PAGE_SIZE)
-    current_page = min(int(data.get("page", 1)), page_count)
-    selection = {
-        "date": selected_date,
-        "q": data.get("query", ""),
-        "order": order,
-        "status": selected_status,
-    }
-    context = {}
-    context.update(
-        files=[
+    return {
+        "files": [
             {
                 **row,
                 "size_label": readable_size(row["size"]),
-                "url": local_url(path, date=row["date"]),
+                "url": local_url("/logs/", date=row["date"]),
                 "download_url": local_url(
                     "/logs/",
                     date=row["date"],
                     download=1,
                 ),
-                "selected": row["date"] == selected_date,
             }
             for row in files
         ],
-        query=data.get("query", ""),
-        selected_date=selected_date,
-        selected_download=local_url("/logs/", date=selected_date, download=1)
+        "selected_date": selected_date,
+        "selected_download": local_url(
+            "/logs/",
+            date=selected_date,
+            download=1,
+        )
         if selected_date
         else None,
-        order=order,
-        selected_status=selected_status,
-        status_choices=[
-            {
-                "value": status,
-                "label": page.text("state.Running")
-                if status == "running"
-                else page.text(f"logs.result.{status}"),
-            }
-            for status in (
-                "running",
-                "updated",
-                "no_update",
-                "failed",
-                "deferred",
-                "unconfirmed",
-                "partial",
-                "unknown",
-            )
-        ],
-        clear_url=local_url(path, date=selected_date, order=order),
-        match_count=page.text(
-            "logs.count",
-            count=f"{len(events):,}",
-            date=selected_date,
-        ),
-        pagination=page.text(
-            "logs.pagination",
-            page=current_page,
-            pages=page_count,
-        ),
-        previous=local_url(path, **selection, page=current_page - 1)
-        if current_page > 1
-        else None,
-        following=local_url(path, **selection, page=current_page + 1)
-        if current_page < page_count
-        else None,
-        truncated=data.get("truncated", False),
-        events=events[
-            (current_page - 1) * _LOG_PAGE_SIZE : current_page * _LOG_PAGE_SIZE
-        ],
-    )
-    return context
+    }
 
 
 def render_error(message_key: str, locale: str) -> str:

@@ -4,6 +4,31 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.10 (2026-10-31 15:04 UTC)
+
+Overview: Refined the website around Codex navigation and controls, introduced
+a new Aranami identity, and improved reviews, maintenance filters, report
+execution history, and newsletter drafts.
+
+- Replaced the site branding with a wave logo and image wordmark, added a
+  language menu and mobile contents button, and simplified page headings.
+- Moved About to the footer and content attribution to a credits section;
+  linked the Wikipedia project and added live server status to About.
+- Removed repeated UTC labels from website dates, headings, and tooltips
+  while retaining UTC conversion and explicit machine-readable timestamps.
+- Converted the two raster review icons to vectors, added icon descriptions,
+  and preserved upstream attribution and licenses.
+- Clarified review start, response, and participant labels and corrected
+  nested discussion dates, including 豐川祥子's review.
+- Added regular-expression title searches and shared inclusive assessment
+  comparisons, with a sorting menu, direction radios, and plain grade labels.
+- Retained independent per-job execution history with measured durations and
+  dialogs showing observed preparation, storage, and publication stages.
+- Made newsletter issue changes explicit, added a Sunday-first calendar with
+  unavailable dates disabled, and removed repeated code headings.
+- Displayed zero milestone counts and compacted completed empty months while
+  preserving later corrections and backfilled assessment changes.
+
 ### 0.7.9 (2026-10-31 13:43 UTC)
 
 Overview: Reorganized the dashboard around content, dedicated maintenance and

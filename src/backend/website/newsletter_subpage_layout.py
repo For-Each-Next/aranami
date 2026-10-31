@@ -181,15 +181,35 @@ def _quality(text: str, issue: Issue) -> dict | None:
         re.MULTILINE,
     )
     if change is None:
-        return None
-    change_row = (
-        change[1]
-        + _slot("icon")
-        + change[3]
-        + _slot("label")
-        + change[5]
-        + _slot("titles")
-    )
+        if empty is None or any(
+            text[
+                month.end() : months[index + 1].start()
+                if index < _QUARTER_MONTHS - 1
+                else category
+            ].strip()
+            != empty[0]
+            for index, month in enumerate(months)
+        ):
+            return None
+        # Completed empty months retain the verified row style
+        # so their source remains reusable for the following issue.
+        change_row = (
+            "* {{icon|"
+            + _slot("icon")
+            + "}}&thinsp;"
+            + _slot("label")
+            + "："
+            + _slot("titles")
+        )
+    else:
+        change_row = (
+            change[1]
+            + _slot("icon")
+            + change[3]
+            + _slot("label")
+            + change[5]
+            + _slot("titles")
+        )
     _, months_end = _body_span(text, months[0].start(), category)
     text = _replace_regions(
         text,

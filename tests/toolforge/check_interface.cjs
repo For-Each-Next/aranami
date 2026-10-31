@@ -37,7 +37,7 @@ async function bounded(operation, label, milliseconds = 10000) {
 async function main() {
     const server = http.createServer((request, response) => {
         const pathname = new URL(request.url, "http://localhost").pathname;
-        const filename = (["/live.js", "/newsletter.js", "/styles.css", "/newsletter.css", "/codex.css", "/codex-select.svg", "/codex-select-disabled.svg", "/codex-license.html", "/favicon.svg", "/aranami.svg", "/report-icons.svg"].includes(pathname) || pathname.startsWith("/review-icons/"))
+        const filename = (["/navigation.js", "/aranami-icon.png", "/aranami-wordmark.png", "/favicon.png", "/live.js", "/newsletter.js", "/styles.css", "/newsletter.css", "/codex.css", "/codex-select.svg", "/codex-select-disabled.svg", "/codex-license.html", "/favicon.svg", "/aranami.svg", "/report-icons.svg"].includes(pathname) || pathname.startsWith("/review-icons/"))
             ? path.join(assetRoot, pathname) : path.join(fixtureRoot, pathname);
         if (!filename.startsWith(fixtureRoot + path.sep) && !filename.startsWith(assetRoot + path.sep)) {
             response.writeHead(404).end(); return;
@@ -119,6 +119,10 @@ async function main() {
             const result = await call("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
             if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
             return result.result.value;
+        };
+        const press = async (key, virtual, modifiers = 0) => {
+            await call("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: virtual, modifiers }, sessionId);
+            await call("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: virtual, modifiers }, sessionId);
         };
         const checkSemantics = async () => {
             const document = await evaluate(`(() => ({
@@ -209,9 +213,109 @@ async function main() {
                         }
                     }
                     assert.equal(await evaluate("document.querySelectorAll('.page-content h3, #tool-status, #backlog').length"), 0, "dashboard sections should have peer h2 headings");
+                    if (width === 320 || width === 1440) {
+                        await evaluate("document.querySelector('.language-menu summary').focus()");
+                        await press("ArrowUp", 38);
+                        const language = await evaluate(`new Promise(resolve => requestAnimationFrame(() => {
+                            const menu = document.querySelector('.language-menu');
+                            const links = [...menu.querySelectorAll('a[href]')];
+                            const panel = menu.querySelector('ul').getBoundingClientRect();
+                            resolve({open: menu.open, last: document.activeElement === links.at(-1),
+                                visible: links.every(link => link.getBoundingClientRect().height > 0),
+                                withinViewport: panel.left >= -1 && panel.right <= innerWidth + 1});
+                        }))`);
+                        assert.equal(language.open, true, "ArrowUp did not open language menu");
+                        assert.equal(language.last, true, "ArrowUp from summary should focus last language");
+                        assert.equal(language.visible, true, "open language choices are hidden");
+                        assert.equal(language.withinViewport, true, "language menu exceeds viewport");
+                        await press("Escape", 27);
+                        assert.equal(await evaluate("!document.querySelector('.language-menu').open && document.activeElement === document.querySelector('.language-menu summary')"), true, "Escape should close language menu and restore summary focus");
+                        assert.equal(await evaluate(`(() => {
+                            const menu = document.querySelector('.language-menu');
+                            menu.querySelector('summary').click();
+                            const opened = menu.open;
+                            document.querySelector('h1').click();
+                            return opened && !menu.open;
+                        })()`), true, "language menu click/outside dismissal failed");
+                    }
+                }
+                if (surface === "newsletter") {
+                    const calendar = await evaluate(`(() => {
+                        const calendar = document.querySelector('[data-newsletter-calendar]');
+                        if (!calendar || calendar.hidden) return null;
+                        calendar.querySelector('summary').click();
+                        const panel = calendar.querySelector('.newsletter-calendar-panel').getBoundingClientRect();
+                        const saved = new Set(JSON.parse(calendar.dataset.dates));
+                        const buttons = [...calendar.querySelectorAll('[data-calendar-days] button')];
+                        const expectedSunday = new Intl.DateTimeFormat(document.documentElement.lang, {weekday:'short', timeZone:'UTC'}).format(new Date('2026-11-01T00:00:00Z'));
+                        const firstDay = calendar.querySelector('[data-calendar-weekdays] th')?.textContent;
+                        const result = {sunday: firstDay === expectedSunday,
+                            unavailable: buttons.some(button => button.disabled),
+                            states: buttons.every(button => button.disabled === !saved.has(button.getAttribute('aria-label'))),
+                            withinViewport: panel.left >= 0 && panel.right <= innerWidth + 1};
+                        calendar.querySelector('summary').click();
+                        const selected = document.querySelector('input[name=issue]:checked');
+                        const other = document.querySelector('input[name=issue]:not(:checked)');
+                        const url = location.href;
+                        other?.click();
+                        result.pendingIssue = location.href === url && (!other || other.checked);
+                        if (selected) selected.checked = true;
+                        return result;
+                    })()`);
+                    assert.ok(calendar, "enhanced saved-date calendar missing");
+                    assert.equal(calendar.sunday, true, "calendar should start on Sunday");
+                    assert.equal(calendar.unavailable, true, "unavailable calendar dates should be visible");
+                    assert.equal(calendar.states, true, "calendar availability disagrees with saved dates");
+                    assert.equal(calendar.withinViewport, true, "open calendar exceeds viewport");
+                    assert.equal(calendar.pendingIssue, true, "issue changes should wait for submission");
                 }
                 if (surface === "backlog") {
                     assert.ok(await evaluate("document.querySelectorAll('.backlog-section h2').length > 0"), "maintenance groups should use h2 headings");
+                }
+                if (surface === "maintenance" && (width === 320 || width === 1440)) {
+                    const filters = await evaluate(`(() => {
+                        const form = document.querySelector('.maintenance-controls');
+                        const originalUrl = location.href;
+                        let submissions = 0;
+                        const onSubmit = event => { event.preventDefault(); submissions++; };
+                        form.addEventListener('submit', onSubmit);
+                        const states = [...form.querySelectorAll('.assessment-filter')].map(field => {
+                            const [operation, grade, endpoint] = field.querySelectorAll('select');
+                            const endpointLabel = field.querySelector('label[for="' + endpoint.id + '"]');
+                            const initial = [operation.value, grade.value, endpoint.value];
+                            const change = value => {
+                                operation.value = value;
+                                operation.dispatchEvent(new Event('change', {bubbles: true}));
+                            };
+                            change('eq');
+                            const equality = endpoint.hidden && endpoint.disabled && !endpoint.required && endpointLabel.hidden && !grade.required;
+                            change('range');
+                            const range = !endpoint.hidden && !endpoint.disabled && endpoint.required && !endpointLabel.hidden && grade.required && endpoint.getBoundingClientRect().height > 0;
+                            grade.value = grade.options[1].value;
+                            grade.dispatchEvent(new Event('change', {bubbles: true}));
+                            endpoint.value = endpoint.options[1].value;
+                            endpoint.dispatchEvent(new Event('change', {bubbles: true}));
+                            change('gte');
+                            const threshold = endpoint.hidden && endpoint.disabled && !endpoint.required && endpointLabel.hidden && grade.required;
+                            [operation.value, grade.value, endpoint.value] = initial;
+                            operation.dispatchEvent(new Event('change', {bubbles: true}));
+                            return {equality, range, threshold};
+                        });
+                        const sort = form.querySelector('select[name=sort]');
+                        const originalSort = sort.value;
+                        sort.value = sort.options[0].value;
+                        sort.dispatchEvent(new Event('change', {bubbles: true}));
+                        sort.value = originalSort;
+                        const selectedOrder = form.querySelector('input[name=order]:checked');
+                        form.querySelector('input[name=order]:not(:checked)')?.click();
+                        selectedOrder.checked = true;
+                        form.removeEventListener('submit', onSubmit);
+                        return {states, submissions, unchangedUrl: location.href === originalUrl};
+                    })()`);
+                    assert.equal(filters.states.length, 2, "quality and importance range controls missing");
+                    assert.ok(filters.states.every(state => state.equality && state.range && state.threshold), "range controls do not follow selected comparison");
+                    assert.equal(filters.submissions, 0, "maintenance control changes submitted automatically");
+                    assert.equal(filters.unchangedUrl, true, "maintenance control changes navigated automatically");
                 }
                 if (surface === "reports") {
                     const detailWeights = await evaluate(`(() => [...document.querySelectorAll('.status-link')].map(button => getComputedStyle(button).fontWeight))()`);
@@ -252,6 +356,40 @@ async function main() {
                     assert.equal(await evaluate("new Promise(resolve => requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('command') === 'show-modal')))"), true, "Escape or focus restoration");
                     assert.equal(await evaluate("new Promise(resolve => { document.activeElement.click(); document.querySelector('dialog[open] button[command=close]').click(); requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('command') === 'show-modal')); })"), true, "Close or focus restoration");
                 }
+                if (surface === "reports" && (width === 320 || width === 1440)) {
+                    const histories = await evaluate("[...document.querySelectorAll('dialog[id^=job-history-]')].map(dialog => dialog.id)");
+                    assert.ok(histories.length > 0, "per-invocation history dialogs missing");
+                    for (const id of histories) {
+                        const opened = await evaluate(`(() => {
+                            const dialog = document.getElementById(${JSON.stringify(id)});
+                            const button = document.querySelector('button[commandfor="' + dialog.id + '"][command="show-modal"]');
+                            button.focus(); button.click();
+                            const bounds = dialog.getBoundingClientRect();
+                            const stages = [...dialog.querySelectorAll('.job-stages li')];
+                            return {open: dialog.open, focused: dialog.contains(document.activeElement),
+                                stages: stages.length, dated: stages.every(stage => Boolean(stage.querySelector('time[datetime]')?.textContent.match(/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$/))),
+                                withinViewport: bounds.left >= -1 && bounds.right <= innerWidth + 1,
+                                contentFits: dialog.scrollWidth <= dialog.clientWidth + 1};
+                        })()`);
+                        assert.equal(opened.open, true, "job history trigger did not open its dialog");
+                        assert.equal(opened.focused, true, "job history dialog initial focus missing");
+                        assert.ok(opened.stages >= 2 && opened.dated, "job history stages need complete observation times");
+                        assert.ok(opened.withinViewport && opened.contentFits, "job history dialog overflows viewport");
+                        await press("Tab", 9, 8);
+                        assert.equal(await evaluate("document.querySelector('dialog[open]').contains(document.activeElement)"), true, "Shift+Tab escaped job history modal");
+                        await evaluate("document.querySelector('.brand').focus()");
+                        assert.equal(await evaluate("document.querySelector('dialog[open]').contains(document.activeElement)"), true, "background accepted focus while job history modal is open");
+                        const shot = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
+                        fs.writeFileSync(path.join(outputRoot, `${locale}-${id}-${width}.png`), Buffer.from(shot.data, "base64"));
+                        await press("Escape", 27);
+                        assert.equal(await evaluate(`new Promise(resolve => requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('commandfor') === ${JSON.stringify(id)})))`), true, "job history Escape did not restore trigger focus");
+                        assert.equal(await evaluate(`new Promise(resolve => {
+                            document.activeElement.click();
+                            document.getElementById(${JSON.stringify(id)}).querySelector('button[command=close]').click();
+                            requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('commandfor') === ${JSON.stringify(id)}));
+                        })`), true, "job history Close did not restore trigger focus");
+                    }
+                }
                 if (width === 320 || width === 1440) {
                     await evaluate("scrollTo(0, 0)");
                     const shot = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
@@ -285,7 +423,7 @@ async function main() {
                 await checkContents();
                 const available = await evaluate(`(() => ({
                     links: [...document.querySelectorAll('.global-navigation a')].every(link => link.getBoundingClientRect().height > 0),
-                    controls: [...document.querySelectorAll('form input:not([type=hidden]), form select, form button')].filter(control => !control.closest('form[hidden]')).every(control => !control.disabled && control.getBoundingClientRect().height > 0),
+                    controls: [...document.querySelectorAll('form input:not([type=hidden]), form select, form button')].filter(control => !control.closest('[hidden]')).every(control => !control.disabled && control.getBoundingClientRect().height > 0),
                     content: Boolean(document.querySelector('main')?.textContent.trim())
                 }))()`);
                 assert.equal(available.links, true, "navigation hidden without JavaScript");

@@ -240,22 +240,20 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
             for template in templates
             if template.name.matches("icon")
         ]
-        assert (
-            icons
-            == [
-                "FA",
-                "FL",
-                "GA",
-                "Bplus",
-                "GT",
-                "FFA",
-                "FFL",
-                "DGA",
-                "GTRC",
-            ]
-            * 3
-        )
-        assert text.count("}}&thinsp;") == 27
+        assert icons == [
+            "FA",
+            "FL",
+            "GA",
+            "Bplus",
+            "GT",
+            "FFA",
+            "FFL",
+            "DGA",
+            "GTRC",
+        ]
+        assert text.count("}}&thinsp;") == 9
+        assert "=== 2026年11月 ===\n（無變動）" in text
+        assert "=== 2026年12月 ===\n（無變動）" in text
         assert "當選優良條目：[[:新增遊戲]]" in text
         assert "撤銷優良條目：[[:移除遊戲]]" in text
         assert "=== 2026年10月 ===" in text

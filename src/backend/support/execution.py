@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from backend.support.events import event_extra
 from backend.support.failure_status import exception_failure_details
+from backend.support.job_history import MAX_STAGES, write_job_history
 from backend.support.logs import open_run_log
 from backend.support.report_status import ReportUpdate, report_update_key
 from backend.support.routine_status import (
@@ -91,6 +92,8 @@ class _TaskResult:
         failure_reason: Safe identifier for the underlying failure.
         failure_date: Observed report date attempted when work failed.
         failure_context: Optional observed missing-data counts.
+        history: Explicit stage facts for this invocation's history.
+        history_truncated: Whether intermediate stages were omitted.
     """
 
     name: str
@@ -119,6 +122,8 @@ class _TaskResult:
             "total": None,
         },
     )
+    history: list[dict[str, str]] = field(default_factory=list)
+    history_truncated: bool = False
 
 
 def _routine_result(task: _TaskResult, *, dry: bool) -> dict[str, object]:
@@ -216,8 +221,66 @@ def _save_progress(
         return
     if progress == task.progress:
         return
+    if progress["phase"] != "publishing" and (
+        task.progress is None or progress["phase"] != task.progress["phase"]
+    ):
+        _history_stage(
+            task,
+            "fetching"
+            if progress["phase"].startswith("pageviews_")
+            else "preparing",
+            dry=dry,
+        )
     task.progress = progress
     _save_task_status(task, dry=dry)
+
+
+def _history_stage(
+    task: _TaskResult,
+    kind: str,
+    *,
+    dry: bool,
+    title: str = "",
+) -> None:
+    """Record a real execution boundary independently of diagnostics.
+
+    Args:
+        task: Invocation that owns the observation.
+        kind: Explicit stage identifier localized by website renderers.
+        dry: Whether this preview must omit live history.
+        title: Optional destination title, never diagnostic error text.
+    """
+    if dry:
+        return
+    observed = (
+        task.started_at
+        if kind == "started"
+        else (task.finished_at or dt.datetime.now(dt.UTC))
+    )
+    task.history.append({
+        "time": observed.isoformat(),
+        "kind": kind,
+        "title": title[:512],
+    })
+    if len(task.history) > MAX_STAGES:
+        del task.history[1]
+        task.history_truncated = True
+    write_job_history({
+        "run_id": task.run_id,
+        "routine": task.name,
+        "started_at": task.started_at.isoformat(),
+        "finished_at": task.finished_at.isoformat()
+        if task.finished_at is not None
+        else None,
+        "status": _routine_result(task, dry=False)["status"]
+        if task.finished_at is not None
+        else "running",
+        "duration_seconds": round(task.elapsed_seconds, 3)
+        if task.finished_at is not None
+        else None,
+        "stages": task.history,
+        "truncated": task.history_truncated,
+    })
 
 
 def _publication_date(edit: Publication) -> dt.date | None:
@@ -408,6 +471,26 @@ class RuntimeContext[EditT: Publication]:
             confirmed_edits,
             **(exception_failure_details(error) if error is not None else {}),
         )
+        self.record_stage(
+            {
+                "updated": "saved",
+                "no_update": "no_update",
+                "failed": "save_failed",
+                "unknown": "unconfirmed",
+                "unconfirmed": "unconfirmed",
+            }.get(outcome, "deferred"),
+            title=title,
+        )
+
+    def record_stage(self, kind: str, *, title: str = "") -> None:
+        """Retain an observed stage for the active invocation.
+
+        Args:
+            kind: Explicit stage from the backend history contract.
+            title: Optional destination being processed.
+        """
+        if self._active_task is not None:
+            _history_stage(self._active_task, kind, dry=self.dry, title=title)
 
     def confirm_report_date(self, day: dt.date | None) -> None:
         """Retain this routine's latest verified daily report date.
@@ -694,6 +777,7 @@ class RuntimeContext[EditT: Publication]:
                 self._report_generations[generation_key] = str(
                     bundle.manifest["generation"],
                 )
+                self.record_stage("database_updated", title=edit.title)
                 if self.dry:
                     _LOGGER.info(
                         "Would update %s on %s: %s",
@@ -757,9 +841,11 @@ class RuntimeContext[EditT: Publication]:
             Confirmed saved or unchanged outcome.
         """
         update = self._report_update(edit.site.dbName(), edit.title)
+        self.record_stage("saving", title=edit.title)
         try:
             outcome = save(edit)
         except BaseException as error:
+            self.record_stage("save_failed", title=edit.title)
             update.finish(
                 "failed",
                 confirmed_edits=None,
@@ -767,6 +853,10 @@ class RuntimeContext[EditT: Publication]:
                 **exception_failure_details(error),
             )
             raise
+        self.record_stage(
+            "saved" if outcome == "saved" else "no_update",
+            title=edit.title,
+        )
         update.finish(
             "updated" if outcome == "saved" else "no_update",
             confirmed_edits=int(outcome == "saved"),
@@ -798,6 +888,7 @@ def routine_run[EditT: Publication](
     with open_run_log():
         logger = _LOGGER
         task = active.start_task(name)
+        _history_stage(task, "started", dry=active.dry)
         started = task.started_monotonic
         logger.info(
             "Started %s%s.",
@@ -807,6 +898,7 @@ def routine_run[EditT: Publication](
         )
         _save_task_status(task, dry=active.dry)
         try:
+            _history_stage(task, "fetching", dry=active.dry)
             with progress_updates(
                 lambda progress: _save_progress(
                     task,
@@ -830,6 +922,7 @@ def routine_run[EditT: Publication](
                 task.status = "success"
         finally:
             active.finish_task(perf_counter() - started)
+            _history_stage(task, "finished", dry=active.dry)
             _save_task_status(task, dry=active.dry)
             result = _routine_result(task, dry=active.dry)
             logger.log(

@@ -84,17 +84,26 @@ establish completion. New pages requires the complete window through yesterday
 and then waits for 00:07 UTC. Pageviews retries at hourly `:59` while behind;
 when current, it waits for 18:59 after the next actual-time readiness boundary.
 
-The backend persists three bounded, atomic snapshots:
+The backend persists bounded, atomic status and history snapshots:
 
 | File | Observation |
 |---|---|
 | `state/routine-status.json` | Routine starts/results, measured durations, confirmed saves, and active progress |
 | `state/schedule-status.json` | Actual next executions, configuration identity, monitor state/session, and optional runtime resources |
 | `state/report-updates.json` | Per-destination attempts, publication outcomes, durations, and confirmed edits |
+| `state/job-history.json` | Independent report invocations and their observed execution stages |
 
 Older attempts cannot overwrite newer observations. Preview activity never
 updates live state. Unknown edit counts remain null, not zero; confirmed saves,
 no change, failure, deferral, and unconfirmed external writes remain distinct.
+Job history retains the newest one hundred invocations independently of daily
+diagnostics, with at most sixty-four explicit stages per invocation and a
+4 MiB file bound. Each record preserves start, final outcome, measured total
+duration, and observed data-read, preparation, durable-data, and publication
+boundaries. Trimming intermediate stages preserves start and completion.
+Report-history dialogs consume these saved facts; they never parse logs or
+infer activity from service messages. Invalid saved history stays untouched
+and appears unavailable; history storage failure does not interrupt a job.
 Routine timing covers the whole invocation. Destination timing starts at its
 individual work boundary, excluding earlier reports and delegated cooldowns.
 Registered destinations remain `queued`: their registration timestamp orders
@@ -180,19 +189,23 @@ dated discussion remains undated; collection or category-observation times
 never stand in for nomination starts. Sort FAC, FLC, ACC, GAN, BPAN, PR, PPR,
 DYKC, reassessment, then start ascending with unknowns last and stable titles.
 
-Review cards show whole elapsed days since nomination and days or hours since
+Review cards show elapsed calendar months, days, or hours since nomination.
+Responses show an inclusive recent-activity window in days or hours since
 the latest signed response from another participant. Nominator-only follow-ups
 do not establish a response; unknown identities and dates remain null. Relative
 times expose their complete UTC instants in native hover tooltips. Older saved
 snapshots without response observations remain readable. After the response,
 show the observed count of distinct identifiable participants, including the
 nominator. Unknown counts stay omitted, and nominator-only reviews show no
-response or participant annotation.
+response or participant annotation. Project review sections use the earliest
+signed discussion across their subsections; appended archived `DYKEntry` vote
+blocks do not establish that review's start or activity.
 
 `review-sources-v1.parquet` caches parsed facts keyed by canonical source title,
-review type, and revision ID. Each due refresh checks current IDs in batches
-of fifty and downloads only changed exact revisions, including valid empty
-sources. Retain at most 10,000 rows and 8 MiB, expiring unused rows after thirty
+review type, and revision ID. Parser versions invalidate old extracted
+observations when parsing contracts change. Each due refresh checks current
+IDs in batches of fifty and downloads only changed exact revisions, including
+valid empty sources. Retain at most 10,000 rows and 8 MiB, expiring unused rows after thirty
 days. Missing community sources and incomplete API batches fail the refresh
 and preserve the prior complete report. Source-cache corruption causes a
 rebuild, and cache-write failure does not discard successfully collected facts.
@@ -212,6 +225,9 @@ some browsers do not include WebSocket schemes in `connect-src 'self'`.
 Pages work with ordinary links, GET forms, and native controls without
 JavaScript. Every page shares the dashboard's left contents panel on desktop
 and native collapsible contents control on narrow screens.
+All displayed dates and times use UTC without repeating its label, including
+table headings, footer uptime, and complete timestamps in hover tooltips.
+Machine-readable timestamps retain their original explicit offsets.
 The dashboard presents reviews and each available highlight group as peer
 second-level sections. `/maintenance/` owns the maintenance catalogue, with
 second-level task groups and existing filtered worklists selected by `task`.
@@ -268,6 +284,13 @@ random order remains stable across pages. Use saved source/category links and
 the verified definitions/evidence in `backend/website/maintenance.json`;
 requests never query wiki sources.
 
+Title search is literal and case-insensitive by default; the optional regular
+expression mode uses Polars' Rust regex engine and validates patterns before
+filtering. Quality and importance share exact, minimum, maximum, and inclusive
+range comparisons using established assessment ranks. Range endpoints work in
+either order; unranked observations never satisfy a range. Controls and locale
+links retain the full selection through pagination.
+
 The Critical issues maintenance section combines notability concerns with
 article deletion discussions, speedy-deletion candidates, and copyright
 validation or copied-content warnings. Match their verified direct article
@@ -312,7 +335,7 @@ Startup is the recorded hub start, not an inferred operating-system boot.
 Retain static facts and startup timestamps when resource samples expire.
 Show the sample's actual UTC timestamp through seconds and its relative age;
 relative annotations use whole minutes, hours, or days and refresh with saved
-status fragments as ordinary text. About omits the server-status panel and
+status fragments as ordinary text. About includes the server-status panel and
 uses its footer as the live uptime clock anchor.
 
 ## Newsletter drafts
@@ -342,13 +365,17 @@ The calendar uses `date=YYYY-MM-DD` within the selected issue's reporting
 quarter. Requests read one retained draft and its bounded catalog, without
 enrichment from current homepage facts, source queries, or runtime writes.
 Missing dates remain unavailable; malformed selections are rejected. The
-catalog's metadata identity invalidates cached calendar HTML when a new date
-is retained. Data-through dates and actual UTC generation times stay separate,
-and copying an archived draft preserves its original text after renderer
+enhanced calendar starts each week on Sunday and disables unavailable dates
+with grey text. A native date input remains usable without JavaScript. Date
+and issue selections take effect only after submitting their View control.
+The catalog's metadata identity invalidates cached calendar HTML when a new
+date is retained. Data-through dates and actual UTC generation times stay
+separate, and copying an archived draft preserves its original text after renderer
 changes. Daily drafts survive clearing disposable caches.
-The header's native Tools disclosure contains newsletter and run-log links.
-Issue radios navigate directly to saved drafts, with ordinary links available
-without JavaScript. Copy actions use Codex primary progressive buttons.
+The header's native Tools disclosure links to newsletter drafts; About links
+to diagnostic log downloads.
+Native issue radios and their submit button work without JavaScript.
+Copy actions use Codex primary progressive buttons.
 Source revisions remain internal provenance rather than a displayed list.
 
 The independent daily newsletter report in `backend.website` fetches sources
@@ -461,8 +488,14 @@ an invented plain-text design.
 Quality and announcements likewise retain their actual prior source around
 explicit data slots, including paragraph and row prototypes. Preserve the
 initial October 2026 quality page's nine ordered monthly placeholders
-(revision 93279502), filling absent entries with `（無）`. Keep every homepage
-subsection in its initial order: featured, DYK, good, news, and history
+(revision 93279502), filling absent entries with `（無）` while a month remains
+open or observations are unavailable. A completed month with observed zero
+changes renders only `（無變動）`; this is a rendering decision, so a later
+refresh can restore dated changes for articles newly added to the project.
+Milestone summaries show an explicit zero count. Both compact empty months
+and full placeholder rows remain reusable as the next issue's source.
+Keep every homepage subsection in its initial order: featured, DYK, good,
+news, and history
 (announcements revision 93279496). Empty sections stay present. Old notices,
 article lists, awards, and chart values are replaced, while a chart with no
 observed grade breakdown remains omitted rather than inheriting old numbers.

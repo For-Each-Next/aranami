@@ -95,12 +95,6 @@
     overflow-wrap: anywhere;
 }
 
-.newsletter-code-label {
-    display: block;
-    margin-block: 0.75rem 0.5rem;
-    font-weight: 700;
-}
-
 .newsletter-text {
     box-sizing: border-box;
     display: block;
@@ -174,4 +168,87 @@
 
 .newsletter-copy-controls button {
     flex-shrink: 0;
+}
+
+.newsletter-calendar {
+    position: relative;
+    min-width: 0;
+}
+
+.newsletter-calendar summary {
+    min-inline-size: 11rem;
+    cursor: pointer;
+}
+
+.newsletter-calendar-panel {
+    position: absolute;
+    z-index: 2;
+    inset-inline-start: 0;
+    inline-size: 17rem;
+    max-inline-size: calc(100vw - 3rem);
+    margin-block-start: 0.25rem;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color-base, #a2a9b1);
+    border-radius: 2px;
+    background: var(--background-color-base, #fff);
+    box-shadow: 0 2px 6px #0003;
+}
+
+.newsletter-calendar-navigation {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25rem;
+}
+
+.newsletter-calendar-navigation strong {
+    font-size: 0.875rem;
+    text-align: center;
+}
+
+.newsletter-calendar-grid {
+    inline-size: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    text-align: center;
+    font-size: 0.8125rem;
+}
+
+.newsletter-calendar-grid th,
+.newsletter-calendar-grid td {
+    padding: 0.125rem 0;
+    border: 0;
+}
+
+.newsletter-calendar-grid button {
+    inline-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 2rem;
+    padding: 0.25rem 0;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    background: transparent;
+    color: var(--color-progressive, #36c);
+    font: inherit;
+    cursor: pointer;
+}
+
+.newsletter-calendar-grid button:disabled {
+    color: var(--color-disabled, #72777d);
+    cursor: default;
+}
+
+.newsletter-calendar-grid button[aria-pressed="true"] {
+    border-color: var(--border-color-progressive, #36c);
+    background: var(--background-color-progressive-subtle, #f1f4fd);
+    font-weight: 700;
+}
+
+.newsletter-calendar-grid button:enabled:hover {
+    background: var(--background-color-interactive-subtle, #f8f9fa);
+}
+
+.newsletter-calendar-grid button:focus-visible {
+    outline: 2px solid var(--color-progressive, #36c);
+    outline-offset: -2px;
 }

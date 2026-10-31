@@ -60,7 +60,6 @@ class NavigationTests(unittest.TestCase):
                     "/",
                     "/maintenance/",
                     "/reports/",
-                    "/about/",
                 ]
                 assert navigation.count('href="/newsletter/"') == 1
                 assert 'role="menu' not in navigation
@@ -81,7 +80,7 @@ class NavigationTests(unittest.TestCase):
                     assert re.findall(
                         r'<a href="([^"]+)" aria-current="page">',
                         navigation,
-                    ) == [path]
+                    ) == ([] if path == "/about/" else [path])
 
     @staticmethod
     def test_footer_names_the_project_and_omits_logs() -> None:

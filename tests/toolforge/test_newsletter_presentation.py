@@ -6,7 +6,6 @@ import re
 import unittest
 from copy import deepcopy
 from html import unescape
-from urllib.parse import parse_qs, urlsplit
 
 from shared.newsletter import Issue
 from updater.services.newsletter import render_issue
@@ -94,7 +93,7 @@ class NewsletterPresentationTests(unittest.TestCase):
             strict=True,
         ):
             assert 'tabindex="0"' in attributes
-            assert 'aria-labelledby="newsletter-code-label-' in attributes
+            assert 'aria-labelledby="newsletter-heading-' in attributes
             assert 'lang="zh"' in attributes
             assert unescape(text) == page["text"]
         assert "<script>alert(1)</script>" not in output
@@ -155,16 +154,16 @@ class NewsletterPresentationTests(unittest.TestCase):
                     assert expected_classes <= set(classes[1].split())
                 assert "built-in method" not in unescape(output)
 
-    def test_saved_issue_navigation_has_no_fetch_button_or_extra_notices(
+    def test_saved_issue_navigation_requires_explicit_submission(
         self,
     ) -> None:
-        """Navigate saved drafts without metadata or extra guidance."""
+        """Keep issue changes pending until the reader submits them."""
         for locale in ("en", "zh-hans", "zh-hant"):
             with self.subTest(locale=locale):
                 value = _issue()
                 output = render_newsletter(value, locale)
-                assert 'type="submit"' not in output
-                assert "hidden data-newsletter-issue-form" in output
+                assert 'type="submit"' in output
+                assert "hidden data-newsletter-issue-form" not in output
                 assert value["period"] not in output
                 assert value["updated_at"] not in output
                 for removed in (
@@ -176,20 +175,8 @@ class NewsletterPresentationTests(unittest.TestCase):
                     'class="notice"',
                 ):
                     assert removed not in output
-                fallback = re.search(
-                    r"<noscript>(.*?)</noscript>",
-                    output,
-                    re.DOTALL,
-                )
-                assert fallback is not None
-                links = re.findall(r'href="([^"]+)"', fallback[1])
-                assert [
-                    parse_qs(urlsplit(unescape(link)).query) for link in links
-                ] == [
-                    {"issue": ["2026-10"], "lang": [locale]},
-                    {"issue": ["2027-01"], "lang": [locale]},
-                ]
-                assert fallback[1].count('aria-current="page"') == 1
+                assert 'name="issue" type="radio"' in output
+                assert "newsletter-code-label" not in output
                 identifiers = set(re.findall(r'\bid="([^"]+)"', output))
                 for reference in re.findall(
                     r'aria-(?:labelledby|describedby)="([^"]+)"',
@@ -234,11 +221,14 @@ class NewsletterPresentationTests(unittest.TestCase):
                 assert f'name="lang" value="{locale}"' in form[2]
                 assert 'type="submit"' in form[2]
                 assert label in form[2]
+                assert "data-newsletter-calendar" in form[2]
+                assert 'data-dates=\'["2026-10-28", "2026-10-30"]\'' in form[2]
                 assert through in output
                 assert generated in output
                 assert 'datetime="2026-10-30"' in output
                 assert 'datetime="2026-10-31T00:04:05+00:00"' in output
-                assert "2026-10-31 00:04:05 UTC" in output
+                assert "2026-10-31 00:04:05" in output
+                assert " UTC" not in output
                 issue_form = re.search(
                     r"<form[^>]*data-newsletter-issue-form>(.*?)</form>",
                     output,
