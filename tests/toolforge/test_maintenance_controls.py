@@ -131,7 +131,7 @@ class TestMaintenanceControls(unittest.TestCase):
         assert ">51</td>" in output
         assert "Game 051" in output
         assert "Game 050" not in output
-        assert 'aria-current="true">Article name</a>' in output
+        assert 'aria-current="true">Article title</a>' in output
         links = re.findall(r'href="([^"]+)"[^>]*rel="(?:prev|next)"', output)
         assert len(links) == 4
         for link in links:

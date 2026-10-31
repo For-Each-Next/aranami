@@ -50,6 +50,15 @@ their documentation (84312754, 40229369, 51743875), and the Copyedit
 translation redirect to Proofreader needed (92617024, doc 77913356).
 Live expansions verified dated English/Japanese roots and the undated
 proofreading aggregate, which does not preserve a marker month.
+
+Critical deletion and copyright tags were checked on 31 October 2026:
+Afd (83265550), Vfd (70202894), Delete (89648764), Module:Delete
+(90946561), Copyvio (94428435), Copypaste (81733705), and Copyright
+violation (85875845). Read-only expansions confirmed exact article AfD,
+speedy-deletion, and copyright-validation categories, plus Copypaste's
+dated plain and source-specified categories. Deletion and validation
+tags have no monthly forms; notification templates and broader deletion
+categories do not establish an article's maintenance issue.
 """
 
 from __future__ import annotations

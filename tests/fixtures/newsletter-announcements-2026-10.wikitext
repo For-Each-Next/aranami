@@ -1,0 +1,88 @@
+{{mbox
+| image=[[File:Schedule (cropped).jpg|50px|link=|class=notpageimage skin-invert-image|編寫中]]
+| text=此為草稿，預定於2026年10月出刊，歡迎[[WikiProject talk:電子遊戲/簡訊#2026-10|討論]]和編輯。
+}}
+
+{{noteTA-lite
+| G1 = 電子遊戲
+}}
+
+== 宣告 ==
+
+=== 公告 ===
+
+* 专题来源年中总结[[WikiProject_talk:电子游戏/2026年#年中總結（2026年）|通过]]。<small>（9月3日）</small>
+* [[WikiProject:电子游戏/里程碑|里程碑]]「乙级以上内容达到5%」[[WikiProject talk:电子游戏#里程碑的“乙级以上内容达到5%”已经达成了|达成]]。<small>（8月21日）</small>
+* [[Template:vgname|Vgname]]家族模板已[[WikiProject_talk:电子游戏/2026年#h-提刪？|清理完成]]，标为停用。<small>（7月9日）</small>
+
+=== 新進條目 ===
+
+{{Pie chart new | radius = 60 | precision = 0 | legend = true | direction = row-reverse
+| labelformat = $label $value篇 <small>$percent</small>
+| 1 = [
+  {"label": "優良", "value": 1, "color": "#66ff66"},
+  {"label": "乙級", "value": 12, "color": "#b2ff66"},
+  {"label": "丙級", "value": 33, "color": "#ffff66"},
+  {"label": "初級", "value": 47, "color": "#ffaa66"},
+  {"label": "小作品", "value": 123, "color": "#ffa4a4"},
+]}}
+
+2026年第三季度，專題共新進條目216篇。其中：
+* 7月計120篇，其中乙級3篇、丙級8篇、初級14篇、小作品級95篇。
+* 8月計34篇，其中優良級1篇、乙級6篇、丙級11篇、初級9篇、小作品級7篇。
+* 9月計62篇，其中乙級3篇、丙級14篇、初級24篇、小作品級21篇。
+
+=== 在首頁上 ===
+
+以下條目於2026年第三季間曾登上[[Wikipedia:首页|中文維基百科首頁]]。感謝所有為電子遊戲專題條目做出貢獻的維基人！
+
+==== 新條目推薦 ====
+
+以下條目曾登上首頁的「新條目推薦」區塊。
+{{div col|colwidth=27em}}
+* [[密码游戏]]<small>（7月19日）</small>
+* [[桑多涅]]<small>（7月24日）</small>
+* [[刃 (崩壞：星穹鐵道)]]<small>（7月26日）</small>
+* [[Unhinged]]<small>（8月14日）</small>
+* [[刻律德菈]]<small>（8月15日）</small>
+* [[仙舟「羅浮」]]<small>（8月18日）</small>
+* [[少女与学院城]]<small>（8月22日）</small>
+* [[2023年Dota 2国际邀请赛]]<small>（8月26日）</small>
+* [[2024年Dota 2国际邀请赛]]<small>（8月28日）</small>
+* [[网易诉迷你玩著作权侵权及不正当竞争纠纷案]]<small>（9月2日）</small>
+* [[2025年Dota 2国际邀请赛]]<small>（9月6日）</small>
+* [[Bad Apple!!]]<small>（9月6日）</small>
+* [[至冬]]<small>（9月7日）</small>
+* [[蔚 (英雄联盟)]]<small>（9月17日）</small>
+* [[完蛋！我被男同學包圍了]]<small>（9月22日）</small>
+* [[湊友希那]]<small>（9月23日）</small>
+* [[户山香澄]]<small>（9月25日）</small>
+* [[COCORO]]<small>（9月27日）</small>
+* [[丸山彩]]<small>（9月27日）</small>
+* [[共鳴：瘟疫傳說傳承]]<small>（9月29日）</small>
+* [[美竹兰]]<small>（9月29日）</small>
+* [[冰川纱夜]]<small>（9月30日）</small>
+{{div col end}}
+
+==== 優良條目 ====
+
+以下條目曾登上首頁的「優良條目」區塊。
+{{div col|colwidth=27em}}
+* [[墨丘利神之杖Z 双超执刀]]<small>（7月25日）</small>
+* [[ZywOo]]<small>（8月1日）</small>
+* [[德軍總部：新秩序]]<small>（9月8日）</small>
+{{div col end}}
+
+=== ACG專題獎 ===
+
+2026年第三季間，[[WikiProject:ACG/維基ACG專題獎|維基ACG專題獎]]得分排行榜前五名如下：
+* [[User:Nostalgiacn|Nostalgiacn]]：共得45分<small>（累計分數1,417分）</small>
+* [[User:JuneAugust|JuneAugust]]：共得36分<small>（累計分數131分）</small>
+* [[User:For Each ... Next|For Each ... Next]]：共得34分<small>（累計分數438分）</small>
+* [[User:LimiEi|LimiEi]]：共得29分<small>（累計分數29分）</small>
+* [[User:Perimeter Chou|Perimeter Chou]]：共得24分<small>（累計分數24分）</small>
+* [[User:断岸千尺|断岸千尺]]：共得24分<small>（累計分數24分）</small>
+
+恭喜LimiEi、Perimeter Chou、断岸千尺等三名編者本季度首次獲得ACG專題獎！
+
+[[Category:電子遊戲專題簡訊宣告]]

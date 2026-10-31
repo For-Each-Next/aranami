@@ -95,12 +95,14 @@ class LogControlsTests(unittest.TestCase):
                 assert archive.count('<th scope="col">') == 3
                 assert archive.count("<td") == 3
                 assert (
-                    '<td class="log-download"><span class="filename">'
+                    '<td class="log-download"><a class="filename" href="'
                     in archive
                 )
-                assert '</span> <a href="' in archive
+                assert "download>aranami.2026-10-23.log</a>" in archive
+                assert interface.text("logs.download") not in archive
                 assert '<span lang="zh">' in listing
-                assert '<details class="system-details">' in output
+                assert '<section class="system-details" aria-label=' in output
+                assert '<details class="system-details">' not in output
                 chronology = self.client.get(
                     "/logs/?order=asc",
                     headers={"Accept-Language": locale},
@@ -127,7 +129,7 @@ class LogControlsTests(unittest.TestCase):
         assert response.status_code == 200
         output = response.text
         assert self._listing(output).count('class="log-event"') == 5
-        assert "30 matching events" in output
+        assert "Matching recent events for 2026-10-23: 30." in output
         assert 'value="failed" selected' in output
         assert 'value="asc" selected' in output
         assert (

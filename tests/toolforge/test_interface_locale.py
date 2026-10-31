@@ -127,7 +127,7 @@ class AssessmentFallbackTests(unittest.TestCase):
 
     @staticmethod
     def test_report_names_explain_destinations() -> None:
-        """Show report names with full path details."""
+        """Keep grouped headings compact and page links in dialogs."""
         output = render_dashboard(
             None,
             None,
@@ -142,6 +142,26 @@ class AssessmentFallbackTests(unittest.TestCase):
         ):
             assert label in output
         assert "WikiProject:电子游戏/认证条目/BPAN" in output
+        heading = re.search(
+            r'id="routine-assessment_lists">\s*<h3>(.*?)</h3>',
+            output,
+            re.DOTALL,
+        )
+        assert heading is not None
+        assert ">6 pages</button>" in heading[1]
+        assert 'commandfor="report-details-assessment_lists"' in heading[1]
+        assert "B-plus reviews" not in heading[1]
+        assert "Project reviews" not in heading[1]
+        dialog = re.search(
+            r'<dialog id="report-details-assessment_lists"[^>]*>'
+            r"(.*?)</dialog>",
+            output,
+            re.DOTALL,
+        )
+        assert dialog is not None
+        assert 'class="report-targets"' in dialog[1]
+        assert "B-plus reviews" in dialog[1]
+        assert "Project reviews" in dialog[1]
 
     @staticmethod
     def test_fallbacks_and_aliases_in_all_locales() -> None:
@@ -182,4 +202,4 @@ class AssessmentFallbackTests(unittest.TestCase):
             assert assessment_code("未知", "importance") == "Unknown"
             output = render_dashboard(None, None, None, locale)
             assert interface.text("nav.skip") in output
-            assert interface.text("assessment.legend") in output
+            assert 'class="assessment-guide"' not in output

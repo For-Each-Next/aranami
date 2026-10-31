@@ -51,13 +51,16 @@ class TestBacklogConfig(TestCase):
     def test_deployment_taxonomy_retains_all_verified_tasks() -> None:
         """Load the complete checked-in maintenance taxonomy."""
         tasks = backlog_tasks(load_backlog_config())
-        assert len(tasks) == 37  # ruff: ignore[magic-value-comparison]
+        assert len(tasks) == 40  # ruff: ignore[magic-value-comparison]
         keys = {task["key"] for task in tasks}
         assert {
             "unreferenced",
             "expand_english",
             "expand_japanese",
             "proofread_translation",
+            "afd",
+            "csd",
+            "copyvio",
         } <= keys
 
     @staticmethod

@@ -14,7 +14,6 @@
       </ul>
     </section>
     {% endfor %}
-    <p class="homepage-note">{{ t.backlog.note }}</p>
     {% with updated=backlog.updated %}{% include "includes/source_updated.html" %}{% endwith %}
   {% endif %}
 </section>

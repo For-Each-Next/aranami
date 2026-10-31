@@ -47,9 +47,9 @@
         }
     });
 
-    const clockId = document.getElementById("tool-status")
-        ? "tool-status" : "live-server-status";
-    if (!document.getElementById(clockId) || !document.getElementById("live-uptime")) return;
+    const clockId = ["tool-status", "live-server-status", "live-uptime"]
+        .find((id) => document.getElementById(id));
+    if (!clockId || !document.getElementById("live-uptime")) return;
     const regionIds = ["tool-status", "live-uptime", "live-server-status", "server-runtime"]
         .filter((id) => document.getElementById(id));
 

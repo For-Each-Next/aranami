@@ -102,6 +102,30 @@ class TestHubDispatch(TestCase):
         dispatch.assert_called_once_with("dyks", dry=True)
         updater.refresh.assert_not_called()
 
+    @staticmethod
+    def test_quarter_finalization_waits_with_an_independent_source_cycle() -> (
+        None
+    ):
+        """Queue final collection with per-cycle source reuse."""
+        fetch = Mock(return_value={"views": 12})
+
+        def collect(*, wait: bool) -> None:
+            """Reuse reads within one required boundary collection."""
+            assert wait
+            for _ in range(2):
+                read_top_pageviews(
+                    "zh.wikipedia.org",
+                    ("2026", "12", "31"),
+                    fetch,
+                    dict,
+                )
+
+        updater = Mock(refresh=Mock(side_effect=collect))
+        hub.finalize_newsletter(updater)
+        hub.finalize_newsletter(updater)
+        assert updater.refresh.call_args_list == [call(wait=True)] * 2
+        assert fetch.call_count == 2  # ruff: ignore[magic-value-comparison]
+
 
 class TestHubLifecycle(TestCase):
     """Coordinate one scheduler, collection, HTTP, and signals."""
@@ -245,6 +269,28 @@ class TestHubLifecycle(TestCase):
         assert options["max_instances"] == 1
         assert options["coalesce"]
         assert options["next_run_time"].tzinfo is dt.UTC
+        quarter_jobs = [
+            job
+            for job in scheduler.add_job.call_args_list
+            if job.kwargs.get("id") == "newsletter-quarter"
+        ]
+        assert len(quarter_jobs) == 1
+        quarter = quarter_jobs[0]
+        assert quarter.args == (hub.finalize_newsletter,)
+        assert quarter.kwargs == {
+            "trigger": "cron",
+            "month": "1,4,7,10",
+            "day": 1,
+            "hour": 0,
+            "minute": 0,
+            "second": 0,
+            "timezone": dt.UTC,
+            "id": "newsletter-quarter",
+            "args": (updater,),
+            "max_instances": 1,
+            "coalesce": True,
+            "misfire_grace_time": None,
+        }
         assert handlers == {
             signal.SIGINT: signal.SIG_DFL,
             signal.SIGTERM: signal.SIG_DFL,

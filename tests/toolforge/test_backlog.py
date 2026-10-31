@@ -127,6 +127,89 @@ class TestMaintenanceBacklog(TestCase):
         )
 
     @staticmethod
+    def test_critical_issues_keep_deletion_scope_and_copyright_dates() -> None:
+        """Match direct article warnings without inventing tag dates."""
+        site = _OfflineSite("zh", "wikipedia")
+        members = pl.DataFrame(
+            [
+                (1, 0, "Discussion and speedy"),
+                (2, 0, "Speedy"),
+                (3, 0, "Copyright validation"),
+                (4, 0, "Copied text"),
+                (5, 0, "Notability"),
+                (6, 0, "Unmatched"),
+                (7, 1, "Talk:Not an article"),
+            ],
+            schema=_MEMBER_SCHEMA,
+            orient="row",
+        )
+        categories = pl.DataFrame(
+            [
+                (1, "条目删除候选"),
+                (1, "条目删除候选"),
+                (1, "快速删除候选"),
+                (2, "快速删除候选"),
+                (3, "怀疑侵犯版权页面"),
+                (3, "內容疑似拷貝後貼上的頁面"),
+                (4, "內容疑似拷貝後貼上的頁面"),
+                (4, "自2024年2月內容疑似拷貝後貼上的頁面"),
+                (4, "自2023年3月指明來源的內容疑似拷貝後貼上的頁面"),
+                (5, "所有主題不滿足收錄標準的條目"),
+                (6, "所有刪除候選"),
+                (6, "自2026年10月条目删除候选"),
+                (6, "自2026年10月快速删除候选"),
+                (6, "自2026年10月怀疑侵犯版权页面"),
+                (6, "条目删除候选/沙盒"),
+                (6, "怀疑侵犯版权页面的子分类"),
+                (7, "快速删除候选"),
+                (99, "条目删除候选"),
+            ],
+            schema=_CATEGORY_SCHEMA,
+            orient="row",
+        )
+        with patch(
+            "backend.website.backlog.page_categories",
+            return_value=categories,
+        ) as read:
+            result = collect_backlog(site, members)
+        read.assert_called_once_with(site, [1, 2, 3, 4, 5, 6])
+        groups = {group["key"]: group for group in result["groups"]}
+        critical_keys = ["csd", "copyvio", "afd", "notability"]
+        assert list(groups)[: len(critical_keys)] == critical_keys
+        assert result["total"] == 5  # ruff: ignore[magic-value-comparison]
+        assert {key: groups[key]["count"] for key in critical_keys} == {
+            "csd": 2,
+            "copyvio": 2,
+            "afd": 1,
+            "notability": 1,
+        }
+        for key in critical_keys:
+            assert groups[key]["section_key"] == "critical"
+            assert groups[key]["section_label"] == {
+                "en": "Critical issues",
+                "zh-hans": "关键问题",
+                "zh-hant": "關鍵問題",
+            }
+        assert groups["afd"]["category"] == "条目删除候选"
+        assert groups["csd"]["category"] == "快速删除候选"
+        assert groups["copyvio"]["category"] == "怀疑侵犯版权页面"
+        assert groups["afd"]["items"][0]["issues"] == ["csd", "afd"]
+        for item in groups["csd"]["items"]:
+            assert item["oldest_issue_month"] is None
+            assert item["oldest_issue_category"] is None
+        copyright_items = {
+            item["title"]: item for item in groups["copyvio"]["items"]
+        }
+        validation = copyright_items["Copyright validation"]
+        assert validation["oldest_issue_month"] is None
+        copied = copyright_items["Copied text"]
+        assert copied["oldest_issue_month"] == "2023-03"
+        assert copied["oldest_issue_category"] == (
+            "自2023年3月指明來源的內容疑似拷貝後貼上的頁面"
+        )
+        assert copied["issues"] == ["copyvio"]
+
+    @staticmethod
     def test_all_verified_category_roots_accept_their_monthly_forms() -> None:
         """Retain the checked Chinese message-box category contract."""
         roots = {

@@ -176,12 +176,15 @@ class DashboardUpdater:
             message = "Another updater already owns this dashboard output."
             raise RuntimeError(message) from error
 
-    def refresh(self) -> bool:
+    def refresh(self, *, wait: bool = False) -> bool:
         """Attempt one collection while skipping overlapping refreshes.
 
         Collection failures retain the previous snapshot and record the
         error type. The hub may call this after any report; collection
         itself selects only independently due website sections.
+
+        Args:
+            wait: Queue behind active work for a calendar refresh.
 
         Returns:
             Whether a complete snapshot was saved. False also covers
@@ -195,7 +198,7 @@ class DashboardUpdater:
         if self._lock_fd is None:
             message = "Start the dashboard updater before refreshing."
             raise RuntimeError(message)
-        if not self._refresh_lock.acquire(blocking=False):
+        if not self._refresh_lock.acquire(blocking=wait):
             return False
         try:
             if self._stop.is_set():

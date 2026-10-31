@@ -118,7 +118,7 @@ class Element {
     }
 }
 
-function fixture(offset = 0, completed = false, logs = false, about = false) {
+function fixture(offset = 0, completed = false, logs = false, resources = false, footerOnly = false) {
     const subject = "Updating records for October 20, 2026";
     const button = new Element("BUTTON", {
         id: "status-button", commandfor: "popover", command: "show-modal",
@@ -147,15 +147,19 @@ function fixture(offset = 0, completed = false, logs = false, about = false) {
     const notice = new Element("P", {
         id: logs ? "live-server-notice" : "live-notice", hidden: "",
     }, "Reconnecting");
-    const root = new Element("SECTION", {
-        id: logs ? "live-server-status" : "tool-status", "data-server-time": stamp(offset),
+    const clockAttributes = {
+        "data-server-time": stamp(offset),
         "data-clock-messages": JSON.stringify(messages),
         "data-schedule-expires": stamp(offset + 120000),
         "data-schedule-stale": "Schedule stale",
+    };
+    const root = new Element("SECTION", {
+        id: logs ? "live-server-status" : "tool-status", ...clockAttributes,
     }, "", logs ? [server, notice] : [
         button, clock, popup, schedule, notice, ...(completed ? [] : [progress]),
     ]);
     const uptime = new Element("SPAN", {
+        ...clockAttributes,
         id: "live-uptime", "data-clock": "uptime", "data-started-at": stamp(-100000),
         "data-uptime-template": "{days}d {hours}h {minutes}m {seconds}s",
         "data-uptime-unknown": "Uptime unavailable",
@@ -167,7 +171,7 @@ function fixture(offset = 0, completed = false, logs = false, about = false) {
     const document = {
         hidden: false,
         documentElement: { lang: "en" },
-        roots: [root, uptime, ...(about ? [runtime] : [])],
+        roots: footerOnly ? [uptime] : [root, uptime, ...(resources ? [runtime] : [])],
         getElementById(id) {
             const search = (node) => node.id === id ? node
                 : (node.childNodes ?? []).map(search).find(Boolean);
@@ -177,8 +181,8 @@ function fixture(offset = 0, completed = false, logs = false, about = false) {
     return { document, button, clock, popup, relative, schedule, server, progress, notice, root, uptime, runtime, memory };
 }
 
-function browser(logs = false, about = false, options = {}) {
-    const state = fixture(0, false, logs, about);
+function browser(logs = false, resources = false, options = {}) {
+    const state = fixture(0, false, logs, resources, options.footerOnly);
     const requests = [];
     const warnings = [];
     const sockets = [];
@@ -239,7 +243,7 @@ function browser(logs = false, about = false, options = {}) {
     };
     return {
         ...state, requests, warnings, sockets, settle,
-        async respond(next = fixture(now, false, logs, about), response = {}) {
+        async respond(next = fixture(now, false, logs, resources, options.footerOnly), response = {}) {
             const content = html(next);
             requests.at(-1).resolve({
                 ok: true, headers: { get: () => "text/html; charset=utf-8" },
@@ -251,7 +255,7 @@ function browser(logs = false, about = false, options = {}) {
         frame(frame, socket = sockets.at(-1)) {
             socket.message(typeof frame === "string" ? frame : JSON.stringify(frame));
         },
-        push(next = fixture(now, false, logs, about), socket = sockets.at(-1)) {
+        push(next = fixture(now, false, logs, resources, options.footerOnly), socket = sockets.at(-1)) {
             socket.message(JSON.stringify({ type: "status", html: html(next) }));
         },
         fire(name, event) { events.get(name)(event); },
@@ -667,7 +671,7 @@ test("logs synchronize only compact server state and uptime", async () => {
     assert.equal(page.document.getElementById("tool-status"), null);
 });
 
-test("About monitor refreshes resources and expires stale usage", async () => {
+test("Logs monitor refreshes resources and expires stale usage", async () => {
     const page = browser(true, true);
     await page.respond();
     page.jump(5000);
@@ -679,6 +683,30 @@ test("About monitor refreshes resources and expires stale usage", async () => {
     page.jump(121000);
     assert.equal(page.memory.textContent, "Unknown");
     assert.equal(page.server.textContent, "Server unavailable");
+});
+
+test("About footer ticks, synchronizes, and expires without status panels", async () => {
+    const page = browser(false, false, { footerOnly: true });
+    for (const id of ["tool-status", "live-server-status", "server-runtime"]) {
+        assert.equal(page.document.getElementById(id), null);
+    }
+    assert.equal(page.uptime.textContent, "0d 0h 1m 40s");
+    await page.respond();
+    page.jump(1000);
+    assert.equal(page.uptime.textContent, "0d 0h 1m 41s");
+    page.jump(4000);
+    assert.equal(page.requests.length, 2);
+    const next = fixture(5000, false, true, true);
+    next.uptime.setAttribute("data-started-at", stamp(-200000));
+    await page.respond(next);
+    assert.equal(page.document.getElementById("live-uptime"), page.uptime);
+    assert.equal(page.uptime.dataset.serverTime, stamp(5000));
+    assert.equal(page.uptime.textContent, "0d 0h 3m 25s");
+    for (const id of ["tool-status", "live-server-status", "server-runtime"]) {
+        assert.equal(page.document.getElementById(id), null);
+    }
+    page.jump(121000);
+    assert.equal(page.uptime.textContent, "Uptime unavailable");
 });
 
 test("native WebSocket pushes preserve controls and use the page locale", async () => {

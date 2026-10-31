@@ -63,7 +63,7 @@ already validated generation. A failed setup leaves current services intact.
 After selection, failed restarts retain both generations for explicit recovery;
 do not silently change code beneath a process that may have started. Preserve
 runtime state, reports, caches, credentials, and daily logs. Existing service
-start/stop events describe process replacement, not host reboot, and the About
+start/stop events describe process replacement, not host reboot, and the Logs
 startup time remains the observed hub start. Log and state formats do not need
 to change for this deployment mechanism.
 
@@ -251,6 +251,15 @@ random order remains stable across pages. Use saved source/category links and
 the verified definitions/evidence in `backend/website/maintenance.json`;
 requests never query wiki sources.
 
+The Critical issues maintenance section combines notability concerns with
+article deletion discussions, speedy-deletion candidates, and copyright
+validation or copied-content warnings. Match their verified direct article
+categories within current project membership; broader deletion categories,
+notification templates, and arbitrary descendants do not establish an issue.
+Only copied-content tags supply verified monthly categories here; keep
+unobserved deletion and copyright-validation dates null. Audited template
+revisions and category-expansion contracts are recorded in `website/backlog.py`.
+
 Routine status uses observed starts/finishes, configured report links,
 and actual scheduled executions; hide next execution while running. Successful
 daily results show confirmed report dates. Active progress requires a fresh
@@ -284,7 +293,56 @@ system/architecture, Python, memory use/allocation, and CPU use/allocation.
 Startup is the recorded hub start, not an inferred operating-system boot.
 Retain static facts and startup timestamps when resource samples expire.
 Show the sample's actual UTC timestamp through seconds and its relative age;
-relative annotations advance in whole minutes, hours, or days.
+relative annotations use whole minutes, hours, or days and refresh with saved
+status fragments as ordinary text. About omits the server-status panel and
+uses its footer as the live uptime clock anchor.
+
+## Newsletter drafts
+
+The read-only `/newsletter/` page prepares the three data-driven Chinese
+video-game newsletter pages for manual copying: overview, quality changes,
+and announcements. The next publication quarter is selected automatically;
+an explicit `issue=2027-01` selects issue 29 for October–December 2026. Quarterly
+calendar identities live in `shared.newsletter`; the public controller passes
+validated saved facts to `updater.services.newsletter` for wikitext projection
+and then to the webservice renderer for HTML. No request starts collection,
+publishes wiki text, or writes runtime data. Browser edits are ephemeral.
+
+The independent daily newsletter report in `backend.website` fetches sources
+for the current publication quarter and its successor. It prepares the next
+issue while the reporting quarter is still in progress, with an explicit
+exclusive observation cutoff through the latest completed UTC day. Historical
+reads, DYK, quality revisions, awards, curated new pages, and saved homepage
+appearances use that same cutoff. Quarterly completion is separate from data
+availability. Supplemental current article totals use a fresh membership count
+with their own observation timestamp, rather than a historical quarter-end label.
+Missing daily records retain their confirmed minimum count and
+coverage gaps. No-data selections show collection state without copyable
+empty templates. Features and interviews are outside this numeric generator.
+
+The numeric sections follow the October 2026 issue (main revision
+94691317; quality revision 94683150). Newsletter facts use the existing bounded
+dashboard snapshot, independent success timestamps, and hourly failure retries.
+Older schema-2 snapshots without newsletter observations remain readable.
+The collector prepares the preceding issue's actual main-page layout and source
+revision. Rendering replaces only recognized issue metadata and statistical
+slots, preserving its original markup, styling, link targets, and navigation.
+If the immediately preceding page is absent or unsupported, collection searches
+up to four preceding issues for a valid layout; older layout counts do not
+become a newer quarter's baseline. Unavailable layouts are never replaced by
+an invented plain-text design.
+Quality and announcements likewise retain their actual prior source around
+explicit data slots, including paragraph and row prototypes. Old notices,
+article lists, awards, and chart values are replaced, while a chart with no
+observed grade breakdown remains omitted rather than inheriting old numbers.
+
+Native issue radios default to `Issue.upcoming()` for the UTC request date.
+The cache key includes this automatic selection so the default changes at
+the quarter boundary even if the previous page is still cached. A quarterly
+`00:00 UTC` cron refresh queues behind any active website pass. Quarter-scoped
+source identities make newsletter and homepage observations due at that
+boundary, independently of their normal refresh intervals. The completed
+issue and new draft remain separate saved observations.
 
 ## Polars and Parquet
 

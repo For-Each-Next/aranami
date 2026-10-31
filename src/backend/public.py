@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime as dt
 import json
 import logging
 import os
@@ -39,8 +40,11 @@ from backend.support.public_data import (
 )
 from shared.config import routine_configuration
 from shared.deployment import project_version
+from shared.newsletter import Issue
 from shared.support.files import open_regular, read_json_object, read_regular
 lazy from backend.website.collect import validate_dashboard_snapshot
+lazy from backend.website.newsletter_homepage import enrich_newsletter_homepage
+lazy from updater.services.newsletter import render_issue
 lazy from webservice import pages
 lazy from webservice.presentation import local_url, select_locale
 
@@ -70,6 +74,7 @@ _CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
     ".svg": "image/svg+xml",
+    ".png": "image/png",
 }
 
 
@@ -258,6 +263,7 @@ def _navigation(request: Request, locale: str) -> dict[str, object]:
             "importance",
             "date",
             "status",
+            "issue",
         }
     }
     return {
@@ -429,13 +435,30 @@ class _PublicViews:
         ] and not parameters.get(
             "seed",
         )
-        key = (path, query, locale)
+        automatic_issue = (
+            Issue.upcoming(dt.datetime.now(dt.UTC).date())
+            if path == "/newsletter/"
+            else None
+        )
+        key = (
+            path,
+            query,
+            locale,
+            automatic_issue.value if automatic_issue is not None else "",
+        )
         identity = self._page_identity()
         if not randomized:
             content = self.pages.get(key, identity)
             if content is not None:
                 return _html(content, locale)
-        if path == "/about/":
+        if automatic_issue is not None:
+            response = self._newsletter_page(
+                parameters,
+                locale,
+                navigation,
+                automatic_issue,
+            )
+        elif path == "/about/":
             response = _html(
                 pages.render_about(
                     _configuration(),
@@ -469,6 +492,57 @@ class _PublicViews:
         if not randomized and response.status_code == HTTPStatus.OK:
             self.pages.put(key, identity, response.body.decode())
         return response
+
+    def _newsletter_page(
+        self,
+        parameters: dict[str, list[str]],
+        locale: str,
+        navigation: dict[str, object],
+        automatic_issue: Issue,
+    ) -> Response:
+        """Render an issue from validated saved facts.
+
+        Returns:
+            A draft page or a localized invalid-selection response.
+        """
+        values = parameters.get("issue", [automatic_issue.value])
+        if set(parameters) - {"issue"} or len(values) != 1:
+            return _page_error(
+                "newsletter.invalid_issue",
+                locale,
+                HTTPStatus.BAD_REQUEST,
+            )
+        try:
+            issue = Issue.parse(values[0])
+        except ValueError:
+            return _page_error(
+                "newsletter.invalid_issue",
+                locale,
+                HTTPStatus.BAD_REQUEST,
+            )
+        snapshot = self._dashboard() or {}
+        data = snapshot.get("newsletter") or {}
+        facts = enrich_newsletter_homepage(
+            data.get("issues", {}).get(issue.value) or {},
+            snapshot,
+            issue,
+        )
+        value = render_issue(issue, facts)
+        choices = [automatic_issue.previous, automatic_issue.value]
+        if issue.value not in choices:
+            choices.append(issue.value)
+        value.update(
+            automatic_issue=automatic_issue.value,
+            issue_choices=choices,
+        )
+        return _html(
+            pages.render_newsletter(
+                value,
+                locale,
+                navigation=navigation,
+            ),
+            locale,
+        )
 
     @staticmethod
     def _maintenance_page(
@@ -549,7 +623,23 @@ class _PublicViews:
             )
         except OSError, ValueError, TypeError, RecursionError, OverflowError:
             return None
-        return value if validate_dashboard_snapshot(value) else None
+        if validate_dashboard_snapshot(value):
+            return value
+        # Older newsletter data must not hide other valid saved reports.
+        reports = value.get("reports")
+        if isinstance(reports, dict) and "newsletter" in reports:
+            value = {
+                **value,
+                "newsletter": None,
+                "reports": {
+                    name: report
+                    for name, report in reports.items()
+                    if name != "newsletter"
+                },
+            }
+            if validate_dashboard_snapshot(value):
+                return value
+        return None
 
     def api(self, request: Request) -> Response:
         """Return data through its backend validation contract."""
@@ -985,7 +1075,7 @@ def create_app(runtime: Path, assets: Path = _ASSETS) -> FastAPI:
     ):
         app.add_exception_handler(exception, _routing_error)
     views = _PublicViews(runtime, assets)
-    for path in ("/", "/about/", "/maintenance/", "/logs/"):
+    for path in ("/", "/about/", "/maintenance/", "/logs/", "/newsletter/"):
         app.add_api_route(path, views.page, methods=["GET", "HEAD"])
     for kind in ("config", "status", "live", "dashboard"):
         app.add_api_route(f"/api/{kind}", views.api, methods=["GET", "HEAD"])

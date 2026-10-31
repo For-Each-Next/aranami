@@ -244,7 +244,7 @@ def _assessment_sentences(row: Mapping[str, object]) -> str:
             if previous == row[field]:
                 continue
             old = _label(previous, names, suffix)
-            sentences.append(f"{dimension}由{old}變為{current}。")
+            sentences.append(f"{dimension}由{old}改為{current}。")
         else:
             sentences.append(f"{dimension}獲評{current}。")
     return "".join(sentences)

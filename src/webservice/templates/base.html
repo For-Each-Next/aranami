@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
   <meta name="description" content="{{ t.page.description }}">
-  <link rel="icon" href="/aranami.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/codex.css">
   {% if live %}<script src="/live.js" defer></script>{% endif %}
+  {% block assets %}{% endblock %}
   <title>{{ heading }} · Aranami</title>
 </head>
 <body>
@@ -17,8 +19,7 @@
       <a href="/" class="brand"><img src="/aranami.svg" width="36" height="36" alt=""><span>Aranami</span></a>
       <nav class="global-navigation" aria-label="{{ t.nav.global }}">
         <a href="/"{% if navigation and navigation.path == '/' %} aria-current="page"{% endif %}>{{ t.nav.dashboard }}</a>
-        <a href="/#backlog"{% if navigation and navigation.path == '/maintenance/' %} aria-current="page"{% endif %}>{{ t.nav.backlog }}</a>
-        <a href="/#tool-status">{{ t.nav.reports }}</a>
+        <a href="/newsletter/"{% if navigation and navigation.path == '/newsletter/' %} aria-current="page"{% endif %}>{{ t.nav.newsletter }}</a>
         <a href="/logs/"{% if navigation and navigation.path == '/logs/' %} aria-current="page"{% endif %}>{{ t.nav.logs }}</a>
         <a href="/about/"{% if navigation and navigation.path == '/about/' %} aria-current="page"{% endif %}>{{ t.nav.about }}</a>
       </nav>
@@ -45,6 +46,7 @@
     <div class="shell footer-inner">
       <p class="footer-uptime">{% if footer %}{% include "includes/uptime.html" %}{% endif %}</p>
       <nav aria-label="Aranami"><a href="/about/">{{ t.nav.about }}</a><a href="/logs/">{{ t.nav.logs }}</a>{{ project_link }}</nav>
+      <p class="extract-attribution">{{ extract_attribution.before }}<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>{{ extract_attribution.after }}</p>
     </div>
   </footer>
 </body>

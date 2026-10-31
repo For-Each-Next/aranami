@@ -23,8 +23,8 @@ from backend.website.collect import (
 )
 
 
-class TestDashboardReportCache(TestCase):
-    """Select due reports and isolate refresh failures."""
+class DashboardFixture(TestCase):
+    """Supply offline sources and a temporary report cache."""
 
     def setUp(self) -> None:
         """Provide offline Chinese sources and a private cache."""
@@ -39,6 +39,10 @@ class TestDashboardReportCache(TestCase):
             "backend.website.collect.reviews.collect_reviews",
             return_value={"items": []},
         )
+        self.newsletter = self._patch(
+            "backend.website.collect.newsletter.collect_newsletter",
+            return_value={"issues": {}},
+        )
         self.site = self._patch("backend.website.collect.pywikibot.Site")
         self._patch(
             "backend.website.collect.WikiReader",
@@ -49,6 +53,7 @@ class TestDashboardReportCache(TestCase):
             return_value=pl.DataFrame({
                 "page_namespace": [0, 14],
                 "full_title": ["Game", "Category:Games"],
+                "pa_class": ["GA", "NA"],
             }),
         )
         self.collectors = {
@@ -124,6 +129,10 @@ class TestDashboardReportCache(TestCase):
             now=now,
             **kwargs,
         )
+
+
+class TestDashboardReportCache(DashboardFixture):
+    """Select due reports and isolate refresh failures."""
 
     def test_public_validation_reuses_complete_report_contracts(self) -> None:
         """Accept empty successful reports and reject damaged data."""
@@ -363,6 +372,7 @@ class TestDashboardReportCache(TestCase):
         assert validate_dashboard_snapshot(failed)
         self._collect(dt.timedelta(hours=2, minutes=59))
         assert self.reviews.call_count == 3
+
         self.reviews.side_effect = None
         self.reviews.return_value = {"items": []}
         empty = self._collect(dt.timedelta(hours=3))
@@ -497,11 +507,13 @@ class TestDashboardReportCache(TestCase):
         """Persist retry times before the first successful result."""
         self.membership.side_effect = RuntimeError("offline")
         failed = self._collect()
-        assert len(failed["errors"]) == len(REPORT_KEYS)
+        assert len(failed["errors"]) == len(REPORT_KEYS) - 1
         assert all(
             value["last_success_at"] is None
-            for value in failed["reports"].values()
+            for name, value in failed["reports"].items()
+            if name != "newsletter"
         )
+        assert failed["newsletter"] == {"issues": {}}
         self.site.reset_mock()
         self._collect(dt.timedelta(minutes=59))
         self.site.assert_not_called()
@@ -541,6 +553,8 @@ class TestDashboardReportCache(TestCase):
         assert stale["pageviews"] == first["pageviews"]
         assert stale["backlog"] == first["backlog"]
         for key in REPORT_KEYS:
+            if key == "newsletter":
+                continue
             assert (
                 stale["reports"][key]["last_success_at"]
                 == first["reports"][key]["last_success_at"]

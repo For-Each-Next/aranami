@@ -37,13 +37,14 @@ async function bounded(operation, label, milliseconds = 10000) {
 async function main() {
     const server = http.createServer((request, response) => {
         const pathname = new URL(request.url, "http://localhost").pathname;
-        const filename = ["/live.js", "/styles.css", "/aranami.svg"].includes(pathname)
+        const filename = (["/live.js", "/styles.css", "/codex.css", "/codex-select.svg", "/codex-select-disabled.svg", "/codex-license.html", "/favicon.svg", "/aranami.svg", "/report-icons.svg"].includes(pathname) || pathname.startsWith("/review-icons/"))
             ? path.join(assetRoot, pathname) : path.join(fixtureRoot, pathname);
         if (!filename.startsWith(fixtureRoot + path.sep) && !filename.startsWith(assetRoot + path.sep)) {
             response.writeHead(404).end(); return;
         }
         try {
-            response.setHeader("Content-Type", ({ ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" })[path.extname(filename)] || "text/plain");
+            response.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+            response.setHeader("Content-Type", ({ ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" })[path.extname(filename)] || "text/plain");
             response.end(fs.readFileSync(filename));
         } catch { response.writeHead(404).end(); }
     });

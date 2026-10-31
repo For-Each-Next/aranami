@@ -51,6 +51,33 @@ generation containing its manifest, Parquet tables, and `report.wikitext`.
 Unknown edit counts are not zero. Do not modify saved observations or expose
 credentials in diagnostics; see [runtime locations](administration.md#runtime-folder-architecture).
 
+## Prepare a quarterly newsletter
+
+Open `/newsletter/` for the automatically selected next quarterly issue.
+The hub fetches source data before publication and refreshes the draft daily
+as the reporting quarter progresses. The page provides separate editable
+wikitext for the main overview, `特優內容`, and `宣告`.
+All three pages keep the preceding issue's original wikitext design, including
+their banners, headings, columns, navigation, and count-change styling.
+For example, `/newsletter/?issue=2027-01` selects issue 29, covering October
+through December 2026. The issue radios offer the latest completed issue and
+the current draft. The default advances at exactly `00:00 UTC` on the first
+day of January, April, July, and October. The hub also refreshes the completed
+quarter at that boundary, including when its normal daily refresh is not due.
+Edit each draft, copy it, and preview it at the linked Wikipedia destination
+before saving. Manual selection and copying also work without JavaScript.
+Edits in these boxes last only until the page is reloaded or another issue is
+selected; the website does not save or publish them.
+
+Requests use saved data only. Each draft states its actual observation cutoff;
+an unfinished quarter uses completed UTC days rather than future quarter-end
+values. New-page counts distinguish complete records from confirmed minimums
+when some daily records are missing. Source revision links and observation
+times remain available for checking the generated numbers. A failed refresh
+retains the last successful draft. An issue without collected data shows its
+collection state instead of empty templates. Authored features and interviews
+are outside this generator.
+
 ## Routine names and UTC triggers
 
 Use these identifiers in `tasks`:

@@ -866,8 +866,8 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
             "* '''[[:Old title]]'''更名為'''[[:New title]]'''。\n"
         ) in rendered
         assert (
-            "'''[[:New title]]'''重新評級。品質由'''丙级'''變為'''乙级'''。"
-            "重要度由'''低重要度'''變為'''高重要度'''。"
+            "'''[[:New title]]'''重新評級。品質由'''丙级'''改為'''乙级'''。"
+            "重要度由'''低重要度'''改為'''高重要度'''。"
         ) in rendered
         assert (
             "'''[[:Added]]'''已評級。品質獲評'''未评级'''。"
@@ -986,18 +986,38 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
             assert positions == sorted(positions)
 
     def test_reassessment_omits_unchanged_dimension(self) -> None:
-        """Describe only the assessment dimension that changed."""
+        """Use new wording without rewriting retained reassessments."""
+        legacy_line = (
+            "* '''[[:Legacy]]'''重新評級。"
+            "品質由'''重定向级'''變為'''小作品级'''。\n"
+        )
+        text = _TEXT.replace(
+            '<!-- aranami end="assessment-log" -->',
+            "=== 2026年10月23日 ===\n\n==== 變更評級 ====\n\n"
+            + legacy_line
+            + '\n<!-- aranami end="assessment-log" -->',
+        )
         old = _members((1, "Same", "GA", "High"))
-        self._retain(self._prepare(old), _TEXT, 1)
-        prepared = self._prepare(_members((1, "Same", "FA", "High")))
-        rendered = update_text(_TEXT, prepared)
+        seed = self._prepare(old, text)
+        assert update_text(text, seed) == text
+        self._retain(seed, text, 1)
+        current = _members((1, "Same", "FA", "High"))
+        prepared = self._prepare(current, text)
+        rendered = update_text(text, prepared)
         assert (
-            "* '''[[:Same]]'''重新評級。品質由'''优良级'''變為'''典范级'''。\n"
+            "* '''[[:Same]]'''重新評級。品質由'''优良级'''改為'''典范级'''。\n"
         ) in rendered
+        assert legacy_line in rendered
+        assert legacy_line.replace("變為", "改為") not in rendered
         change_line = next(
-            line for line in rendered.splitlines() if line.startswith("* ")
+            line
+            for line in rendered.splitlines()
+            if line.startswith("* '''[[:Same]]'''")
         )
         assert "重要度" not in change_line
+        self._retain(prepared, rendered, 2)
+        retry = self._prepare(current, rendered)
+        assert update_text(rendered, retry) == rendered
 
     def test_added_unassessed_and_unknown_ratings_are_explicit(self) -> None:
         """Show unassessed values without duplicate suffixes."""
@@ -1044,14 +1064,14 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         rendered = update_text(_TEXT, prepared)
         assert (
             "'''[[:Restored]]'''重新評級。"
-            "品質由'''未评级'''變為'''乙级'''。"
-            "重要度由'''未知重要度'''變為'''高重要度'''。"
+            "品質由'''未评级'''改為'''乙级'''。"
+            "重要度由'''未知重要度'''改為'''高重要度'''。"
         ) in rendered
         for title in ("Missing", "Blank"):
             assert (
                 f"'''[[:{title}]]'''重新評級。"
-                "品質由'''乙级'''變為'''未评级'''。"
-                "重要度由'''高重要度'''變為'''未知重要度'''。"
+                "品質由'''乙级'''改為'''未评级'''。"
+                "重要度由'''高重要度'''改為'''未知重要度'''。"
             ) in rendered
 
 

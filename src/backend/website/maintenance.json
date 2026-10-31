@@ -2,13 +2,73 @@
   "schema": 1,
   "sections": [
     {
-      "key": "notability",
+      "key": "critical",
       "label": {
-        "en": "Notability",
-        "zh-hans": "收录标准",
-        "zh-hant": "收錄標準"
+        "en": "Critical issues",
+        "zh-hans": "关键问题",
+        "zh-hant": "關鍵問題"
       },
       "tasks": [
+        {
+          "key": "csd",
+          "label": {
+            "en": "Speedy deletion (CSD)",
+            "zh-hans": "快速删除（CSD）",
+            "zh-hant": "快速刪除（CSD）"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "快速删除候选",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        },
+        {
+          "key": "copyvio",
+          "label": {
+            "en": "Copyright concerns (CV)",
+            "zh-hans": "版权问题（CV）",
+            "zh-hant": "版權問題（CV）"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "怀疑侵犯版权页面",
+              "talk_page": false,
+              "monthly": false
+            },
+            {
+              "kind": "category",
+              "name": "內容疑似拷貝後貼上的頁面",
+              "talk_page": false,
+              "monthly": true
+            },
+            {
+              "kind": "category",
+              "name": "指明來源的內容疑似拷貝後貼上的頁面",
+              "talk_page": false,
+              "monthly": true
+            }
+          ]
+        },
+        {
+          "key": "afd",
+          "label": {
+            "en": "Deletion discussions (AfD)",
+            "zh-hans": "存废讨论（AfD）",
+            "zh-hant": "存廢討論（AfD）"
+          },
+          "rules": [
+            {
+              "kind": "category",
+              "name": "条目删除候选",
+              "talk_page": false,
+              "monthly": false
+            }
+          ]
+        },
         {
           "key": "notability",
           "label": {

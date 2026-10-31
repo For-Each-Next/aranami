@@ -141,6 +141,16 @@ def refresh_website(updater: DashboardUpdater) -> None:
         updater.refresh()
 
 
+def finalize_newsletter(updater: DashboardUpdater) -> None:
+    """Collect the completed quarter before preparing the next issue.
+
+    Args:
+        updater: Collector whose active refresh must finish first.
+    """
+    with source_cycle():
+        updater.refresh(wait=True)
+
+
 def run(config: HubConfig) -> None:
     """Serve saved data and coordinate updates until a shutdown signal.
 
@@ -215,6 +225,21 @@ def run(config: HubConfig) -> None:
         )
         resources.callback(scheduler.shutdown, wait=True)
         if updater is not None:
+            scheduler.add_job(
+                finalize_newsletter,
+                trigger="cron",
+                month="1,4,7,10",
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                timezone=dt.UTC,
+                id="newsletter-quarter",
+                args=(updater,),
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=None,
+            )
             startup = (
                 {"next_run_time": dt.datetime.now(dt.UTC)}
                 if config.run_immediately

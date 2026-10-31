@@ -24,6 +24,7 @@ from backend.server import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Self
 
 
 def wait_for(predicate: Callable[[], object]) -> None:
@@ -44,6 +45,44 @@ def wait_for(predicate: Callable[[], object]) -> None:
 def save_fixture(path: Path, snapshot: dict[str, object]) -> None:
     """Write the successful fixture snapshot."""
     path.write_text(json.dumps(snapshot), encoding="utf-8")
+
+
+class _ObservedRefreshLock:
+    """Expose blocking acquisition without timing assumptions."""
+
+    def __init__(self) -> None:
+        """Create a real lock and an event for the required waiter."""
+        self.lock = threading.Lock()
+        self.waiting = threading.Event()
+        self.context_entered = threading.Event()
+
+    def __enter__(self) -> Self:
+        """Observe shutdown entering the context-managed lock.
+
+        Returns:
+            This lock after it has been acquired.
+        """
+        self.context_entered.set()
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        """Release the lock after context-managed shutdown."""
+        self.release()
+
+    def acquire(self, *, blocking: bool = True) -> bool:
+        """Signal entry before the blocking lock operation.
+
+        Returns:
+            Whether the underlying lock was acquired.
+        """
+        if blocking:
+            self.waiting.set()
+        return self.lock.acquire(blocking=blocking)
+
+    def release(self) -> None:
+        """Release the real lock after each refresh."""
+        self.lock.release()
 
 
 class DashboardUpdaterTests(unittest.TestCase):
@@ -164,6 +203,107 @@ class DashboardUpdaterTests(unittest.TestCase):
         replacement.start()
         assert replacement.refresh()
         assert json.loads(self.output.read_text()) == {"replacement": True}
+
+    def test_required_refresh_waits_then_saves_a_second_collection(
+        self,
+    ) -> None:
+        """Serialize boundary collection after the active pass saves."""
+        entered = threading.Event()
+        release = threading.Event()
+        self.releases.append(release)
+        calls = []
+        saved = []
+        outcomes = {}
+
+        def collect() -> dict[str, object]:
+            """Hold the first pass until explicitly released.
+
+            Returns:
+                A distinct observation for each required pass.
+            """
+            attempt = len(calls) + 1
+            calls.append(attempt)
+            if attempt == 1:
+                entered.set()
+                assert release.wait(3)
+            else:
+                assert saved == [{"attempt": 1}]
+            return {"attempt": attempt}
+
+        def save(path: Path, snapshot: dict[str, object]) -> None:
+            """Record a save before allowing the next pass."""
+            saved.append(snapshot.copy())
+            save_fixture(path, snapshot)
+
+        updater = self.updater(collect)
+        updater.start()
+        lock = _ObservedRefreshLock()
+        active = threading.Thread(
+            target=lambda: outcomes.update(active=updater.refresh()),
+        )
+        quarter = threading.Thread(
+            target=lambda: outcomes.update(quarter=updater.refresh(wait=True)),
+        )
+        with (
+            patch.object(updater, "_refresh_lock", lock),
+            patch.object(updater, "_save", side_effect=save),
+        ):
+            active.start()
+            try:
+                assert entered.wait(1)
+                quarter.start()
+                assert lock.waiting.wait(1)
+                assert quarter.is_alive()
+                assert calls == [1]
+                assert saved == []
+            finally:
+                release.set()
+                active.join(3)
+                if quarter.ident is not None:
+                    quarter.join(3)
+            assert not active.is_alive()
+            assert not quarter.is_alive()
+        assert outcomes == {"active": True, "quarter": True}
+        assert calls == [1, 2]
+        assert saved == [{"attempt": 1}, {"attempt": 2}]
+        assert json.loads(self.output.read_text()) == {"attempt": 2}
+
+    def test_required_waiter_honors_stop_requested_while_queued(self) -> None:
+        """Skip queued collection after shutdown has been requested."""
+        collect, entered, calls = self.blocked_collection()
+        updater = self.updater(collect)
+        updater.start()
+        lock = _ObservedRefreshLock()
+        outcomes = {}
+        active = threading.Thread(
+            target=lambda: outcomes.update(active=updater.refresh()),
+        )
+        quarter = threading.Thread(
+            target=lambda: outcomes.update(quarter=updater.refresh(wait=True)),
+        )
+        stopper = threading.Thread(target=updater.stop)
+        with patch.object(updater, "_refresh_lock", lock):
+            active.start()
+            try:
+                assert entered.wait(1)
+                quarter.start()
+                assert lock.waiting.wait(1)
+                stopper.start()
+                assert lock.context_entered.wait(1)
+                assert updater.stopping
+            finally:
+                self.releases[0].set()
+                active.join(3)
+                if quarter.ident is not None:
+                    quarter.join(3)
+                if stopper.ident is not None:
+                    stopper.join(3)
+            assert not active.is_alive()
+            assert not quarter.is_alive()
+            assert not stopper.is_alive()
+        assert calls == [1]
+        assert outcomes == {"active": True, "quarter": False}
+        assert json.loads(self.output.read_text()) == {"value": 1}
 
     def test_failure_preserves_previous_snapshot_and_retries(self) -> None:
         """Preserve good data after failure and recover on retry."""

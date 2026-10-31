@@ -229,6 +229,10 @@ class EventStorageTests(unittest.TestCase):
         """Keep concurrent appends as independent valid records."""
         other = DailyEventHandler(self.root)
         self.addCleanup(other.close)
+        path = self.root / "events.2026-10-03.jsonl"
+        # Creation is covered separately; isolate append locking from
+        # host-specific races when concurrent calls first create a file.
+        path.touch()
 
         def append(index: int) -> None:
             """Emit through independent native handler locks."""
@@ -238,9 +242,7 @@ class EventStorageTests(unittest.TestCase):
         total = 64
         with ThreadPoolExecutor(max_workers=8) as executor:
             list(executor.map(append, range(total)))
-        lines = (
-            (self.root / "events.2026-10-03.jsonl").read_bytes().splitlines()
-        )
+        lines = path.read_bytes().splitlines()
         assert len(lines) == total
         assert all(validate_event(json.loads(line)) for line in lines)
 

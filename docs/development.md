@@ -83,6 +83,20 @@ accessible interaction. The webservice renders Jinja templates with local CSS
 and native HTML controls. Keep appearance consistent with Codex across the
 dashboard, maintenance, logs, About, and error pages.
 
+The local CSS-only components are pinned to Codex 2.7.0. Keep the upstream
+stylesheet unchanged and retain its GPL-2.0-or-later notice in
+`public_html/codex-license.html`. Load `styles.css` first so the local Select
+icon overrides apply before Codex loads, without transient data-URI requests
+blocked by the production content security policy.
+
+The local report-icon SVG sprite uses Wikimedia Codex icons under CC BY 4.0.
+Preserve its embedded source/author attribution and the About-page credit
+when changing those assets.
+
+Content-review icons follow Chinese Wikipedia's `Module:PJ:VG/RVW`
+(revision 92100885). Preserve each icon's Commons file-page link and the
+source and license notices in `public_html/review-icons/credits.html`.
+
 For website changes, verify desktop/narrow layouts, long/escaped text, sorting
 and pagination, observed dates/ranks, all three locales, and missing/stale data.
 Keep native controls usable without JavaScript. Live-status changes also cover
@@ -97,7 +111,7 @@ Render synthetic pages and check all three locales at thirteen widths from
 320 to 1920 CSS pixels:
 
 ```shell
-PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python tests/toolforge/render_interface_fixtures.py /tmp/aranami-interface-fixtures
+PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python tests/toolforge/test_presentation.py --render-fixtures /tmp/aranami-interface-fixtures
 node tests/toolforge/check_interface.cjs /tmp/aranami-interface-fixtures /tmp/aranami-interface-results
 ```
 

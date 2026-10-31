@@ -23,15 +23,7 @@
 </aside>
 {% endblock %}
 {% block content %}
-<section class="dashboard-intro" aria-label="{{ t.nav.dashboard }}">
-  <p class="purpose">{{ t.home.purpose }}</p>
-  <nav class="task-shortcuts" aria-label="{{ t.nav.contents }}">
-    {% if backlog %}<a href="#backlog">{{ t.home.find_articles }}</a>{% endif %}
-    <a href="#tool-status">{{ t.home.report_updates }}</a>
-  </nav>
-</section>
 {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
-{% include "includes/assessment_legend.html" %}
 {% include "includes/reviews.html" %}
 {% include "includes/highlights.html" %}
 {% include "includes/backlog.html" %}

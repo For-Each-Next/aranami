@@ -6,11 +6,14 @@ and helps editors find articles to improve. Its main focus is
 
 The [dashboard](https://aranami.toolforge.org/) brings together current content
 reviews, main-page highlights, upcoming quality content, popular articles,
-maintenance worklists, and report update results in English, Simplified Chinese, and
-Traditional Chinese. The [About page](https://aranami.toolforge.org/about/)
-includes the server monitor. [Major events](https://aranami.toolforge.org/logs/)
-show service starts and report outcomes in the selected language, with links
-to related Wikipedia reports and separate diagnostic downloads.
+maintenance worklists, and report results in English, Simplified Chinese, and
+Traditional Chinese. [Logs](https://aranami.toolforge.org/logs/) shows service
+events, report outcomes, server status, and downloadable diagnostics.
+[About Aranami](https://aranami.toolforge.org/about/) describes the tool and
+credits its sources and artwork.
+The [newsletter generator](https://aranami.toolforge.org/newsletter/?issue=2027-01)
+automatically prepares the next quarterly issue's overview, quality changes,
+and announcements from wiki sources, with editable wikitext and copy controls.
 
 ## Scheduled tasks
 
@@ -32,10 +35,12 @@ completion across restarts. Pageviews uses an 18:00 UTC reporting boundary;
 incomplete data retries hourly. PexBot reports already edited that UTC day
 are not requested again.
 
-The website refreshes content reviews hourly and its other five datasets
+The website refreshes content reviews hourly and its other six datasets
 independently every 24 hours after success. Review cards link to active
 discussions and show assessments, introductions, and known start dates and
 durations. Failures retain valid data and retry hourly; visits are read-only.
+At `00:00 UTC` on 1 January, April, July, and October, the newsletter refreshes
+the completed quarter and advances its default issue to the next publication.
 
 ## How it works
 

@@ -110,6 +110,8 @@ class PublicWebsiteTests(unittest.TestCase):
         )
         (self.assets / "styles.css").write_text("body { color: green; }")
         (self.assets / "live.js").write_text('"use strict";')
+        self.png = b"\x89PNG\r\n\x1a\n"
+        (self.assets / "icon.png").write_bytes(self.png)
         self.app = create_app(self.runtime, self.assets)
         self.client = TestClient(
             self.app,
@@ -168,6 +170,10 @@ class PublicWebsiteTests(unittest.TestCase):
         assert self.request("/live.js")[1]["Content-Type"].startswith(
             "text/javascript",
         )
+        status, png_headers, png_body = self.request("/icon.png")
+        assert status == 200
+        assert png_headers["Content-Type"] == "image/png"
+        assert png_body == self.png
         for method in ("POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"):
             with self.subTest(method=method):
                 result = self.request("/api/status", method)
@@ -245,11 +251,14 @@ class PublicWebsiteTests(unittest.TestCase):
                     assert b"Aranami" in body
                     assert b'<script src="/live.js" defer>' in body
                     if target == "/about/":
-                        assert b'id="server-runtime"' in body
+                        assert b'id="server-runtime"' not in body
+                        assert b'id="live-server-status"' not in body
+                        assert b'id="live-uptime"' in body
+                        assert b"data-clock-messages=" in body
                     if target == "/logs/":
                         assert b'id="live-server-status"' in body
                         assert b'id="live-uptime"' in body
-                        assert b'class="routine-card"' not in body
+                        assert b'class="routine-row"' not in body
                     assert b"Enable JavaScript" not in body
             head = self.request("/", "HEAD")
             assert head[0] == 200
@@ -303,7 +312,7 @@ class PublicWebsiteTests(unittest.TestCase):
             assert b"32.89" not in body
             translated = self.request("/api/live", language="zh-TW")
             assert translated[1]["Content-Language"] == "zh-Hant"
-            assert "執行完畢於" in translated[2].decode()
+            assert "結束時間\uff1a" in translated[2].decode()
             assert "執行時間33秒" not in translated[2].decode()
             assert self.request("/api/live", "HEAD")[2] == b""
             assert self.request("/api/live", "POST")[0] == 405

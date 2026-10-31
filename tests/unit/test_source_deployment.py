@@ -152,6 +152,17 @@ class TestSourcePayload(TestCase):
         assert set(self.payload) == expected
         assert "src/webservice/pages.py" in self.payload
         assert "src/webservice/templates/base.html" in self.payload
+        png_files = {
+            name for name in self.payload if Path(name).suffix == ".png"
+        }
+        assert png_files == {
+            "src/webservice/public_html/review-icons/peer-review.png",
+            "src/webservice/public_html/review-icons/project-peer-review.png",
+        }
+        assert all(
+            self.payload[name].startswith(b"\x89PNG\r\n\x1a\n")
+            for name in png_files
+        )
         assert {
             Path(name).parts[1]
             for name in self.payload
@@ -174,7 +185,10 @@ class TestSourcePayload(TestCase):
         )
         assert {
             name for name in self.payload if Path(name).suffix == ".js"
-        } == {"src/webservice/public_html/live.js"}
+        } == {
+            "src/webservice/public_html/live.js",
+            "src/webservice/public_html/newsletter.js",
+        }
         assert (
             "-m backend.public --host 0.0.0.0 --port 8000 "
             '--runtime "$tool_dir"'

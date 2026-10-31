@@ -4,47 +4,54 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.7 (2026-10-31 10:33 UTC)
+
+Overview: Refined the multilingual dashboard with Codex components, clearer
+review and status information, and deletion-related maintenance worklists.
+Added automatically populated quarterly newsletter drafts backed by wiki sources.
+
+- Added Codex controls and assessment chips, consistent time formats, and
+  a new wave favicon.
+- Replaced review numbering with locally stored review-type icons linked to
+  their Commons sources, with retained author and license notices.
+- Added AfD, speedy-deletion, and copyright worklists under Critical issues,
+  using verified wiki categories and the existing project scope.
+- Simplified existing copy, showed complete introductions, and consolidated
+  their attribution in the footer.
+- Kept system details on Logs, made archive filenames download links, and
+  removed the About status panel and redundant notices.
+- Condensed report status into rows with accessible detail dialogs and
+  compact page counts.
+- Kept a single Dashboard navigation link for its maintenance and report sections.
+- Used “改為” for new assessment transitions without rewriting existing entries.
+- Automatically populated the next issue's overview, quality changes, and
+  announcements throughout the quarter, with dated sources and copy controls.
+- Reused the preceding issue's original wikitext layout, navigation, icons,
+  columns, and count-change styling while updating collected issue data.
+- Preserved both subpages' original source around generated report bodies,
+  and selected issues through radios that advance at the UTC quarter boundary.
+- Refreshed the completed quarter at `00:00 UTC` on each quarter's first day,
+  queuing behind active collection instead of waiting for the daily interval.
+- Distinguished observed periods and incomplete new-page counts, and removed
+  empty template output and authored feature/interview sections from the generator.
+
 ### 0.7.6 (2026-10-31 07:06 UTC)
 
-Overview: Added hourly content-review cards and rebuilt the webservice with
-Wikimedia Codex styles, localized reports, and accessible navigation. Introduced
-immutable source deployments with individual service replacement, corrected
-assessment report dates and totals, and maintained DYK chart data inline.
+Overview: Added current content reviews, redesigned the webservice with Codex
+styles, and introduced immutable source deployments on Toolforge.
 
-- Pinned each service and manual job to its source and Python environment,
-  with atomic selection and retained generations for recovery.
-- Replaced the website before restarting the hub, requiring confirmed hub
-  termination and preserving missing or deliberately paused services.
-- Preserved job settings and runtime data through legacy migration, with
-  documented recovery and offline coverage for deployment failures.
-- Added localized content-review cards with ordered nominations, assessments,
-  introductions, discussion links, and observed ages from wiki review sources.
-- Resolved Chinese title variants and redirects, including category-backed
-  project reviews and nominees discovered directly from proposal pages.
-- Cached hourly results and revision-keyed parses, reused article summaries,
-  and retained successful data through failed refreshes and restarts.
-- Restored mobile log downloads while keeping archive headers and body cells
-  aligned at narrow widths.
-- Added persistent language choices and shared navigation, localized assessment
-  fallbacks, dimension labels, meaningful report names, and a rating guide.
-- Made report details modal with keyboard containment, inert backgrounds,
-  focus restoration, responsive fields, and stable live reconciliation.
-- Added maintenance title/assessment filters, explicit ordering, compact rows,
-  matching ranges, and direct pagination at both ends.
-- Paged logs newest first with result filters, counts, nearby downloads,
-  expandable details, and clear unknown outcomes without false failures.
-- Redesigned all pages and report dialogs with Codex typography, neutral surfaces,
-  blue actions, responsive contents navigation, and accessible native controls.
-- Preserved accessible article numbering on Safari and expanded multilingual
-  browser checks for responsive layouts, dialogs, and use without JavaScript.
-- Replaced obsolete interface specifications with the Codex design reference
-  and synchronized fallback release metadata.
-- Labeled midnight assessment observations with the previous UTC date and added
-  ordered article/list quality and importance totals, omitting zero counts.
-- Updated DYK chart dates and counts in inline managed ranges with comma-space
-  separators, replacing the obsolete generated Commons statistics comment.
-- Corrected six existing wiki log dates with synchronized publication state,
-  and initialized inline DYK chart markers while removing its old JSON comment.
+- Added cached hourly review cards from nomination pages and project categories,
+  preserving successful observations through failed refreshes and restarts.
+- Rebuilt navigation, localized reports, filters, dialogs, and log controls
+  for accessible desktop and narrow-screen use.
+- Pinned services to immutable source and Python environments, with atomic
+  promotion, individual replacement, and retained generations for recovery.
+- Preserved job settings and runtime data during legacy deployment migration,
+  requiring confirmed hub termination before starting its replacement.
+- Corrected assessment report dates and daily totals, repaired existing wiki
+  dates, and retained synchronized publication state.
+- Maintained DYK chart dates and counts in inline managed ranges, replacing
+  the obsolete generated statistics comment.
 
 ### 0.7.5 (2026-10-25 12:07 UTC)
 

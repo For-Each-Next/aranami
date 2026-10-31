@@ -87,6 +87,7 @@ class TestPackageMain(TestCase):
             "pageviews": 2 * 3600,
             "news_history": 3 * 3600,
             "backlog": 4 * 3600,
+            "newsletter": 24 * 3600,
         }
 
     def test_invalid_settings_fail_before_startup(self) -> None:

@@ -1,0 +1,23 @@
+{{mbox
+| image=[[File:Schedule (cropped).jpg|50px|link=|class=notpageimage skin-invert-image|編寫中]]
+| text=此為草稿，預定於2026年10月出刊，歡迎[[WikiProject talk:電子遊戲/簡訊#2026-10|討論]]和編輯。
+}}
+
+{{noteTA-lite
+| G1 = 電子遊戲
+}}
+
+== 特色內容及優良條目狀態變動 ==
+電子遊戲專題於2026年第三季間，一共新增或升格了2篇優良條目，此外喪失了1篇優良條目。感謝所有為電子遊戲專題條目做出貢獻的維基人！
+
+=== 2026年7月 ===
+（無變動） 
+
+=== 2026年8月 ===
+（無變動） 
+
+=== 2026年9月 ===
+* {{icon|GA}}&thinsp;當選優良條目：[[超执刀2]]、[[Unhinged]]
+* {{icon|DGA}}&thinsp;撤銷優良條目：[[ZywOo]]
+
+[[Category:電子遊戲專題簡訊特優內容]]

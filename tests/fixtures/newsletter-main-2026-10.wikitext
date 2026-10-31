@@ -1,0 +1,79 @@
+{{mbox
+| image=[[File:Schedule (cropped).jpg|50px|alt=🗓️|link=|class=notpageimage skin-invert-image|編寫中]]
+| text=本簡訊為草稿，預定於2026年10月出刊，歡迎參與[[WikiProject talk:電子遊戲/簡訊#2026-10|討論]]和編輯。
+}}
+
+<div style="width: clamp(264px, 100%, 750px); box-sizing: border-box; border: 2px #76c2af solid; box-shadow: 0 3px 5px 1px rgba(0, 0, 0, 0.1);">
+<div style="position: relative; overflow: hidden;">
+<div class="skin-invert" style="position: absolute; z-index: 0; top: 0; right: 0; bottom: 0; left: 0; background-color: #ccf7e6;" role="presentation" aria-hidden="true"></div>
+<div style="position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; justify-content: center; padding: 1em; text-align: center; word-break: keep-all;">
+<div role="presentation" aria-hidden="true" style="flex: 0 0 75px;">[[File:Circle-icons-gamecontroller (white controller, with W icon).svg|75px|alt=🎮|link=|class=notpageimage skin-invert-image]]</div>
+<div style="flex: 1 1 8em; min-width: 0; font-weight: bold; font-size: clamp(1.15em, 5vw, 1.5em); line-height: 1.25; letter-spacing: clamp(0.08em, 0.8vw, 0.3em);">電子遊戲<wbr>專題簡訊</div>
+<div style="flex: 1 1 11em; min-width: 0; max-width: 220px;">
+<ul style="margin: 0; padding: 0; font-weight: bold; list-style: none;">
+<li style="display: inline; margin: 0;">第廿八號</li>
+<li style="display: inline; margin: 0; user-select: none;" role="none" aria-hidden="true">·</li>
+<li style="display: inline; margin: 0;">2026年第三季</li>
+</ul>
+<ul style="margin: 0; padding: 0; font-size: 0.9em; list-style: none;">
+<li style="display: inline; margin: 0;">[[維基專題:電子遊戲/簡訊/2026-07|上一期]]</li>
+<li style="display: inline; margin: 0; user-select: none;" role="none" aria-hidden="true">｜</li>
+<li style="display: inline; margin: 0;">[[維基專題:電子遊戲/簡訊/目錄|目錄]]</li>
+<li style="display: inline; margin: 0; user-select: none;" role="none" aria-hidden="true">｜</li>
+<li style="display: inline; margin: 0;">[[維基專題:電子遊戲/簡訊/2027-01|下一期]]</li>
+</ul>
+</div>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 15px; box-sizing: border-box; padding: 2em;">
+<div style="min-width: 0; border-bottom: 1px solid #a2a9b1; padding-bottom: 15px;">
+<div style="font-weight: bold; letter-spacing: 0.1em; line-height: 1.5em; font-size: 1.2em;">專題概覽</div>
+<p style="margin-bottom: inherit;">截至2026年第三季底，[[维基专题:电子游戏|電子遊戲專題]]共有：</p>
+<div class="columns" style="columns: 2 12em;">
+* 13,016篇條目<small style="color: grey;">（+216）</small>
+* 25篇[[维基专题:电子游戏/典范内容#典范条目|典範條目]]
+* 11篇[[维基专题:电子游戏/典范内容#特色列表|特色列表]]
+* 216篇[[维基专题:电子游戏/优良条目#优良条目|優良條目]]<small style="color: grey;">（+1）</small>
+* 1,470篇[[维基专题:电子游戏/新条目推荐#新条目推荐|新條目推薦]]<small style="color: grey;">（+21）</small>
+* 7篇[[维基专题:电子游戏/乙级内容#乙上级条目|乙上級條目]]
+* 3組[[维基专题:电子游戏/话题#专题优良级话题|專題優良話題]]
+</div>
+</div>
+
+<div style="min-width: 0; border-bottom: 1px solid #a2a9b1; padding-bottom: 15px;">
+<div style="font-weight: bold; letter-spacing: 0.1em; line-height: 1.5em; font-size: 1.2em;">本期內容</div>
+<p style="margin-bottom: inherit;">本期簡訊的內容如下：</p>
+<div class="columns" style="columns: 2 12em;">
+* [[維基專題:電子遊戲/簡訊/2026-10/特優內容|特優內容狀態變動]]
+* [[維基專題:電子遊戲/簡訊/2026-10/宣告|宣告]]
+* [[維基專題:電子遊戲/簡訊/2026-10/專題|專題報導：<待定>]]
+* [[維基專題:電子遊戲/簡訊/2026-10/訪談|訪談：<待定>]]
+</div>
+</div>
+
+<div style="min-width: 0; border-bottom: 1px solid #a2a9b1; padding-bottom: 15px;">
+<div style="font-weight: bold; letter-spacing: 0.1em; line-height: 1.5em; font-size: 1.2em;">專題導覽</div>
+<div class="columns" style="columns: 2 12em;">
+* [[维基专题:电子游戏|專題主頁面]]（[[维基专题讨论:电子游戏|討論]]）
+* [[:分类:电子游戏专题|專題分類]]（[[分类讨论:电子游戏专题|討論]]）
+* [[主题:电子游戏|主題]]（[[主题讨论:电子游戏|討論]]）
+* [[维基专题:电子游戏/评级|評級]]（[[维基专题讨论:电子游戏/评级|討論]]）
+* [[维基专题:电子游戏/开放任务|開放任務]]（[[维基专题讨论:电子游戏/开放任务|討論]]）
+* [[维基专题:电子游戏/条目请求|條目請求]]（[[维基专题讨论:电子游戏/条目请求|討論]]）
+</div>
+</div>
+
+<div style="font-size: smaller; text-align: center;">
+<ul style="margin: 0; padding: 0; list-style: none;">
+<li style="display: inline; margin: 0;">[[維基專題討論:電子遊戲/簡訊|討論本期簡訊]]</li>
+<li style="display: inline; margin: 0; user-select: none;" role="none" aria-hidden="true">·</li>
+<li style="display: inline; margin: 0;">[[維基專題:電子遊戲/簡訊#訂閱清單|新增訂閱]]</li>
+<li style="display: inline; margin: 0; user-select: none;" role="none" aria-hidden="true">·</li>
+<li style="display: inline; margin: 0;">~~{{void}}~~</li>
+</ul>
+</div>
+</div>
+</div>
+
+[[Category:電子遊戲專題簡訊]]

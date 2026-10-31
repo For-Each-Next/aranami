@@ -22,8 +22,9 @@ from urllib.parse import unquote, urlsplit
 import polars as pl
 import pywikibot
 
-from backend.website import backlog, homepage, pageviews, reviews
+from backend.website import backlog, homepage, newsletter, pageviews, reviews
 from backend.website.extracts import MAX_EXTRACT_BYTES, ExtractCache
+from shared.newsletter import Issue
 from shared.sources.quarry.projects import query_pages_by_wikiproject
 from shared.sources.summaries import fetch_summary
 from shared.support.files import read_json_object
@@ -42,6 +43,7 @@ REPORT_KEYS = (
     "pageviews",
     "news_history",
     "backlog",
+    "newsletter",
 )
 _APPEARANCE_SECTIONS = {
     "recognized": ("featured", "good", "upcoming"),
@@ -55,6 +57,7 @@ _REPORT_LABELS = {
     "pageviews": "popular articles",
     "news_history": "news and history",
     "backlog": "maintenance catalogue",
+    "newsletter": "quarterly newsletter drafts",
 }
 _DEFAULT_INTERVAL = 24 * 3600
 _RETRY_INTERVAL = 3600
@@ -68,6 +71,50 @@ _PAGEVIEWS_LIMIT = 12
 _PAGEVIEWS_SITE_LIMIT = 1000
 _URL_MAX_BYTES = 4096
 _MAX_DAYS = 365
+# Match the verified project count template's explicit article classes.
+_NEWSLETTER_ARTICLE_CLASSES = (
+    "fa",
+    "a",
+    "ga",
+    "bplus",
+    "b",
+    "c",
+    "start",
+    "stub",
+    "fl",
+    "al",
+    "bl",
+    "cl",
+    "list",
+    "sl",
+    "unassessed",
+    "b+",
+    "典范",
+    "典範",
+    "甲",
+    "优良",
+    "優良",
+    "乙上",
+    "乙",
+    "丙",
+    "初",
+    "小作品",
+    "特色列表",
+    "典表",
+    "甲表",
+    "乙表",
+    "丙表",
+    "甲级列表",
+    "甲級列表",
+    "乙级列表",
+    "乙級列表",
+    "丙级列表",
+    "丙級列表",
+    "列表",
+    "小列表",
+    "未评",
+    "未評",
+)
 
 
 def _revision_timestamp(value: dt.datetime) -> pywikibot.Timestamp:
@@ -324,7 +371,11 @@ class WikiReader:
                 message = f"A display revision is unavailable for {title}."
                 raise ValueError(message)
             stamp = revision.timestamp.replace(tzinfo=dt.UTC)
-            rows.append({"text": revision.text, "timestamp": stamp})
+            rows.append({
+                "text": revision.text,
+                "timestamp": stamp,
+                "revision": revision.revid,
+            })
             self._remember(title, revision.revid)
         return rows
 
@@ -869,7 +920,11 @@ def _valid_reviews_cache(value: dict[str, object]) -> bool:
     )
 
 
-def _valid_report_data(name: str, value: object, days: int) -> bool:
+def _valid_report_data(  # ruff: ignore[too-many-return-statements]
+    name: str,
+    value: object,
+    days: int,
+) -> bool:
     """Validate one independent result before persisting or reusing it.
 
     Returns:
@@ -878,6 +933,8 @@ def _valid_report_data(name: str, value: object, days: int) -> bool:
     if not isinstance(value, dict):
         return False
     try:
+        if name == "newsletter":
+            return newsletter.valid_newsletter(value)
         if name == "reviews":
             return _valid_reviews_cache(value)
         if name == "backlog":
@@ -965,7 +1022,7 @@ def _valid_dashboard_report(  # ruff: ignore[too-many-return-statements]
     Returns:
         Whether an independent report is absent or completely valid.
     """
-    if name == "reviews" and name not in snapshot["reports"]:
+    if name in {"reviews", "newsletter"} and name not in snapshot["reports"]:
         return snapshot.get(name) is None
     metadata = snapshot["reports"][name]
     if not _valid_report_metadata(metadata):
@@ -1177,8 +1234,12 @@ def _report_plan(
             if name == "reviews"
             else "zh:all-access:user:top1000:limit12:lookback7:extracts-v3"
             if name == "pageviews"
+            else "quarterly-newsletter-v5:original-source-subpages"
+            if name == "newsletter"
             else f"days:{days}:extracts-v3"
         )
+        if name in {"newsletter", "recognized", "news_history"}:
+            source_id += f":draft:{Issue.upcoming(clock.date()).value}"
         identity = hashlib.sha256(
             f"dashboard-v2:{name}:{source_id}:{intervals[name]}".encode(),
         ).hexdigest()
@@ -1234,7 +1295,7 @@ def _dashboard_snapshot(
         "history",
     ))
     reports, sources, errors = {}, [], []
-    popular = maintenance = current_reviews = None
+    popular = maintenance = current_reviews = newsletter_data = None
     for name in REPORT_KEYS:
         record = caches[name]
         data = record["data"] if record else None
@@ -1251,6 +1312,8 @@ def _dashboard_snapshot(
         if data is not None:
             if name == "reviews":
                 current_reviews = data
+            elif name == "newsletter":
+                newsletter_data = data
             elif name == "pageviews":
                 popular = data
                 sources.append({
@@ -1280,6 +1343,7 @@ def _dashboard_snapshot(
         "reviews": current_reviews,
         "pageviews": popular,
         "backlog": maintenance,
+        "newsletter": newsletter_data,
         "sources": sources,
         "errors": errors,
     }
@@ -1309,10 +1373,41 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
     )
     today = end - dt.timedelta(days=1)
     days = (end - start).days
-    if members is None:
+    if read is None or (members is None and name != "newsletter"):
         message = "Project membership is unavailable."
         raise RuntimeError(message)
-    if name == "reviews":
+    if name == "newsletter":
+        if membership is None:
+            try:
+                membership = query_pages_by_wikiproject(read.site, "电子游戏")
+            except Exception as error:  # ruff: ignore[blind-except]
+                _LOGGER.warning(
+                    "Newsletter current article count unavailable (%s).",
+                    type(error).__name__,
+                )
+        current_counts = (
+            {
+                "total": membership.filter(
+                    (pl.col("page_namespace") == 0)
+                    & pl
+                    .col("pa_class")
+                    .fill_null("unassessed")
+                    .str.to_lowercase()
+                    .str.replace(r"[级級]$", "")
+                    .is_in(
+                        _NEWSLETTER_ARTICLE_CLASSES,
+                    ),
+                ).height,
+            }
+            if membership is not None and "pa_class" in membership.columns
+            else None
+        )
+        data = newsletter.collect_newsletter(
+            read,
+            now=now or dt.datetime.now(dt.UTC),
+            current_counts=current_counts,
+        )
+    elif name == "reviews":
         data = reviews.collect_reviews(
             read.site,
             members,
@@ -1380,6 +1475,8 @@ def _report_record_count(name: str, data: dict[str, object]) -> int:
     """
     if name == "backlog":
         return data["total"]
+    if name == "newsletter":
+        return len(data["issues"])
     if name in {"pageviews", "reviews"}:
         return len(data["items"])
     return sum(len(records) for records in data["homepage"].values())
@@ -1395,7 +1492,7 @@ def _with_extracts(
     Returns:
         Enriched records with all original source dates and counts.
     """
-    if name == "backlog":
+    if name in {"backlog", "newsletter"}:
         return data
     if name in {"pageviews", "reviews"}:
         return {**data, "items": extracts.enrich(data["items"])}
@@ -1452,21 +1549,23 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
     if not plan["due"]:
         return _dashboard_snapshot(plan, intervals, period, stamp)
     # All source construction stays below persisted due selection.
+    read = membership = members = None
     try:
         read = WikiReader(pywikibot.Site("zh", "wikipedia"))
-        membership = query_pages_by_wikiproject(read.site, "电子游戏")
-        members = set(
-            membership.filter(pl.col("page_namespace") == 0)[
-                "full_title"
-            ].to_list(),
-        )
+        if any(name != "newsletter" for name in plan["due"]):
+            membership = query_pages_by_wikiproject(read.site, "电子游戏")
+            members = set(
+                membership.filter(pl.col("page_namespace") == 0)[
+                    "full_title"
+                ].to_list(),
+            )
     except Exception as error:  # ruff: ignore[blind-except]
         _LOGGER.log(
             logging.ERROR,
             "Could not read website project membership (%s).",
             type(error).__name__,
         )
-        read = membership = members = None
+        membership = members = None
     extracts = (
         ExtractCache(
             cache_directory / "article-extracts-v2.parquet"

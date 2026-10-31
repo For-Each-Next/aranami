@@ -166,7 +166,7 @@ toolforge jobs logs aranami-web
 After replacement, confirm both jobs are running, no duplicate workers exist,
 and the [website](https://aranami.toolforge.org/) and
 [logs](https://aranami.toolforge.org/logs/) are readable. Hub logs should show
-due work or valid current-data skips. The About page shows saved environment,
+due work or valid current-data skips. The Logs page shows saved environment,
 resource usage, and monitor state; missing or stale observations stay explicit.
 See [Usage](usage.md#inspect-results-and-logs) for status files and diagnostics.
 

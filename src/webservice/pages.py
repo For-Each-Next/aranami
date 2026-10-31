@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from shared.newsletter import Issue
 from webservice.presentation import (
     Interface,
     article_extract,
@@ -61,6 +62,26 @@ _STATES = {
 }
 _LOG_EVENT_LIMIT = 100
 _LOG_PAGE_SIZE = 25
+_REPORT_ICONS = {
+    "dyks": "lightbulb",
+    "new_pages": "article-add",
+    "assessment_lists": "article-check",
+    "assessment_log": "history",
+    "pageviews": "chart-bar",
+    "enwp_key_articles": "language",
+    "pexbot": "robot",
+}
+# Module:PJ:VG/RVW, revision 92100885; reassessment uses Codex history.
+_REVIEW_ICONS = {
+    "fac": ("featured-candidate.svg", "Cscr-candidate.svg"),
+    "flc": ("featured-candidate.svg", "Cscr-candidate.svg"),
+    "acc": ("a-candidate.svg", "A_candidate.svg"),
+    "gan": ("ga-candidate.svg", "GA_candidate.svg"),
+    "bpan": ("bplus-candidate.svg", "Bplus_candidate.svg"),
+    "pr": ("peer-review.png", "Nuvola_apps_kedit.png"),
+    "ppr": ("project-peer-review.png", "Cvg_peerreview_icon.png"),
+    "dykc": ("dyk-candidate.svg", "DYK_candidate.svg"),
+}
 _LOG_EVENT_KINDS = frozenset({
     "service_started",
     "service_stopping",
@@ -158,28 +179,13 @@ class _Page:
         Returns:
             Plain context values and an explicitly validated wiki link.
         """
+        before, after = self.text("extracts.attribution").split("{license}")
         return {
             "heading": heading,
             "language_tag": self.interface.language_tag,
             "t": _messages(self.interface.locale),
             "live": live,
-            "assessment_legend": [
-                {
-                    "dimension_label": self.text(
-                        f"assessment.dimension.{dimension}",
-                    ),
-                    "label": self.text(key),
-                    "description": self.text(
-                        f"assessment.description.{dimension}.{code}",
-                    ),
-                }
-                for key in catalog()
-                if key.startswith((
-                    "assessment.class.",
-                    "assessment.importance.",
-                ))
-                for _, dimension, code in [key.split(".")]
-            ],
+            "extract_attribution": {"before": before, "after": after},
             "project_link": wiki_link(
                 "https://zh.wikipedia.org/wiki/WikiProject:电子游戏",
                 self.text("nav.project"),
@@ -196,13 +202,11 @@ class _Page:
         """Prepare a relative annotation only for a known timestamp.
 
         Returns:
-            A localized label and the original observed timestamp.
+            A localized relative label, without presentation wrappers.
         """
         label = relative_time(value, self.interface, now)
         return {
             "label": label[1:-1] if inline and label else label,
-            "value": value,
-            "inline": inline,
         }
 
     def clock(self, schedule: Record, now: dt.datetime) -> Record:
@@ -408,30 +412,17 @@ class _Page:
         )
         return card
 
-    def source_updated(
-        self,
-        value: object,
-        *,
-        attribution: bool = False,
-    ) -> Record | None:
-        """Prepare attribution alongside the section's observed time.
+    @staticmethod
+    def source_updated(value: object) -> Record | None:
+        """Prepare the section's observed source time.
+
+        Args:
+            value: Saved source observation timestamp, when available.
 
         Returns:
             Plain source metadata, or none without a saved observation.
         """
-        if value is None:
-            return None
-        before, after = (
-            self.text("extracts.attribution").split("{license}")
-            if attribution
-            else ("", "")
-        )
-        return {
-            "time": _time(value),
-            "attribution": attribution,
-            "before": before,
-            "after": after,
-        }
+        return {"time": _time(value)} if value is not None else None
 
     def reviews(self, snapshot: Record, now: dt.datetime) -> Record | None:
         """Prepare complete review cards with observed elapsed time.
@@ -449,6 +440,10 @@ class _Page:
         cards = []
         for item in (data or {}).get("items", []):
             card = self.article(item)
+            review_type = item["review_type"]
+            review_label = self.text(f"reviews.{review_type}")
+            icon = _REVIEW_ICONS.get(review_type)
+            icon_source = icon[1] if icon else "Codex_icon_history_(v2.6).svg"
             started = timestamp(item.get("started_at"))
             age = (
                 max(0, int((now - started).total_seconds() // 3600))
@@ -461,14 +456,20 @@ class _Page:
                 count=days or hours,
             )
             card.update(
+                review_icon=f"/review-icons/{icon[0]}" if icon else None,
+                review_icon_symbol=None if icon else "history",
+                review_icon_label=review_label,
+                review_icon_source=(
+                    "https://commons.wikimedia.org/wiki/File:" + icon_source
+                ),
                 review_link=wiki_link(
                     item["review_url"],
-                    self.text(f"reviews.{item['review_type']}"),
+                    review_label,
                 ),
                 review_date={
                     "value": item["started_at"],
-                    "label": self.interface.date(started.date().isoformat()),
-                    "elapsed": self.text("reviews.elapsed", duration=elapsed),
+                    "label": utc_time(item["started_at"], seconds=True),
+                    "elapsed": elapsed,
                 }
                 if started is not None and started <= now
                 else None,
@@ -476,13 +477,13 @@ class _Page:
             cards.append(card)
         return {
             "cards": cards,
+            "is_review": True,
             "empty": self.text("empty.section") if data is None else None,
             "updated": self.source_updated(
                 snapshot
                 .get("reports", {})
                 .get("reviews", {})
                 .get("last_success_at"),
-                attribution=True,
             ),
         }
 
@@ -547,7 +548,7 @@ class _Page:
                     self.article_card(item, views)
                     for item in section["items"] or []
                 ],
-                "updated": self.source_updated(updated, attribution=True),
+                "updated": self.source_updated(updated),
             })
         return sections
 
@@ -595,10 +596,10 @@ class _Page:
         }
 
     def _routine_links(self, name: str, definition: Record) -> Record:
-        """Prepare configured report links with accessible names.
+        """Prepare a compact destination count and detailed page links.
 
         Returns:
-            Validated target links and locale-specific separators.
+            Target links, count, and localized separators.
         """
         targets = list(definition.get("pages", {}).values()) or definition.get(
             "prefixes",
@@ -608,6 +609,7 @@ class _Page:
         return {
             "name": name,
             "multiple": multiple,
+            "count": self.text("ops.page_count", count=len(targets)),
             "opening": " (" if self.interface.locale == "en" else "\uff08",
             "closing": ")" if self.interface.locale == "en" else "\uff09",
             "targets": [
@@ -655,7 +657,7 @@ class _Page:
             else None,
         }
 
-    def routine_cards(
+    def routine_rows(
         self,
         status: Record,
         definitions: Record,
@@ -665,11 +667,11 @@ class _Page:
         """Prepare actual outcomes and independent configured schedules.
 
         Returns:
-            Routine cards with current-session progress and report rows.
+            Routine rows with progress and destination details.
         """
         events = (status.get("routines") or {}).get("routines", {})
         records = (status.get("reports") or {}).get("reports", {}).values()
-        cards = []
+        rows = []
         for identifier, definition in definitions.items():
             name = self.text(f"routine.{identifier}")
             event = events.get(identifier)
@@ -711,8 +713,9 @@ class _Page:
                 ),
                 key=operator.itemgetter("title"),
             )
-            cards.append({
+            rows.append({
                 "identifier": identifier,
+                "icon": _REPORT_ICONS.get(identifier, "article"),
                 "links": self._routine_links(name, definition),
                 "running": running,
                 "status": "updated"
@@ -730,7 +733,7 @@ class _Page:
                 "popup_heading": self.text("ops.details", routine=name),
                 "reports": [self._report(record, now) for record in pages],
             })
-        return cards
+        return rows
 
     def live_status(
         self,
@@ -756,7 +759,7 @@ class _Page:
         )
         return {
             "clock": self.clock(schedule, now),
-            "routines": self.routine_cards(status, definitions, schedule, now),
+            "routines": self.routine_rows(status, definitions, schedule, now),
             "footer": {
                 "label": uptime(schedule, version, self.interface, now),
                 "started": started,
@@ -1360,6 +1363,74 @@ def render_maintenance(
     return _render("maintenance.html", context)
 
 
+def render_newsletter(
+    value: Record,
+    locale: str,
+    *,
+    navigation: Record | None = None,
+) -> str:
+    """Present three data pages after automatic collection succeeds.
+
+    Args:
+        value: Issue, reporting period, drafts, and source observations.
+        locale: Negotiated interface language; wikitext stays Chinese.
+        navigation: Request route and language choices, when available.
+
+    Returns:
+        Escaped HTML with native issue selection and copy controls.
+    """
+    page = _Page(locale)
+    context = page.context(page.text("newsletter.heading"))
+    labels = ("main", "quality", "announcements")
+    automatic = value.get("automatic_issue", value["issue"])
+    previous = Issue.parse(str(automatic)).previous
+    choices = value.get("issue_choices") or [
+        previous,
+        automatic,
+    ]
+    context.update(
+        navigation=navigation,
+        issue=value["issue"],
+        period=value["period"],
+        available=value["available"],
+        complete=value.get("complete", True),
+        updated=page.source_updated(value.get("updated_at")),
+        locale=page.interface.locale,
+        issue_choices=[
+            {
+                "value": choice,
+                "checked": choice == value["issue"],
+                "label": page.text(
+                    "newsletter.choice.current"
+                    if choice == automatic
+                    else "newsletter.choice.previous"
+                    if choice == previous
+                    else "newsletter.choice.selected",
+                ),
+            }
+            for choice in choices
+        ],
+        drafts=[
+            {
+                **draft,
+                "heading": page.text(f"newsletter.page.{label}"),
+                "link": wiki_link(draft["url"], draft["title"]),
+            }
+            for label, draft in zip(
+                labels,
+                value["pages"],
+                strict=value["available"],
+            )
+            if value["available"]
+        ],
+        sources=[
+            wiki_link(source["url"], source["label"])
+            for source in value.get("sources", [])
+        ],
+    )
+    return _render("newsletter.html", context)
+
+
 def render_about(
     config: Record | None,
     locale: str,
@@ -1368,7 +1439,7 @@ def render_about(
     now: dt.datetime | None = None,
     navigation: Record | None = None,
 ) -> str:
-    """Explain the tool and show its saved server environment.
+    """Explain the tool and credit its sources and artwork.
 
     Args:
         config: Current application version and routine configuration.
@@ -1378,7 +1449,7 @@ def render_about(
         navigation: Request route and language choices, when available.
 
     Returns:
-        An informative About page with a read-only live server monitor.
+        An informative About page with a live footer uptime.
     """
     page = _Page(locale)
     context = page.context(page.text("nav.about"), live=True)

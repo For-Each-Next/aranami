@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <!-- SPDX-License-Identifier: CC-BY-4.0 -->
+  <metadata>
+    Codex icons by Wikimedia Design, the OOUI team, and other contributors.
+    Source: https://gerrit.wikimedia.org/g/design/codex/+/dcd478e318d99a0361723557d7ed135ffb57a682/packages/codex-icons/src/images/
+    Revision: dcd478e318d99a0361723557d7ed135ffb57a682 (Codex icons 2.7.0).
+    License: https://creativecommons.org/licenses/by/4.0/
+    License notice: https://doc.wikimedia.org/codex/latest/style-guide/icons.html
+    Adaptation: unchanged SVG geometry grouped into currentColor symbols.
+  </metadata>
+  <symbol id="article" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M2 0h16v20H2zm2 2v16h12V2zm2 2h3v1H6zm0 2h3v1H6zm0 2h3v1H6zm0 3h8v1H6zm0 2h8v1H6zm0 2h8v1H6zm4-11h4v5h-4z"/>
+  </symbol>
+  <symbol id="lightbulb" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M13 20H7v-2h6zM10 0c1.938 0 3.58.556 4.745 1.644C15.918 2.738 16.5 4.27 16.5 6c0 2.22-1.15 3.732-2.04 4.727-.644.72-.96 1.633-.96 2.662V16h-7v-2.611c0-1.029-.317-1.942-.96-2.662C4.65 9.732 3.5 8.22 3.5 6c0-1.627.593-3.145 1.743-4.255C6.395.634 8.032 0 10 0"/>
+  </symbol>
+  <symbol id="article-add" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M11 9h3v2h-3v3H9v-3H6V9h3V6h2z"/>
+    <path d="M18 0v20H2V0zM4 2v16h12V2z"/>
+  </symbol>
+  <symbol id="article-check" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M18 0v20H2V0zM4 2v16h12V6.799l-5.341 6.97h-1.3l-3.767-3.141 1.28-1.536 2.967 2.471L16 3.508V2z"/>
+  </symbol>
+  <symbol id="history" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M10 1a9 9 0 1 1 0 18v-2a7 7 0 1 0-4-1.257V13h2.001L8 18l-1 1H2v-2l2.346-.001A8.97 8.97 0 0 1 1 10a9 9 0 0 1 9-9"/>
+    <path d="M11 10h3v2H9V5h2z"/>
+  </symbol>
+  <symbol id="chart-bar" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M3 17h16v2H1V1h2z"/>
+    <path d="M7 15H5v-4h2zm4 0H9V5h2zm4 0h-2V9h2zm4 0h-2V3h2z"/>
+  </symbol>
+  <symbol id="language" viewBox="0 0 20 20" fill="currentColor">
+    <path d="m17.835 19-1.248-3h-4.174l-1.248 3.001H9l4.577-11.005h1.846L20 19zm-4.59-5h2.51L14.5 10.982zM7.618 3H12v2H9.991a8.5 8.5 0 0 1-1.423 4.02q-.24.358-.528.707.634.367 1.379.711l.908.42-.839 1.816-.907-.42a18 18 0 0 1-2.026-1.09c-1.255.979-2.912 1.8-5.076 2.31l-.973.228-.458-1.946.973-.23c1.631-.383 2.885-.954 3.85-1.608C3.29 8.527 2.317 6.884 2.065 5H0V3h5.382l-.724-1.447 1.79-.895L7.617 3ZM4.094 5c.243 1.282.974 2.489 2.29 3.586A6.54 6.54 0 0 0 7.98 5z"/>
+  </symbol>
+  <symbol id="robot" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M9 3h2v2h5.5A2.5 2.5 0 0 1 19 7.5V15h-7v2h4a1 1 0 0 1 1 1v2H3v-2a1 1 0 0 1 1-1h4v-2H1V7.5A2.5 2.5 0 0 1 3.5 5H9M5.5 9a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3"/>
+    <circle cx="10" cy="2" r="2"/>
+  </symbol>
+</svg>

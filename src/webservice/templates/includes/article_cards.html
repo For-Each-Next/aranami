@@ -1,24 +1,17 @@
 {% if section.empty %}
 <p class="empty">{{ section.empty }}</p>
 {% else %}
-<ol class="card-grid article-list highlights" role="list">
+{% if section.is_review %}<ul class="card-grid article-list review-cards" role="list">{% else %}<ol class="card-grid article-list highlights" role="list">{% endif %}
   {% for card in section.cards %}
-  <li class="article-card"{% if card.rank %} value="{{ card.rank }}"{% endif %}>
+  <li class="article-card"{% if card.rank and not section.is_review %} value="{{ card.rank }}"{% endif %}>
     <div class="article-card-body">
       {% include "includes/article_summary.html" %}
       {% if card.extract is not none %}
-        {% if card.extract|length > 180 %}
-        <details class="article-extract summary-disclosure">
-          <summary><bdi class="extract-preview" lang="{{ card.extract_language }}">{{ card.extract|truncate(180, true) }}</bdi><span class="expand-label">{{ t.home.expand_summary }}</span></summary>
-          <p><bdi lang="{{ card.extract_language }}">{{ card.extract }}</bdi></p>
-        </details>
-        {% else %}
         <p class="article-extract"><bdi lang="{{ card.extract_language }}">{{ card.extract }}</bdi></p>
-        {% endif %}
       {% endif %}
-      <p class="card-meta">{% if card.review_link %}{{ t.reviews.participate }}{{ card.review_link }}{% if card.review_date %} · {{ t.reviews.started }}<time datetime="{{ card.review_date.value }}">{{ card.review_date.label }}</time>{{ card.review_date.elapsed }}{% endif %}{% elif card.pageviews_url %}<a href="{{ card.pageviews_url }}" class="pageviews-number">{{ card.views }}</a>{% if card.site_rank %} · <span class="site-rank">{{ card.site_rank }}</span>{% endif %}{% else %}{{ card.scheduled }}{% if card.date %}<time datetime="{{ card.date.value }}">{{ card.date.label }}</time>{% endif %}{% if card.separator %} · {% endif %}{% if card.kind %}{{ card.kind }}{% endif %}{% if card.date_note %}<abbr class="date-note-marker" title="{{ card.date_note }}" aria-label="{{ card.date_note }}">†</abbr>{% endif %}{% endif %}</p>
+      <p class="card-meta">{% if card.review_link %}{{ card.review_link }}{% if card.review_date %} · <time datetime="{{ card.review_date.value }}" title="{{ card.review_date.label }}">{{ card.review_date.elapsed }}</time>{% endif %}{% elif card.pageviews_url %}<a href="{{ card.pageviews_url }}" class="pageviews-number">{{ card.views }}</a>{% if card.site_rank %} · <span class="site-rank">{{ card.site_rank }}</span>{% endif %}{% else %}{{ card.scheduled }}{% if card.date %}<time datetime="{{ card.date.value }}">{{ card.date.label }}</time>{% endif %}{% if card.separator %} · {% endif %}{% if card.kind %}{{ card.kind }}{% endif %}{% if card.date_note %}<abbr class="date-note-marker" title="{{ card.date_note }}" aria-label="{{ card.date_note }}">†</abbr>{% endif %}{% endif %}</p>
     </div>
   </li>
   {% endfor %}
-</ol>
+{% if section.is_review %}</ul>{% else %}</ol>{% endif %}
 {% endif %}
