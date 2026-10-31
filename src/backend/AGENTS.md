@@ -6,8 +6,9 @@ repository-wide instructions.
 ## Runtime boundary
 
 - Target Toolforge source deployment using Python 3.15 exclusively.
-- Run from `/data/project/aranami/app/src` on PYTHONPATH, with the existing
-  account authentication and runtime data outside the uploaded source tree.
+- Run from the immutable source generation selected by
+  `/data/project/aranami/app`, pinning its `src` on PYTHONPATH at startup.
+  Keep existing account authentication and runtime data outside source.
 - `python -m backend` starts the central hub for on-wiki and website
   updates. Keep one `aranami-hub` background job through `run-hub.sh`.
   `python -m backend.public` serves saved data and Python-rendered pages through

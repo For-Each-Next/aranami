@@ -1,2 +1,5 @@
 {% extends "base.html" %}
-{% block content %}<p class="notice" role="alert">{{ message }}</p>{% endblock %}
+{% block content %}
+<p class="notice notice-error" role="alert">{{ message }}</p>
+<p><a href="/">{{ t.nav.dashboard }}</a></p>
+{% endblock %}

@@ -30,14 +30,42 @@ saved facts without loading files or initializing source clients.
 Shared code imports neither backend nor frontends. Only HTTP orchestration in
 `backend.public` imports webservice renderers. Website requests cannot collect,
 publish, or write runtime data. Imports, validation, and command-line help
-remain inert. Resolve source imports through deployed `src` on `PYTHONPATH`;
-do not restore installed-package shims or retired launchers.
+remain inert. Resolve imports through the pinned generation's `src` on
+`PYTHONPATH`; do not restore installed-package shims or retired launchers.
 
 `shared.config.TASK_DEFINITIONS` is the sole definition of report destinations
 and UTC schedules. `routine_configuration()` supplies its serialized form.
 `pyproject.toml` supplies the version, with generated `shared/version.json` in
 deployments. The backend exposes these contracts through `/api/config` and
 passes them to renderers; no installed distribution is required.
+
+## Service updates
+
+Normal source updates preserve Toolforge job definitions and replace existing
+services individually. Prepare and validate an isolated source/environment
+generation while current services run, then atomically select it through the
+`app` symlink. Uploaded `app-staging-<id>/` paths remain immutable after
+activation. Each launcher reads the selection once, validates its own setup
+receipt, and pins both `PYTHONPATH` and the Python executable for its lifetime.
+Lazy imports, templates, and assets must never follow the moving `app` link
+inside a running process. Retain old source, environment, and setup evidence
+until no process uses them, including manual jobs.
+
+Replace the read-only web service first and wait for availability, then
+terminate the hub's old pods before restoring its single replica. Missing
+or deliberately paused services stay stopped. Never overlap publishers or
+fall back to deleting all jobs. The legacy real `app/` layout needs one
+confirmed shutdown before migration; subsequent updates need no shared source
+shutdown. See [Administration](administration.md) for commands and recovery.
+
+The deployment lock serializes promotions without blocking startup from an
+already validated generation. A failed setup leaves current services intact.
+After selection, failed restarts retain both generations for explicit recovery;
+do not silently change code beneath a process that may have started. Preserve
+runtime state, reports, caches, credentials, and daily logs. Existing service
+start/stop events describe process replacement, not host reboot, and the About
+startup time remains the observed hub start. Log and state formats do not need
+to change for this deployment mechanism.
 
 ## Scheduling and observed state
 
@@ -134,12 +162,33 @@ Retain complete reusable facts, not just displayed rows:
 
 ## Website collection and presentation
 
-`backend.website` independently refreshes recognized content, DYK, popularity,
-news/history, and the maintenance catalogue, normally 24 hours after each
-success. Select due work before initializing a Site or querying membership;
-nothing due means no source requests. Valid empty results count as success.
+`backend.website` independently refreshes current reviews hourly and recognized
+content, DYK, popularity, news/history, and the maintenance catalogue normally
+24 hours after each success. Select due work before initializing a Site or
+querying membership; nothing due means no source requests. Valid empty results
+count as success.
 Failures retain validated data and successful timestamps and retry hourly;
 restart does not reset intervals. The schema-2 snapshot is bounded to 8 MiB.
+
+Collect FAC, FLC, GAN, and PR reviews from their proposal-area headings and
+DYKC from current `DYKEntry` subjects and explicit timestamps. Never require
+community nomination banners. Batch-resolve article titles with MediaWiki
+conversion and redirects before matching project membership; keep original
+discussion anchors.
+ACC, BPAN, PPR, and reassessment come from verified talk categories. An absent
+dated discussion remains undated; collection or category-observation times
+never stand in for nomination starts. Sort FAC, FLC, ACC, GAN, BPAN, PR, PPR,
+DYKC, reassessment, then start ascending with unknowns last and stable titles.
+
+`review-sources-v1.parquet` caches parsed facts keyed by canonical source title,
+review type, and revision ID. Each due refresh checks current IDs in batches
+of fifty and downloads only changed exact revisions, including valid empty
+sources. Retain at most 10,000 rows and 8 MiB, expiring unused rows after thirty
+days. Missing community sources and incomplete API batches fail the refresh
+and preserve the prior complete report. Source-cache corruption causes a
+rebuild, and cache-write failure does not discard successfully collected facts.
+Review introductions reuse the shared article-extract cache below. Old
+schema-2 dashboards without review fields remain readable during rollout.
 
 `backend.public` validates saved dashboard, status, and daily-log inputs through
 their owning readers. FastAPI/Uvicorn serves GET/HEAD and read-only WebSocket
@@ -155,10 +204,17 @@ Pages work with ordinary links, GET forms, and native controls without
 JavaScript. `/api/live` reads saved status only and renders existing live
 regions, never website datasets or logs. `/api/live/ws` pushes the same
 localized snapshot when saved status changes and periodically renews it.
-Subscriptions accept no mutations or collection commands. The dashboard owns
-routine cards; About shows environment/resources; logs shows compact server state even without
-saved logs. Fixed assets live in `webservice/public_html/`. Omit confirmed-empty
-sections but preserve their saved observations; unavailable data is not empty.
+Subscriptions accept no mutations or collection commands. Fixed assets live in
+`webservice/public_html/`. Omit confirmed-empty sections but preserve their
+saved observations; unavailable data is not empty.
+
+A supported `lang` query overrides the browser's one-year `aranami-language`
+cookie, which overrides `Accept-Language`.
+Language links preserve the route and valid filter/sort/page controls.
+HTML and response language tags agree; localized responses vary by language
+header and cookie. Live requests propagate the current document language.
+Source article titles retain canonical spelling and Chinese language markup.
+Translate missing/unrecognized assessments centrally without changing facts.
 
 Chinese main-page history covers 100 UTC dates and upcoming quality content
 30 days. Never invent carry-in first-appearance dates. Popularity retains its
@@ -185,27 +241,25 @@ and expire unused entries after 30 days. Script failures do not fail otherwise
 valid reports. Contract changes invalidate affected report identities, not
 maintenance data.
 
-Keep sections stacked, with responsive sibling-card columns and no horizontal
-page overflow. Treat widths up to and including 600 pixels as narrow screens.
-Preserve ordering, inline assessments, source metadata, and
-all three interface languages. Popularity/DYK show at most six actual rows;
-other lists render supplied rows directly. Display limits do not trim collected
-data. Maintenance sorts the complete group before fifty-row pagination, with
+Preserve ordering, assessments, source metadata, and all three languages.
+Popularity/DYK show at most six actual rows; other lists render supplied rows
+directly. Display limits do not trim collected data. Maintenance filters titles
+and assessments, then sorts the complete
+matching group before fifty-row pagination, with
 stable page-ID ties and unknown dates/grades last in either direction. Seeded
 random order remains stable across pages. Use saved source/category links and
 the verified definitions/evidence in `backend/website/maintenance.json`;
 requests never query wiki sources.
 
-Contents navigation sits beneath the dashboard title and links only to visible
-sections. Routine cards use observed starts/finishes, configured report links,
+Routine status uses observed starts/finishes, configured report links,
 and actual scheduled executions; hide next execution while running. Successful
-daily cards show confirmed report dates. Active progress requires a fresh
+daily results show confirmed report dates. Active progress requires a fresh
 monitor session containing the routine start; stale sessions restore generic
 labels. Never extrapolate phases, counts, or dates from clocks or logs.
-Native popovers expose per-destination outcomes, independent timing, and UTC
-timestamps while preserving keyboard access and unknown states. Execution
-durations use minute/second primes: completed values retain hundredths
-(`12′05.30″`, `5.30″`, `0.44″`); active values use whole seconds (`12′05″…`).
+Report details expose per-destination outcomes, independent timing,
+and UTC timestamps. Live updates preserve open details and keyboard focus.
+Execution durations use explicit localized units: completed values retain
+hundredths (`12 min 05.30 s`); active values use whole seconds (`12 min 05 s…`).
 
 Live clocks tick each second from a monotonic server-time anchor. Visible pages
 receive WebSocket updates and independently verify the complete state through
@@ -216,7 +270,7 @@ connections. Reconnect with backoff and always request a complete snapshot.
 Hidden tabs pause connections
 and requests; returning visibility, focus, or connectivity restores them.
 Reject older snapshots received after newer updates. Update existing elements
-to preserve popovers, focus, and scroll. Completed durations stay fixed;
+to preserve dialogs, focus, and scroll. Completed durations stay fixed;
 stale state/resources expire
 after 120 seconds. Failed refreshes retain prior observations with a notice.
 Bound rendered-view caches to sixty seconds and invalidate on saved-input
@@ -225,8 +279,8 @@ and source timestamps intact. Source changes require process replacement.
 Distinguish network, transport, response, clock, and rendering failures in
 bounded browser diagnostics without exposing arbitrary server or error text.
 
-About combines monitor state, observed hub startup, system/architecture,
-Python, memory use/allocation, and CPU use/allocation in one server table.
+Server observations include monitor state, observed hub startup,
+system/architecture, Python, memory use/allocation, and CPU use/allocation.
 Startup is the recorded hub start, not an inferred operating-system boot.
 Retain static facts and startup timestamps when resource samples expire.
 Show the sample's actual UTC timestamp through seconds and its relative age;
@@ -255,8 +309,10 @@ source or `site-packages`:
   never derive these records by parsing diagnostic messages. Bound each line
   and daily file. Logging failure must not change publication outcomes.
   The website reads at most 100 recent events, translates them into all three
-  locales, and links configured wiki destinations in natural-sentence
-  paragraphs. Missing event files remain empty; historical diagnostics are not
+  locales, and shows newest first in pages of 25 with chronological order,
+  localized text search, and result filtering. Full prose and configured wiki
+  destinations remain in disclosures; counts describe this bounded window.
+  Missing event files remain empty; historical diagnostics are not
   backfilled. Raw downloads retain the separate diagnostic log, including
   tracebacks.
 - `state/`: authoritative observed metadata, separate from logs and caches.
@@ -459,7 +515,11 @@ bundles never advance the production baseline; missing or changed managed
 ranges, malformed snapshots, and empty project results prevent publication.
 Keep `reports/` durable: disposable membership caches cannot recover removals.
 Dates/times describe observations, not inferred edit times. Retain thirty UTC
-dates by default, configurable with the `assessment-log` range's `days` option.
+report dates by default, configurable with the `assessment-log` range's `days`
+option. A snapshot collected on a UTC date labels the previous day's report;
+keep its actual collection timestamp and immutable source date unchanged.
+Daily introductions summarize mainspace article/list quality and importance
+counts in assessment order, omit zero counts, and survive failed-save recovery.
 
 Membership snapshots use stable page IDs in Parquet, not wiki output, to track
 renames, assessments, and DYK transitions. Validate against exact destination
@@ -475,6 +535,14 @@ does not distinguish failed repeats from delayed cleanup. Keep removed historica
 entries distinct from failed nominees. Cache talk-page state by revision ID.
 Matching membership, assessments, and dates preserve exact published text;
 sampling dates/statistical comments alone do not justify edits.
+
+DYK charts separate dates and cumulative counts with a comma and a space inside
+inline `dyk-chart-x` and `dyk-chart-y` paired ranges. Require both ranges alongside
+`dyk` and `dykn` before source requests, preserve chart settings, and do not emit
+the former Commons JSON comment. Initial marker placement and comment removal
+are separate wiki maintenance. The verified `Graph:Chart` contract accepts CSV
+`x`/`y` with `xType=date` (template revision 95272485, documentation 95335383,
+and `Module:Graph` 95334515).
 
 ### English comparison reports
 

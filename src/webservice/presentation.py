@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlencode, urlsplit
 
+import polars as pl
 from markupsafe import Markup, escape
 
 if TYPE_CHECKING:
@@ -77,7 +78,8 @@ _QUALITY = (
     ("SL", "sl", "stublist", "小列表"),
     ("Substub", "substub", "小小作品"),
     ("Disambig", "disambig", "消歧义", "消歧義"),
-    ("Unassessed", "unassessed", "未评级", "未評級"),
+    ("Unassessed", "unassessed", "未评", "未評", "未评级", "未評級"),
+    ("Unknown", "unknown", "未知"),
 )
 _IMPORTANCE = (
     ("Top", "top", "极高", "極高"),
@@ -86,7 +88,7 @@ _IMPORTANCE = (
     ("Low", "low", "低"),
     ("Bottom", "bottom", "极低", "極低"),
     ("NA", "na", "不适用", "不適用"),
-    ("Unknown", "unknown", "未评级", "未評級"),
+    ("Unknown", "unknown", "未知", "未评", "未評", "未评级", "未評級"),
 )
 _ALIASES = {
     dimension: {name: code for code, *names in groups for name in names}
@@ -476,7 +478,16 @@ def maintenance_selection(
     Raises:
         ValueError: A control is duplicated, unsupported, or malformed.
     """
-    allowed = {"task", "page", "sort", "order", "seed"}
+    allowed = {
+        "task",
+        "page",
+        "sort",
+        "order",
+        "seed",
+        "q",
+        "quality",
+        "importance",
+    }
     if set(parameters) - allowed or any(
         len(values) != 1 for values in parameters.values()
     ):
@@ -485,6 +496,9 @@ def maintenance_selection(
     values = {key: items[0] for key, items in parameters.items()}
     values.setdefault("page", "1")
     values.setdefault("sort", "oldest")
+    for key in ("q", "quality", "importance"):
+        if not values.get(key):
+            values.pop(key, None)
     values.setdefault(
         "order",
         "desc" if values["sort"] in {"class", "importance"} else "asc",
@@ -495,6 +509,9 @@ def maintenance_selection(
         "sort": r"oldest|title|class|importance|random",
         "order": r"asc|desc",
         "seed": r"[0-9a-f]{16}",
+        "q": r"[^\x00-\x1f\x7f]{1,200}",
+        "quality": "|".join(code for code, *_ in _QUALITY) + "|Unknown",
+        "importance": "|".join(code for code, *_ in _IMPORTANCE),
     }
     if "task" not in values or any(
         not re.fullmatch(patterns[key], value) for key, value in values.items()
@@ -502,6 +519,62 @@ def maintenance_selection(
         message = "Invalid maintenance query."
         raise ValueError(message)
     return values
+
+
+def maintenance_filter(
+    items: list[Record],
+    selection: Mapping[str, str],
+) -> list[Record]:
+    """Filter saved titles and assessments before sorting and paging.
+
+    Args:
+        items: Complete observations for the selected task.
+        selection: Validated title query and optional assessment codes.
+
+    Returns:
+        Original observations with source order and fields kept. Title
+        search is literal and case-insensitive. Missing quality is
+        unassessed; unrecognized values remain unknown.
+    """
+    if not any(selection.get(key) for key in ("q", "quality", "importance")):
+        return items
+    frame = pl.from_dicts(
+        items,
+        schema={
+            "title": pl.String,
+            "assessment_class": pl.String,
+            "assessment_importance": pl.String,
+        },
+    ).with_row_index("position")
+    conditions = []
+    if query := selection.get("q"):
+        conditions.append(
+            pl
+            .col("title")
+            .str.to_lowercase()
+            .str.contains(
+                query.lower(),
+                literal=True,
+            ),
+        )
+    for key, dimension in (("quality", "class"), ("importance", "importance")):
+        if selected := selection.get(key):
+            value = pl.col(f"assessment_{dimension}").str.strip_chars()
+            fallback = (
+                pl
+                .when(value.is_null() | (value.str.len_chars() == 0))
+                .then(pl.lit("Unassessed"))
+                .otherwise(pl.lit("Unknown"))
+                if dimension == "class"
+                else pl.lit("Unknown")
+            )
+            code = value.str.to_lowercase().replace_strict(
+                _ALIASES[dimension],
+                default=fallback,
+            )
+            conditions.append(code == selected)
+    positions = frame.filter(*conditions).get_column("position")
+    return [items[position] for position in positions]
 
 
 def maintenance_items(
@@ -698,7 +771,7 @@ def duration(
     *,
     running: bool = False,
 ) -> str:
-    """Format execution durations with minute and second prime notation.
+    """Format execution durations with explicit localized units.
 
     Returns:
         Seconds with an optional minute prefix. Completed values retain

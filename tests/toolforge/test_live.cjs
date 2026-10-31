@@ -9,8 +9,8 @@ const source = fs.readFileSync(
     path.join(__dirname, "../../src/webservice/public_html/live.js"), "utf8",
 );
 const messages = {
-    "duration.seconds": "{seconds}″",
-    "duration.minutes": "{minutes}′{seconds}″",
+    "duration.seconds": "{seconds} s",
+    "duration.minutes": "{minutes} min {seconds} s",
     "time.minutes_ago": "({count} min ago)",
     "time.hours_ago": "({count} hr ago)",
     "time.days_ago": "({count} d ago)",
@@ -51,6 +51,20 @@ class Element {
         this.childNodes.forEach((child) => { child.parent = this; });
     }
     get id() { return this.values.id; }
+    get open() { return this.hasAttribute("open"); }
+    set open(value) {
+        if (value) this.setAttribute("open", "");
+        else this.removeAttribute("open");
+    }
+    get isConnected() { return Boolean(this.parent); }
+    closest(selector) {
+        if (selector === "button[commandfor]" && this.nodeName === "BUTTON"
+            && this.hasAttribute("commandfor")) return this;
+        if (selector === "dialog[open]" && this.nodeName === "DIALOG" && this.open) return this;
+        return this.parent?.closest(selector) ?? null;
+    }
+    showModal() { this.open = true; this.modalOpens = (this.modalOpens ?? 0) + 1; }
+    close() { this.open = false; }
     get hidden() { return this.hasAttribute("hidden"); }
     set hidden(value) {
         if (value) this.setAttribute("hidden", "");
@@ -107,7 +121,7 @@ class Element {
 function fixture(offset = 0, completed = false, logs = false, about = false) {
     const subject = "Updating records for October 20, 2026";
     const button = new Element("BUTTON", {
-        id: "status-button", popovertarget: "popover",
+        id: "status-button", commandfor: "popover", command: "show-modal",
         ...(completed ? {} : {
             "data-progress-label": subject,
             "data-progress-fallback": "Running",
@@ -120,8 +134,8 @@ function fixture(offset = 0, completed = false, logs = false, about = false) {
             "data-started-at": stamp(-10000),
             "data-duration-template": "({duration})",
         }),
-    }, completed ? "(14.30″)" : "(10″…)");
-    const popup = new Element("DIV", { id: "popover", popover: "auto" });
+    }, completed ? "(14.30 s)" : "(10 s…)");
+    const popup = new Element("DIALOG", { id: "popover" });
     const relative = new Element("SMALL", {
         "data-clock": "relative", "data-observed-at": stamp(75000),
     });
@@ -240,7 +254,7 @@ function browser(logs = false, about = false, options = {}) {
         push(next = fixture(now, false, logs, about), socket = sockets.at(-1)) {
             socket.message(JSON.stringify({ type: "status", html: html(next) }));
         },
-        fire(name) { events.get(name)(); },
+        fire(name, event) { events.get(name)(event); },
         elapse(milliseconds) { now += milliseconds; },
         jump(milliseconds) {
             now += milliseconds;
@@ -254,13 +268,81 @@ function browser(logs = false, about = false, options = {}) {
     };
 }
 
+test("modal commands open dialogs and restore the exact invoker after dismissal", async () => {
+    const page = browser();
+    page.button.focus = () => { page.document.activeElement = page.button; };
+    let prevented = 0;
+    page.fire("click", { target: page.button, preventDefault() { prevented++; } });
+    assert.equal(page.popup.open, true);
+    assert.equal(page.popup.modalOpens, 1);
+    await page.respond();
+    assert.equal(page.popup.open, true); // A status update cannot close a modal.
+    page.fire("click", { target: page.button, preventDefault() { prevented++; } });
+    assert.equal(page.popup.modalOpens, 1);
+    const close = new Element("BUTTON", { commandfor: "popover", command: "close" });
+    page.fire("click", { target: close, preventDefault() { prevented++; } });
+    assert.equal(page.popup.open, false);
+    page.fire("close", { target: page.popup });
+    assert.equal(page.document.activeElement, page.button);
+    assert.equal(prevented, 3);
+});
+
+test("Escape/native close restores focus without a close-button click", () => {
+    const page = browser();
+    page.button.focus = () => { page.document.activeElement = page.button; };
+    page.fire("click", { target: page.button, preventDefault() {} });
+    page.document.activeElement = page.popup;
+    page.popup.close();
+    page.fire("close", { target: page.popup });
+    assert.equal(page.document.activeElement, page.button);
+});
+
+test("Tab and Shift+Tab wrap within the currently open dialog", () => {
+    const page = browser();
+    const close = new Element("BUTTON");
+    const scroll = new Element("DIV", { tabindex: "0" });
+    const lastLink = new Element("A", { href: "https://zh.wikipedia.org" });
+    const hidden = new Element("BUTTON");
+    const disabled = new Element("BUTTON");
+    for (const control of [close, scroll, lastLink, hidden, disabled]) {
+        page.popup.insertBefore(control, null);
+        control.tabIndex = 0;
+        control.getClientRects = () => [{}];
+        control.focus = () => { page.document.activeElement = control; };
+    }
+    hidden.getClientRects = () => [];
+    disabled.disabled = true;
+    page.popup.querySelectorAll = () => [close, scroll, lastLink, hidden, disabled];
+    page.popup.open = true;
+    let prevented = 0;
+    page.document.activeElement = close;
+    page.fire("keydown", {
+        target: close, key: "Tab", shiftKey: true, preventDefault() { prevented++; },
+    });
+    assert.equal(page.document.activeElement, lastLink);
+    page.fire("keydown", {
+        target: lastLink, key: "Tab", shiftKey: false, preventDefault() { prevented++; },
+    });
+    assert.equal(page.document.activeElement, close);
+    page.document.activeElement = scroll;
+    page.fire("keydown", {
+        target: scroll, key: "Tab", shiftKey: false, preventDefault() { prevented++; },
+    });
+    assert.equal(prevented, 2); // Interior navigation is left to the browser.
+    page.popup.open = false;
+    page.fire("keydown", {
+        target: close, key: "Tab", shiftKey: true, preventDefault() { prevented++; },
+    });
+    assert.equal(prevented, 2); // Background controls are never trapped.
+});
+
 test("running clocks use whole seconds and pad seconds after minutes", () => {
     for (const [seconds, expected] of [
-        [0.44, "(0″…)"],
-        [32.89, "(32″…)"],
-        [59.999, "(59″…)"],
-        [60, "(1′00″…)"],
-        [725.3, "(12′05″…)"],
+        [0.44, "(0 s…)"],
+        [32.89, "(32 s…)"],
+        [59.999, "(59 s…)"],
+        [60, "(1 min 00 s…)"],
+        [725.3, "(12 min 05 s…)"],
     ]) {
         const page = browser();
         page.clock.setAttribute("data-started-at", stamp(1000 - seconds * 1000));
@@ -335,15 +417,15 @@ test("local clocks advance by elapsed time while server requests stay periodic",
     assert.equal(page.notice.hidden, true);
     assert.equal(page.requests.length, 1);
     page.jump(1000);
-    assert.equal(page.clock.textContent, "(11″…)");
+    assert.equal(page.clock.textContent, "(11 s…)");
     assert.equal(page.uptime.textContent, "0d 0h 1m 41s");
     page.jump(3200); // A delayed callback must catch up without losing seconds.
-    assert.equal(page.clock.textContent, "(14″…)");
+    assert.equal(page.clock.textContent, "(14 s…)");
     assert.equal(page.requests.length, 1);
     page.jump(800);
     assert.equal(page.requests.length, 2);
     await page.respond();
-    assert.equal(page.clock.textContent, "(15″…)");
+    assert.equal(page.clock.textContent, "(15 s…)");
     page.jump(10000);
     assert.equal(page.requests.length, 3);
     assert.equal(page.relative.textContent, "(in 1 min)");
@@ -351,7 +433,7 @@ test("local clocks advance by elapsed time while server requests stay periodic",
     assert.equal(page.relative.textContent, "(soon)");
 });
 
-test("synchronization keeps existing popovers and freezes completed timers", async () => {
+test("synchronization keeps existing modal dialogs and freezes completed timers", async () => {
     const page = browser();
     page.popup.open = true;
     page.document.activeElement = page.button;
@@ -367,7 +449,7 @@ test("synchronization keeps existing popovers and freezes completed timers", asy
     assert.equal(page.button.hasAttribute("data-progress-fallback"), false);
     assert.equal(page.clock.hasAttribute("data-clock"), false);
     const completed = page.clock.textContent;
-    assert.equal(completed, "(14.30″)");
+    assert.equal(completed, "(14.30 s)");
     page.jump(3000);
     assert.equal(page.clock.textContent, completed);
     assert.equal(page.button.textContent, "No update");
@@ -397,7 +479,7 @@ test("subject labels and phase counts synchronize without replacing buttons", as
     assert.equal(page.document.getElementById("status-button"), page.button);
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
-    assert.equal(page.button.getAttribute("popovertarget"), "popover");
+    assert.equal(page.button.getAttribute("commandfor"), "popover");
 });
 
 test("hidden tabs suspend work and resume immediately without overlapping fetches", async () => {
@@ -406,7 +488,7 @@ test("hidden tabs suspend work and resume immediately without overlapping fetche
     page.fire("visibilitychange");
     page.jump(6000);
     assert.equal(page.requests.length, 1);
-    assert.equal(page.clock.textContent, "(10″…)");
+    assert.equal(page.clock.textContent, "(10 s…)");
     page.document.hidden = false;
     page.fire("visibilitychange");
     assert.equal(page.requests.length, 1); // Wait for the aborted request's cleanup.
@@ -415,7 +497,7 @@ test("hidden tabs suspend work and resume immediately without overlapping fetche
     assert.equal(page.requests.length, 2);
     assert.equal(page.warnings.length, 0);
     assert.equal(page.notice.hidden, true);
-    assert.equal(page.clock.textContent, "(16″…)");
+    assert.equal(page.clock.textContent, "(16 s…)");
     page.fire("online");
     page.fire("pageshow");
     assert.equal(page.requests.length, 2);
@@ -430,7 +512,7 @@ test("focus synchronizes an idle visible page before delayed timers run", async 
     page.elapse(61000); // Browser sleep can delay timer delivery without hiding the tab.
     page.fire("focus");
     assert.equal(page.requests.length, 2);
-    assert.equal(page.clock.textContent, "(1′11″…)");
+    assert.equal(page.clock.textContent, "(1 min 11 s…)");
     page.fire("focus");
     assert.equal(page.requests.length, 2);
     await page.respond();
@@ -535,7 +617,7 @@ test("failed syncs retain observations, expire schedules, and recover", async ()
     assert.equal(page.button.hidden, false);
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
-    assert.equal(page.clock.textContent, "(2′11″…)");
+    assert.equal(page.clock.textContent, "(2 min 11 s…)");
     await page.respond();
     assert.equal(page.notice.hidden, true);
     assert.equal(page.schedule.hasAttribute("data-schedule-time"), true);
@@ -559,7 +641,7 @@ test("malformed fragments do not replace received observations", async () => {
     assert.equal(page.warnings[0][1].failure, "clock");
     assert.equal(page.root.dataset.serverTime, stamp(0));
     page.jump(1000);
-    assert.equal(page.clock.textContent, "(16″…)");
+    assert.equal(page.clock.textContent, "(16 s…)");
 });
 
 test("logs synchronize only compact server state and uptime", async () => {
@@ -613,7 +695,7 @@ test("native WebSocket pushes preserve controls and use the page locale", async 
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
     assert.equal(page.button.textContent, "No update");
-    assert.equal(page.clock.textContent, "(14.30″)");
+    assert.equal(page.clock.textContent, "(14.30 s)");
     assert.equal(page.clock.hasAttribute("data-clock"), false);
     assert.equal(page.notice.hidden, true);
     assert.equal(page.requests.length, 1);
@@ -650,7 +732,7 @@ test("a delayed HTTP snapshot cannot overwrite a more recent pushed result", asy
     page.push(fixture(1000, true));
     await page.respond(fixture(0));
     assert.equal(page.button.textContent, "No update");
-    assert.equal(page.clock.textContent, "(14.30″)");
+    assert.equal(page.clock.textContent, "(14.30 s)");
     assert.equal(page.root.dataset.serverTime, stamp(1000));
     page.push(fixture(0)); // The same monotonic rule applies to pushed snapshots.
     assert.equal(page.button.textContent, "No update");

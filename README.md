@@ -4,9 +4,9 @@ Aranami (荒波, “rough waves”) keeps Wikipedia project reports up to date
 and helps editors find articles to improve. Its main focus is
 [WikiProject Video games on Chinese Wikipedia](https://zh.wikipedia.org/wiki/WikiProject:电子游戏).
 
-The [dashboard](https://aranami.toolforge.org/) brings together main-page
-highlights, upcoming quality content, popular articles, maintenance
-worklists, and report update results in English, Simplified Chinese, and
+The [dashboard](https://aranami.toolforge.org/) brings together current content
+reviews, main-page highlights, upcoming quality content, popular articles,
+maintenance worklists, and report update results in English, Simplified Chinese, and
 Traditional Chinese. The [About page](https://aranami.toolforge.org/about/)
 includes the server monitor. [Major events](https://aranami.toolforge.org/logs/)
 show service starts and report outcomes in the selected language, with links
@@ -32,8 +32,10 @@ completion across restarts. Pageviews uses an 18:00 UTC reporting boundary;
 incomplete data retries hourly. PexBot reports already edited that UTC day
 are not requested again.
 
-The website's five datasets refresh independently every 24 hours after
-success. Failures retain valid data and retry hourly; visits are read-only.
+The website refreshes content reviews hourly and its other five datasets
+independently every 24 hours after success. Review cards link to active
+discussions and show assessments, introductions, and known start dates and
+durations. Failures retain valid data and retry hourly; visits are read-only.
 
 ## How it works
 

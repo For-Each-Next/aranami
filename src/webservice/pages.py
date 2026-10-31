@@ -27,6 +27,7 @@ from webservice.presentation import (
     failure_description,
     homepage_sections,
     local_url,
+    maintenance_filter,
     maintenance_items,
     maintenance_page,
     maintenance_sections,
@@ -58,16 +59,8 @@ _STATES = {
     "unknown": "Result unavailable",
     "unconfirmed": "Result unavailable",
 }
-_STATE_ICONS = {
-    "running": "⏳",
-    "updated": "✅",
-    "no_update": "🆗",
-    "failed": "❌",
-    "deferred": "⏸️",
-    "unknown": "❔",
-    "unconfirmed": "❔",
-}
 _LOG_EVENT_LIMIT = 100
+_LOG_PAGE_SIZE = 25
 _LOG_EVENT_KINDS = frozenset({
     "service_started",
     "service_stopping",
@@ -170,6 +163,23 @@ class _Page:
             "language_tag": self.interface.language_tag,
             "t": _messages(self.interface.locale),
             "live": live,
+            "assessment_legend": [
+                {
+                    "dimension_label": self.text(
+                        f"assessment.dimension.{dimension}",
+                    ),
+                    "label": self.text(key),
+                    "description": self.text(
+                        f"assessment.description.{dimension}.{code}",
+                    ),
+                }
+                for key in catalog()
+                if key.startswith((
+                    "assessment.class.",
+                    "assessment.importance.",
+                ))
+                for _, dimension, code in [key.split(".")]
+            ],
             "project_link": wiki_link(
                 "https://zh.wikipedia.org/wiki/WikiProject:电子游戏",
                 self.text("nav.project"),
@@ -315,14 +325,21 @@ class _Page:
         assessments = []
         for dimension in ("class", "importance"):
             value = item.get(f"assessment_{dimension}")
-            if not isinstance(value, str) or not value.strip():
-                continue
-            code = assessment_code(value, dimension)
+            code = assessment_code(value, dimension) or (
+                "Unassessed"
+                if dimension == "class"
+                and (not isinstance(value, str) or not value.strip())
+                else "Unknown"
+            )
+            label = self.text(f"assessment.{dimension}.{code}")
+            dimension_label = self.text(f"assessment.dimension.{dimension}")
             assessments.append({
                 "dimension": dimension,
-                "label": self.text(f"assessment.{dimension}.{code}")
-                if code
-                else value,
+                "label": label,
+                "dimension_label": dimension_label,
+                "description": self.text(
+                    f"assessment.description.{dimension}.{code}",
+                ),
             })
         language, extract = article_extract(item, self.interface.locale)
         return {
@@ -414,6 +431,59 @@ class _Page:
             "attribution": attribution,
             "before": before,
             "after": after,
+        }
+
+    def reviews(self, snapshot: Record, now: dt.datetime) -> Record | None:
+        """Prepare complete review cards with observed elapsed time.
+
+        Args:
+            snapshot: Saved dashboard facts, possibly without reviews.
+            now: Aware server time for duration calculations.
+
+        Returns:
+            The review section, or none for a confirmed empty list.
+        """
+        data = snapshot.get("reviews")
+        if data is not None and not data["items"]:
+            return None
+        cards = []
+        for item in (data or {}).get("items", []):
+            card = self.article(item)
+            started = timestamp(item.get("started_at"))
+            age = (
+                max(0, int((now - started).total_seconds() // 3600))
+                if started
+                else 0
+            )
+            days, hours = divmod(age, 24)
+            elapsed = self.text(
+                "reviews.days" if days else "reviews.hours",
+                count=days or hours,
+            )
+            card.update(
+                review_link=wiki_link(
+                    item["review_url"],
+                    self.text(f"reviews.{item['review_type']}"),
+                ),
+                review_date={
+                    "value": item["started_at"],
+                    "label": self.interface.date(started.date().isoformat()),
+                    "elapsed": self.text("reviews.elapsed", duration=elapsed),
+                }
+                if started is not None and started <= now
+                else None,
+            )
+            cards.append(card)
+        return {
+            "cards": cards,
+            "empty": self.text("empty.section") if data is None else None,
+            "updated": self.source_updated(
+                snapshot
+                .get("reports", {})
+                .get("reviews", {})
+                .get("last_success_at"),
+                attribution=True,
+            ),
         }
 
     def highlights(self, snapshot: Record) -> list[Record]:
@@ -543,7 +613,13 @@ class _Page:
             "targets": [
                 wiki_link(
                     title_url(title),
-                    str(index) if multiple else name,
+                    (
+                        self.text(f"report.{title.rsplit('/', 1)[-1]}")
+                        if f"report.{title.rsplit('/', 1)[-1]}" in catalog()
+                        else title.rsplit("/", 1)[-1]
+                    )
+                    if multiple
+                    else name,
                     f"{index} · {name} · {title}"
                     if multiple
                     else f"{name} · {title}",
@@ -639,9 +715,9 @@ class _Page:
                 "identifier": identifier,
                 "links": self._routine_links(name, definition),
                 "running": running,
-                "icon": "✅"
+                "status": "updated"
                 if completed_daily
-                else _STATE_ICONS.get((event or {}).get("status"), "❔"),
+                else (event or {}).get("status", "unknown"),
                 "state": label,
                 "progress": self._progress_note(progress),
                 "fallback": fallback,
@@ -817,15 +893,22 @@ class _Page:
         """
         definitions = (config.get("routines") or {}).get("routines", {})
         query = data.get("query", "").casefold()
+        status = data.get("status", "all")
         events = []
-        for event in data.get("events", [])[:_LOG_EVENT_LIMIT]:
+        for event in data.get("events", [])[-_LOG_EVENT_LIMIT:]:
             content = self._log_event(event, definitions)
             if content is None:
                 continue
             if query and query not in content["searchable"].casefold():
                 continue
+            if status != "all" and content["status"] != status:
+                continue
             events.append(content)
-        return events
+        return sorted(
+            events,
+            key=operator.itemgetter("sort_time"),
+            reverse=data.get("order", "desc") == "desc",
+        )
 
     def _log_event(self, event: Record, definitions: Record) -> Record | None:
         """Prepare one authored event summary without diagnostic fields.
@@ -864,8 +947,49 @@ class _Page:
         summary = separator.join((summary, *self._log_details(event)))
         reports = self._log_reports(titles)
         time = _time(event.get("time"), seconds=True)
+        status = (
+            "running"
+            if kind.endswith("started")
+            else event.get("status", "unknown")
+        )
+        task = (
+            self.text(routine_key)
+            if routine_key in catalog()
+            else self.text(service_key)
+            if service_key in catalog()
+            else self.text("logs.service.website")
+            if kind.startswith("website_")
+            else self.text("logs.run_task")
+        )
         return {
             "time": time,
+            "sort_time": timestamp(event.get("time"))
+            or dt.datetime.min.replace(tzinfo=dt.UTC),
+            "task": task,
+            "status": status,
+            "result": self.text("state.Running")
+            if status == "running"
+            else self._log_result(
+                status,
+                preview=event.get("dry") is True
+                and kind == "routine_finished",
+            )
+            if kind.endswith("finished")
+            else "—",
+            "duration": duration(event["duration_seconds"], self.interface)
+            if event.get("duration_seconds") is not None
+            else "—",
+            "completion_note": self.text("logs.completed_unknown")
+            if kind.endswith("finished")
+            and status
+            not in {
+                "updated",
+                "no_update",
+                "failed",
+                "deferred",
+                "partial",
+            }
+            else None,
             "time_intro": self.text("logs.time_intro"),
             "time_separator": self.text("logs.time_separator"),
             "summary": summary,
@@ -989,12 +1113,14 @@ class _Page:
         return self.text(f"logs.result.{key}")
 
 
-def render_dashboard(
+def render_dashboard(  # ruff: ignore[too-many-arguments]
     snapshot: Record | None,
     status: Record | None,
     config: Record | None,
     locale: str,
     now: dt.datetime | None = None,
+    *,
+    navigation: Record | None = None,
 ) -> str:
     """Render the dashboard from independent saved observations.
 
@@ -1004,12 +1130,14 @@ def render_dashboard(
         config: Current source version and routine definitions.
         locale: Negotiated interface language.
         now: Optional aware clock for deterministic elapsed time.
+        navigation: Request route and language choices, when available.
 
     Returns:
         Complete escaped HTML document, including unavailable states.
     """
     page = _Page(locale)
     context = page.context(page.text("page.heading"), live=True)
+    context["navigation"] = navigation
     context.update(
         page.live_status(
             status or {},
@@ -1024,6 +1152,7 @@ def render_dashboard(
         if snapshot.get("errors")
         else None,
         sections=page.highlights(snapshot or {}),
+        reviews=page.reviews(snapshot or {}, now or dt.datetime.now(dt.UTC)),
         backlog=page.backlog((snapshot or {}).get("backlog")),
     )
     return _render("dashboard.html", context)
@@ -1062,6 +1191,8 @@ def render_maintenance(
     snapshot: Record | None,
     params: Mapping[str, list[str]],
     locale: str,
+    *,
+    navigation: Record | None = None,
 ) -> str:
     """Render a maintenance list after sorting all saved observations.
 
@@ -1069,6 +1200,7 @@ def render_maintenance(
         snapshot: Validated website snapshot containing the catalogue.
         params: Parsed controls with repeated values retained.
         locale: Negotiated interface language.
+        navigation: Request-specific language links and active location.
 
     Returns:
         Complete escaped HTML with stable sorting and pagination links.
@@ -1088,16 +1220,31 @@ def render_maintenance(
     if selection["task"] not in groups:
         message = "Maintenance task not found."
         raise LookupError(message)
-    if selection["sort"] == "random":
-        selection.setdefault("seed", secrets.token_hex(8))
+    if selection["sort"] == "random" and "seed" not in selection:
+        selection["seed"] = secrets.token_hex(8)
     selected = groups[selection["task"]]
     items = maintenance_items(
-        selected["items"],
+        maintenance_filter(selected["items"], selection),
         selection["sort"],
         selection["order"],
         selection.get("seed", ""),
     )
     portion = maintenance_page(items, selection["page"])
+    if navigation:
+        navigation = {
+            **navigation,
+            "languages": [
+                {
+                    **language,
+                    "url": local_url(
+                        "/maintenance/",
+                        **selection,
+                        lang=language["tag"].lower(),
+                    ),
+                }
+                for language in navigation["languages"]
+            ],
+        }
     page = _Page(locale)
     heading = page.interface.label(selected.get("label"), selected["category"])
     context = page.context(heading)
@@ -1107,16 +1254,58 @@ def render_maintenance(
         "order": "desc" if selection["order"] == "asc" else "asc",
     }
     context.update(
+        navigation=navigation,
         count=page.text("backlog.count", count=f"{selected['count']:,}"),
+        selection=selection,
+        task_choices=[
+            {
+                "value": key,
+                "label": page.interface.label(
+                    group.get("label"),
+                    group["category"],
+                ),
+                "current": key == selection["task"],
+            }
+            for key, group in groups.items()
+        ],
+        assessment_choices={
+            control: [
+                {
+                    "value": key.rsplit(".", 1)[1],
+                    "label": page.text(key),
+                    "current": key.rsplit(".", 1)[1] == selection.get(control),
+                }
+                for key in catalog()
+                if key.startswith(f"assessment.{dimension}.")
+            ]
+            for control, dimension in (
+                ("quality", "class"),
+                ("importance", "importance"),
+            )
+        },
+        clear_url=local_url(
+            "/maintenance/",
+            task=selection["task"],
+            sort=selection["sort"],
+            order=selection["order"],
+        ),
+        range_label=page.text(
+            "backlog.range",
+            start=portion["offset"] + 1 if items else 0,
+            end=portion["offset"] + len(portion["items"]),
+            count=f"{len(items):,}",
+        ),
+        page_number=portion["page"],
+        page_count=portion["pages"],
         updated=page.source_updated(backlog["observed_at"]),
         sort_choices=[
             {
                 "label": page.text(key),
                 "url": local_url(
                     "/maintenance/",
-                    task=selection["task"],
-                    sort=sort,
+                    **{**selection, "sort": sort, "page": "1"},
                 ),
+                "value": sort,
                 "current": sort == selection["sort"],
             }
             for sort, key in (
@@ -1128,6 +1317,25 @@ def render_maintenance(
             )
         ],
         reverse_url=local_url("/maintenance/", **reverse),
+        direction_choices=[
+            {
+                "value": order,
+                "label": page.text(
+                    "backlog.direction."
+                    + ("oldest" if order == "asc" else "newest")
+                    if selection["sort"] == "oldest"
+                    else f"backlog.direction.{order}",
+                ),
+                "current": order == selection["order"],
+            }
+            for order in ("asc", "desc")
+        ],
+        reverse_label=page.text(
+            "backlog.direction."
+            + ("oldest" if reverse["order"] == "asc" else "newest")
+            if selection["sort"] == "oldest"
+            else f"backlog.direction.{reverse['order']}",
+        ),
         cards=[page.worklist_card(item, groups) for item in portion["items"]],
         start=portion["offset"] + 1,
         previous=local_url(
@@ -1158,6 +1366,7 @@ def render_about(
     *,
     status: Record | None = None,
     now: dt.datetime | None = None,
+    navigation: Record | None = None,
 ) -> str:
     """Explain the tool and show its saved server environment.
 
@@ -1166,12 +1375,14 @@ def render_about(
         locale: Negotiated interface language.
         status: Validated saved monitor and resource observations.
         now: Optional clock for deterministic freshness checks.
+        navigation: Request route and language choices, when available.
 
     Returns:
         An informative About page with a read-only live server monitor.
     """
     page = _Page(locale)
     context = page.context(page.text("nav.about"), live=True)
+    context["navigation"] = navigation
     context.update(
         page.live_status(
             status or {},
@@ -1190,13 +1401,14 @@ def render_about(
     return _render("about.html", context)
 
 
-def render_logs(
+def render_logs(  # ruff: ignore[too-many-arguments]
     data: Record,
     locale: str,
     *,
     status: Record | None = None,
     config: Record | None = None,
     now: dt.datetime | None = None,
+    navigation: Record | None = None,
 ) -> str:
     """Render localized major events and daily-file downloads.
 
@@ -1206,12 +1418,28 @@ def render_logs(
         status: Validated routine and scheduler observations.
         config: Current source version and routine definitions.
         now: Optional aware clock for deterministic status freshness.
+        navigation: Request-specific navigation and language choices.
 
     Returns:
         Escaped event summaries without exposing diagnostic text.
     """
     page = _Page(locale)
     context = page.context(page.text("logs.heading"), live=True)
+    context.update(navigation=navigation)
+    selected_date = data.get("date") or (
+        data["files"][0]["date"] if data["files"] else None
+    )
+    order = data.get("order", "desc")
+    selected_status = data.get("status", "all")
+    events = page.log_events(data, config or {})
+    page_count = max(1, (len(events) + _LOG_PAGE_SIZE - 1) // _LOG_PAGE_SIZE)
+    current_page = min(int(data.get("page", 1)), page_count)
+    selection = {
+        "date": selected_date,
+        "q": data.get("query", ""),
+        "order": order,
+        "status": selected_status,
+    }
     context.update(
         page.live_status(
             status or {},
@@ -1230,13 +1458,56 @@ def render_logs(
                     date=row["date"],
                     download=1,
                 ),
-                "selected": row["date"] == data.get("date"),
+                "selected": row["date"] == selected_date,
             }
             for row in data["files"]
         ],
         query=data.get("query", ""),
+        selected_date=selected_date,
+        selected_download=local_url("/logs/", date=selected_date, download=1)
+        if selected_date
+        else None,
+        order=order,
+        selected_status=selected_status,
+        status_choices=[
+            {
+                "value": status,
+                "label": page.text("state.Running")
+                if status == "running"
+                else page.text(f"logs.result.{status}"),
+            }
+            for status in (
+                "running",
+                "updated",
+                "no_update",
+                "failed",
+                "deferred",
+                "unconfirmed",
+                "partial",
+                "unknown",
+            )
+        ],
+        clear_url=local_url("/logs/", date=selected_date, order=order),
+        match_count=page.text(
+            "logs.count",
+            count=f"{len(events):,}",
+            date=selected_date,
+        ),
+        pagination=page.text(
+            "logs.pagination",
+            page=current_page,
+            pages=page_count,
+        ),
+        previous=local_url("/logs/", **selection, page=current_page - 1)
+        if current_page > 1
+        else None,
+        following=local_url("/logs/", **selection, page=current_page + 1)
+        if current_page < page_count
+        else None,
         truncated=data.get("truncated", False),
-        events=page.log_events(data, config or {}),
+        events=events[
+            (current_page - 1) * _LOG_PAGE_SIZE : current_page * _LOG_PAGE_SIZE
+        ],
     )
     return _render("logs.html", context)
 

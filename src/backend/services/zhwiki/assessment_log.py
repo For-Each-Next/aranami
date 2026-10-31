@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -70,6 +71,7 @@ class AssessmentLogData:
         references: Observed talk titles and subject/talk revision IDs.
         pending: Retained unsaved history still needs publication.
         unchanged: A newer daily observation confirms no changes.
+        summaries: Retained per-day assessment totals paragraphs.
     """
 
     members: pl.DataFrame
@@ -85,6 +87,14 @@ class AssessmentLogData:
     )
     pending: bool = False
     unchanged: bool = False
+    summaries: Mapping[dt.date, str] = field(default_factory=dict)
+
+    @property
+    def report_date(self) -> dt.date:
+        """The completed UTC day represented by the snapshot."""
+        return self.calculated_at.astimezone(dt.UTC).date() - dt.timedelta(
+            days=1,
+        )
 
 
 @dataclass(frozen=True)
@@ -182,10 +192,39 @@ def compare_members(
     ).sort("kind", "title", "old_title", "page_id", nulls_last=True)
 
 
+def _daily_summaries(
+    introductions: Mapping[dt.date, str],
+    days: Mapping[dt.date, Mapping[str, str]],
+) -> dict[dt.date, str]:
+    """Read totals while validating each day's introductory text.
+
+    Args:
+        introductions: Text before each day's first change group.
+        days: Parsed change groups for every observation date.
+
+    Returns:
+        Exact totals paragraphs, without no-change markers.
+
+    Raises:
+        ValueError: Daily text has unsupported or contradictory content.
+    """
+    summaries = {}
+    for day, introduction in introductions.items():
+        paragraphs = introduction.strip().split("\n\n", maxsplit=1)
+        if re.fullmatch(r"'''总条目'''[0-9,]+篇。[^\r\n]*", paragraphs[0]):
+            summaries[day] = paragraphs.pop(0)
+        if "\n\n".join(paragraphs).strip() != ("" if days[day] else "無變更"):
+            message = (
+                "Assessment log needs change groups or standalone 無變更."
+            )
+            raise ValueError(message)
+    return summaries
+
+
 def _history(
     body: str,
     cutoff: dt.date,
-) -> tuple[str, dict[dt.date, dict[str, str]], bool]:
+) -> tuple[str, dict[dt.date, dict[str, str]], dict[dt.date, str], bool]:
     """Read existing daily sections without interpreting their entries.
 
     Args:
@@ -193,7 +232,7 @@ def _history(
         cutoff: Earliest retained UTC date.
 
     Returns:
-        Preserved introduction, group bodies, and pruning observation.
+        Preserved introduction, group bodies, daily totals, and pruning.
 
     Raises:
         ValueError: Headings or groups are ambiguous or unsupported.
@@ -229,14 +268,14 @@ def _history(
             days[day][group] += str(node)
         else:
             introductions[day] += str(node)
-    if any(
-        introduction.strip() != ("" if days[day] else "無變更")
-        for day, introduction in introductions.items()
-    ):
-        message = "Assessment log needs change groups or standalone 無變更."
-        raise ValueError(message)
+    summaries = _daily_summaries(introductions, days)
     retained = {day: groups for day, groups in days.items() if day >= cutoff}
-    return prefix, retained, len(retained) != len(days)
+    return (
+        prefix,
+        retained,
+        {day: summary for day, summary in summaries.items() if day >= cutoff},
+        len(retained) != len(days),
+    )
 
 
 def _digest(body: str) -> str:
@@ -441,13 +480,16 @@ def prepare_data(  # ruff: ignore[too-many-arguments, too-many-locals]
         message = "Assessment-log observation time must include a timezone."
         raise ValueError(message)
     instant = instant.astimezone(dt.UTC)
-    cutoff = instant.date() - dt.timedelta(days=days - 1)
-    prefix, history, pruned = _history(body, cutoff)
+    cutoff = instant.date() - dt.timedelta(days=days)
+    prefix, history, summaries, pruned = _history(body, cutoff)
     key = report_key("assessment-log", site.dbName(), report_title)
     previous = _baseline(key, project, body)
     pending = previous is not None and previous.body != body
     if pending:
-        prefix, history, pending_pruned = _history(previous.body, cutoff)
+        prefix, history, summaries, pending_pruned = _history(
+            previous.body,
+            cutoff,
+        )
         pruned = pruned or pending_pruned
     snapshot = get_snapshot(site, project, observed_at=instant, dry=dry)
     source = snapshot.tables["members"]
@@ -505,6 +547,7 @@ def prepare_data(  # ruff: ignore[too-many-arguments, too-many-locals]
         metadata={
             "project": project,
             "days": days,
+            "report_date": (instant.date() - dt.timedelta(days=1)).isoformat(),
             "baseline_sha256": _digest(body),
         },
         provenance={
@@ -531,4 +574,5 @@ def prepare_data(  # ruff: ignore[too-many-arguments, too-many-locals]
             and state.observed_at.date() < instant.date()
             and changes.is_empty()
         ),
+        summaries=summaries,
     )

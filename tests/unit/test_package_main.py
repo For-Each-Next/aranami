@@ -81,6 +81,7 @@ class TestPackageMain(TestCase):
         assert config.days == 30  # ruff: ignore[magic-value-comparison]
         assert (config.host, config.port) == ("127.0.0.2", 9000)
         assert config.refresh_intervals == {
+            "reviews": 3600,
             "recognized": 12 * 3600,
             "dyk": 6 * 3600,
             "pageviews": 2 * 3600,

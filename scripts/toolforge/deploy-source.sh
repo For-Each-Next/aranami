@@ -1,5 +1,5 @@
 #!/bin/sh
-# Validate an isolated generation, then promote it with applications stopped.
+# Validate immutable code, select it atomically, and replace existing services.
 set -eu
 umask 027
 tool_dir=${ARANAMI_TOOL_DIR:-/data/project/aranami}
@@ -21,22 +21,27 @@ validator="$stage/scripts/toolforge/validate-source.py"
 # No jobs, source directories, or runtime data change before this succeeds.
 python3 "$validator" verify "$stage"
 cd "$tool_dir"
-for path in app app.previous deployment-backups deployment-envs; do
+for path in deployment-backups deployment-envs; do
     test ! -L "$path"
     if [ -e "$path" ]; then test -d "$path"; fi
 done
-test ! -L active-deployment.json
-if [ -e active-deployment.json ]; then test -f active-deployment.json; fi
+legacy=false
+if [ -L app ]; then
+    previous_source=$(readlink app)
+    previous_token=${previous_source#app-staging-}
+    case "$previous_token" in ''|*[!a-f0-9]*) exit 2 ;; esac
+    test "${#previous_token}" -eq 32 && test "$previous_source" = "app-staging-$previous_token"
+    python3 "$validator" runtime "$tool_dir/$previous_source" >/dev/null
+elif [ -e app ]; then
+    test -d app
+    legacy=true
+fi
 mkdir deployment.lock || { printf '%s\n' 'Another deployment holds deployment.lock.' >&2; exit 1; }
 backup=
+backup_created=false
 setup_started=false
-promoted=false
-saved_app=false
-rotated_previous=false
-environment_changed=false
-environment_kind=absent
-active_changed=false
-active_existed=false
+selected=false
+legacy_moved=false
 
 wait_stopped() {
     selector=$1
@@ -48,41 +53,51 @@ wait_stopped() {
     test -z "$remaining"
 }
 
+pause_service() {
+    service=$1
+    replicas=$(cat "$backup/$service.replicas")
+    kubectl scale deployment "$service" --current-replicas="$replicas" --replicas=0 || return 1
+    wait_stopped "app.kubernetes.io/name=$service" || return 1
+    # Only confirmed termination permits a replacement publisher to start.
+    touch "$backup/$service.stopped"
+}
+
+resume_service() {
+    service=$1
+    replicas=$(cat "$backup/$service.replicas")
+    kubectl scale deployment "$service" --current-replicas=0 --replicas="$replicas" || return 1
+    rm "$backup/$service.stopped"
+}
+
 finish() {
     status=$?
     trap - 0 HUP INT TERM
     set +e
-    rollback_safe=true
-    if [ "$status" -ne 0 ] && [ "$setup_started" = true ]; then
-        toolforge jobs delete "$setup_job" >/dev/null 2>&1
-        if ! wait_stopped "app.kubernetes.io/name=$setup_job"; then
-            rollback_safe=false
-            printf '%s\n' 'Setup shutdown could not be confirmed; inspect before restoring source.' >&2
-        fi
-    fi
-    if [ "$status" -ne 0 ] && [ "$rollback_safe" = true ]; then
-        if [ "$active_changed" = true ]; then
-            if [ "$active_existed" = true ]; then
-                cp -p "$backup/active-deployment.before" active-deployment.json
-            else
-                rm -f active-deployment.json
+    release_lock=true
+    if [ -L app ] && [ "$(readlink app)" = "${stage##*/}" ]; then selected=true; fi
+    if [ "$status" -ne 0 ]; then
+        if [ "$setup_started" = true ]; then
+            toolforge jobs delete "$setup_job" >/dev/null 2>&1
+            if ! wait_stopped "app.kubernetes.io/name=$setup_job"; then
+                release_lock=false
+                printf '%s\n' 'Setup shutdown is unconfirmed; deployment.lock retained for inspection.' >&2
             fi
         fi
-        if [ "$environment_changed" = true ]; then
-            if [ -L pyvenv-3.15 ]; then rm pyvenv-3.15; fi
-            if [ "$environment_kind" = directory ]; then
-                mv "$backup/previous-environment" pyvenv-3.15
-            elif [ "$environment_kind" = link ]; then
-                previous_environment=$(cat "$backup/previous-environment-link")
-                ln -s "$previous_environment" pyvenv-3.15
+        if [ "$selected" = false ]; then
+            if [ "$legacy_moved" = true ] && [ ! -e app ] && [ ! -L app ]; then
+                mv "$backup/legacy-app" app
             fi
+            if [ "$backup_created" = true ]; then
+                for service in aranami-web aranami-hub; do
+                    if [ -f "$backup/$service.stopped" ]; then resume_service "$service"; fi
+                done
+            fi
+            printf 'Deployment failed before activation; prior source retained. Inspect service state and backup: %s\n' "$backup" >&2
+        else
+            printf 'Code activated, but service replacement failed. Retained both generations; inspect jobs before retrying. Backup: %s\n' "$backup" >&2
         fi
-        if [ "$promoted" = true ]; then mv app "$backup/rejected-app"; fi
-        if [ "$saved_app" = true ]; then mv app.previous app; fi
-        if [ "$rotated_previous" = true ]; then mv "$backup/older-app" app.previous; fi
-        printf 'Deployment failed. Prior source was retained; no application was started. Backup: %s\n' "$backup" >&2
     fi
-    rmdir deployment.lock
+    if [ "$release_lock" = true ]; then rmdir deployment.lock; fi
     exit "$status"
 }
 trap finish 0
@@ -91,11 +106,14 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 mkdir -p deployment-backups deployment-envs
-backup=$(mktemp -d "$tool_dir/deployment-backups/source-$token.XXXXXXXX")
-environment="$tool_dir/deployment-envs/${backup##*/}"
+backup="$tool_dir/deployment-backups/source-$token"
+# A token is used once; never overwrite another transaction's setup proof.
+mkdir "$backup"
+backup_created=true
+environment="$tool_dir/deployment-envs/source-$token"
 receipt="$backup/setup-success.json"
 setup_job="aranami-setup-$token"
-toolforge jobs dump -f "$backup/jobs.yaml"
+if [ -L app ]; then cp -P app "$backup/app.before"; fi
 # Dependency installation never mutates the active environment or source.
 setup_started=true
 toolforge jobs run "$setup_job" --image python3.13 --mount=all \
@@ -103,39 +121,52 @@ toolforge jobs run "$setup_job" --image python3.13 --mount=all \
 # --wait is not evidence of a successful container exit: require exact proof.
 python3 "$validator" receipt "$stage" "$receipt"
 setup_started=false
-for job in aranami-hub aranami-web; do
-    if toolforge jobs show "$job" >/dev/null 2>&1; then toolforge jobs delete "$job"; fi
+# Observe current services after setup, which may take several minutes.
+toolforge jobs dump -f "$backup/jobs.yaml"
+for service in aranami-web aranami-hub; do
+    replicas=$(kubectl get deployment "$service" --ignore-not-found -o 'jsonpath={.spec.replicas}')
+    case "$replicas" in
+        ''|0) continue ;;
+        *[!0-9]*) printf 'Invalid replica count for %s.\n' "$service" >&2; exit 1 ;;
+    esac
+    if [ "$service" = aranami-hub ]; then test "$replicas" = 1; fi
+    printf '%s\n' "$replicas" > "$backup/$service.replicas"
 done
-wait_stopped 'app.kubernetes.io/name in (aranami-hub,aranami-web)'
-if [ -e app.previous ]; then
-    mv app.previous "$backup/older-app"
-    rotated_previous=true
+if [ "$legacy" = true ]; then
+    printf '%s\n' 'Migrating legacy source: briefly pausing existing services once.'
+    for service in aranami-web aranami-hub; do
+        if [ -f "$backup/$service.replicas" ]; then pause_service "$service"; fi
+    done
+    wait_stopped 'app.kubernetes.io/name in (aranami-hub,aranami-web)'
+    mv app "$backup/legacy-app"
+    legacy_moved=true
 fi
-if [ -e app ]; then
-    mv app app.previous
-    saved_app=true
-fi
-mv "$stage" app
-promoted=true
-if [ -L pyvenv-3.15 ]; then
-    readlink pyvenv-3.15 > "$backup/previous-environment-link"
-    environment_kind=link
-    rm pyvenv-3.15
-elif [ -e pyvenv-3.15 ]; then
-    test -d pyvenv-3.15
-    mv pyvenv-3.15 "$backup/previous-environment"
-    environment_kind=directory
-fi
-environment_changed=true
-ln -s "deployment-envs/${environment##*/}" pyvenv-3.15
-if [ -e active-deployment.json ]; then
-    cp -p active-deployment.json "$backup/active-deployment.before"
-    active_existed=true
-fi
-active_changed=true
-cp "$receipt" active-deployment.json
-python3 app/scripts/toolforge/validate-source.py receipt "$tool_dir/app" "$tool_dir/active-deployment.json"
-printf '%s\n' 'Validated source and isolated Python 3.15 environment promoted. Applications remain stopped.' \
+# app is the only selection pointer. Keep every uploaded source at its path.
+python3 "$validator" select "$stage"
+selected=true
+for service in aranami-web aranami-hub; do
+    if [ ! -f "$backup/$service.replicas" ]; then continue; fi
+    if [ -f "$backup/$service.stopped" ]; then
+        resume_service "$service"
+    elif [ "$service" = aranami-hub ]; then
+        # Do not overlap publishers even if the platform uses rolling restarts.
+        pause_service "$service"
+        resume_service "$service"
+    else
+        replicas=$(kubectl get deployment "$service" --ignore-not-found -o 'jsonpath={.spec.replicas}')
+        test "$replicas" = "$(cat "$backup/$service.replicas")" || {
+            printf 'Service state changed during deployment: %s.\n' "$service" >&2; exit 1;
+        }
+        old_pods=$(kubectl get pods -l "app.kubernetes.io/name=$service" -o name)
+        toolforge jobs restart "$service"
+        if [ -n "$old_pods" ]; then
+            # Kubernetes supplies whitespace-separated resource names here.
+            kubectl wait --for=delete $old_pods --timeout=180s
+        fi
+    fi
+    kubectl rollout status "deployment/$service" --timeout=180s
+done
+printf '%s\n' 'Validated code activated; existing services replaced. Missing or paused services were not started.' \
     "Backup: $backup" \
-    "Start website: toolforge jobs run aranami-web --image python3.13 --continuous --mount=all --port 8000 --publish --command 'exec sh $tool_dir/app/scripts/toolforge/run-web.sh'" \
-    "Start data hub and publication explicitly: toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --mem 4Gi --command 'exec sh $tool_dir/app/scripts/toolforge/run-hub.sh'"
+    "First website start: toolforge jobs run aranami-web --image python3.13 --continuous --mount=all --port 8000 --publish --command 'exec sh $tool_dir/app/scripts/toolforge/run-web.sh'" \
+    "First hub start (live publication): toolforge jobs run aranami-hub --image python3.13 --continuous --mount=all --mem 4Gi --command 'exec sh $tool_dir/app/scripts/toolforge/run-hub.sh'"

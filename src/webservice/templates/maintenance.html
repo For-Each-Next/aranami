@@ -1,2 +1,33 @@
 {% extends "base.html" %}
-{% block content %}<a href="/#backlog" class="back">{{ t.backlog.back }}</a><p class="context">{{ t.backlog.heading }}</p><div class="metadata"><p>{{ count }}</p>{% include "includes/source_updated.html" %}</div><nav class="sort-controls" aria-label="{{ t.backlog.sort.heading }}"><span>{{ t.backlog.sort.heading }}:</span>{% for choice in sort_choices %}<a href="{{ choice.url }}"{% if choice.current %} aria-current="true"{% endif %}>{{ choice.label }}</a>{% endfor %}<a href="{{ reverse_url }}">[{{ t.backlog.sort.reverse }}]</a></nav>{% if cards %}<ol class="card-grid article-list" start="{{ start }}" aria-label="{{ heading }}">{% for card in cards %}<li class="article-card">{% include "includes/article_summary.html" %}<ul class="card-meta issues" aria-label="{{ t.backlog.column.issues }}">{% for issue in card.issues %}<li>{{ issue }}</li>{% else %}<li class="unknown">—</li>{% endfor %}</ul><p class="card-meta" aria-label="{{ t.backlog.column.oldest }}">{% if card.month %}{% if card.month.url %}<a href="{{ card.month.url }}">{% endif %}<time datetime="{{ card.month.value }}">{{ card.month.label }}</time>{% if card.month.url %}</a>{% endif %}{% else %}—{% endif %}</p></li>{% endfor %}</ol>{% else %}<p class="empty">{{ t.backlog.empty }}</p>{% endif %}<nav class="pagination" aria-label="{{ t.nav.backlog }}">{% if previous %}<a href="{{ previous }}" rel="prev">{{ t.backlog.previous }}</a>{% endif %}<p>{{ pagination }}</p>{% if following %}<a href="{{ following }}" rel="next">{{ t.backlog.next }}</a>{% endif %}</nav><p>{{ t.backlog.source }}: {{ source_link }}</p>{% endblock %}
+{% block content %}
+<a href="/#backlog" class="back">{{ t.backlog.back }}</a>
+<p class="context">{{ t.backlog.heading }}</p>
+<div class="metadata"><p>{{ count }}</p>{% include "includes/source_updated.html" %}</div>
+<form class="maintenance-controls" action="/maintenance/" method="get">
+  <div class="field"><label for="maintenance-task">{{ t.backlog.task }}</label><select id="maintenance-task" name="task">{% for choice in task_choices %}<option value="{{ choice.value }}"{% if choice.current %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="maintenance-query">{{ t.backlog.search }}</label><input id="maintenance-query" name="q" type="search" maxlength="200" value="{{ selection.get('q', '') }}"></div>
+  {% for name, label in [('quality', t.backlog.sort.class), ('importance', t.backlog.column.importance)] %}<div class="field"><label for="maintenance-{{ name }}">{{ label }}</label><select id="maintenance-{{ name }}" name="{{ name }}"><option value="">{{ t.backlog.all }}</option>{% for choice in assessment_choices[name] %}<option value="{{ choice.value }}"{% if choice.current %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select></div>{% endfor %}
+  <div class="field"><label for="maintenance-sort">{{ t.backlog.sort.heading }}</label><select id="maintenance-sort" name="sort">{% for choice in sort_choices %}<option value="{{ choice.value }}"{% if choice.current %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="maintenance-order">{{ t.backlog.direction.heading }}</label><select id="maintenance-order" name="order">{% for choice in direction_choices %}<option value="{{ choice.value }}"{% if choice.current %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select></div>
+  {% if selection.get('seed') %}<input name="seed" type="hidden" value="{{ selection.seed }}">{% endif %}
+  <div class="form-actions"><button type="submit" class="button-primary">{{ t.backlog.apply }}</button><a href="{{ clear_url }}">{{ t.backlog['clear'] }}</a></div>
+</form>
+{% include "includes/assessment_legend.html" %}
+<nav class="sort-controls" aria-label="{{ t.backlog.sort.heading }}"><span>{{ t.backlog.sort.heading }}:</span>{% for choice in sort_choices %}<a href="{{ choice.url }}"{% if choice.current %} aria-current="true"{% endif %}>{{ choice.label }}</a>{% endfor %}<a href="{{ reverse_url }}">{{ reverse_label }}</a></nav>
+{% with position='top' %}{% include "includes/maintenance_pagination.html" %}{% endwith %}
+{% if cards %}
+<table class="maintenance-table" role="table">
+  <caption>{{ range_label }}</caption>
+  <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">#</th><th scope="col" role="columnheader">{{ t.backlog.sort.title }}</th><th scope="col" role="columnheader">{{ t.backlog.sort.class }}</th><th scope="col" role="columnheader">{{ t.backlog.column.importance }}</th><th scope="col" role="columnheader">{{ t.backlog.column.issues }}</th><th scope="col" role="columnheader">{{ t.backlog.sort.time }}</th></tr></thead>
+  <tbody role="rowgroup">{% for card in cards %}<tr role="row">
+    <td role="cell" class="row-number" data-label="#">{{ start + loop.index0 }}</td>
+    <th scope="row" role="rowheader"><bdi lang="zh">{{ card.link }}</bdi></th>
+    {% for dimension, label in [('class', t.backlog.sort.class), ('importance', t.backlog.column.importance)] %}<td role="cell" data-label="{{ label }}">{% for assessment in card.assessments if assessment.dimension == dimension %}{{ assessment.label }}{% else %}{{ t.assessment.class.Unassessed if dimension == 'class' else t.assessment.importance.Unknown }}{% endfor %}</td>{% endfor %}
+    <td role="cell" data-label="{{ t.backlog.column.issues }}"><ul class="issues">{% for issue in card.issues %}<li>{{ issue }}</li>{% else %}<li>—</li>{% endfor %}</ul></td>
+    <td role="cell" data-label="{{ t.backlog.sort.time }}">{% if card.month %}{% if card.month.url %}<a href="{{ card.month.url }}">{% endif %}<time datetime="{{ card.month.value }}">{{ card.month.label }}</time>{% if card.month.url %}</a>{% endif %}{% else %}—{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table>
+{% else %}<p class="empty">{{ t.backlog.empty }}</p>{% endif %}
+{% with position='bottom' %}{% include "includes/maintenance_pagination.html" %}{% endwith %}
+<p>{{ t.backlog.source }}: {{ source_link }}</p>
+{% endblock %}

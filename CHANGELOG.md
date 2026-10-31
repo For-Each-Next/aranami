@@ -4,10 +4,53 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.6 (2026-10-31 07:06 UTC)
+
+Overview: Added hourly content-review cards and rebuilt the webservice with
+Wikimedia Codex styles, localized reports, and accessible navigation. Introduced
+immutable source deployments with individual service replacement, corrected
+assessment report dates and totals, and maintained DYK chart data inline.
+
+- Pinned each service and manual job to its source and Python environment,
+  with atomic selection and retained generations for recovery.
+- Replaced the website before restarting the hub, requiring confirmed hub
+  termination and preserving missing or deliberately paused services.
+- Preserved job settings and runtime data through legacy migration, with
+  documented recovery and offline coverage for deployment failures.
+- Added localized content-review cards with ordered nominations, assessments,
+  introductions, discussion links, and observed ages from wiki review sources.
+- Resolved Chinese title variants and redirects, including category-backed
+  project reviews and nominees discovered directly from proposal pages.
+- Cached hourly results and revision-keyed parses, reused article summaries,
+  and retained successful data through failed refreshes and restarts.
+- Restored mobile log downloads while keeping archive headers and body cells
+  aligned at narrow widths.
+- Added persistent language choices and shared navigation, localized assessment
+  fallbacks, dimension labels, meaningful report names, and a rating guide.
+- Made report details modal with keyboard containment, inert backgrounds,
+  focus restoration, responsive fields, and stable live reconciliation.
+- Added maintenance title/assessment filters, explicit ordering, compact rows,
+  matching ranges, and direct pagination at both ends.
+- Paged logs newest first with result filters, counts, nearby downloads,
+  expandable details, and clear unknown outcomes without false failures.
+- Redesigned all pages and report dialogs with Codex typography, neutral surfaces,
+  blue actions, responsive contents navigation, and accessible native controls.
+- Preserved accessible article numbering on Safari and expanded multilingual
+  browser checks for responsive layouts, dialogs, and use without JavaScript.
+- Replaced obsolete interface specifications with the Codex design reference
+  and synchronized fallback release metadata.
+- Labeled midnight assessment observations with the previous UTC date and added
+  ordered article/list quality and importance totals, omitting zero counts.
+- Updated DYK chart dates and counts in inline managed ranges with comma-space
+  separators, replacing the obsolete generated Commons statistics comment.
+- Corrected six existing wiki log dates with synchronized publication state,
+  and initialized inline DYK chart markers while removing its old JSON comment.
+
 ### 0.7.5 (2026-10-25 12:07 UTC)
 
 Overview: Added reusable daily project assessment snapshots and a Chinese
-video-game change log with durable membership comparisons.
+video-game change log with durable membership comparisons. Defined the
+branch and merge workflow for repository tasks.
 
 - Retained complete project PageAssessments in daily Parquet snapshots at
   the `00:00 UTC` trigger, preserving actual collection times for reuse.
@@ -21,6 +64,8 @@ video-game change log with durable membership comparisons.
   publication recovery, managed ranges, and first-observation baselines.
 - Initialized the wiki's managed range through October 24 as a separate
   action, retaining the complete current project baseline.
+- Required a new branch for each repository task and a merge into `trunk`
+  after completion and verification.
 
 ### 0.7.4 (2026-10-24 16:30 UTC)
 

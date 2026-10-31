@@ -1,0 +1,1 @@
+{% if reviews %}<section class="section-flat" id="reviews" aria-labelledby="reviews-heading"><h2 id="reviews-heading">{{ t.reviews.heading }}</h2>{% with section=reviews %}{% include "includes/article_cards.html" %}{% endwith %}{% with updated=reviews.updated %}{% include "includes/source_updated.html" %}{% endwith %}</section>{% endif %}

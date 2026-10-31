@@ -34,17 +34,47 @@ args = sys.argv[1:]
 with (root / "commands.jsonl").open("a") as stream:
     stream.write(json.dumps([name, *args]) + "\n")
 if name == "python3":
-    if (len(args) > 3 and args[1] == "receipt"
-            and args[3] == str(root / "active-deployment.json")
-            and os.environ.get("FAKE_RECEIPT_FAILURE")):
+    if (len(args) > 1 and args[1] == "select"
+            and os.environ.get("FAKE_SELECTION_FAILURE")):
         raise SystemExit(17)
     os.execv(os.environ["TEST_PYTHON"], [os.environ["TEST_PYTHON"], *args])
 if name == "kubectl":
-    if os.environ.get("FAKE_PODS_STUCK"):
-        if args[0] == "get":
+    stuck_service = os.environ.get("FAKE_STUCK_SERVICE")
+    stuck = os.environ.get("FAKE_PODS_STUCK") or (
+        stuck_service and stuck_service in " ".join(args)
+    )
+    state = root / "fake-replicas.json"
+    replicas = json.loads(state.read_text()) if state.exists() else {
+        "aranami-hub": os.environ.get("FAKE_HUB_REPLICAS", "1"),
+        "aranami-web": os.environ.get("FAKE_WEB_REPLICAS", "1"),
+    }
+    if args[:2] == ["get", "deployment"]:
+        print(replicas[args[2]], end="")
+    elif args[:2] == ["get", "pods"]:
+        selector = args[args.index("-l") + 1]
+        if stuck:
             print("pod/still-running")
         else:
+            for service, count in replicas.items():
+                if service in selector and count not in {"", "0"}:
+                    print(f"pod/{service}-old")
+    elif args[0] == "scale":
+        service = args[2]
+        expected = next(arg.split("=", 1)[1] for arg in args
+                        if arg.startswith("--current-replicas="))
+        assert replicas[service] == expected, (args, replicas)
+        replicas[service] = next(arg.split("=", 1)[1] for arg in args
+                                 if arg.startswith("--replicas="))
+        state.write_text(json.dumps(replicas))
+    elif args[0] == "wait":
+        if stuck:
             raise SystemExit(9)
+    elif args[:2] == ["rollout", "status"]:
+        assert (root / "app").is_symlink()
+        if os.environ.get("FAKE_ROLLOUT_FAILURE"):
+            raise SystemExit(10)
+    else:
+        raise AssertionError(args)
     raise SystemExit(0)
 if name == "uv":
     if args == ["--version"]:
@@ -73,7 +103,10 @@ if args[:2] == ["jobs", "dump"]:
 elif args[:2] == ["jobs", "show"]:
     assert args[2] in {"aranami-hub", "aranami-web"}
 elif args[:2] == ["jobs", "delete"]:
-    pass
+    assert args[2].startswith("aranami-setup-"), args
+elif args[:2] == ["jobs", "restart"]:
+    assert args[2] == "aranami-web", args
+    assert (root / "app").is_symlink()
 elif args[:2] == ["jobs", "run"]:
     mode = os.environ.get("FAKE_SETUP_MODE", "success")
     if mode == "silent-failure":
@@ -231,16 +264,33 @@ class TestDeploymentShell(TestCase):
             self.root / "reports/keep.parquet"
         ).read_text() == "retained report"
 
-    def test_success_validates_before_stop_and_keeps_publication_stopped(
+    def test_unconfirmed_setup_exit_keeps_the_deployment_guard(self) -> None:
+        """Keep the guard when setup termination is unconfirmed."""
+        result = self._deploy(
+            self._stage(),
+            FAKE_SETUP_MODE="failure",
+            FAKE_PODS_STUCK="1",
+        )
+        assert result.returncode != 0
+        assert (self.root / "deployment.lock").is_dir()
+        assert (self.root / "app/old-source.txt").exists()
+        assert "Setup shutdown is unconfirmed" in result.stderr
+
+    def test_legacy_migration_validates_before_pause_and_preserves_jobs(
         self,
     ) -> None:
-        """Promote a complete generation and preserve private data."""
-        result = self._deploy(self._stage())
+        """Migrate old source once and resume only existing services."""
+        stage = self._stage()
+        result = self._deploy(stage)
         assert result.returncode == 0, result.stderr
+        assert (self.root / "app").is_symlink()
+        assert (self.root / "app").resolve() == stage
         assert (self.root / "app/deployment.json").is_file()
-        assert (self.root / "app.previous/old-source.txt").exists()
+        backup = self.root / f"deployment-backups/source-{'a' * 32}"
+        assert (backup / "legacy-app/old-source.txt").exists()
+        assert (self.root / "app.previous/older-source.txt").exists()
         assert (self.root / "app/src/webservice/pages.py").is_file()
-        assert (self.root / "pyvenv-3.15").is_symlink()
+        assert (self.root / "pyvenv-3.15/old-environment.txt").exists()
         assert (self.root / "logs/keep.log").read_text() == "retained log"
         assert (
             self.root / "cache/keep.parquet"
@@ -257,14 +307,18 @@ class TestDeploymentShell(TestCase):
         stopped = next(
             index
             for index, command in enumerate(commands)
-            if command[:3] == ["toolforge", "jobs", "delete"]
+            if command[:2] == ["kubectl", "scale"]
         )
         assert run < stopped
         assert {"aranami-hub", "aranami-web"} == {
             command[3]
             for command in commands
-            if command[:3] == ["toolforge", "jobs", "delete"]
+            if command[:2] == ["kubectl", "scale"]
         }
+        assert not any(
+            command[:3] == ["toolforge", "jobs", "delete"]
+            for command in commands
+        )
         started = [
             command
             for command in commands
@@ -272,7 +326,7 @@ class TestDeploymentShell(TestCase):
         ]
         assert len(started) == 1
         assert started[0][3].startswith("aranami-setup-")
-        assert "Applications remain stopped" in result.stdout
+        assert "existing services replaced" in result.stdout
         assert "--port 8000 --publish" in result.stdout
         assert (
             f"--command 'exec sh {self.root}/app/scripts/toolforge/run-web.sh'"
@@ -283,21 +337,20 @@ class TestDeploymentShell(TestCase):
             in result.stdout
         )
 
-    def test_post_promotion_failure_restores_source_and_environment(
+    def test_selection_failure_restores_legacy_source_and_services(
         self,
     ) -> None:
-        """Restore predecessors without starting applications."""
-        result = self._deploy(self._stage(), FAKE_RECEIPT_FAILURE="1")
+        """Restore predecessors when activation has not occurred."""
+        result = self._deploy(self._stage(), FAKE_SELECTION_FAILURE="1")
         assert result.returncode != 0
         assert (self.root / "app/old-source.txt").exists()
         assert (self.root / "app.previous/older-source.txt").exists()
         assert (self.root / "pyvenv-3.15/old-environment.txt").exists()
         assert not (self.root / "active-deployment.json").exists()
-        assert list(
-            (self.root / "deployment-backups").glob(
-                "*/rejected-app/deployment.json",
-            ),
-        )
+        assert json.loads((self.root / "fake-replicas.json").read_text()) == {
+            "aranami-hub": "1",
+            "aranami-web": "1",
+        }
 
     def test_both_launchers_reject_changed_source_before_application_start(
         self,
@@ -324,22 +377,180 @@ class TestDeploymentShell(TestCase):
                 assert "hash" in result.stderr
                 assert "usage:" not in result.stdout
 
-    def test_repeated_promotions_keep_current_and_older_predecessors(
+    def test_later_promotions_keep_generations_and_restart_sequentially(
         self,
     ) -> None:
-        """Preserve predecessors across later source uploads."""
-        first = self._deploy(self._stage())
+        """Keep the website available while replacing its publisher."""
+        first_stage = self._stage()
+        first = self._deploy(first_stage)
         assert first.returncode == 0, first.stderr
-        first_environment = (self.root / "pyvenv-3.15").resolve()
-        second = self._deploy(self._stage("b" * 32))
+        first_environment = self.root / f"deployment-envs/source-{'a' * 32}"
+        count = len(self._commands())
+        second_stage = self._stage("b" * 32)
+        second = self._deploy(second_stage)
         assert second.returncode == 0, second.stderr
-        assert (self.root / "app.previous/deployment.json").exists()
+        assert (self.root / "app").resolve() == second_stage
+        assert (first_stage / "deployment.json").exists()
         assert first_environment.exists()
-        assert (self.root / "pyvenv-3.15").resolve() != first_environment
-        assert list(
-            (self.root / "deployment-backups").glob(
-                "*/older-app/old-source.txt",
-            ),
+        commands = self._commands()[count:]
+        restart = commands.index([
+            "toolforge",
+            "jobs",
+            "restart",
+            "aranami-web",
+        ])
+        paused = next(
+            index
+            for index, command in enumerate(commands)
+            if command[:4] == ["kubectl", "scale", "deployment", "aranami-hub"]
+        )
+        assert restart < paused
+        assert not any(
+            command[:4] == ["kubectl", "scale", "deployment", "aranami-web"]
+            for command in commands
+        )
+        backup = self.root / f"deployment-backups/source-{'b' * 32}"
+        assert (backup / "app.before").readlink() == Path(first_stage.name)
+
+    def test_missing_and_paused_services_are_not_started(self) -> None:
+        """Preserve absent jobs and deliberately paused publication."""
+        result = self._deploy(
+            self._stage(),
+            FAKE_HUB_REPLICAS="",
+            FAKE_WEB_REPLICAS="0",
+        )
+        assert result.returncode == 0, result.stderr
+        assert not any(
+            command[:2] == ["kubectl", "scale"]
+            or command[:3] == ["toolforge", "jobs", "restart"]
+            for command in self._commands()
+        )
+
+    def test_failed_web_restart_keeps_selected_code_and_hub_running(
+        self,
+    ) -> None:
+        """Retain both immutable generations for explicit recovery."""
+        first_stage = self._stage()
+        assert self._deploy(first_stage).returncode == 0
+        count = len(self._commands())
+        second_stage = self._stage("b" * 32)
+        result = self._deploy(second_stage, FAKE_ROLLOUT_FAILURE="1")
+        assert result.returncode != 0
+        assert (self.root / "app").resolve() == second_stage
+        assert first_stage.exists()
+        assert "Code activated" in result.stderr
+        assert not any(
+            command[:4] == ["kubectl", "scale", "deployment", "aranami-hub"]
+            for command in self._commands()[count:]
+        )
+
+    def test_hub_shutdown_timeout_never_starts_another_publisher(
+        self,
+    ) -> None:
+        """Keep a stuck publisher paused and the website running."""
+        assert self._deploy(self._stage()).returncode == 0
+        count = len(self._commands())
+        result = self._deploy(
+            self._stage("b" * 32),
+            FAKE_STUCK_SERVICE="aranami-hub",
+        )
+        assert result.returncode != 0
+        assert json.loads((self.root / "fake-replicas.json").read_text()) == {
+            "aranami-hub": "0",
+            "aranami-web": "1",
+        }
+        assert not any(
+            command[:4] == ["kubectl", "scale", "deployment", "aranami-hub"]
+            and "--replicas=1" in command
+            for command in self._commands()[count:]
+        )
+
+    def test_runtime_pins_late_imports_and_python_across_selection(
+        self,
+    ) -> None:
+        """Pin running code while another generation is selected."""
+        first = self._stage()
+        assert self._deploy(first).returncode == 0
+        second = self._stage("b" * 32)
+        assert self._deploy(second).returncode == 0
+        (self.root / "deployment.lock").mkdir()
+        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [
+                "/bin/sh",
+                "-c",
+                (
+                    "set -eu; tool_dir=$1; "
+                    "validator=scripts/toolforge/validate-source.py; "
+                    'python3 "$2/$validator" select "$2"; '
+                    '. "$tool_dir/app/scripts/toolforge/runtime-env.sh"; '
+                    'python3 "$3/$validator" select "$3"; '
+                    'printf "%s\\n" "$PYTHONPATH" "$runtime_python"; '
+                    'exec "$runtime_python" -c '
+                    "'import shared; print(shared.__file__)'"
+                ),
+                "pin-test",
+                str(self.root),
+                str(first),
+                str(second),
+            ],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [
+            str(first / "src"),
+            str(self.root / f"deployment-envs/source-{'a' * 32}/bin/python"),
+            str(first / "src/shared/__init__.py"),
+        ]
+        assert (self.root / "app").resolve() == second
+
+    def test_runtime_rejects_receipt_from_identical_other_generation(
+        self,
+    ) -> None:
+        """Require source identity even for matching source bytes."""
+        first = self._stage()
+        assert self._deploy(first).returncode == 0
+        second = self._stage("b" * 32)
+        assert self._deploy(second).returncode == 0
+        receipt = (
+            self.root
+            / f"deployment-backups/source-{'b' * 32}"
+            / "setup-success.json"
+        )
+        evidence = json.loads(receipt.read_text())
+        evidence["source"] = str(first)
+        receipt.write_text(json.dumps(evidence))
+        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [
+                "/bin/sh",
+                str(second / "scripts/toolforge/run-web.sh"),
+                "--help",
+            ],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert result.returncode != 0
+        assert "different source directory" in result.stderr
+
+    def test_reused_upload_never_resumes_an_old_transaction(self) -> None:
+        """Reject reused tokens without resuming old transactions."""
+        first = self._stage()
+        assert self._deploy(first).returncode == 0
+        assert self._deploy(self._stage("b" * 32)).returncode == 0
+        backup = self.root / f"deployment-backups/source-{'a' * 32}"
+        (backup / "aranami-hub.stopped").touch()
+        count = len(self._commands())
+        result = self._deploy(first)
+        assert result.returncode != 0
+        assert (backup / "aranami-hub.stopped").exists()
+        assert all(
+            command[0] == "python3" for command in self._commands()[count:]
         )
 
     def test_stuck_application_pods_prevent_source_promotion(self) -> None:
@@ -365,7 +576,11 @@ class TestDeploymentShell(TestCase):
         )
         assert result.returncode == 0, result.stderr
         evidence = json.loads(
-            (self.root / "active-deployment.json").read_text(),
+            (
+                self.root
+                / f"deployment-backups/source-{'a' * 32}"
+                / "setup-success.json"
+            ).read_text(),
         )
         assert Path(evidence["source"]).parent == home
         assert Path(evidence["environment"]).parent == home / "deployment-envs"

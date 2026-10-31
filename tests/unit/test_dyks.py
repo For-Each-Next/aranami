@@ -28,14 +28,13 @@ from updater.support.edit_summary import (
 )
 
 
-def _update_report(  # ruff: ignore[too-many-arguments]
+def _update_report(
     original: str,
     site: BaseSite,
     today: date,
     *,
     project: str,
     report_title: str,
-    statistics_title: str,
 ) -> str:
     """Exercise preparation and rendering together.
 
@@ -49,12 +48,7 @@ def _update_report(  # ruff: ignore[too-many-arguments]
         project=project,
         report_title=report_title,
     )
-    return rendering.update_text(
-        original,
-        prepared,
-        report_title=report_title,
-        statistics_title=statistics_title,
-    )
+    return rendering.update_text(original, prepared)
 
 
 def _prepared_fixture(text: str, members: dict[str, int | None]) -> Mock:
@@ -205,7 +199,7 @@ class TestDykReports(TestCase):
         ]
 
     @staticmethod
-    def test_visible_report_uses_latest_date_and_includes_comment() -> None:
+    def test_visible_report_uses_latest_date_without_json_comment() -> None:
         """List repeat DYKs by latest year and count their debut."""
         completed = pl.DataFrame(
             {
@@ -234,8 +228,6 @@ class TestDykReports(TestCase):
                     date(2024, 5, 1),
                 )[2],
             ),
-            report_title="Project:Example DYK report",
-            statistics_title="c:Data:Example statistics.tab",
         )
         parsed = mwparserfromhell.parse(completed_text)
         assert "共計3篇條目" in completed_text
@@ -248,16 +240,88 @@ class TestDykReports(TestCase):
             "=== 日期不詳 ===",
         )
         assert "8888" not in completed_text
-        assert len(parsed.filter_comments()) == 1
+        assert not parsed.filter_comments()
         assert "aranami-member" not in completed_text
         assert "aranami-member" not in nomination_text
-        assert "for [[:c:Data:Example statistics.tab]]" in completed_text
-        assert (
-            '"sources": "See [[:w:zh:Project:Example DYK report]]"'
-            in completed_text
-        )
-        assert '"data": [["2021-12-31", 0]' in completed_text
+        assert '"data":' not in completed_text
         assert nomination_text == "# {{icon|DYKC}} \uff08無\uff09"
+
+    @staticmethod
+    def test_chart_updates_only_inline_managed_values() -> None:
+        """Keep formatting, settings, and independent charts intact."""
+        chart = (
+            "{{Graph:Chart|type=line|xType=date\n"
+            '|x=<!-- aranami begin="dyk-chart-x" -->old dates'
+            '<!-- aranami end="dyk-chart-x" -->\n'
+            '|y=<!-- aranami begin="dyk-chart-y" -->old counts'
+            '<!-- aranami end="dyk-chart-y" -->|colors=blue}}'
+        )
+        original = (
+            'Before<!-- aranami begin="dyk" -->old list'
+            '<!-- aranami end="dyk" -->\n'
+            '<!-- aranami begin="dykn" -->old nominees'
+            '<!-- aranami end="dykn" -->\n'
+            + chart
+            + "\n{{Graph:Chart|x=keep|y=these}}After"
+        )
+        with patch.object(
+            rendering,
+            "render_reports",
+            return_value=("list", "nominees"),
+        ):
+            updated = rendering.update_text(
+                original,
+                Mock(statistics=(("2024-03-31", 1234), ("2024-05-01", 1235))),
+            )
+        assert updated == (
+            original
+            .replace("old list", "list")
+            .replace("old nominees", "nominees")
+            .replace("old dates", "2024-03-31, 2024-05-01")
+            .replace("old counts", "1234, 1235")
+        )
+
+    def test_chart_markers_are_required_before_source_requests(self) -> None:
+        """Reject invalid chart markers before source collection."""
+        lists = (
+            '<!-- aranami begin="dyk" --><!-- aranami end="dyk" -->'
+            '<!-- aranami begin="dykn" --><!-- aranami end="dykn" -->'
+        )
+        x = (
+            '<!-- aranami begin="dyk-chart-x" -->x'
+            '<!-- aranami end="dyk-chart-x" -->'
+        )
+        y = (
+            '<!-- aranami begin="dyk-chart-y" -->y'
+            '<!-- aranami end="dyk-chart-y" -->'
+        )
+        invalid = (
+            lists,
+            lists + x,
+            lists + y,
+            lists + x + x + y,
+            lists + x + y + y,
+            lists + x + '<!-- aranami end="dyk-chart-y" -->'
+            '<!-- aranami begin="dyk-chart-y" -->',
+        )
+        with (
+            patch.object(dyks, "load_membership") as membership,
+            patch.object(dyks, "query_pages_by_wikiproject") as query,
+        ):
+            for text in invalid:
+                with (
+                    self.subTest(text=text),
+                    self.assertRaises(ValueError),  # ruff: ignore[pytest-unittest-raises-assertion]
+                ):
+                    dyks.prepare_report(
+                        text,
+                        Mock(),
+                        date(2024, 5, 1),
+                        project="Example",
+                        report_title="Report",
+                    )
+        membership.assert_not_called()
+        query.assert_not_called()
 
 
 class TestDykCache(TestCase):
@@ -338,19 +402,23 @@ class TestDykUnchangedStatus(TestCase):
         })
         self.text = (
             'Before<!-- aranami begin="dyk" -->\n共計1篇條目'
-            "<!-- retained hidden statistics -->\n=== 2024年 ===\n"
+            "\n=== 2024年 ===\n"
             "# {{PJ:VG/DYK/item|Game|B|date=2024-01-01、日期不詳}}\n"
             '<!-- aranami end="dyk" -->\n'
             '<!-- aranami begin="dykn" -->\n'
             "# {{PJ:VG/DYK/item|Candidate|C}}\n"
-            '<!-- aranami end="dykn" -->After'
+            '<!-- aranami end="dykn" -->'
+            '{{Graph:Chart|x=<!-- aranami begin="dyk-chart-x" -->2024-05-01'
+            '<!-- aranami end="dyk-chart-x" -->'
+            '|y=<!-- aranami begin="dyk-chart-y" -->1'
+            '<!-- aranami end="dyk-chart-y" -->}}After'
         )
 
-    def test_unchanged_status_ignores_hidden_statistics(self) -> None:
-        """Ignore statistical dates when source states match."""
+    def test_unchanged_status_ignores_chart_sampling_dates(self) -> None:
+        """Ignore chart sampling dates when source states match."""
         for text in (
             self.text,
-            self.text.replace("retained hidden statistics", "another date"),
+            self.text.replace("2024-05-01", "2024-05-02"),
         ):
             assert dyks._published_statuses_match(
                 text,
@@ -443,7 +511,12 @@ class TestDykEdit(TestCase):
             'Introduction\n<!-- aranami begin="dyk" -->old'
             '<!-- aranami end="dyk" -->\nMiddle\n'
             '<!-- aranami begin="dykn" -->old candidates'
-            '<!-- aranami end="dykn" -->\nFooter'
+            '<!-- aranami end="dykn" -->\n'
+            "{{Graph:Chart\n|xType=date\n"
+            '|x=<!-- aranami begin="dyk-chart-x" spacing="keep" -->old x'
+            '<!-- aranami end="dyk-chart-x" -->\n'
+            '|y=<!-- aranami begin="dyk-chart-y" -->old y'
+            '<!-- aranami end="dyk-chart-y" -->\n|width=600\n}}\nFooter'
         )
         members = pl.DataFrame(
             {
@@ -487,19 +560,13 @@ class TestDykEdit(TestCase):
                 project="Example project",
                 report_title="Project:Example DYK report",
             )
-            updated = rendering.update_text(
-                original_text,
-                report,
-                report_title="Project:Example DYK report",
-                statistics_title="c:Data:Example statistics.tab",
-            )
+            updated = rendering.update_text(original_text, report)
             repeated = _update_report(
                 updated,
                 site,
                 date(2024, 5, 1),
                 project="Example project",
                 report_title="Project:Example DYK report",
-                statistics_title="c:Data:Example statistics.tab",
             )
         read_pages.assert_not_called()
         query_members.assert_called_with(site, "Example project")
@@ -513,6 +580,13 @@ class TestDykEdit(TestCase):
         assert updated.startswith("Introduction\n")
         assert "\nMiddle\n" in updated
         assert updated.endswith("\nFooter")
+        assert region_content(updated, "dyk-chart-x") == (
+            "2023-12-31, 2024-03-31, 2024-05-01"
+        )
+        assert region_content(updated, "dyk-chart-y") == "0, 1, 1"
+        assert 'begin="dyk-chart-x" spacing="keep"' in updated
+        assert "|width=600\n}}" in updated
+        assert '"license"' not in updated
         assert report.members == {"游戏甲": 1, "游戏乙": 2}
         assert report.changes == dyks.compare_reports(
             original_text,

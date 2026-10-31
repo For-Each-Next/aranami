@@ -22,7 +22,7 @@ from urllib.parse import unquote, urlsplit
 import polars as pl
 import pywikibot
 
-from backend.website import backlog, homepage, pageviews
+from backend.website import backlog, homepage, pageviews, reviews
 from backend.website.extracts import MAX_EXTRACT_BYTES, ExtractCache
 from shared.sources.quarry.projects import query_pages_by_wikiproject
 from shared.sources.summaries import fetch_summary
@@ -35,13 +35,21 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 _MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
 _SNAPSHOT_SCHEMA = 2
-REPORT_KEYS = ("recognized", "dyk", "pageviews", "news_history", "backlog")
+REPORT_KEYS = (
+    "reviews",
+    "recognized",
+    "dyk",
+    "pageviews",
+    "news_history",
+    "backlog",
+)
 _APPEARANCE_SECTIONS = {
     "recognized": ("featured", "good", "upcoming"),
     "dyk": ("dyk",),
     "news_history": ("news", "history"),
 }
 _REPORT_LABELS = {
+    "reviews": "current content reviews",
     "recognized": "recognized Chinese content",
     "dyk": "DYK highlights",
     "pageviews": "popular articles",
@@ -675,12 +683,13 @@ def report_intervals(
         values: Optional report-key to interval-in-seconds overrides.
 
     Returns:
-        All report intervals, each defaulting to twenty-four hours.
+        Hourly reviews and daily intervals for the other reports.
 
     Raises:
         ValueError: A report is unknown or an interval is not positive.
     """
     result = dict.fromkeys(REPORT_KEYS, float(_DEFAULT_INTERVAL))
+    result["reviews"] = 3600.0
     for key, interval in (values or {}).items():
         if (
             key not in result
@@ -705,7 +714,7 @@ def add_refresh_arguments(parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             f"--{key.replace('_', '-')}-interval-hours",
             type=float,
-            default=24,
+            default=report_intervals()[key] / 3600,
         )
 
 
@@ -836,6 +845,30 @@ def _valid_appearance_cache(  # ruff: ignore[too-many-return-statements]
     )
 
 
+def _valid_reviews_cache(value: dict[str, object]) -> bool:
+    """Validate bounded review records and observed nomination dates.
+
+    Returns:
+        Whether every article and discussion link is safe to display.
+    """
+    items = value.get("items")
+    return (
+        isinstance(items, list)
+        and len(items) <= _SECTION_RECORD_LIMIT
+        and all(
+            _cache_article(row)
+            and row.get("review_type") in reviews.REVIEW_TYPES
+            and _cache_wiki_url(row.get("review_url"))
+            and "started_at" in row
+            and (
+                row["started_at"] is None
+                or _cache_timestamp(row["started_at"]) is not None
+            )
+            for row in items
+        )
+    )
+
+
 def _valid_report_data(name: str, value: object, days: int) -> bool:
     """Validate one independent result before persisting or reusing it.
 
@@ -845,6 +878,8 @@ def _valid_report_data(name: str, value: object, days: int) -> bool:
     if not isinstance(value, dict):
         return False
     try:
+        if name == "reviews":
+            return _valid_reviews_cache(value)
         if name == "backlog":
             return _valid_backlog_cache(value)
         if name == "pageviews":
@@ -921,12 +956,17 @@ def _period_days(period: object) -> int:
     )
 
 
-def _valid_dashboard_report(name: str, snapshot: dict[str, object]) -> bool:
+def _valid_dashboard_report(  # ruff: ignore[too-many-return-statements]
+    name: str,
+    snapshot: dict[str, object],
+) -> bool:
     """Reuse private report validators for their public observations.
 
     Returns:
         Whether an independent report is absent or completely valid.
     """
+    if name == "reviews" and name not in snapshot["reports"]:
+        return snapshot.get(name) is None
     metadata = snapshot["reports"][name]
     if not _valid_report_metadata(metadata):
         return False
@@ -1133,6 +1173,8 @@ def _report_plan(
         source_id = (
             _maintenance_cache_key()
             if name == "backlog"
+            else "nomination-sources-v1:extracts-v3"
+            if name == "reviews"
             else "zh:all-access:user:top1000:limit12:lookback7:extracts-v3"
             if name == "pageviews"
             else f"days:{days}:extracts-v3"
@@ -1192,7 +1234,7 @@ def _dashboard_snapshot(
         "history",
     ))
     reports, sources, errors = {}, [], []
-    popular = maintenance = None
+    popular = maintenance = current_reviews = None
     for name in REPORT_KEYS:
         record = caches[name]
         data = record["data"] if record else None
@@ -1207,7 +1249,9 @@ def _dashboard_snapshot(
             "failed": record["failed"] if record else False,
         }
         if data is not None:
-            if name == "pageviews":
+            if name == "reviews":
+                current_reviews = data
+            elif name == "pageviews":
                 popular = data
                 sources.append({
                     "label": "Wikimedia daily top pageviews",
@@ -1233,6 +1277,7 @@ def _dashboard_snapshot(
         "updated_at": stamp,
         "reports": reports,
         "homepage": displays,
+        "reviews": current_reviews,
         "pageviews": popular,
         "backlog": maintenance,
         "sources": sources,
@@ -1240,12 +1285,15 @@ def _dashboard_snapshot(
     }
 
 
-def _collect_report(
+def _collect_report(  # ruff: ignore[too-many-arguments]
     name: str,
     read: WikiReader | None,
     membership: pl.DataFrame | None,
     members: set[str] | None,
     period: dict[str, str],
+    *,
+    cache_directory: Path | None = None,
+    now: dt.datetime | None = None,
 ) -> object:
     """Collect and validate one complete independent source result.
 
@@ -1264,7 +1312,17 @@ def _collect_report(
     if members is None:
         message = "Project membership is unavailable."
         raise RuntimeError(message)
-    if name == "pageviews":
+    if name == "reviews":
+        data = reviews.collect_reviews(
+            read.site,
+            members,
+            resolve=read.resolve,
+            resolve_many=read.resolve_many,
+            cache_directory=cache_directory,
+            now=now or dt.datetime.now(dt.UTC),
+        )
+        data["items"] = enrich_project_assessments(data["items"], membership)
+    elif name == "pageviews":
         data = _assessed_section(
             name,
             pageviews.collect_pageviews(today, members, site=read.site),
@@ -1322,7 +1380,7 @@ def _report_record_count(name: str, data: dict[str, object]) -> int:
     """
     if name == "backlog":
         return data["total"]
-    if name == "pageviews":
+    if name in {"pageviews", "reviews"}:
         return len(data["items"])
     return sum(len(records) for records in data["homepage"].values())
 
@@ -1339,7 +1397,7 @@ def _with_extracts(
     """
     if name == "backlog":
         return data
-    if name == "pageviews":
+    if name in {"pageviews", "reviews"}:
         return {**data, "items": extracts.enrich(data["items"])}
     return {
         **data,
@@ -1435,7 +1493,15 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
             "data": previous["data"] if previous else None,
         }
         try:  # ruff: ignore[too-many-statements-in-try-clause]
-            data = _collect_report(name, read, membership, members, period)
+            data = _collect_report(
+                name,
+                read,
+                membership,
+                members,
+                period,
+                cache_directory=cache_directory,
+                now=clock,
+            )
             if extracts is not None:
                 data = _with_extracts(name, data, extracts)
                 extracts.save()

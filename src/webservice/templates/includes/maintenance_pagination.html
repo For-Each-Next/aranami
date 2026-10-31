@@ -1,0 +1,6 @@
+<nav class="pagination" aria-label="{{ t.nav.backlog }} · {{ pagination }}">
+  {% if previous %}<a href="{{ previous }}" rel="prev">{{ t.backlog.previous }}</a>{% endif %}
+  <p>{{ pagination }} · {{ range_label }}</p>
+  {% if following %}<a href="{{ following }}" rel="next">{{ t.backlog.next }}</a>{% endif %}
+  {% if page_count > 1 %}<form class="page-jump" action="/maintenance/" method="get">{% for name, value in selection.items() if name != 'page' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}<label for="maintenance-page-{{ position }}">{{ t.backlog.goto }}</label><input id="maintenance-page-{{ position }}" type="number" name="page" min="1" max="{{ page_count }}" value="{{ page_number }}"><button type="submit">{{ t.backlog.go }}</button></form>{% endif %}
+</nav>

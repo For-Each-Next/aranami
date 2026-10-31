@@ -1,4 +1,9 @@
 {
+  "logs.download": {
+    "en": "Download log",
+    "zh-hans": "下载日志",
+    "zh-hant": "下載日誌"
+  },
   "page.description": {
     "en": "Chinese Wikipedia video-game highlights, popularity, maintenance worklists, and report update status.",
     "zh-hans": "中文维基百科电子游戏专题看板：佳作展示、动态热门、维护列表与站内报告更新状态。",
@@ -10,9 +15,9 @@
     "zh-hant": "電子遊戲專題看板"
   },
   "nav.skip": {
-    "en": "Skip to the dashboard",
-    "zh-hans": "跳至专题看板",
-    "zh-hant": "跳至專題看板"
+    "en": "Skip to main content",
+    "zh-hans": "跳至主要内容",
+    "zh-hant": "跳至主要內容"
   },
   "nav.backlog": {
     "en": "Maintenance",
@@ -85,9 +90,9 @@
     "zh-hant": "目錄"
   },
   "about.intro": {
-    "en": "Aranami ({name}, meaning “raging waves”) is a tool hosted on Toolforge. It primarily updates reports for Chinese Wikipedia’s video-game WikiProject and also provides a few web lookup features.",
-    "zh-hans": "Aranami（{name}，意为「狂澜」），是托管在Toolforge上的工具。其主要更新中文维基百科电子游戏专题报告，并顺带提供一些网页查询功能。",
-    "zh-hant": "Aranami（{name}，意為「狂瀾」），是託管在Toolforge上的工具。其主要更新中文維基百科電子遊戲專題報告，並順帶提供一些網頁查詢功能。"
+    "en": "Aranami ({name}, meaning “raging waves”) updates reports for Chinese Wikipedia’s video game WikiProject on Toolforge. Use this dashboard to browse articles, find maintenance tasks, check report updates, and read run logs.",
+    "zh-hans": "Aranami（{name}，意为「狂澜」）在Toolforge上为中文维基百科电子游戏专题更新报告。通过此看板，可以浏览条目、查找维护任务、查看报告更新状态及阅读运行日志。",
+    "zh-hant": "Aranami（{name}，意為「狂瀾」）在Toolforge上為中文維基百科電子遊戲專題更新報告。透過此看板，可以瀏覽條目、尋找維護任務、查看報告更新狀態及閱讀執行日誌。"
   },
   "about.contact": {
     "en": "If you have questions, contact {user}.",
@@ -226,8 +231,8 @@
   },
   "assessment.class.Unassessed": {
     "en": "Unassessed",
-    "zh-hans": "未评级",
-    "zh-hant": "未評級"
+    "zh-hans": "未评",
+    "zh-hant": "未評"
   },
   "assessment.importance.Top": {
     "en": "Top",
@@ -260,9 +265,9 @@
     "zh-hant": "不適用"
   },
   "assessment.importance.Unknown": {
-    "en": "Unassessed",
-    "zh-hans": "未评级",
-    "zh-hant": "未評級"
+    "en": "Unknown",
+    "zh-hans": "未知",
+    "zh-hant": "未知"
   },
   "snapshot.updated": {
     "en": "Data updated:",
@@ -283,6 +288,81 @@
     "en": "Article",
     "zh-hans": "条目",
     "zh-hant": "條目"
+  },
+  "reviews.heading": {
+    "en": "Content reviews",
+    "zh-hans": "内容评审",
+    "zh-hant": "內容評審"
+  },
+  "reviews.participate": {
+    "en": "Join ",
+    "zh-hans": "参与",
+    "zh-hant": "參與"
+  },
+  "reviews.started": {
+    "en": "Started ",
+    "zh-hans": "始于",
+    "zh-hant": "始於"
+  },
+  "reviews.elapsed": {
+    "en": " ({duration})",
+    "zh-hans": "（{duration}）",
+    "zh-hant": "（{duration}）"
+  },
+  "reviews.days": {
+    "en": "{count} days",
+    "zh-hans": "{count}日",
+    "zh-hant": "{count}日"
+  },
+  "reviews.hours": {
+    "en": "{count} hours",
+    "zh-hans": "{count}小时",
+    "zh-hant": "{count}小時"
+  },
+  "reviews.fac": {
+    "en": "featured article candidates",
+    "zh-hans": "典范条目评选",
+    "zh-hant": "典範條目評選"
+  },
+  "reviews.flc": {
+    "en": "featured list candidates",
+    "zh-hans": "特色列表评选",
+    "zh-hant": "特色列表評選"
+  },
+  "reviews.acc": {
+    "en": "A-class review",
+    "zh-hans": "甲级内容评审",
+    "zh-hant": "甲級內容評審"
+  },
+  "reviews.gan": {
+    "en": "good article nominations",
+    "zh-hans": "优良条目评选",
+    "zh-hant": "優良條目評選"
+  },
+  "reviews.bpan": {
+    "en": "Bplus-class review",
+    "zh-hans": "乙上级条目评审",
+    "zh-hant": "乙上級條目評審"
+  },
+  "reviews.pr": {
+    "en": "peer review",
+    "zh-hans": "同行评审",
+    "zh-hant": "同行評審"
+  },
+  "reviews.ppr": {
+    "en": "project peer review",
+    "zh-hans": "专题同侪评审",
+    "zh-hant": "專題同儕評審"
+  },
+  "reviews.dykc": {
+    "en": "Did you know nominations",
+    "zh-hans": "新条目推荐候选",
+    "zh-hant": "新條目推薦候選"
+  },
+  "reviews.reassess": {
+    "en": "reassessment",
+    "zh-hans": "重新评级",
+    "zh-hant": "重新評級"
   },
   "homepage.heading": {
     "en": "Current highlights",
@@ -440,9 +520,9 @@
     "zh-hant": "品質"
   },
   "backlog.sort.time": {
-    "en": "Time",
-    "zh-hans": "时间",
-    "zh-hant": "時間"
+    "en": "First tagged",
+    "zh-hans": "首次标记时间",
+    "zh-hant": "首次標記時間"
   },
   "backlog.sort.random": {
     "en": "Random",
@@ -895,14 +975,14 @@
     "zh-hant": "Aranami ({version}) 連續運行時間：未取得"
   },
   "duration.seconds": {
-    "en": "{seconds}″",
-    "zh-hans": "{seconds}″",
-    "zh-hant": "{seconds}″"
+    "en": "{seconds} s",
+    "zh-hans": "{seconds} 秒",
+    "zh-hant": "{seconds} 秒"
   },
   "duration.minutes": {
-    "en": "{minutes}′{seconds}″",
-    "zh-hans": "{minutes}′{seconds}″",
-    "zh-hant": "{minutes}′{seconds}″"
+    "en": "{minutes} min {seconds} s",
+    "zh-hans": "{minutes} 分 {seconds} 秒",
+    "zh-hant": "{minutes} 分 {seconds} 秒"
   },
   "logs.service.hub": {
     "en": "the data hub",
@@ -965,9 +1045,9 @@
     "zh-hant": "已部分完成"
   },
   "logs.result.unknown": {
-    "en": "finished without a recorded result",
-    "zh-hans": "已结束，但未获取执行结果",
-    "zh-hant": "已結束，但未取得執行結果"
+    "en": "Update result unavailable",
+    "zh-hans": "更新结果未获取",
+    "zh-hant": "更新結果未取得"
   },
   "logs.time_intro": {
     "en": "At ",
@@ -1135,9 +1215,9 @@
     "zh-hant": "這裡只顯示任務開始、執行結果和服務啟停。日誌保留30天；下載檔案包含詳細診斷資訊。"
   },
   "logs.no_matches": {
-    "en": "No matching major events in the displayed period.",
-    "zh-hans": "当前范围内没有匹配的主要事件。",
-    "zh-hant": "目前範圍內沒有符合的主要事件。"
+    "en": "No events match these filters.",
+    "zh-hans": "没有符合这些筛选条件的事件。",
+    "zh-hant": "沒有符合這些篩選條件的事件。"
   },
   "logs.invalid_query": {
     "en": "The log date or text query is invalid.",
@@ -1173,5 +1253,405 @@
     "en": "Showing up to 100 recent major events. Download the daily log for detailed diagnostics.",
     "zh-hans": "当前最多显示最近100项主要事件；下载每日日志可查看详细诊断信息。",
     "zh-hant": "目前最多顯示最近100項主要事件；下載每日日誌可查看詳細診斷資訊。"
+  },
+  "nav.dashboard": {
+    "en": "Dashboard",
+    "zh-hans": "专题看板",
+    "zh-hant": "專題看板"
+  },
+  "nav.reports": {
+    "en": "Report updates",
+    "zh-hans": "报告更新状态",
+    "zh-hant": "報告更新狀態"
+  },
+  "nav.global": {
+    "en": "Main navigation",
+    "zh-hans": "主导航",
+    "zh-hant": "主要導覽"
+  },
+  "nav.language": {
+    "en": "Language",
+    "zh-hans": "语言",
+    "zh-hant": "語言"
+  },
+  "nav.language_note": {
+    "en": "Your choice is saved in this browser for one year. Article titles retain their source spelling.",
+    "zh-hans": "语言选择将在本浏览器中保存一年。条目名保留来源写法。",
+    "zh-hant": "語言選擇將在此瀏覽器中儲存一年。條目名稱保留來源寫法。"
+  },
+  "assessment.dimension.class": {
+    "en": "Quality",
+    "zh-hans": "质量",
+    "zh-hant": "品質"
+  },
+  "assessment.dimension.importance": {
+    "en": "Importance",
+    "zh-hans": "重要度",
+    "zh-hant": "重要度"
+  },
+  "assessment.class.Unknown": {
+    "en": "Unknown",
+    "zh-hans": "未知",
+    "zh-hant": "未知"
+  },
+  "assessment.legend": {
+    "en": "Assessment guide",
+    "zh-hans": "评级说明",
+    "zh-hant": "評級說明"
+  },
+  "assessment.explanation": {
+    "en": "Quality describes article development; importance describes relevance to the video games project. Ratings are saved project assessments, not a fresh review.",
+    "zh-hans": "质量反映条目的完善程度，重要度反映条目与电子游戏专题的关联程度。此处显示已保存的专题评级，不代表重新审核的结果。",
+    "zh-hant": "品質反映條目的完善程度，重要度反映條目與電子遊戲專題的關聯程度。此處顯示已儲存的專題評級，不代表重新審核的結果。"
+  },
+  "home.purpose": {
+    "en": "Browse Chinese Wikipedia video game articles, find maintenance tasks, and follow automated report updates.",
+    "zh-hans": "浏览中文维基百科电子游戏条目，查找维护任务，并查看自动报告的更新状态。",
+    "zh-hant": "瀏覽中文維基百科電子遊戲條目，尋找維護任務，並查看自動報告的更新狀態。"
+  },
+  "home.find_articles": {
+    "en": "Find articles to improve",
+    "zh-hans": "查找待改进条目",
+    "zh-hant": "尋找待改善條目"
+  },
+  "home.report_updates": {
+    "en": "Report updates",
+    "zh-hans": "报告更新状态",
+    "zh-hant": "報告更新狀態"
+  },
+  "home.expand_summary": {
+    "en": "Read full summary",
+    "zh-hans": "阅读完整摘要",
+    "zh-hant": "閱讀完整摘要"
+  },
+  "backlog.search": {
+    "en": "Search article titles",
+    "zh-hans": "搜索条目名",
+    "zh-hant": "搜尋條目名"
+  },
+  "backlog.task": {
+    "en": "Task",
+    "zh-hans": "任务",
+    "zh-hant": "任務"
+  },
+  "backlog.all": {
+    "en": "All",
+    "zh-hans": "全部",
+    "zh-hant": "全部"
+  },
+  "backlog.apply": {
+    "en": "Apply filters",
+    "zh-hans": "应用筛选条件",
+    "zh-hant": "套用篩選條件"
+  },
+  "backlog.clear": {
+    "en": "Clear filters",
+    "zh-hans": "清除筛选条件",
+    "zh-hant": "清除篩選條件"
+  },
+  "backlog.range": {
+    "en": "Articles {start}–{end} of {count}",
+    "zh-hans": "第{start}–{end}篇，共{count}篇",
+    "zh-hant": "第{start}–{end}篇，共{count}篇"
+  },
+  "backlog.goto": {
+    "en": "Go to page",
+    "zh-hans": "转到页码",
+    "zh-hant": "前往頁碼"
+  },
+  "backlog.go": {
+    "en": "Go",
+    "zh-hans": "前往",
+    "zh-hant": "前往"
+  },
+  "backlog.direction.asc": {
+    "en": "Ascending",
+    "zh-hans": "升序",
+    "zh-hant": "升冪"
+  },
+  "backlog.direction.desc": {
+    "en": "Descending",
+    "zh-hans": "降序",
+    "zh-hant": "降冪"
+  },
+  "backlog.direction.oldest": {
+    "en": "Oldest first",
+    "zh-hans": "最早优先",
+    "zh-hant": "最早優先"
+  },
+  "backlog.direction.newest": {
+    "en": "Newest first",
+    "zh-hans": "最新优先",
+    "zh-hant": "最新優先"
+  },
+  "backlog.direction": {
+    "en": "Order",
+    "zh-hans": "顺序",
+    "zh-hant": "順序"
+  },
+  "logs.order": {
+    "en": "Event order",
+    "zh-hans": "事件顺序",
+    "zh-hant": "事件順序"
+  },
+  "logs.newest": {
+    "en": "Newest first",
+    "zh-hans": "最新事件优先",
+    "zh-hant": "最新事件優先"
+  },
+  "logs.oldest": {
+    "en": "Oldest first",
+    "zh-hans": "最早事件优先",
+    "zh-hant": "最早事件優先"
+  },
+  "logs.status": {
+    "en": "Result",
+    "zh-hans": "结果",
+    "zh-hant": "結果"
+  },
+  "logs.all": {
+    "en": "All results",
+    "zh-hans": "全部结果",
+    "zh-hant": "全部結果"
+  },
+  "logs.count": {
+    "en": "{count} matching events in the latest saved window for {date}.",
+    "zh-hans": "{date}最近保存的事件中有{count}项符合筛选条件。",
+    "zh-hant": "{date}最近儲存的事件中有{count}項符合篩選條件。"
+  },
+  "logs.clear": {
+    "en": "Clear filters",
+    "zh-hans": "清除筛选条件",
+    "zh-hant": "清除篩選條件"
+  },
+  "logs.details": {
+    "en": "Event details",
+    "zh-hans": "事件详情",
+    "zh-hant": "事件詳情"
+  },
+  "logs.duration_label": {
+    "en": "Duration",
+    "zh-hans": "用时",
+    "zh-hant": "用時"
+  },
+  "logs.pagination": {
+    "en": "Page {page} of {pages}",
+    "zh-hans": "第{page}页，共{pages}页",
+    "zh-hant": "第{page}頁，共{pages}頁"
+  },
+  "logs.previous": {
+    "en": "Previous",
+    "zh-hans": "上一页",
+    "zh-hant": "上一頁"
+  },
+  "logs.next": {
+    "en": "Next",
+    "zh-hans": "下一页",
+    "zh-hant": "下一頁"
+  },
+  "logs.archive": {
+    "en": "Daily log archive",
+    "zh-hans": "每日日志归档",
+    "zh-hant": "每日日誌封存"
+  },
+  "logs.system_details": {
+    "en": "System details",
+    "zh-hans": "系统详情",
+    "zh-hant": "系統詳情"
+  },
+  "logs.task_label": {
+    "en": "Task or service",
+    "zh-hans": "任务或服务",
+    "zh-hant": "任務或服務"
+  },
+  "logs.run_task": {
+    "en": "Report run",
+    "zh-hans": "报告执行",
+    "zh-hant": "報告執行"
+  },
+  "logs.completed_unknown": {
+    "en": "Run completed; update result unavailable. See the daily log for details.",
+    "zh-hans": "执行已结束；更新结果不可用。请查看每日日志了解详情。",
+    "zh-hant": "執行已結束；更新結果無法取得。請查看每日日誌了解詳情。"
+  },
+  "assessment.description.class.FA": {
+    "en": "Featured article",
+    "zh-hans": "典范条目",
+    "zh-hant": "典範條目"
+  },
+  "assessment.description.class.FL": {
+    "en": "Featured list",
+    "zh-hans": "特色列表",
+    "zh-hant": "特色列表"
+  },
+  "assessment.description.class.GA": {
+    "en": "Good article",
+    "zh-hans": "优良条目",
+    "zh-hant": "優良條目"
+  },
+  "assessment.description.class.A": {
+    "en": "A-class article",
+    "zh-hans": "甲级条目",
+    "zh-hant": "甲級條目"
+  },
+  "assessment.description.class.AL": {
+    "en": "A-class list",
+    "zh-hans": "甲级列表",
+    "zh-hant": "甲級列表"
+  },
+  "assessment.description.class.Bplus": {
+    "en": "B-plus-class article",
+    "zh-hans": "乙上级条目",
+    "zh-hant": "乙上級條目"
+  },
+  "assessment.description.class.B": {
+    "en": "B-class article",
+    "zh-hans": "乙级条目",
+    "zh-hant": "乙級條目"
+  },
+  "assessment.description.class.BL": {
+    "en": "B-class list",
+    "zh-hans": "乙级列表",
+    "zh-hant": "乙級列表"
+  },
+  "assessment.description.class.C": {
+    "en": "C-class article",
+    "zh-hans": "丙级条目",
+    "zh-hant": "丙級條目"
+  },
+  "assessment.description.class.CL": {
+    "en": "C-class list",
+    "zh-hans": "丙级列表",
+    "zh-hant": "丙級列表"
+  },
+  "assessment.description.class.D": {
+    "en": "D-class article",
+    "zh-hans": "丁级条目",
+    "zh-hant": "丁級條目"
+  },
+  "assessment.description.class.Start": {
+    "en": "Start-class article",
+    "zh-hans": "初级条目",
+    "zh-hant": "初級條目"
+  },
+  "assessment.description.class.Stub": {
+    "en": "Stub article",
+    "zh-hans": "小作品条目",
+    "zh-hant": "小作品條目"
+  },
+  "assessment.description.class.SL": {
+    "en": "Stub list",
+    "zh-hans": "小列表",
+    "zh-hant": "小列表"
+  },
+  "assessment.description.class.List": {
+    "en": "List",
+    "zh-hans": "列表",
+    "zh-hant": "列表"
+  },
+  "assessment.description.class.Substub": {
+    "en": "Substub article",
+    "zh-hans": "小小作品条目",
+    "zh-hant": "小小作品條目"
+  },
+  "assessment.description.class.Disambig": {
+    "en": "Disambiguation page",
+    "zh-hans": "消歧义页",
+    "zh-hant": "消歧義頁"
+  },
+  "assessment.description.class.Unassessed": {
+    "en": "Quality has not been assessed.",
+    "zh-hans": "尚未评定质量。",
+    "zh-hant": "尚未評定品質。"
+  },
+  "assessment.description.class.Unknown": {
+    "en": "Quality is unavailable or unrecognized.",
+    "zh-hans": "质量评级未获取或无法识别。",
+    "zh-hant": "品質評級未取得或無法辨識。"
+  },
+  "assessment.description.importance.Top": {
+    "en": "Project importance: Top",
+    "zh-hans": "专题重要度：极高",
+    "zh-hant": "專題重要度：極高"
+  },
+  "assessment.description.importance.High": {
+    "en": "Project importance: High",
+    "zh-hans": "专题重要度：高",
+    "zh-hant": "專題重要度：高"
+  },
+  "assessment.description.importance.Mid": {
+    "en": "Project importance: Mid",
+    "zh-hans": "专题重要度：中",
+    "zh-hant": "專題重要度：中"
+  },
+  "assessment.description.importance.Low": {
+    "en": "Project importance: Low",
+    "zh-hans": "专题重要度：低",
+    "zh-hant": "專題重要度：低"
+  },
+  "assessment.description.importance.Bottom": {
+    "en": "Project importance: Bottom",
+    "zh-hans": "专题重要度：极低",
+    "zh-hant": "專題重要度：極低"
+  },
+  "assessment.description.importance.NA": {
+    "en": "Importance does not apply.",
+    "zh-hans": "不适用重要度评级。",
+    "zh-hant": "不適用重要度評級。"
+  },
+  "assessment.description.importance.Unknown": {
+    "en": "Importance is unavailable or unrecognized.",
+    "zh-hans": "重要度未获取或无法识别。",
+    "zh-hant": "重要度未取得或無法辨識。"
+  },
+  "logs.pagination_label": {
+    "en": "Log event pages",
+    "zh-hans": "日志事件分页",
+    "zh-hant": "日誌事件分頁"
+  },
+  "ops.scroll_hint": {
+    "en": "Scroll horizontally to view all report fields.",
+    "zh-hans": "横向滚动以查看报告的所有字段。",
+    "zh-hant": "橫向捲動以查看報告的所有欄位。"
+  },
+  "report.Bplus": {
+    "en": "B-plus articles",
+    "zh-hans": "乙上级条目",
+    "zh-hant": "乙上級條目"
+  },
+  "report.BPAN": {
+    "en": "B-plus reviews",
+    "zh-hans": "乙上级评审",
+    "zh-hant": "乙上級評審"
+  },
+  "report.A": {
+    "en": "A-class articles",
+    "zh-hans": "甲级条目",
+    "zh-hant": "甲級條目"
+  },
+  "report.AL": {
+    "en": "A-class lists",
+    "zh-hans": "甲级列表",
+    "zh-hant": "甲級列表"
+  },
+  "report.ACC": {
+    "en": "A-class reviews",
+    "zh-hans": "甲级评审",
+    "zh-hant": "甲級評審"
+  },
+  "report.PPR": {
+    "en": "Project reviews",
+    "zh-hans": "专题评审",
+    "zh-hant": "專題評審"
+  },
+  "report.英文维基百科重要条目": {
+    "en": "English Wikipedia important articles",
+    "zh-hans": "英文维基百科重要条目",
+    "zh-hant": "英文維基百科重要條目"
+  },
+  "report.英文维基百科优质条目": {
+    "en": "English Wikipedia quality articles",
+    "zh-hans": "英文维基百科优质条目",
+    "zh-hant": "英文維基百科優質條目"
   }
 }

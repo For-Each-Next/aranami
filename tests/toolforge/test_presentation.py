@@ -215,6 +215,94 @@ def _fixtures() -> dict[str, object]:
     }
 
 
+class ReviewPresentationTests(unittest.TestCase):
+    """Render review cards from saved observations in every language."""
+
+    def setUp(self) -> None:
+        """Create saved observations and a deterministic clock."""
+        self.data = _fixtures()
+        self.now = dt.datetime(2026, 10, 18, 12, 0, 30, tzinfo=dt.UTC)
+        self.en = Interface("en")
+
+    def test_review_cards_precede_highlights_in_every_language(self) -> None:
+        """Show localized review cards with observed durations."""
+        snapshot = self.data["snapshot"]
+        snapshot["reports"]["reviews"] = {
+            "last_success_at": "2026-10-18T12:00:00Z",
+        }
+        snapshot["reviews"] = {
+            "items": [
+                {
+                    **self.data["article"],
+                    "title": f"Review {index} <&>",
+                    "review_type": kind,
+                    "review_url": f"https://zh.wikipedia.org/wiki/Talk:Game#Review_{index}",
+                    "started_at": "2026-10-07T03:04:00Z"
+                    if index == 0
+                    else "2026-10-18T10:00:00Z"
+                    if index == 1
+                    else None,
+                }
+                for index, kind in enumerate((
+                    "fac",
+                    "flc",
+                    "acc",
+                    "gan",
+                    "bpan",
+                    "pr",
+                    "ppr",
+                    "dykc",
+                    "reassess",
+                ))
+            ],
+        }
+        for locale in ("en", "zh-hans", "zh-hant", "zh"):
+            with self.subTest(locale=locale):
+                interface = Interface(locale)
+                rendered = render_dashboard(snapshot, {}, {}, locale, self.now)
+                assert rendered.index('id="reviews-heading"') < rendered.index(
+                    'id="homepage-heading"',
+                )
+                section = rendered.split('id="reviews"', 1)[1].split(
+                    "</section>",
+                    1,
+                )[0]
+                assert (
+                    '<h2 id="reviews-heading">'
+                    f"{interface.text('reviews.heading')}</h2>" in section
+                )
+                assert section.count('class="article-card"') == 9
+                assert section.count(interface.text("reviews.started")) == 2
+                assert interface.text("reviews.days", count=11) in section
+                assert interface.text("reviews.hours", count=2) in section
+                assert "Review 0 &lt;&amp;&gt;" in section
+                if locale != "zh":
+                    assert (
+                        "&lt;script&gt;never execute&lt;/script&gt;" in section
+                    )
+                assert "#Review_0" in section
+                assert 'data-assessment="class"' in section
+                assert 'data-assessment="importance"' in section
+                assert 'href="#reviews"' in rendered
+
+    def test_empty_reviews_hide_section_and_missing_reviews_stay_unknown(
+        self,
+    ) -> None:
+        """Distinguish empty reviews from unavailable data."""
+        snapshot = self.data["snapshot"]
+        snapshot["reviews"] = {"items": []}
+        rendered = render_dashboard(snapshot, {}, {}, "en", self.now)
+        assert 'id="reviews-heading"' not in rendered
+        assert 'href="#reviews"' not in rendered
+        snapshot["reviews"] = None
+        rendered = render_dashboard(snapshot, {}, {}, "en", self.now)
+        assert 'id="reviews-heading"' in rendered
+        section = rendered.split('id="reviews"', 1)[1].split("</section>", 1)[
+            0
+        ]
+        assert self.en.text("empty.section") in section
+
+
 class PresentationTests(unittest.TestCase):
     """Exercise routes without network or runtime writes."""
 
@@ -307,30 +395,35 @@ class PresentationTests(unittest.TestCase):
         assert timestamp("2026-10-18T12:00:00") is None
         assert self.en.date("2020-03", month_only=True) == "March 2020"
         assert Interface("zh-hant").date("2026-10-18") == "2026年10月18日"
-        assert duration(0.25, self.en) == "0.25″"
-        assert duration(59.999, self.en) == "1\N{PRIME}00.00″"
-        assert duration(65.1, self.en) == "1\N{PRIME}05.10″"
+        assert duration(0.25, self.en) == "0.25 s"
+        assert duration(59.999, self.en) == "1 min 00.00 s"
+        assert duration(65.1, self.en) == "1 min 05.10 s"
         for seconds, expected in (
-            (0, "0.00″"),
-            (0.004, "0.00″"),
-            (0.44, "0.44″"),
-            (1, "1.00″"),
-            (5.3, "5.30″"),
-            (32.89, "32.89″"),
-            (32.49, "32.49″"),
-            (59.994, "59.99″"),
-            (60, "1\N{PRIME}00.00″"),
-            (725.3, "12\N{PRIME}05.30″"),
-            (3600, "60\N{PRIME}00.00″"),
+            (0, "0.00 s"),
+            (0.004, "0.00 s"),
+            (0.44, "0.44 s"),
+            (1, "1.00 s"),
+            (5.3, "5.30 s"),
+            (32.89, "32.89 s"),
+            (32.49, "32.49 s"),
+            (59.994, "59.99 s"),
+            (60, "1 min 00.00 s"),
+            (725.3, "12 min 05.30 s"),
+            (3600, "60 min 00.00 s"),
         ):
             for locale in ("en", "zh-hans", "zh-hant"):
-                assert duration(seconds, Interface(locale)) == expected
+                localized = (
+                    expected
+                    if locale == "en"
+                    else expected.replace(" min ", " 分 ").replace(" s", " 秒")
+                )
+                assert duration(seconds, Interface(locale)) == localized
         for seconds, expected in (
-            (0.44, "0″…"),
-            (32.89, "32″…"),
-            (59.999, "59″…"),
-            (60, "1\N{PRIME}00″…"),
-            (725.3, "12\N{PRIME}05″…"),
+            (0.44, "0 s…"),
+            (32.89, "32 s…"),
+            (59.999, "59 s…"),
+            (60, "1 min 00 s…"),
+            (725.3, "12 min 05 s…"),
         ):
             assert duration(seconds, self.en, running=True) == expected
         assert duration(None, self.en) == "—"
@@ -340,7 +433,7 @@ class PresentationTests(unittest.TestCase):
                 self.en,
                 self.now,
             )
-            == "6\N{PRIME}15″…"
+            == "6 min 15 s…"
         )
         assert (
             event_duration(
@@ -348,7 +441,7 @@ class PresentationTests(unittest.TestCase):
                 self.en,
                 self.now,
             )
-            == "0″…"
+            == "0 s…"
         )
         assert readable_size(1024) == "1.0 KiB"
         assert readable_size(10) == "10 B"
@@ -661,15 +754,15 @@ class PresentationTests(unittest.TestCase):
             assert output.count('class="article-extract"') == 18
             assert output.count('class="extract-attribution"') == 4
             assert output.count('scope="col"') == 5
-            assert "<details" not in output
-            assert 'popovertarget="report-details-pageviews"' in output
-            assert 'popover="auto" role="dialog"' in output
+            assert 'class="assessment-guide"' in output
+            assert 'commandfor="report-details-pageviews"' in output
+            assert '<dialog id="report-details-pageviews"' in output
             assert (
                 'aria-labelledby="report-details-pageviews-heading"' in output
             )
-            assert 'popovertargetaction="hide" autofocus' in output
-            assert '<span aria-hidden="true">⏸️</span>' in output
-            assert 'class="routine-status"' in output
+            assert 'command="close" autofocus' in output
+            assert '<span aria-hidden="true">⏸️</span>' not in output
+            assert 'class="routine-status" data-status=' in output
             task = re.search(
                 r'<a href="/maintenance/\?task=references&amp;page=1" '
                 r'class="backlog-task">(.*?)</a>',
@@ -704,18 +797,18 @@ class PresentationTests(unittest.TestCase):
     def test_status_line_labels_and_independent_timing(self) -> None:
         """Show finish times and retain durations in details."""
         for locale, finished, next_label, report_duration in (
-            ("en", "Finished at ", "Next run scheduled for ", "5.00″"),
+            ("en", "Finished at ", "Next run scheduled for ", "5.00 s"),
             (
                 "zh-hans",
                 "执行完毕于",
                 "下次执行预定于",
-                "5.00″",
+                "5.00 秒",
             ),
             (
                 "zh-hant",
                 "執行完畢於",
                 "下次執行預定於",
-                "5.00″",
+                "5.00 秒",
             ),
         ):
             output = render_dashboard(
@@ -725,7 +818,10 @@ class PresentationTests(unittest.TestCase):
                 locale,
                 self.now,
             )
-            line = re.search(r'<li class="routine-status">(.*?)</li>', output)
+            line = re.search(
+                r'<li class="routine-status"[^>]*>(.*?)</li>',
+                output,
+            )
             assert line is not None
             assert line[1].endswith("</button>")
             assert "data-clock" not in line[1]
@@ -736,7 +832,7 @@ class PresentationTests(unittest.TestCase):
             assert "<br" not in line[1]
             assert finished in output
             assert next_label in output
-            assert f"<td>{report_duration}</td>" in output
+            assert f">{report_duration}</td>" in output
             assert "5.000" not in output
         self.data["status"]["reports"] = None
         output = render_dashboard(
@@ -746,7 +842,7 @@ class PresentationTests(unittest.TestCase):
             "en",
             self.now,
         )
-        assert 'popover="auto" role="dialog"' in output
+        assert '<dialog id="report-details-pageviews"' in output
         assert '<p class="empty">No record</p>' in output
 
     def test_queued_reports_wait_until_individual_execution_starts(
@@ -763,18 +859,18 @@ class PresentationTests(unittest.TestCase):
             duration_seconds=None,
         )
         for locale, waiting, running, completed in (
-            ("en", "Waiting to run…", "2″…", "5.00″"),
+            ("en", "Waiting to run…", "2 s…", "5.00 s"),
             (
                 "zh-hans",
                 "等待执行…",
-                "2″…",
-                "5.00″",
+                "2 秒…",
+                "5.00 秒",
             ),
             (
                 "zh-hant",
                 "等待執行…",
-                "2″…",
-                "5.00″",
+                "2 秒…",
+                "5.00 秒",
             ),
         ):
             report.update(
@@ -792,7 +888,10 @@ class PresentationTests(unittest.TestCase):
                     locale,
                     now,
                 )
-                row = re.search(r'<tr data-key="[^"]*">(.*?)</tr>', output)
+                row = re.search(
+                    r'<tr data-key="[^"]*"[^>]*>(.*?)</tr>',
+                    output,
+                )
                 assert row is not None
                 assert row[1].count(waiting) == 2
                 assert "<time" not in row[1]
@@ -828,7 +927,7 @@ class PresentationTests(unittest.TestCase):
                 locale,
                 later + dt.timedelta(seconds=30),
             )
-            assert f"<td>{completed}</td>" in output
+            assert f">{completed}</td>" in output
 
     def test_live_fragments_advance_timers_and_expire_schedules(self) -> None:
         """Refresh clocks and observed states with the server's time."""
@@ -847,9 +946,9 @@ class PresentationTests(unittest.TestCase):
             duration_seconds=None,
         )
         for locale, elapsed in (
-            ("en", "1″…"),
-            ("zh-hans", "1″…"),
-            ("zh-hant", "1″…"),
+            ("en", "1 s…"),
+            ("zh-hans", "1 秒…"),
+            ("zh-hant", "1 秒…"),
         ):
             now = self.now + dt.timedelta(seconds=1)
             live = render_live_status(status, self.data["config"], locale, now)
@@ -1000,31 +1099,24 @@ class PresentationTests(unittest.TestCase):
             assert 'class="empty"' in render_logs({"files": []}, locale)
 
     @staticmethod
-    def test_shared_css_preserves_responsive_contracts() -> None:
-        """Keep narrow cards, counters, and scrollable details."""
+    def test_interface_assets_are_self_contained() -> None:
+        """Ship local assets without a remote browser dependency."""
         root = Path(__file__).resolve().parents[2] / "src" / "webservice"
-        styles = (root / "public_html" / "styles.css").read_text()
-        assert "repeat(auto-fill, minmax(min(18em, 100%), 1fr))" in styles
-        assert "list-style: decimal inside" in styles
-        assert "overflow-x: auto" in styles
-        assert "margin-top: auto" in styles
-        assert ".routine-status {\n    white-space: nowrap;" in styles
-        assert ".page-updates::backdrop" in styles
-        assert "max-height: calc(100dvh - 48px)" in styles
-        assert ".relative-time {" in styles
-        assert "font-size: .85em" in styles
-        assert "@media (max-width: 600px)" in styles
-        assert "@media (max-width: 480px)" not in styles
-        assert ".major-events p {" in styles
-        assert ".major-events li" not in styles
-        task = re.search(r"\.backlog-task \{([^}]+)\}", styles)
-        count = re.search(r"\.backlog-count \{([^}]+)\}", styles)
-        assert task is not None
-        assert count is not None
-        assert "grid-template-columns: minmax(0, 1fr) auto" in task[1]
-        assert "padding: 10px 16px" in task[1]
-        assert "text-align: end" in count[1]
-        assert "white-space: nowrap" in count[1]
+        for output in (
+            render_dashboard(None, None, None, "en"),
+            render_logs({"files": []}, "en"),
+            render_about(None, "en"),
+        ):
+            assets = re.findall(
+                r'<(?:link|script)\b[^>]*(?:href|src)="([^"]+)"',
+                output,
+            )
+            assert "/styles.css" in assets
+            assert all(asset.startswith("/") for asset in assets)
+            assert all(
+                (root / "public_html" / asset.lstrip("/")).is_file()
+                for asset in assets
+            )
         assert not list(root.rglob("*.php"))
         assert list(root.rglob("*.js")) == [root / "public_html" / "live.js"]
         assert not list(root.rglob("*.mjs"))
@@ -1105,16 +1197,20 @@ class LiveVisibilityTests(unittest.TestCase):
                         for output in self._outputs(locale):
                             card = self._card(output, routine)
                             assert label in card
-                            assert "✅" in card
+                            assert 'data-status="updated"' in card
 
-    def test_contents_moves_navigation_beneath_the_title(self) -> None:
-        """Link visible dashboard sections beneath the title."""
+    def test_contents_links_only_visible_dashboard_sections(self) -> None:
+        """Keep contents links valid when navigation moves."""
         for locale in ("en", "zh-hans", "zh-hant"):
             output = self._outputs(locale)[0]
             header = output.split("</header>")[0]
-            footer = output.split("<footer>")[1]
-            assert header.index("</h1>") < header.index('class="page-toc"')
-            contents = header.split('<nav class="page-toc"')[1]
+            contents = re.search(
+                r'<nav class="page-toc"[^>]*>(.*?)</nav>',
+                output,
+                re.DOTALL,
+            )
+            assert contents is not None
+            contents = contents[1]
             assert 'href="/"' not in contents
             assert 'class="brand"' in header
             for anchor in (
@@ -1125,16 +1221,20 @@ class LiveVisibilityTests(unittest.TestCase):
                 "#backlog",
                 "#tool-status",
             ):
-                assert f'href="{anchor}"' in header
-            assert 'href="/#backlog"' not in footer
-            assert 'href="/"' not in footer
+                assert f'href="{anchor}"' in contents
+                assert f'id="{anchor[1:]}"' in output
         snapshot = self.data["snapshot"]
         snapshot["pageviews"]["items"] = []
         snapshot["backlog"]["total"] = 0
         output = self._outputs("en")[0]
-        header = output.split("</header>")[0]
-        assert 'href="#homepage-pageviews"' not in header
-        assert 'href="#backlog"' not in header
+        contents = re.search(
+            r'<nav class="page-toc"[^>]*>(.*?)</nav>',
+            output,
+            re.DOTALL,
+        )
+        assert contents is not None
+        assert 'href="#homepage-pageviews"' not in contents[1]
+        assert 'href="#backlog"' not in contents[1]
 
     def test_about_monitor_uses_saved_environment_and_fresh_usage(
         self,
@@ -1261,7 +1361,7 @@ class LiveVisibilityTests(unittest.TestCase):
                 for output in self._outputs(locale):
                     card = self._card(output)
                     assert card.count(label) == 2
-                    assert "❌" in card
+                    assert 'data-status="failed"' in card
                     assert "<script>unsafe</script>" not in card
                     assert "TimeoutError" not in card
                     assert "Updated report for" not in card
@@ -1333,7 +1433,7 @@ class LiveVisibilityTests(unittest.TestCase):
             for output in self._outputs(locale):
                 card = self._card(output)
                 assert "ExceptionGroup" not in card
-                assert "❌" in card
+                assert 'data-status="failed"' in card
 
     def test_running_progress_uses_saved_dates_and_counts(self) -> None:
         """Separate dated status labels from phase and counters."""
@@ -1800,17 +1900,17 @@ class ServerPresentationTests(unittest.TestCase):
         for locale, purpose, contact in (
             (
                 "en",
-                "primarily updates reports",
+                "updates reports for Chinese Wikipedia",
                 "If you have questions, contact ",
             ),
             (
                 "zh-hans",
-                "其主要更新中文维基百科电子游戏专题报告",
+                "为中文维基百科电子游戏专题更新报告",
                 "如果有疑问\uff0c联系",
             ),
             (
                 "zh-hant",
-                "其主要更新中文維基百科電子遊戲專題報告",
+                "為中文維基百科電子遊戲專題更新報告",
                 "如果有疑問\uff0c聯絡",
             ),
         ):
@@ -1825,7 +1925,7 @@ class ServerPresentationTests(unittest.TestCase):
                 contact + '<a href="https://zh.wikipedia.org/wiki/'
                 'User:For_Each_..._Next">For Each ... Next</a>' in output
             )
-            assert 'href="/#backlog"' not in output
+            assert 'href="/#backlog"' in output
             for removed in (
                 "discover-heading",
                 "improve-heading",
@@ -1915,6 +2015,7 @@ class EventPresentationTests(unittest.TestCase):
         *,
         query: str = "",
         config: dict[str, object] | None = None,
+        page: int = 1,
     ) -> str:
         """Render event prose alongside daily download controls.
 
@@ -1932,6 +2033,7 @@ class EventPresentationTests(unittest.TestCase):
                 ],
                 "date": "2026-10-18",
                 "query": query,
+                "page": page,
                 "events": events,
                 "truncated": False,
             },
@@ -1995,10 +2097,22 @@ class EventPresentationTests(unittest.TestCase):
         events.extend({**event, "dry": True} for event in events.copy())
         for locale in ("en", "zh-hans", "zh-hant"):
             interface = Interface(locale)
-            output = self._render(events, locale)
+            output = "".join(
+                self._render(events, locale, page=number)
+                for number in range(1, (len(events) + 24) // 25 + 1)
+            )
             listing = re.search(
-                r'<div class="major-events">(.*?)</div>',
-                output,
+                r'<div class="major-events">(.*)</div>',
+                '<div class="major-events">'
+                + "".join(
+                    re.findall(
+                        r'<div class="major-events">(.*?)</div>',
+                        output,
+                        re.DOTALL,
+                    ),
+                )
+                + "</div>",
+                re.DOTALL,
             )
             assert listing is not None
             assert listing[1].count("<p>") == len(events)
@@ -2016,8 +2130,18 @@ class EventPresentationTests(unittest.TestCase):
             assert interface.text("logs.result.partial") in listing[1]
             assert interface.text("logs.edits", count=2) in listing[1]
             assert interface.text("logs.failure", count=1) in listing[1]
-            assert "5.30″" in listing[1]
-            assert "1\N{PRIME}05.10″" in listing[1]
+            assert (
+                interface.text("duration.seconds", seconds="5.30")
+                in listing[1]
+            )
+            assert (
+                interface.text(
+                    "duration.minutes",
+                    minutes=1,
+                    seconds="05.10",
+                )
+                in listing[1]
+            )
             assert "https://zh.wikipedia.org/wiki/" in listing[1]
             assert "<pre" not in output
             assert "<code" not in output
@@ -2156,7 +2280,7 @@ class EventPresentationTests(unittest.TestCase):
         ])
         listing = re.search(r'<div class="major-events">(.*?)</div>', output)
         assert listing is not None
-        assert listing[1].count("<p>") == 100
+        assert listing[1].count("<p>") == 25
 
     def test_failed_attempts_keep_confirmed_edits_in_complete_sentences(
         self,
@@ -2175,7 +2299,7 @@ class EventPresentationTests(unittest.TestCase):
                 (
                     "At 2026-10-18 12:00:02 UTC, "
                     "the Pageview rankings task failed. "
-                    "1 page edit was confirmed. The attempt took 5.30″. "
+                    "1 page edit was confirmed. The attempt took 5.30 s. "
                     "Related reports include WikiProject:电子游戏/热门条目."
                 ),
             ),
@@ -2183,7 +2307,7 @@ class EventPresentationTests(unittest.TestCase):
                 "zh-hans",
                 (
                     "在2026-10-18 12:00:02 UTC\uff0c浏览量排行执行失败。"
-                    "已确认完成1次页面编辑。本次执行耗时5.30″。"
+                    "已确认完成1次页面编辑。本次执行耗时5.30 秒。"
                     "相关报告包括WikiProject:电子游戏/热门条目。"
                 ),
             ),
@@ -2191,7 +2315,7 @@ class EventPresentationTests(unittest.TestCase):
                 "zh-hant",
                 (
                     "在2026-10-18 12:00:02 UTC\uff0c瀏覽量排行執行失敗。"
-                    "已確認完成1次頁面編輯。本次執行耗時5.30″。"
+                    "已確認完成1次頁面編輯。本次執行耗時5.30 秒。"
                     "相關報告包括WikiProject:电子游戏/热门条目。"
                 ),
             ),
@@ -2209,7 +2333,7 @@ class EventPresentationTests(unittest.TestCase):
             (
                 "en",
                 "At 2026-10-18 12:00:02 UTC, ",
-                " The attempt took 0.44″.",
+                " The attempt took 0.44 s.",
                 " Related reports include WikiProject:电子游戏/热门条目.",
                 (
                     "the Pageview rankings task was deferred for retry.",
@@ -2226,7 +2350,7 @@ class EventPresentationTests(unittest.TestCase):
             (
                 "zh-hans",
                 "在2026-10-18 12:00:02 UTC\uff0c",
-                "本次执行耗时0.44″。",
+                "本次执行耗时0.44 秒。",
                 "相关报告包括WikiProject:电子游戏/热门条目。",
                 (
                     "浏览量排行已推迟执行\uff0c等待重试。",
@@ -2237,7 +2361,7 @@ class EventPresentationTests(unittest.TestCase):
             (
                 "zh-hant",
                 "在2026-10-18 12:00:02 UTC\uff0c",
-                "本次執行耗時0.44″。",
+                "本次執行耗時0.44 秒。",
                 "相關報告包括WikiProject:电子游戏/热门条目。",
                 (
                     "瀏覽量排行已延後執行\uff0c等待重試。",
@@ -2303,13 +2427,13 @@ class EventPresentationTests(unittest.TestCase):
                         "At 2026-10-18 12:00:02 UTC, "
                         "the report run finished after processing 1 task, "
                         "with 0 tasks failing and 1 task deferred for retry. "
-                        "The attempt took 1.00″."
+                        "The attempt took 1.00 s."
                     ),
                     (
                         "At 2026-10-18 12:00:02 UTC, "
                         "the website data refresh completed with some "
                         "failures. The refresh encountered 1 source failure. "
-                        "The attempt took 0.44″."
+                        "The attempt took 0.44 s."
                     ),
                 ],
             ),
@@ -2319,12 +2443,12 @@ class EventPresentationTests(unittest.TestCase):
                     (
                         "在2026-10-18 12:00:02 UTC\uff0c报告执行完毕\uff0c"
                         "共处理1项任务\uff0c其中0项任务失败\uff0c"
-                        "1项任务等待重试。本次执行耗时1.00″。"
+                        "1项任务等待重试。本次执行耗时1.00 秒。"
                     ),
                     (
                         "在2026-10-18 12:00:02 UTC\uff0c"
                         "网站数据刷新已部分完成。"
-                        "刷新时有1项来源获取失败。本次执行耗时0.44″。"
+                        "刷新时有1项来源获取失败。本次执行耗时0.44 秒。"
                     ),
                 ],
             ),
@@ -2334,12 +2458,12 @@ class EventPresentationTests(unittest.TestCase):
                     (
                         "在2026-10-18 12:00:02 UTC\uff0c報告執行完畢\uff0c"
                         "共處理1項任務\uff0c其中0項任務失敗\uff0c"
-                        "1項任務等待重試。本次執行耗時1.00″。"
+                        "1項任務等待重試。本次執行耗時1.00 秒。"
                     ),
                     (
                         "在2026-10-18 12:00:02 UTC\uff0c"
                         "網站資料重新整理已部分完成。"
-                        "重新整理時有1項來源取得失敗。本次執行耗時0.44″。"
+                        "重新整理時有1項來源取得失敗。本次執行耗時0.44 秒。"
                     ),
                 ],
             ),
@@ -2375,7 +2499,7 @@ class EventPresentationTests(unittest.TestCase):
         }
         output = self._render([event], config=config)
         assert self._paragraphs(output)[0].endswith(
-            "0 page edits were confirmed. The attempt took 5.30″. "
+            "0 page edits were confirmed. The attempt took 5.30 s. "
             "Related reports include Report A, Report B and Report <C>.",
         )
         assert "Report &lt;C&gt;" in output

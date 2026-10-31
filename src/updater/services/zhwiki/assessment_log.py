@@ -17,6 +17,7 @@ from shared.support.regions import replace_by_tag
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import date
 
     from backend.services.zhwiki.assessment_log import AssessmentLogData
 
@@ -71,6 +72,138 @@ _IMPORTANCE_NAMES = {
     "極高": "极高",
     "不適用": "不适用",
 }
+_SUMMARY_QUALITY = (
+    ("典范级", ("fa", "典范", "典範"), ("fl", "特色列表", "典表")),
+    ("优良级", ("ga", "优良", "優良"), ()),
+    ("甲级", ("a", "甲"), ("al", "甲表", "甲级列表", "甲級列表")),
+    ("乙上级", ("b+", "bplus", "乙上"), ()),
+    ("乙级", ("b", "乙"), ("bl", "乙表", "乙级列表", "乙級列表")),
+    ("丙级", ("c", "丙"), ("cl", "丙表", "丙级列表", "丙級列表")),
+    ("丁级", ("d", "丁"), ()),
+    ("初级", ("start", "初"), ("list", "列表")),
+    ("小作品级", ("stub", "小作品"), ("sl", "stublist", "小列表")),
+    ("小小作品级", ("substub", "小小作品"), ()),
+    ("未评级", ("unassessed", "unknown", "未评", "未評", "未知"), ()),
+)
+_SUMMARY_IMPORTANCE = (
+    ("极高", ("top", "极高", "極高")),
+    ("高", ("high", "高")),
+    ("中", ("mid", "中")),
+    ("低", ("low", "低")),
+    ("极低", ("bottom", "极低", "極低")),
+    ("不适用", ("na", "n/a", "不适用", "不適用")),
+    (
+        "未知",
+        ("unknown", "unassessed", "未知", "未评", "未評", "未评级", "未評級"),
+    ),
+)
+
+
+def _summary_counts(
+    articles: pl.DataFrame,
+    field: str,
+    aliases: Mapping[str, str],
+    default: str,
+    suffix: str,
+) -> dict[str, int]:
+    """Count article assessments after translating known label aliases.
+
+    Args:
+        articles: Complete namespace-zero members for one observation.
+        field: Assessment dimension to count.
+        aliases: Labels that share one report label.
+        default: Label for an absent assessment.
+        suffix: Dimension suffix already present in some source labels.
+
+    Returns:
+        Counts by normalized label, preserving custom grades.
+    """
+    label = (
+        pl
+        .col(field)
+        .fill_null(default)
+        .str.to_lowercase()
+        .str.replace(rf"[{suffix}]$" if suffix == "级級" else f"{suffix}$", "")
+    )
+    return dict(
+        articles
+        .select(label.replace(aliases).alias("label"))
+        .group_by("label")
+        .len()
+        .iter_rows(),
+    )
+
+
+def _totals(data: AssessmentLogData) -> str:
+    """Render current article and list totals in assessment order.
+
+    Args:
+        data: Complete members and their retained source namespaces.
+
+    Returns:
+        A paragraph with thousands separators and no zero-count labels.
+    """
+    articles = data.members.join(
+        data.result.tables["source"].select("page_id", "page_namespace"),
+        on="page_id",
+        validate="1:1",
+    ).filter(pl.col("page_namespace") == 0)
+    quality_aliases = {
+        alias: f"{label}{kind}"
+        for label, article_aliases, list_aliases in _SUMMARY_QUALITY
+        for kind, values in (("条目", article_aliases), ("列表", list_aliases))
+        for alias in values
+    }
+    quality = _summary_counts(
+        articles,
+        "class",
+        quality_aliases,
+        "未评",
+        "级級",
+    )
+    quality_parts = []
+    for label, _, _ in _SUMMARY_QUALITY:
+        article_count = quality.pop(f"{label}条目", 0)
+        list_count = quality.pop(f"{label}列表", 0)
+        parts = []
+        if article_count:
+            name = label if label == "未评级" else f"{label}条目"
+            parts.append(f"{name}{article_count:,}篇")
+        if list_count:
+            name = "列表" if article_count else f"{label}列表"
+            parts.append(f"{name}{list_count:,}篇")
+        if parts:
+            quality_parts.append("、".join(parts))
+    quality_parts.extend(
+        f"{name}{count:,}篇" for name, count in sorted(quality.items())
+    )
+    importance = _summary_counts(
+        articles,
+        "importance",
+        {
+            alias: name
+            for name, aliases in _SUMMARY_IMPORTANCE
+            for alias in aliases
+        },
+        "未知",
+        "重要度",
+    )
+    importance_parts = [
+        f"{name}重要度{count:,}篇"
+        for name, _ in _SUMMARY_IMPORTANCE
+        if (count := importance.pop(name, 0))
+    ]
+    importance_parts.extend(
+        f"{name}重要度{count:,}篇"
+        for name, count in sorted(importance.items())
+    )
+    paragraphs = [f"'''总条目'''{articles.height:,}篇。"]
+    paragraphs.extend(
+        "，".join(parts) + "。"
+        for parts in (quality_parts, importance_parts)
+        if parts
+    )
+    return "".join(paragraphs)
 
 
 def _label(value: object, names: Mapping[str, str], suffix: str) -> str:
@@ -171,6 +304,43 @@ def _change_line(
     )
 
 
+def _render_days(
+    data: AssessmentLogData,
+    days: Mapping[date, Mapping[str, str]],
+    summaries: Mapping[date, str],
+) -> str:
+    """Render retained day sections with their original totals.
+
+    Args:
+        data: Original introductory text for the managed history.
+        days: Dated change groups, including observed no-change days.
+        summaries: Totals paragraphs retained for each observed day.
+
+    Returns:
+        The managed history body with newest dates first.
+    """
+    parts = [data.prefix.rstrip(), "\n"]
+    for day, sections in sorted(days.items(), reverse=True):
+        heading = f" {day.year}年{day.month}月{day.day}日 "
+        parts.extend((str(Heading(heading, 3)), "\n\n"))
+        if day in summaries:
+            parts.extend((summaries[day], "\n\n"))
+        if not sections:
+            parts.append("無變更\n\n")
+        for _, label in _SECTIONS:
+            body = sections.get(label)
+            if body is not None:
+                parts.extend(
+                    (
+                        str(Heading(f" {label} ", 4)),
+                        "\n\n",
+                        body.strip(),
+                        "\n\n",
+                    ),
+                )
+    return "".join(parts)
+
+
 def update_text(original_text: str, data: AssessmentLogData) -> str:
     """Append observed changes and retain selected daily records.
 
@@ -182,7 +352,7 @@ def update_text(original_text: str, data: AssessmentLogData) -> str:
         Updated managed log with newest dates first, or the
         exact original text when no updates are pending.
     """
-    observation_date = data.calculated_at.date()
+    observation_date = data.report_date
     new_unchanged_day = data.unchanged and observation_date not in data.days
     if (
         data.changes.is_empty()
@@ -192,6 +362,7 @@ def update_text(original_text: str, data: AssessmentLogData) -> str:
     ):
         return original_text
     days = {day: dict(sections) for day, sections in data.days.items()}
+    summaries = dict(data.summaries)
     if new_unchanged_day:
         days[observation_date] = {}
     if not data.changes.is_empty():
@@ -211,25 +382,10 @@ def update_text(original_text: str, data: AssessmentLogData) -> str:
             )
             previous = sections.get(label, "").rstrip()
             sections[label] = f"{previous}\n{lines}\n"
-    parts = [data.prefix.rstrip(), "\n"]
-    for day, sections in sorted(days.items(), reverse=True):
-        heading = f" {day.year}年{day.month}月{day.day}日 "
-        parts.extend((str(Heading(heading, 3)), "\n\n"))
-        if not sections:
-            parts.append("無變更\n\n")
-        for _, label in _SECTIONS:
-            body = sections.get(label)
-            if body is not None:
-                parts.extend(
-                    (
-                        str(Heading(f" {label} ", 4)),
-                        "\n\n",
-                        body.strip(),
-                        "\n\n",
-                    ),
-                )
+    if new_unchanged_day or not data.changes.is_empty():
+        summaries[observation_date] = _totals(data)
     return replace_by_tag(
         "assessment-log",
-        "".join(parts),
+        _render_days(data, days, summaries),
         original_text,
     )

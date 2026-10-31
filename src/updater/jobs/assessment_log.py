@@ -53,7 +53,7 @@ def run(
                 dry=active.dry,
             )
             text = update_text(original_text, data)
-            summary = EditSummary.daily(data.calculated_at.date()).append(
+            summary = EditSummary.daily(data.report_date).append(
                 "Published pending assessment changes."
                 if data.pending
                 else f"Recorded {data.changes.height:,} assessment changes.",

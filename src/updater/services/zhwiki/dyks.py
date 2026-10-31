@@ -2,78 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
-import mwparserfromhell
 from mwparserfromhell.nodes import Template
 
 from shared.support.regions import replace_by_tag
 
 if TYPE_CHECKING:
     from backend.services.zhwiki.dyks import PreparedDyk
-
-
-def _statistics_comment(
-    statistics: tuple[tuple[str, int], ...],
-    *,
-    report_title: str,
-    statistics_title: str,
-) -> str:
-    """Render the copyable Commons payload without publishing it.
-
-    Args:
-        statistics: Backend-prepared cumulative observations.
-        report_title: Chinese Wikipedia title cited as the data source.
-        statistics_title: Interwiki title for the copyable Commons data.
-
-    Returns:
-        A complete HTML comment containing the tabular JSON payload.
-    """
-    payload = {
-        "license": "CC-BY-SA-4.0",
-        "description": {
-            "en": "Chinese Wikipedia WikiProject Video games DYK Statistics",
-            "zh-cn": "中文维基百科电子游戏专题新条目推荐统计",
-            "zh-tw": "中文維基百科電子遊戲專題新條目推薦統計",
-        },
-        "sources": f"See [[:w:zh:{report_title}]]",
-        "mediawikiCategories": [
-            {
-                "name": "WikiProject Video games (Chinese Wikipedia)",
-                "sort": "",
-            },
-        ],
-        "schema": {
-            "fields": [
-                {
-                    "name": "date",
-                    "type": "string",
-                    "title": {
-                        "en": "Date",
-                        "zh-hans": "日期",
-                        "zh-hant": "日期",
-                    },
-                },
-                {
-                    "name": "count",
-                    "type": "number",
-                    "title": {
-                        "en": "DYK Count",
-                        "zh-hans": "新条目推荐总数",
-                        "zh-hant": "新條目推薦總數",
-                    },
-                },
-            ],
-        },
-        "data": statistics,
-    }
-    return str(
-        mwparserfromhell.nodes.Comment(
-            f" \n\nfor [[:{statistics_title}]]\n\n"
-            f"{json.dumps(payload, ensure_ascii=False)}\n\n",
-        ),
-    )
 
 
 def _item(title: str, assessment: str) -> Template:
@@ -94,29 +30,17 @@ def _item(title: str, assessment: str) -> Template:
 
 def render_reports(
     prepared: PreparedDyk,
-    *,
-    report_title: str,
-    statistics_title: str,
 ) -> tuple[str, str]:
-    """Render yearly DYK listings, nominations, and hidden statistics.
+    """Render yearly DYK listings and current nominations.
 
     Args:
         prepared: Backend-prepared rows, ordering, and statistics.
-        report_title: Chinese Wikipedia title cited as the data source.
-        statistics_title: Interwiki title for the copyable Commons data.
 
     Returns:
         Completed-DYK and current-nomination wikitext sections.
     """
     completed, nominations = prepared.completed, prepared.nominations
-    items = [
-        f"共計{completed.height:,}篇條目"
-        + _statistics_comment(
-            prepared.statistics,
-            report_title=report_title,
-            statistics_title=statistics_title,
-        ),
-    ]
+    items = [f"共計{completed.height:,}篇條目"]
     heading = ""
     for row in completed.iter_rows(named=True):
         row_heading = (
@@ -148,28 +72,25 @@ def render_reports(
 def update_text(
     original_text: str,
     prepared: PreparedDyk,
-    *,
-    report_title: str,
-    statistics_title: str,
 ) -> str:
-    """Replace both managed DYK ranges from prepared source facts.
+    """Replace managed DYK listings and inline chart values.
 
     Args:
         original_text: Destination content whose surroundings are kept.
         prepared: Complete backend data with no further source reads.
-        report_title: Destination title cited in the statistics.
-        statistics_title: Interwiki title for the copyable data payload.
 
     Returns:
-        Complete destination text with both ranges replaced.
+        Complete text preserving chart settings and unmanaged content.
     """
-    completed, nominations = render_reports(
-        prepared,
-        report_title=report_title,
-        statistics_title=statistics_title,
-    )
-    return replace_by_tag(
+    completed, nominations = render_reports(prepared)
+    text = replace_by_tag(
         "dykn",
         nominations,
         replace_by_tag("dyk", completed, original_text),
     )
+    for name, values in (
+        ("dyk-chart-x", (day for day, _ in prepared.statistics)),
+        ("dyk-chart-y", (str(count) for _, count in prepared.statistics)),
+    ):
+        text = replace_by_tag(name, ", ".join(values), text)
+    return text

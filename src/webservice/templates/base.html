@@ -1,2 +1,51 @@
 <!doctype html>
-<html lang="{{ language_tag }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#edf9f4"><meta name="description" content="{{ t.page.description }}"><link rel="icon" href="/aranami.svg" type="image/svg+xml"><link rel="stylesheet" href="/styles.css">{% if live %}<script src="/live.js" defer></script>{% endif %}<title>{{ heading }} · Aranami</title></head><body><a href="#main" class="skip">{{ t.nav.skip }}</a><header class="masthead"><div class="shell"><a href="/" class="brand"><img src="/aranami.svg" width="36" height="36" alt=""><span>Aranami</span></a><h1>{{ heading }}</h1>{% block navigation %}<nav class="page-toc" aria-label="{{ t.nav.contents }}"><a href="/#backlog">{{ t.nav.backlog }}</a></nav>{% endblock %}</div></header><main class="shell" id="main">{% block content %}{% endblock %}</main><footer><div class="shell footer-inner"><p class="footer-uptime">{% if footer %}{% include "includes/uptime.html" %}{% endif %}</p><nav aria-label="Aranami"><a href="/about/">{{ t.nav.about }}</a><a href="/logs/">{{ t.nav.logs }}</a>{{ project_link }}</nav></div></footer></body></html>
+<html lang="{{ language_tag }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="{{ t.page.description }}">
+  <link rel="icon" href="/aranami.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  {% if live %}<script src="/live.js" defer></script>{% endif %}
+  <title>{{ heading }} · Aranami</title>
+</head>
+<body>
+  <a href="#main" class="skip">{{ t.nav.skip }}</a>
+  <header class="masthead">
+    <div class="shell header-inner">
+      <a href="/" class="brand"><img src="/aranami.svg" width="36" height="36" alt=""><span>Aranami</span></a>
+      <nav class="global-navigation" aria-label="{{ t.nav.global }}">
+        <a href="/"{% if navigation and navigation.path == '/' %} aria-current="page"{% endif %}>{{ t.nav.dashboard }}</a>
+        <a href="/#backlog"{% if navigation and navigation.path == '/maintenance/' %} aria-current="page"{% endif %}>{{ t.nav.backlog }}</a>
+        <a href="/#tool-status">{{ t.nav.reports }}</a>
+        <a href="/logs/"{% if navigation and navigation.path == '/logs/' %} aria-current="page"{% endif %}>{{ t.nav.logs }}</a>
+        <a href="/about/"{% if navigation and navigation.path == '/about/' %} aria-current="page"{% endif %}>{{ t.nav.about }}</a>
+      </nav>
+      <nav class="language-switcher" aria-label="{{ t.nav.language }}">
+        <span class="language-label">{{ t.nav.language }}</span>
+        {% if navigation %}
+          {% for language in navigation.languages %}<a href="{{ language.url }}" lang="{{ language.tag }}" hreflang="{{ language.tag }}"{% if language.current %} aria-current="true"{% endif %}>{{ language.label }}</a>{% endfor %}
+        {% else %}
+          <a href="?lang=en" lang="en">English</a>
+          <a href="?lang=zh-hans" lang="zh-Hans">简体中文</a>
+          <a href="?lang=zh-hant" lang="zh-Hant">繁體中文</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+  <div class="shell page-layout{% block layout_class %}{% endblock %}">
+    {% block navigation %}{% endblock %}
+    <main id="main" tabindex="-1">
+      <div class="page-heading"><h1>{{ heading }}</h1></div>
+      <div class="page-content">{% block content %}{% endblock %}</div>
+    </main>
+  </div>
+  <footer>
+    <div class="shell footer-inner">
+      <p class="footer-uptime">{% if footer %}{% include "includes/uptime.html" %}{% endif %}</p>
+      <nav aria-label="Aranami"><a href="/about/">{{ t.nav.about }}</a><a href="/logs/">{{ t.nav.logs }}</a>{{ project_link }}</nav>
+    </div>
+  </footer>
+</body>
+</html>

@@ -255,7 +255,7 @@ class PublicWebsiteTests(unittest.TestCase):
             assert head[0] == 200
             assert head[2] == b""
             translated = self.request("/about/", language="zh-TW,en;q=0.5")
-            assert translated[1]["Content-Language"] == "zh-hant"
+            assert translated[1]["Content-Language"] == "zh-Hant"
             assert self.request("/maintenance/?task=valid")[0] == 503
             assert self.request("/maintenance/?task=../private")[0] == 400
             assert self.request("/logs/?q=one&q=two")[0] == 400
@@ -302,7 +302,7 @@ class PublicWebsiteTests(unittest.TestCase):
             assert b"(33 sec)" not in body
             assert b"32.89" not in body
             translated = self.request("/api/live", language="zh-TW")
-            assert translated[1]["Content-Language"] == "zh-hant"
+            assert translated[1]["Content-Language"] == "zh-Hant"
             assert "執行完畢於" in translated[2].decode()
             assert "執行時間33秒" not in translated[2].decode()
             assert self.request("/api/live", "HEAD")[2] == b""
@@ -358,7 +358,7 @@ class PublicWebsiteTests(unittest.TestCase):
         _, marker, remainder = human.partition('<div class="major-events">')
         assert marker
         prose = remainder.partition("</div>")[0]
-        assert prose.count("<p>") == 100
+        assert prose.count("<p>") == 25
         assert "<ul" not in prose
         assert "<li" not in prose
         assert " · " not in prose

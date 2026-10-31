@@ -373,7 +373,7 @@ def _published_statuses_match(
 
     Returns:
         Whether published members, grades, and dates match source facts.
-        Hidden statistical sampling dates do not cause a new wiki edit.
+        Chart sampling dates do not cause a new wiki edit.
     """
     content = region_content(text, "dyk")
     if content is None or not content.lstrip().startswith(
@@ -582,7 +582,7 @@ def prepare_report(
     Raises:
         ValueError: A required managed range is absent or malformed.
     """
-    for name in ("dyk", "dykn"):
+    for name in ("dyk", "dykn", "dyk-chart-x", "dyk-chart-y"):
         if region_content(original_text, name) is None:
             message = f"Missing managed-region markers for {name!r}."
             raise ValueError(message)
@@ -635,7 +635,7 @@ def prepare_report(
     if content_unchanged:
         _LOGGER.info(
             "DYK revision-backed statuses are unchanged; keeping published "
-            "text without refreshing its hidden statistics comment.",
+            "text without refreshing its chart sampling date.",
         )
     identities = dict(
         pl

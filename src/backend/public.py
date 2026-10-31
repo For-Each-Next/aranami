@@ -42,7 +42,7 @@ from shared.deployment import project_version
 from shared.support.files import open_regular, read_json_object, read_regular
 lazy from backend.website.collect import validate_dashboard_snapshot
 lazy from webservice import pages
-lazy from webservice.presentation import select_locale
+lazy from webservice.presentation import local_url, select_locale
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
@@ -63,6 +63,8 @@ _SOCKET_REFRESH_SECONDS = 60
 _SOCKET_CHECK_SECONDS = 1
 _SOCKET_SEND_SECONDS = 5
 _LOGGER = logging.getLogger(__name__)
+_LANGUAGES = {"en": "English", "zh-hans": "简体中文", "zh-hant": "繁體中文"}
+_LANGUAGE_COOKIE = "aranami-language"
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -151,6 +153,17 @@ def _response_policy(
         websocket_origin="wss://aranami.toolforge.org",
     ).items():
         response.headers[name] = value
+    language = _explicit_language(request)
+    if language is not None:
+        response.set_cookie(
+            _LANGUAGE_COOKIE,
+            language,
+            max_age=365 * 24 * 60 * 60,
+            httponly=True,
+            secure=request.url.hostname == "aranami.toolforge.org"
+            or request.url.scheme == "https",
+            samesite="lax",
+        )
     if (
         not isinstance(response, StreamingResponse)
         and "Content-Disposition" not in response.headers
@@ -185,8 +198,126 @@ def _html(
         content.encode(),
         status_code=status,
         media_type="text/html; charset=utf-8",
-        headers={"Content-Language": locale, "Vary": "Accept-Language"},
+        headers={
+            "Content-Language": {
+                "zh-hans": "zh-Hans",
+                "zh-hant": "zh-Hant",
+            }.get(locale, locale),
+            "Vary": "Accept-Language, Cookie",
+        },
     )
+
+
+def _explicit_language(request: Request) -> str | None:
+    """Read one supported explicit language choice.
+
+    Returns:
+        The selected locale, or none for absent or invalid choices.
+    """
+    values = request.query_params.getlist("lang")
+    return (
+        values[0].lower()
+        if len(values) == 1 and values[0].lower() in _LANGUAGES
+        else None
+    )
+
+
+def _request_locale(request: Request) -> str:
+    """Prefer an explicit choice, then cookie, then browser language.
+
+    Returns:
+        A supported interface locale without changing source content.
+    """
+    chosen = _explicit_language(request)
+    saved = request.cookies.get(_LANGUAGE_COOKIE)
+    return chosen or (
+        saved
+        if saved in _LANGUAGES
+        else select_locale(request.headers.get("Accept-Language", ""))
+    )
+
+
+def _navigation(request: Request, locale: str) -> dict[str, object]:
+    """Build language links retaining the current route and query state.
+
+    Returns:
+        Safe local URLs and the active page for shared navigation.
+    """
+    parameters = {
+        key: value
+        for key, value in request.query_params.items()
+        if key
+        in {
+            "task",
+            "sort",
+            "order",
+            "page",
+            "seed",
+            "q",
+            "quality",
+            "importance",
+            "date",
+            "status",
+        }
+    }
+    return {
+        "path": request.url.path,
+        "languages": [
+            {
+                "label": label,
+                "tag": {"zh-hans": "zh-Hans", "zh-hant": "zh-Hant"}.get(
+                    language,
+                    language,
+                ),
+                "url": local_url(
+                    request.url.path,
+                    **parameters,
+                    lang=language,
+                ),
+                "current": language == locale
+                or (language == "zh-hans" and locale == "zh"),
+            }
+            for language, label in _LANGUAGES.items()
+        ],
+    }
+
+
+def _log_controls(selection: dict[str, list[str]]) -> dict[str, str]:
+    """Remove validated page controls before the fixed log reader runs.
+
+    Returns:
+        Bounded ordering, outcome, and page choices.
+
+    Raises:
+        ValueError: A control is repeated or unsupported.
+    """
+    selection.pop("lang", None)
+    controls = {}
+    for name, default, allowed in (
+        ("order", "desc", {"asc", "desc"}),
+        (
+            "status",
+            "all",
+            {
+                "all",
+                "running",
+                "updated",
+                "no_update",
+                "failed",
+                "deferred",
+                "unconfirmed",
+                "partial",
+                "unknown",
+            },
+        ),
+        ("page", "1", {"1", "2", "3", "4"}),
+    ):
+        values = selection.pop(name, [default])
+        if len(values) != 1 or values[0] not in allowed:
+            message = "Invalid log presentation control."
+            raise ValueError(message)
+        controls[name] = values[0]
+    return controls
 
 
 def _page_error(key: str, locale: str, status: HTTPStatus) -> Response:
@@ -274,7 +405,7 @@ class _PublicViews:
     def page(self, request: Request) -> Response:
         """Return a page cached by locale and saved-input identity."""
         path = request.url.path
-        locale = select_locale(request.headers.get("Accept-Language", ""))
+        locale = _request_locale(request)
         if path == "/logs/":
             return self.logs(request, locale=locale)
         try:
@@ -283,7 +414,7 @@ class _PublicViews:
                 query,
                 keep_blank_values=True,
                 errors="strict",
-                max_num_fields=5,
+                max_num_fields=12 if path == "/maintenance/" else 5,
             )
         except ValueError, UnicodeError:
             return _page_error(
@@ -291,12 +422,14 @@ class _PublicViews:
                 locale,
                 HTTPStatus.BAD_REQUEST,
             )
+        parameters.pop("lang", None)
+        navigation = _navigation(request, locale)
         randomized = parameters.get("sort") == [
             "random",
         ] and not parameters.get(
             "seed",
         )
-        key = (path, query if path == "/maintenance/" else "", locale)
+        key = (path, query, locale)
         identity = self._page_identity()
         if not randomized:
             content = self.pages.get(key, identity)
@@ -308,6 +441,7 @@ class _PublicViews:
                     _configuration(),
                     locale,
                     status=saved_status(self.runtime),
+                    navigation=navigation,
                 ),
                 locale,
             )
@@ -320,11 +454,17 @@ class _PublicViews:
                         saved_status(self.runtime),
                         _configuration(),
                         locale,
+                        navigation=navigation,
                     ),
                     locale,
                 )
                 if path == "/"
-                else self._maintenance_page(snapshot, parameters, locale)
+                else self._maintenance_page(
+                    snapshot,
+                    parameters,
+                    locale,
+                    navigation,
+                )
             )
         if not randomized and response.status_code == HTTPStatus.OK:
             self.pages.put(key, identity, response.body.decode())
@@ -335,10 +475,16 @@ class _PublicViews:
         snapshot: dict[str, object] | None,
         parameters: dict[str, list[str]],
         locale: str,
+        navigation: dict[str, object],
     ) -> Response:
         """Return a worklist or its localized selection error."""
         try:
-            content = pages.render_maintenance(snapshot, parameters, locale)
+            content = pages.render_maintenance(
+                snapshot,
+                parameters,
+                locale,
+                navigation=navigation,
+            )
         except ValueError:
             return _page_error(
                 "backlog.not_found",
@@ -413,7 +559,7 @@ class _PublicViews:
         if kind == "status":
             return _json(saved_status(self.runtime))
         if kind == "live":
-            locale = select_locale(request.headers.get("Accept-Language", ""))
+            locale = _request_locale(request)
             return _html(
                 pages.render_live_status(
                     saved_status(self.runtime),
@@ -464,8 +610,9 @@ class _PublicViews:
                 request.scope.get("query_string", b"").decode("ascii"),
                 keep_blank_values=True,
                 errors="strict",
-                max_num_fields=3,
+                max_num_fields=7 if locale is not None else 3,
             )
+            controls = _log_controls(selection) if locale is not None else {}
             filename, text, download = log_selection(selection, files)
         except ValueError, UnicodeError:
             return (
@@ -504,6 +651,7 @@ class _PublicViews:
             "files": files,
             "date": log_date(filename) if filename is not None else None,
             "query": text,
+            **controls,
             **excerpt,
         }
         return (
@@ -515,6 +663,7 @@ class _PublicViews:
                     locale,
                     status=saved_status(self.runtime),
                     config=_configuration(),
+                    navigation=_navigation(request, locale),
                 ),
                 locale,
             )

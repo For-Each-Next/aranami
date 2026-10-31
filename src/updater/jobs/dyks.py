@@ -19,9 +19,6 @@ if TYPE_CHECKING:
     from updater.jobs import JobContext
 
 _TARGET = TASK_DEFINITIONS["dyks"].pages["report"]
-_STATISTICS_TITLE = (
-    "c:Data:Zhwiki_WikiProject_Video_Games_DYK_Annual_Statistics.tab"
-)
 
 
 def _content_summary(changes: data.DykChanges) -> str:
@@ -58,15 +55,13 @@ def _content_summary(changes: data.DykChanges) -> str:
 def run(
     *,
     title: str = _TARGET,
-    statistics_title: str = _STATISTICS_TITLE,
     dry: bool = False,
     context: JobContext | None = None,
 ) -> None:
-    """Update completed DYK listings, candidates, and hidden statistics.
+    """Update completed DYK listings, candidates, and chart data.
 
     Args:
-        title: Destination report page, also cited in its statistics.
-        statistics_title: Interwiki title for the copyable data payload.
+        title: Destination with managed lists and chart data.
         dry: Write proposed edits locally without wiki publication.
         context: Shared context, or ``None`` for a standalone run.
     """
@@ -86,12 +81,7 @@ def run(
         text = (
             original_text
             if report.content_unchanged is True
-            else update_text(
-                original_text,
-                report,
-                report_title=title,
-                statistics_title=statistics_title,
-            )
+            else update_text(original_text, report)
         )
         confirmed = active.publish(
             ProposedEdit(

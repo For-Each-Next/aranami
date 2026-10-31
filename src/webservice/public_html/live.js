@@ -2,6 +2,51 @@
 (() => {
     "use strict";
 
+    // Native modal dialogs supply focus containment, Escape dismissal, and an
+    // inert background. Delegation also covers buttons refreshed over HTTP.
+    const dialogOpeners = new Map();
+    document.addEventListener("click", (event) => {
+        const button = event.target.closest?.("button[commandfor]");
+        if (!button) return;
+        const dialog = document.getElementById(button.getAttribute("commandfor"));
+        if (dialog?.nodeName !== "DIALOG" || typeof dialog.showModal !== "function") return;
+        const command = button.getAttribute("command");
+        if (command === "show-modal") {
+            event.preventDefault();
+            if (!dialog.open) {
+                dialogOpeners.set(dialog, button);
+                dialog.showModal();
+            }
+        } else if (command === "close") {
+            event.preventDefault();
+            dialog.close();
+        }
+    });
+    document.addEventListener("close", (event) => {
+        const opener = dialogOpeners.get(event.target);
+        dialogOpeners.delete(event.target);
+        if (opener?.isConnected) opener.focus();
+    }, true);
+    document.addEventListener("keydown", (event) => {
+        if (event.key !== "Tab") return;
+        const dialog = event.target.closest?.("dialog[open]");
+        if (!dialog) return;
+        const controls = [...dialog.querySelectorAll(
+            "a[href],button,input,select,textarea,[tabindex]",
+        )].filter((node) => node.tabIndex >= 0 && !node.disabled && node.getClientRects().length);
+        const first = controls[0];
+        const last = controls.at(-1);
+        if (!first) {
+            event.preventDefault();
+        } else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    });
+
     const clockId = document.getElementById("tool-status")
         ? "tool-status" : "live-server-status";
     if (!document.getElementById(clockId) || !document.getElementById("live-uptime")) return;
@@ -148,6 +193,9 @@
             return;
         }
         for (const attribute of [...current.attributes]) {
+            // The server describes closed dialogs; preserve the user's modal
+            // state while refreshing the observations inside them.
+            if (current.nodeName === "DIALOG" && attribute.name === "open") continue;
             if (!next.hasAttribute(attribute.name)) {
                 current.removeAttribute(attribute.name);
             }

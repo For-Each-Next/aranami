@@ -158,7 +158,7 @@ class TestSourcePayload(TestCase):
             if name.startswith("src/")
         } == _PACKAGES
         assert (
-            'exec "$tool_dir/pyvenv-3.15/bin/python" -m backend "$@"'
+            'exec "$runtime_python" -m backend "$@"'
             in self.payload["scripts/toolforge/run-hub.sh"].decode()
         )
         assert (

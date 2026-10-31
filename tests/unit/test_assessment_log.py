@@ -290,14 +290,17 @@ class TestAssessmentLogEmptyDays(_AssessmentLogFixture):
         assert prepared.unchanged
         assert prepared.changes.is_empty()
         rendered = update_text(_TEXT, prepared)
-        assert "=== 2026年10月26日 ===\n\n無變更\n\n" in rendered
-        assert "2026年10月25日" not in rendered
+        assert "=== 2026年10月25日 ===\n\n" in rendered
+        assert (
+            "'''总条目'''1篇。乙级条目1篇。高重要度1篇。\n\n無變更" in rendered
+        )
+        assert "2026年10月24日" not in rendered
         assert "====" not in rendered
         assert rendered.startswith("Introduction\n")
         assert rendered.endswith("Footer [[Unmanaged]]")
         self._retain(prepared, rendered, 2)
         retry = self._prepare(members, rendered, observed_at=next_day)
-        assert retry.days == {next_day.date(): {}}
+        assert retry.days == {next_day.date() - dt.timedelta(days=1): {}}
         assert not retry.unchanged
         assert update_text(rendered, retry) == rendered
 
@@ -312,8 +315,9 @@ class TestAssessmentLogEmptyDays(_AssessmentLogFixture):
             observed_at=_NOW + dt.timedelta(days=3),
         )
         rendered = update_text(_TEXT, prepared)
-        assert "=== 2026年10月28日 ===\n\n無變更\n\n" in rendered
-        for day in (25, 26, 27):
+        assert "=== 2026年10月27日 ===\n\n" in rendered
+        assert "\n\n無變更\n\n" in rendered
+        for day in (24, 25, 26):
             assert f"2026年10月{day}日" not in rendered
 
     def test_same_day_changes_replace_an_empty_day_marker(self) -> None:
@@ -330,7 +334,7 @@ class TestAssessmentLogEmptyDays(_AssessmentLogFixture):
         )
         changed = self._prepare(current, empty_day)
         rendered = update_text(empty_day, changed)
-        assert rendered.count("=== 2026年10月25日 ===") == 1
+        assert rendered.count("=== 2026年10月24日 ===") == 1
         assert "無變更" not in rendered
         assert "==== 新增評級 ====\n\n" in rendered
         assert "'''[[:Added]]'''已評級。" in rendered
@@ -356,7 +360,7 @@ class TestAssessmentLogEmptyDays(_AssessmentLogFixture):
         assert later.pending
         assert later.unchanged
         rendered = update_text(_TEXT, later)
-        days = (25, 26)
+        days = (24, 25)
         assert rendered.count("無變更") == len(days)
         for day in days:
             assert rendered.count(f"=== 2026年10月{day}日 ===") == 1
@@ -511,14 +515,17 @@ class TestAssessmentLogState(_AssessmentLogFixture):
         assert restored.baseline.equals(original)
         assert restored.changes["kind"].to_list() == ["added"]
         assert restored.changes["page_id"].to_list() == [1]
-        assert "已移除評級" in restored.days[_NOW.date()]["移除評級"]
+        assert (
+            "已移除評級"
+            in restored.days[_NOW.date() - dt.timedelta(days=1)]["移除評級"]
+        )
         rendered = update_text(_TEXT, restored)
         assert rendered.count("已移除評級") == 1
         assert rendered.count("已評級") == 1
-        older = rendered[rendered.index("=== 2026年10月25日 ===") :]
+        older = rendered[rendered.index("=== 2026年10月24日 ===") :]
         newer = rendered[
-            rendered.index("=== 2026年10月26日 ===") : rendered.index(
-                "=== 2026年10月25日 ===",
+            rendered.index("=== 2026年10月25日 ===") : rendered.index(
+                "=== 2026年10月24日 ===",
             )
         ]
         assert "已移除評級" in older
@@ -558,9 +565,9 @@ class TestAssessmentLogState(_AssessmentLogFixture):
             assert rendered.count("已移除評級") == 1
             assert rendered.count("無變更") == sequence - 2
             assert (
-                f"=== 2026年10月{observed_at.day}日 ===\n\n無變更\n\n"
+                f"=== 2026年10月{observed_at.day - 1}日 ===\n\n"
             ) in rendered
-            original_day = rendered[rendered.index("=== 2026年10月25日 ===") :]
+            original_day = rendered[rendered.index("=== 2026年10月24日 ===") :]
             assert "已移除評級" in original_day
             assert "無變更" not in original_day
             proposal = rendered
@@ -645,8 +652,8 @@ class TestAssessmentLogState(_AssessmentLogFixture):
     def test_prunes_only_dates_older_than_thirty_day_window(self) -> None:
         """Retain the date boundary and surrounding wiki text."""
         body = (
-            "=== 2026年9月25日 ===\n==== 移除評級 ====\n* [[Expired]]\n"
-            "=== 2026年9月26日 ===\n==== 移除評級 ====\n* [[Boundary]]\n"
+            "=== 2026年9月24日 ===\n==== 移除評級 ====\n* [[Expired]]\n"
+            "=== 2026年9月25日 ===\n==== 移除評級 ====\n* [[Boundary]]\n"
             "=== 2026年10月24日 ===\n==== 新增評級 ====\n* [[Recent]]\n"
         )
         text = _TEXT.replace(
@@ -665,8 +672,8 @@ class TestAssessmentLogState(_AssessmentLogFixture):
     def test_empty_days_use_the_same_retention_boundary(self) -> None:
         """Prune old empty days without claiming an initial date."""
         body = (
+            "=== 2026年9月24日 ===\n\n無變更\n\n"
             "=== 2026年9月25日 ===\n\n無變更\n\n"
-            "=== 2026年9月26日 ===\n\n無變更\n\n"
             "=== 2026年10月24日 ===\n\n無變更\n\n"
         )
         text = _TEXT.replace(
@@ -677,12 +684,12 @@ class TestAssessmentLogState(_AssessmentLogFixture):
         assert prepared.pruned
         assert not prepared.unchanged
         assert set(prepared.days) == {
-            dt.date(2026, 9, 26),
+            dt.date(2026, 9, 25),
             dt.date(2026, 10, 24),
         }
         rendered = update_text(text, prepared)
-        assert "2026年9月25日" not in rendered
-        assert "2026年9月26日" in rendered
+        assert "2026年9月24日" not in rendered
+        assert "2026年9月25日" in rendered
         assert "2026年10月24日" in rendered
         assert "2026年10月25日" not in rendered
         assert rendered.count("無變更") == len(prepared.days)
@@ -740,6 +747,99 @@ class TestAssessmentLogState(_AssessmentLogFixture):
 class TestAssessmentLogRendering(_AssessmentLogFixture):
     """Verify natural sentences, links, ordering, and spacing."""
 
+    def test_daily_totals_count_articles_and_lists_in_quality_order(
+        self,
+    ) -> None:
+        """Combine article aliases and omit zero-count classes."""
+        existing = (1, "Existing", "FA", "Top")
+        self._retain(self._prepare(_members(existing)), _TEXT, 1)
+        articles = pl.DataFrame(
+            {
+                "page_id": pl.int_range(1, 1235, eager=True),
+                "title": [f"Article {number}" for number in range(1, 1235)],
+                "class": ["FA"] * 1233 + ["典範级"],
+                "importance": ["Top"] * 1234,
+            },
+            schema=_SCHEMA,
+        )
+        members = pl.concat(
+            [
+                articles,
+                _members(
+                    (1235, "List one", "FL", "High"),
+                    (1236, "List two", "特色列表", "高"),
+                    (1237, "Good", "GA", "Mid"),
+                    (1238, "Upper", "Bplus", "Low"),
+                    (1239, "B article", "乙级", "Low"),
+                    (1240, "B list", "乙级列表", "Low"),
+                    (1241, "Unknown", None, None),
+                    (1242, "Category:Not an article", "FA", "Top"),
+                    (1243, "Template:Not an article", "Template", "NA"),
+                ),
+            ],
+        )
+        prepared = self._prepare(members)
+        rendered = update_text(_TEXT, prepared)
+        assert (
+            "'''总条目'''1,241篇。典范级条目1,234篇、列表2篇，"
+            "优良级条目1篇，乙上级条目1篇，乙级条目1篇、列表1篇，未评级1篇。"
+            "极高重要度1,234篇，高重要度2篇，中重要度1篇，低重要度3篇，未知重要度1篇。"
+        ) in rendered
+        totals = next(
+            line
+            for line in rendered.splitlines()
+            if line.startswith("'''总条目'''")
+        )
+        assert "甲级条目" not in totals
+        assert "不适用重要度" not in totals
+
+    def test_failed_days_keep_their_own_snapshot_totals(self) -> None:
+        """Retain each day's own totals across failed publications."""
+        seed = _members((1, "Original", "B", "High"))
+        self._retain(self._prepare(seed), _TEXT, 1)
+        first_members = _members(
+            (1, "Original", "B", "High"),
+            (2, "Added", "C", "Low"),
+        )
+        first = self._prepare(
+            first_members,
+            observed_at=_NOW + dt.timedelta(days=1),
+        )
+        proposal = update_text(_TEXT, first)
+        self._retain(first, proposal, 2, state="unconfirmed")
+        second = self._prepare(seed, observed_at=_NOW + dt.timedelta(days=2))
+        rendered = update_text(_TEXT, second)
+        older = rendered[rendered.index("=== 2026年10月25日 ===") :]
+        newer = rendered[: rendered.index("=== 2026年10月25日 ===")]
+        assert "'''总条目'''2篇。乙级条目1篇，丙级条目1篇。" in older
+        assert "'''总条目'''1篇。乙级条目1篇。" in newer
+        self._retain(second, rendered, 3)
+        retry = self._prepare(
+            seed,
+            rendered,
+            observed_at=_NOW + dt.timedelta(days=2),
+        )
+        assert update_text(rendered, retry) == rendered
+
+    def test_midnight_snapshot_reports_the_previous_utc_year(self) -> None:
+        """Use UTC boundaries and retain the actual collection time."""
+        seed = _members((1, "Existing", "B", "High"))
+        self._retain(self._prepare(seed), _TEXT, 1)
+        observed_at = dt.datetime(
+            2027,
+            1,
+            1,
+            8,
+            tzinfo=dt.timezone(dt.timedelta(hours=8)),
+        )
+        prepared = self._prepare(seed, observed_at=observed_at)
+        rendered = update_text(_TEXT, prepared)
+        assert prepared.report_date == dt.date(2026, 12, 31)
+        assert prepared.calculated_at == observed_at
+        assert prepared.result.metadata["report_date"] == "2026-12-31"
+        assert "=== 2026年12月31日 ===" in rendered
+        assert "2027年1月1日" not in rendered
+
     def test_renderer_groups_follow_requested_order_and_preserve_unknowns(
         self,
     ) -> None:
@@ -756,7 +856,7 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         groups = ("重命名", "變更評級", "新增評級", "移除評級")
         positions = [rendered.index(f"==== {group} ====") for group in groups]
         assert positions == sorted(positions)
-        assert "=== 2026年10月25日 ===\n\n==== 重命名 ====\n\n" in rendered
+        assert "=== 2026年10月24日 ===\n\n'''总条目'''2篇。" in rendered
         for group in groups:
             assert f"==== {group} ====\n\n* " in rendered
         assert "。\n\n==== 變更評級 ====" in rendered
@@ -894,7 +994,10 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         assert (
             "* '''[[:Same]]'''重新評級。品質由'''优良级'''變為'''典范级'''。\n"
         ) in rendered
-        assert "重要度" not in rendered
+        change_line = next(
+            line for line in rendered.splitlines() if line.startswith("* ")
+        )
+        assert "重要度" not in change_line
 
     def test_added_unassessed_and_unknown_ratings_are_explicit(self) -> None:
         """Show unassessed values without duplicate suffixes."""

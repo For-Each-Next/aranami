@@ -33,6 +33,11 @@ and links related Wikipedia reports; downloads include full diagnostics.
 Event records begin with this deployment. Older diagnostic files remain
 downloadable, without inferred historical events. Search covers the recent
 event window shown on the page.
+The viewer defaults to newest first, with 25 events per page, a result filter,
+and a chronological-order option. Download the selected day or use the daily
+archive. Choose English, Simplified Chinese, or Traditional Chinese; that choice
+lasts one year in the current browser. Article titles keep their source spelling.
+
 Inspect backend-owned metadata read-only:
 
 | File | Observation |
@@ -75,13 +80,15 @@ Submit a one-off job from the bastion as the tool account:
 
 ```shell
 toolforge jobs run aranami-preview --image python3.13 --mount=all \
-  --command 'env PYTHONPATH=/data/project/aranami/app/src PYWIKIBOT_DIR=/data/project/aranami PYTHONPYCACHEPREFIX=/data/project/aranami/cache/pycache /data/project/aranami/pyvenv-3.15/bin/python -c "from backend import run_once; run_once(dry=True, tasks=[\"new_pages\", \"pageviews\"])"'
+  --command 'tool_dir=/data/project/aranami; set -eu; . "$tool_dir/app/scripts/toolforge/runtime-env.sh"; export PYWIKIBOT_DIR="$tool_dir"; exec "$runtime_python" -c "from backend import run_once; run_once(dry=True, tasks=[\"new_pages\", \"pageviews\"])"'
 toolforge jobs logs aranami-preview
 ```
 
 `dry=True` suppresses wiki saves and PexBot requests. It writes Markdown summaries,
 flat `.wikitext` proposals, and isolated bundles under `dry-run/reports/`, without
 advancing production datasets, completion evidence, membership, or status.
+The shared launcher guard pins source and Python to one validated generation,
+so a later service update cannot change code underneath this one-off job.
 After completion, inspect the artifacts and delete the definition before reuse:
 
 ```shell
@@ -95,7 +102,7 @@ This example performs live publication; run it only while that routine is idle:
 
 ```shell
 toolforge jobs run aranami-manual --image python3.13 --mount=all \
-  --command 'env PYTHONPATH=/data/project/aranami/app/src PYWIKIBOT_DIR=/data/project/aranami PYTHONPYCACHEPREFIX=/data/project/aranami/cache/pycache /data/project/aranami/pyvenv-3.15/bin/python -c "from backend import run_once; run_once(dry=False, tasks=[\"assessment_lists\"])"'
+  --command 'tool_dir=/data/project/aranami; set -eu; . "$tool_dir/app/scripts/toolforge/runtime-env.sh"; export PYWIKIBOT_DIR="$tool_dir"; exec "$runtime_python" -c "from backend import run_once; run_once(dry=False, tasks=[\"assessment_lists\"])"'
 toolforge jobs logs aranami-manual
 ```
 
@@ -143,8 +150,9 @@ for settings; changing targets, schedules, or definitions requires deployment.
 reassessments, additions to the assessment set, and removals.
 A removal means an existing page ID disappeared from the project's assessment
 set; it does not establish that the page was deleted. Stable page IDs distinguish
-renames from departures and arrivals. Dated sections use the UTC observation
-date, with the actual timestamp retained in metadata; comparisons are not a
+renames from departures and arrivals. Dated sections use the previous UTC day:
+the October 25 midnight observation reports October 24. The actual collection
+timestamp remains in metadata; comparisons are not a
 complete edit history. Main page links and assessment values are bold, with
 simplified assessment labels and unbolded discussion/revision links. Entries
 sort by numeric namespace and then title within each subsection.
@@ -166,7 +174,11 @@ or `None` when that date has no snapshot; the full assessment table is
 date's `reports/<report-key>/<generation>/` bundle. Preview snapshots stay under
 `dry-run/reports/` and cannot replace production observations.
 
-The `assessment-log` range retains 30 UTC dates by default, including today;
+Each new dated section starts with the total number of mainspace articles and
+lists, followed by quality classes and importance levels in assessment order.
+List counts follow the corresponding quality class; zero counts are omitted.
+
+The `assessment-log` range retains 30 report dates by default, through yesterday;
 `days` accepts 1 through 365. Repeated checks append within the same daily
 sections. A newer daily snapshot with no changes adds its date heading and
 `無變更`; repeated checks preserve existing entries without duplicating the day.
@@ -182,6 +194,23 @@ not part of the recurring source task. Historical entries require actual
 historical observations; the current assessment set alone cannot reconstruct
 past removals. Keep the markers after initialization so normal updates preserve
 all text outside the range.
+
+### DYK chart data
+
+The DYK routine updates completed entries, nominees, and the chart on
+`WikiProject:电子游戏/新条目推荐`. Initialize its `Graph:Chart` parameters once
+with paired markers around the existing comma-separated values:
+
+```wikitext
+|x=<!-- aranami begin="dyk-chart-x" -->2006-06-30, 2006-09-30<!-- aranami end="dyk-chart-x" -->
+|y1=<!-- aranami begin="dyk-chart-y" -->0, 6<!-- aranami end="dyk-chart-y" -->
+```
+
+Keep each parameter's values inline, separated by a comma and a space.
+The routine requires these ranges and the existing `dyk` and `dykn` ranges
+before preparing source data. It preserves other
+chart settings and surrounding text. Remove the obsolete Commons statistics
+JSON comment during initialization; recurring updates no longer generate it.
 
 ### Pageviews data readiness
 
@@ -204,12 +233,26 @@ See [Pageviews contracts](architecture.md#pageviews) for comparison and ranking 
 
 ## Website refresh and retained data
 
-Each website dataset defaults to 24 hours after its last successful refresh.
+Content reviews refresh one hour after their last successful collection;
+the other website datasets default to 24 hours.
 Failures retain prior data and retry hourly; valid empty results count as refreshed.
 Restarts preserve timestamps; page requests/status heartbeats never collect sources.
 
-Maintainers can set `--recognized-interval-hours`, `--dyk-interval-hours`,
-`--pageviews-interval-hours`, `--news-history-interval-hours`, and
+Maintainers can set `--reviews-interval-hours`, `--recognized-interval-hours`,
+`--dyk-interval-hours`, `--pageviews-interval-hours`,
+`--news-history-interval-hours`, and
 `--backlog-interval-hours` independently. Reusable results in `reports/` survive
 unsuccessful wiki saves; storage failure prevents publication. Retention and
 cleanup belong to [Administration](administration.md#recovery-and-cleanup).
+
+The content-review section precedes current highlights and lists FAC, FLC,
+ACC, GAN, BPAN, PR, PPR, DYKC, then reassessment requests. Each type lists
+oldest starts first, followed by undated requests. Community reviews come
+from nomination pages even without talk-page candidate banners; project
+reviews come from their talk categories. Cards resolve article-title variants
+and redirects while keeping the original discussion anchor. A category-only
+request has no start date until a relevant dated discussion exists.
+
+Hourly refreshes check source revisions in batches and reuse unchanged
+parses from `review-sources-v1.parquet`. Introductions share the existing
+daily article-summary cache across review cards and highlights.

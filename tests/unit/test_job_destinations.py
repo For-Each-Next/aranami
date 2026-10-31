@@ -150,11 +150,10 @@ class TestJobDestinations(TestCase):
         )
 
     @staticmethod
-    def test_dyk_destination_is_used_in_statistics_source() -> None:
-        """Keep report and statistics targets in rendering settings."""
+    def test_dyk_destination_is_used_for_membership_identity() -> None:
+        """Keep the caller's target in preparation and publication."""
         context = _context()
         target = "User:Example/DYK report"
-        statistics = "c:Data:Example/DYK.tab"
         original = "Existing DYK content"
         changes = Mock(
             articles=1,
@@ -186,7 +185,6 @@ class TestJobDestinations(TestCase):
         ):
             dyks.run(
                 title=target,
-                statistics_title=statistics,
                 context=context,
             )
         read.assert_called_once_with(context.site, [target])
@@ -197,12 +195,7 @@ class TestJobDestinations(TestCase):
             project="电子游戏",
             report_title=target,
         )
-        render.assert_called_once_with(
-            original,
-            prepared,
-            report_title=target,
-            statistics_title=statistics,
-        )
+        render.assert_called_once_with(original, prepared)
         assert context.publish.call_args.args[0].title == target
         assert record.call_args.args[2] == target
 

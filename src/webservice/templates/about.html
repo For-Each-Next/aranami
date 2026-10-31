@@ -1,3 +1,9 @@
 {% extends "base.html" %}
-{% block navigation %}{% endblock %}
-{% block content %}<div class="prose"><p>{{ before_name }}<span lang="ja"><a href="https://en.wiktionary.org/wiki/%E8%8D%92%E6%B3%A2">荒波</a></span>{{ after_name }}</p><p>{{ before_user }}<a href="https://zh.wikipedia.org/wiki/User:For_Each_..._Next">For Each ... Next</a>{{ after_user }}</p>{% include "includes/server.html" %}</div>{% endblock %}
+{% block content %}
+<div class="prose">
+  <p>{{ before_name }}<span lang="ja"><a href="https://en.wiktionary.org/wiki/%E8%8D%92%E6%B3%A2">荒波</a></span>{{ after_name }}</p>
+  <p>{{ t.nav.language_note }}</p>
+  <p>{{ before_user }}<a href="https://zh.wikipedia.org/wiki/User:For_Each_..._Next">For Each ... Next</a>{{ after_user }}</p>
+</div>
+{% include "includes/server.html" %}
+{% endblock %}

@@ -77,15 +77,45 @@ presentation checks. Socket tests need local-loopback permission; sandbox
 denial is not an application defect. Check changed launchers with
 `sh -n scripts/toolforge/<name>.sh`.
 
+Use the [Wikimedia Codex style guide](https://doc.wikimedia.org/codex/latest/style-guide/overview.html)
+for website design, including color, typography, spacing, controls, and
+accessible interaction. The webservice renders Jinja templates with local CSS
+and native HTML controls. Keep appearance consistent with Codex across the
+dashboard, maintenance, logs, About, and error pages.
+
 For website changes, verify desktop/narrow layouts, long/escaped text, sorting
 and pagination, observed dates/ranks, all three locales, and missing/stale data.
 Keep native controls usable without JavaScript. Live-status changes also cover
-timers, running/completed states, progress, popovers/focus, hidden-tab behavior,
+timers, running/completed states, progress, dialog focus, hidden-tab behavior,
 and failed/malformed response recovery:
 
 ```shell
 node --test tests/toolforge/test_live.cjs
 ```
+
+Render synthetic pages and check all three locales at thirteen widths from
+320 to 1920 CSS pixels:
+
+```shell
+PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python tests/toolforge/render_interface_fixtures.py /tmp/aranami-interface-fixtures
+node tests/toolforge/check_interface.cjs /tmp/aranami-interface-fixtures /tmp/aranami-interface-results
+```
+
+Set `ARANAMI_CHROMIUM` to the Chromium executable when it differs from the
+macOS default. The checker uses native Node/CDP and synthetic data, without
+external services or npm dependencies. It writes a JSON result and sample
+screenshots, checking overflow, log download visibility/column alignment,
+and modal focus, background inertness, dismissal, and restoration. Browser
+and local-loopback permission are required. Inspect the screenshots as well.
+These effective-width checks do not establish real-device touch behavior,
+Safari/Firefox behavior, screen-reader speech, forced colors, or browser zoom.
+
+Deployment tests use fake Toolforge/Kubernetes commands and temporary source
+generations. Cover legacy migration, pinned source/environment paths, staged
+setup failures, individual service replacement, missing/paused jobs, and
+shutdown/restart failures without contacting Toolforge. Keep old generations
+available to running processes and require confirmed hub termination before
+starting its replacement.
 
 HOT v2 Lua/TemplateStyles belong to the wiki. Preview both on-wiki before
 enabling publication; keep temporary paste/rendering artifacts outside this

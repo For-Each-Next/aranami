@@ -69,6 +69,15 @@ publication in `src/updater/`.
 
 ## Change management
 
+### Task branches
+
+- At the start of every repository task, create and switch to a new branch
+  from `trunk` before making changes.
+- When the task is complete and required verification has passed, commit the
+  task's changes and merge its branch back into `trunk`.
+- Preserve unrelated work and include only the task's changes in its commits
+  and merge.
+
 ### Versioning
 
 - Use a [Semantic Versioning 2.0.0][3] base version for release meaning.

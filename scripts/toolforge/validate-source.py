@@ -314,7 +314,7 @@ def receipt(
     *,
     write: bool = False,
     environment: Path | None = None,
-) -> None:
+) -> dict[str, object]:
     """Write or verify proof that this source passed runtime setup.
 
     Args:
@@ -322,6 +322,9 @@ def receipt(
         path: Unique receipt selected before requesting setup.
         write: Record success after imports, or verify existing proof.
         environment: Fresh validated environment used for setup.
+
+    Returns:
+        Validated source and environment identity.
 
     Raises:
         ValueError: Evidence is missing, stale, or from another runtime.
@@ -376,6 +379,61 @@ def receipt(
     ):
         msg = "Active environment differs from its setup evidence."
         raise ValueError(msg)
+    return expected
+
+
+def generation(root: Path) -> dict[str, object]:
+    """Validate an immutable generation and its own setup receipt.
+
+    Args:
+        root: Uploaded source retained at its original staging path.
+
+    Returns:
+        Matching source and environment identity.
+
+    Raises:
+        ValueError: The source or receipt belongs to another generation.
+    """
+    if re.fullmatch(r"app-staging-[0-9a-f]{32}", root.name) is None:
+        msg = "Expected an immutable uploaded generation."
+        raise ValueError(msg)
+    token = root.name.removeprefix("app-staging-")
+    path = (
+        root.parent
+        / "deployment-backups"
+        / f"source-{token}"
+        / "setup-success.json"
+    )
+    evidence = receipt(root, path)
+    if evidence["source"] != str(root):
+        msg = "Setup receipt belongs to a different source directory."
+        raise ValueError(msg)
+    return evidence
+
+
+def select_generation(root: Path) -> None:
+    """Atomically select validated code without changing running code.
+
+    Args:
+        root: Complete immutable source and environment generation.
+
+    Raises:
+        ValueError: Existing source still needs the one-time migration.
+    """
+    generation(root)
+    selected = root.parent / "app"
+    if selected.exists() and not selected.is_symlink():
+        msg = "Migrate the legacy app directory before selecting source."
+        raise ValueError(msg)
+    descriptor, name = tempfile.mkstemp(prefix=".app-", dir=root.parent)
+    os.close(descriptor)
+    temporary = Path(name)
+    temporary.unlink()
+    try:
+        temporary.symlink_to(root.name, target_is_directory=True)
+        temporary.replace(selected)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -403,7 +461,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=("verify", "record", "receipt"),
+        choices=("verify", "record", "receipt", "runtime", "select"),
     )
     parser.add_argument("root", type=Path)
     parser.add_argument("path", nargs="?", type=Path)
@@ -411,6 +469,11 @@ def main() -> None:
     args = parser.parse_args()
     if args.action == "verify":
         verify(args.root)
+    elif args.action == "runtime":
+        evidence = generation(args.root)
+        print(f"{evidence['environment']}/bin/python")  # ruff: ignore[print]
+    elif args.action == "select":
+        select_generation(args.root)
     elif args.path is None:
         parser.error("This action requires a transaction-specific path.")
     else:

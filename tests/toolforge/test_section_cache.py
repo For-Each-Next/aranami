@@ -35,6 +35,10 @@ class TestDashboardReportCache(TestCase):
         self.reader = Mock()
         self.reader.sources = {}
         self.reader.summary.return_value = ""
+        self.reviews = self._patch(
+            "backend.website.collect.reviews.collect_reviews",
+            return_value={"items": []},
+        )
         self.site = self._patch("backend.website.collect.pywikibot.Site")
         self._patch(
             "backend.website.collect.WikiReader",
@@ -286,12 +290,12 @@ class TestDashboardReportCache(TestCase):
         assert first["homepage"]["dyk"] == []
         self.site.reset_mock()
         self.membership.reset_mock()
-        repeated = self._collect(dt.timedelta(hours=23))
+        repeated = self._collect(dt.timedelta(minutes=30))
         self.site.assert_not_called()
         self.membership.assert_not_called()
         assert repeated["reports"] == first["reports"]
         assert repeated["pageviews"] == first["pageviews"]
-        assert len(list(self.cache.glob("*-v2.json"))) == 5
+        assert len(list(self.cache.glob("*-v2.json"))) == len(REPORT_KEYS)
 
     def test_interval_changes_refresh_only_the_selected_report(self) -> None:
         """Change popularity without refreshing other reports."""
@@ -308,12 +312,90 @@ class TestDashboardReportCache(TestCase):
             assert self.collectors[key].call_count == 1
         assert self.backlog.call_count == 1
         for key in REPORT_KEYS:
-            if key != "pageviews":
+            if key not in {"pageviews", "reviews"}:
                 assert second["reports"][key] == first["reports"][key]
         assert (
             second["reports"]["pageviews"]["config_id"]
             != first["reports"]["pageviews"]["config_id"]
         )
+
+    def test_reviews_refresh_hourly_and_retain_success_on_failure(
+        self,
+    ) -> None:
+        """Refresh reviews independently and retry failures hourly."""
+        self.reviews.return_value = {
+            "items": [
+                {
+                    "title": "Game",
+                    "url": "https://zh.wikipedia.org/wiki/Game",
+                    "review_type": "fac",
+                    "review_url": "https://zh.wikipedia.org/wiki/Wikipedia:FAC#Game",
+                    "started_at": "2026-10-07T03:04:00Z",
+                },
+            ],
+        }
+        self.reader.summary.return_value = "A saved introduction."
+        first = self._collect()
+        assert first["reports"]["reviews"]["refresh_interval_seconds"] == 3600
+        assert (
+            first["reviews"]["items"][0]["extract"] == "A saved introduction."
+        )
+        self.reader.summary.reset_mock()
+        assert (
+            self._collect(dt.timedelta(minutes=59))["reviews"]
+            == first["reviews"]
+        )
+        assert self.reviews.call_count == 1
+        second = self._collect(dt.timedelta(hours=1))
+        assert self.reviews.call_count == 2
+        self.reader.summary.assert_not_called()
+        for name in REPORT_KEYS:
+            if name != "reviews":
+                assert second["reports"][name] == first["reports"][name]
+        self.reviews.side_effect = OSError("nomination source unavailable")
+        with self.assertLogs("backend.website.collect", level="ERROR"):
+            failed = self._collect(dt.timedelta(hours=2))
+        assert failed["reviews"] == second["reviews"]
+        assert (
+            failed["reports"]["reviews"]["last_success_at"]
+            == second["reports"]["reviews"]["last_success_at"]
+        )
+        assert validate_dashboard_snapshot(failed)
+        self._collect(dt.timedelta(hours=2, minutes=59))
+        assert self.reviews.call_count == 3
+        self.reviews.side_effect = None
+        self.reviews.return_value = {"items": []}
+        empty = self._collect(dt.timedelta(hours=3))
+        assert empty["reviews"] == {"items": []}
+        assert not empty["reports"]["reviews"]["failed"]
+
+    def test_reviews_validate_saved_dates_links_and_older_snapshots(
+        self,
+    ) -> None:
+        """Accept old dashboards and reject invalid review data."""
+        first = self._collect()
+        old = deepcopy(first)
+        del old["reports"]["reviews"]
+        del old["reviews"]
+        assert validate_dashboard_snapshot(old)
+        row = {
+            "title": "Game",
+            "url": "https://zh.wikipedia.org/wiki/Game",
+            "review_type": "ppr",
+            "review_url": "https://zh.wikipedia.org/wiki/Talk:Game",
+            "started_at": None,
+        }
+        first["reviews"] = {"items": [row]}
+        assert validate_dashboard_snapshot(first)
+        for key, bad in (
+            ("started_at", "2026-10-25"),
+            ("started_at", "2026-10-25T12:00:00"),
+            ("review_type", "unexpected"),
+            ("review_url", "javascript:alert(1)"),
+        ):
+            with self.subTest(key=key, bad=bad):
+                first["reviews"]["items"] = [{**row, key: bad}]
+                assert not validate_dashboard_snapshot(first)
 
     def test_independent_intervals_and_original_fallback_source_day(
         self,
@@ -415,7 +497,7 @@ class TestDashboardReportCache(TestCase):
         """Persist retry times before the first successful result."""
         self.membership.side_effect = RuntimeError("offline")
         failed = self._collect()
-        assert len(failed["errors"]) == 5
+        assert len(failed["errors"]) == len(REPORT_KEYS)
         assert all(
             value["last_success_at"] is None
             for value in failed["reports"].values()
@@ -472,7 +554,7 @@ class TestDashboardReportCache(TestCase):
         """Share main-namespace membership with every collector."""
         published = []
         result = self._collect(publish=published.append)
-        assert len(published) == 5
+        assert len(published) == len(REPORT_KEYS)
         assert published[-1] == result
         for collector in self.collectors.values():
             assert collector.call_args.args[2] == {"Game"}
