@@ -3,6 +3,7 @@
 The page structure follows the October 2026 newsletter (main revision
 94691317; quality revision 94683150). Drafts retain all three months,
 filling their slots with the figures collected so far.
+Quality placeholders follow the initial quality revision 93279502.
 No empty draft is produced without collected data.
 This renderer performs no source reads, publication, or runtime writes.
 """
@@ -13,12 +14,16 @@ This renderer performs no source reads, publication, or runtime writes.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 from html import escape
 from typing import TYPE_CHECKING
 
 import polars as pl
 
+from backend.website.newsletter_subpage_layout import (
+    complete_announcement_layout,
+)
 from shared.newsletter import ROOT, SUFFIXES, Issue
 
 if TYPE_CHECKING:
@@ -26,6 +31,40 @@ if TYPE_CHECKING:
 
 _UNAVAILABLE = "來源資料暫未取得。"
 _STAT_KEYS = ("total", "fa", "fl", "ga", "dyk", "bplus", "topics")
+_NEW_PAGE_GRADES = {
+    "FA": ("典範", "典範級", "#9cbdff"),
+    "FL": ("特色列表", "特色列表級", "#9cbdff"),
+    "A": ("甲級", "甲級", "#66ffff"),
+    "GA": ("優良", "優良級", "#66ff66"),
+    "Bplus": ("乙上", "乙上級", "#8cff66"),
+    "B": ("乙級", "乙級", "#b2ff66"),
+    "C": ("丙級", "丙級", "#ffff66"),
+    "D": ("丁級", "丁級", "#ffffaa"),
+    "Start": ("初級", "初級", "#ffaa66"),
+    "Stub": ("小作品", "小作品級", "#ffa4a4"),
+    "Substub": ("小小作品", "小小作品級", "#ff6666"),
+    "Disambig": ("消歧義", "消歧義級", "#00fa9a"),
+    "Unassessed": ("未評級", "未評級", "#dcdcdc"),
+}
+_NEW_PAGE_LEVELS = {
+    "AL": "A",
+    "BL": "B",
+    "CL": "C",
+    "List": "Start",
+    "SL": "Stub",
+    "Unknown": "Unassessed",
+}
+_QUALITY_ROWS = (
+    ("fa", "added", "FA", "當選典範條目"),
+    ("fl", "added", "FL", "當選特色列表"),
+    ("ga", "added", "GA", "當選優良條目"),
+    ("bplus", "added", "Bplus", "當選乙上級條目"),
+    ("gt", "added", "GT", "當選優良話題"),
+    ("fa", "removed", "FFA", "撤銷典範條目"),
+    ("fl", "removed", "FFL", "撤銷特色列表"),
+    ("ga", "removed", "DGA", "撤銷優良條目"),
+    ("gt", "removed", "GTRC", "撤銷優良話題"),
+)
 _TEN = 10
 _HUNDRED = 100
 _LINK_ENTITIES = str.maketrans({
@@ -189,12 +228,10 @@ def _quality_months(issue: Issue, facts: Mapping, layout: Mapping) -> str:
         Original month sections populated with grouped article links.
     """
     changes = facts.get("quality_changes")
-    if changes is None:
-        return _UNAVAILABLE
     grouped = (
         pl
         .DataFrame(
-            changes,
+            changes or [],
             schema={
                 "date": pl.String,
                 "grade": pl.String,
@@ -209,37 +246,35 @@ def _quality_months(issue: Issue, facts: Mapping, layout: Mapping) -> str:
         .group_by("month", "grade", "action", maintain_order=True)
         .agg(pl.col("title").unique(maintain_order=True).alias("titles"))
     )
-    labels = {
-        "fa": "典範條目",
-        "fl": "特色列表",
-        "ga": "優良條目",
-        "a": "甲級條目",
-        "bplus": "乙上級條目",
-    }
-    historical = facts.get("quality_source") == "article_history"
     result = []
     for month in range(issue.start.month, issue.start.month + 3):
         lines = []
-        for row in grouped.filter(
-            pl.col("month") == f"{issue.start.year}-{month:02}",
-        ).iter_rows(named=True):
-            grade, added = row["grade"], row["action"] == "added"
+        titles = {
+            (row["grade"], row["action"]): row["titles"]
+            for row in grouped.filter(
+                pl.col("month") == f"{issue.start.year}-{month:02}",
+            ).iter_rows(named=True)
+        }
+        rows = list(_QUALITY_ROWS)
+        for grade, action, icon, label in (
+            ("a", "added", "A", "當選甲級條目"),
+            ("a", "removed", "A", "撤銷甲級條目"),
+            ("bplus", "removed", "Bplus", "撤銷乙上級條目"),
+        ):
+            if (grade, action) in titles:
+                rows.append((grade, action, icon, label))
+        for grade, action, icon, label in rows:
             lines.append(
                 _fill(
                     layout["change_row"],
                     {
-                        "icon": "DGA"
-                        if grade == "ga" and not added
-                        else "Bplus"
-                        if grade == "bplus"
-                        else grade.upper(),
-                        "label": ("新增" if added else "撤銷") + labels[grade]
-                        if historical
-                        else labels[grade]
-                        + ("列表新增" if added else "列表移除"),
+                        "icon": icon,
+                        "label": label,
                         "titles": "、".join(
-                            _link(title) for title in row["titles"]
-                        ),
+                            _link(title)
+                            for title in titles.get((grade, action), [])
+                        )
+                        or "（無）",
                     },
                 ),
             )
@@ -249,12 +284,7 @@ def _quality_months(issue: Issue, facts: Mapping, layout: Mapping) -> str:
                 {
                     "month_year": issue.start.year,
                     "month": month,
-                    "month_rows": "\n".join(lines)
-                    or (
-                        "（無已知日期的變動）"
-                        if historical
-                        else layout["empty_month"]
-                    ),
+                    "month_rows": "\n".join(lines),
                 },
             ),
         )
@@ -327,35 +357,6 @@ def _source_homepage_rows(rows: object, prototype: str) -> str:
     )
 
 
-def _additional_homepage_sections(facts: Mapping, layout: Mapping) -> str:
-    """Add observed sections absent from the preceding issue's layout.
-
-    Returns:
-        Nonempty sections using the source's bullet prototype and its
-        verified newsletter column format, or an empty string.
-    """
-    homepage = facts.get("homepage") or {}
-    prototypes = layout["homepage_rows"]
-    prototype = next(iter(prototypes.values()))
-    sections = []
-    for kind, label in (
-        ("featured", "特色內容"),
-        ("news", "新聞動態"),
-        ("history", "歷史上的今天"),
-    ):
-        rows = homepage.get(kind)
-        if kind in prototypes or not rows:
-            continue
-        sections.append(
-            f"==== {label} ====\n\n"
-            f"以下條目曾登上首頁的「{label}」區塊。\n"
-            "{{div col|colwidth=27em}}\n"
-            + _source_homepage_rows(rows, prototype)
-            + "\n{{div col end}}\n\n",
-        )
-    return "".join(sections)
-
-
 def _source_awards(facts: Mapping, layout: Mapping) -> str:
     """Fill original award rows with the measured ranking.
 
@@ -381,19 +382,61 @@ def _source_awards(facts: Mapping, layout: Mapping) -> str:
     )
 
 
+def _new_page_grade_counts(grades: Mapping[str, int]) -> dict[str, int]:
+    """Combine article and list counts at matching assessment levels.
+
+    Preserve supplied class counts for reuse. Featured articles and
+    featured lists keep separate designations. Older unknown-class
+    counts display as unassessed rather than a separate quality level.
+
+    Args:
+        grades: Observed counts keyed by canonical assessment class.
+
+    Returns:
+        Chart and prose counts, with generic lists at Start.
+    """
+    counts: dict[str, int] = {}
+    for grade, count in grades.items():
+        level = _NEW_PAGE_LEVELS.get(grade, grade)
+        counts[level] = counts.get(level, 0) + count
+    return counts
+
+
 def _source_new_pages(issue: Issue, facts: Mapping, layout: Mapping) -> str:
     """Fill all quarterly count slots with the figures collected so far.
 
     Returns:
-        Complete monthly prose without collection diagnostics, excluding
-        charts without observed grades. Facts retain coverage gaps.
+        Monthly grade counts and the original pie chart populated from
+        observed assessments. Facts retain coverage gaps.
     """
     data = facts.get("new_pages_data")
     if data is None:
         return str(facts.get("new_pages") or _UNAVAILABLE)
     count = data["total"]
     value = f"{count if count is not None else data.get('known_count', 0):,}"
-    lines = [
+    lines = []
+    grades = _new_page_grade_counts(data.get("grades") or {})
+    if grades:
+        slices = [
+            {"label": label, "value": grades[grade], "color": color}
+            for grade, (label, _, color) in _NEW_PAGE_GRADES.items()
+            if grades.get(grade)
+        ]
+        lines.extend([
+            _fill(
+                layout["chart_template"],
+                {
+                    "chart_values": "[\n"
+                    + ",\n".join(
+                        "  " + json.dumps(row, ensure_ascii=False)
+                        for row in slices
+                    )
+                    + "\n]",
+                },
+            ),
+            "",
+        ])
+    lines.append(
         _fill(
             layout["new_pages_summary"],
             {
@@ -401,19 +444,25 @@ def _source_new_pages(issue: Issue, facts: Mapping, layout: Mapping) -> str:
                 "count": value,
             },
         ),
-    ]
+    )
     months = {row["month"]: row for row in data["months"]}
     for month in range(issue.start.month, issue.start.month + 3):
         row = months.get(f"{issue.start.year}-{month:02}", {})
         count = row.get("count")
         registered = count if count is not None else row.get("known_count", 0)
+        monthly_grades = _new_page_grade_counts(row.get("grades") or {})
+        details = "、".join(
+            f"{label}{monthly_grades[grade]:,}篇"
+            for grade, (_, label, _) in _NEW_PAGE_GRADES.items()
+            if monthly_grades.get(grade)
+        )
         lines.append(
             _fill(
                 layout["new_pages_month"],
                 {
                     "month": month,
                     "count": f"{registered:,}",
-                    "grade_details": "",
+                    "grade_details": "，其中" + details if details else "",
                 },
             ),
         )
@@ -429,6 +478,7 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
     layout = (facts.get("subpage_layouts") or {}).get("宣告")
     if layout is None:
         return _UNAVAILABLE
+    layout = complete_announcement_layout(layout)
     values = {
         **_subpage_values(issue),
         "notices": facts.get("announcements") or "（尚無本期公告）",
@@ -457,10 +507,6 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
                 else str(size),
             },
         )
-    values["additional_homepage"] = _additional_homepage_sections(
-        facts,
-        layout,
-    )
     undated = facts.get("history_undated") or {}
     labels = (
         ("dyk", "新條目推薦"),
@@ -478,16 +524,16 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
         else ""
     )
     template = layout["text"].replace(
-        "=== ACG專題獎 ===",
-        "@@aranami:additional_homepage@@=== ACG專題獎 ===",
-        1,
-    )
-    template = template.replace(
         "=== 在首頁上 ===",
         "=== 在首頁上 ===@@aranami:homepage_undated@@",
         1,
     )
-    return _fill(template, values)
+    text = _fill(template, values)
+    return re.sub(
+        r"\n(?:[ \t]*\n)+(?=\[\[Category:電子遊戲專題簡訊宣告\]\])",
+        "\n\n",
+        text,
+    )
 
 
 def _source_links(facts: Mapping[str, object]) -> list[dict]:

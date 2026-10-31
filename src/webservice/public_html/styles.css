@@ -456,6 +456,10 @@ main {
     block-size: 1.5rem;
 }
 
+.review-cards time, .review-participants {
+    white-space: nowrap;
+}
+
 .review-icon {
     display: block;
     inline-size: 1rem;
@@ -714,6 +718,7 @@ select:not(.cdx-select):disabled {
     max-inline-size: 100%;
     color: var(--color-progressive);
     font-size: var(--font-size-small);
+    font-weight: 400;
     text-align: start;
 }
 
@@ -959,49 +964,6 @@ caption {
     font-variant-numeric: tabular-nums;
 }
 
-.major-events {
-    margin-block: 1rem 2rem;
-}
-
-.log-event {
-    padding: 1rem;
-    border: 1px solid var(--border-color-subtle);
-    border-block-end: 0;
-}
-
-.log-event:last-child {
-    border-block-end: 1px solid var(--border-color-subtle);
-}
-
-.log-event-fields {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
-    gap: .5rem 1.25rem;
-    margin: 0;
-}
-
-.log-event-fields dt {
-    color: var(--color-subtle);
-    font-size: var(--font-size-small);
-}
-
-.log-event-fields dd {
-    min-inline-size: 0;
-    margin-inline-start: 0;
-}
-
-.log-event details {
-    margin-block-start: .5rem;
-}
-
-.log-event p {
-    margin-block: .5rem;
-}
-
-.log-event time {
-    font-variant-numeric: tabular-nums;
-}
-
 .log-download a {
     display: inline-flex;
     align-items: center;
@@ -1220,11 +1182,6 @@ footer nav {
 
     .maintenance-controls > .field, .log-query > .field {
         flex-basis: 100%;
-    }
-
-    .log-event-fields {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-        gap: .5rem .75rem;
     }
 
     .logs-table th, .logs-table td {

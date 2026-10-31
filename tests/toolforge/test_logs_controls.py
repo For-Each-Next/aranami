@@ -1,4 +1,4 @@
-"""Verify localized log controls and download access."""
+"""Verify report-event controls and diagnostic download access."""
 
 from __future__ import annotations
 
@@ -54,41 +54,48 @@ class LogControlsTests(unittest.TestCase):
 
     @staticmethod
     def _listing(output: str) -> str:
-        """Extract the event list without matching unrelated timestamps.
+        """Extract event rows without matching status-panel timestamps.
 
         Returns:
-            The visible event records inside their semantic container.
+            The visible event rows inside the report table body.
         """
-        match = re.search(r'<div class="major-events">(.*?)</div>', output)
+        match = re.search(r"<tbody>(.*?)</tbody>", output, re.DOTALL)
         assert match is not None
         return match[1]
 
     def test_newest_default_and_chronology_keep_downloads_reachable(
         self,
     ) -> None:
-        """Keep archive columns and downloads in every locale."""
+        """Keep chronology and downloads in each locale."""
         for locale in ("en", "zh-hans", "zh-hant"):
             with self.subTest(locale=locale):
                 interface = Interface(locale)
                 response = self.client.get(
-                    "/logs/",
+                    "/reports/",
                     headers={"Accept-Language": locale},
                 )
                 assert response.status_code == 200
                 output = response.text
                 listing = self._listing(output)
-                assert listing.count('class="log-event"') == 25
+                assert listing.count("<tr>") == 25
+                assert listing.count("<td>") == 100
+                assert output.count('<th scope="col">') == 4
                 assert listing.index(self.events[-1]["time"]) < listing.index(
                     self.events[-2]["time"],
                 )
                 assert "60" in output
                 assert interface.text("logs.download") in output
                 assert output.index(" download>") < output.index(
-                    'class="major-events"',
+                    '<table class="logs-table">',
                 )
-                archive = output.split('<table class="logs-table">', 1)[
-                    1
-                ].split(
+                archive_output = self.client.get(
+                    "/logs/",
+                    headers={"Accept-Language": locale},
+                ).text
+                archive = archive_output.split(
+                    '<table class="logs-table">',
+                    1,
+                )[1].split(
                     "</table>",
                     1,
                 )[0]
@@ -100,11 +107,12 @@ class LogControlsTests(unittest.TestCase):
                 )
                 assert "download>aranami.2026-10-23.log</a>" in archive
                 assert interface.text("logs.download") not in archive
-                assert '<span lang="zh">' in listing
-                assert '<section class="system-details" aria-label=' in output
-                assert '<details class="system-details">' not in output
+                assert 'class="log-query"' not in archive_output
+                assert 'id="recent-events"' not in archive_output
+                assert 'class="system-details"' in archive_output
+                assert 'class="system-details"' not in output
                 chronology = self.client.get(
-                    "/logs/?order=asc",
+                    "/reports/?order=asc",
                     headers={"Accept-Language": locale},
                 ).text
                 assert self._listing(chronology).index(
@@ -123,12 +131,12 @@ class LogControlsTests(unittest.TestCase):
             "page": 2,
         }
         response = self.client.get(
-            "/logs/?" + urlencode(parameters),
+            "/reports/?" + urlencode(parameters),
             headers={"Accept-Language": "en"},
         )
         assert response.status_code == 200
         output = response.text
-        assert self._listing(output).count('class="log-event"') == 5
+        assert self._listing(output).count("<tr>") == 5
         assert "Matching recent events for 2026-10-23: 30." in output
         assert 'value="failed" selected' in output
         assert 'value="asc" selected' in output
@@ -137,6 +145,7 @@ class LogControlsTests(unittest.TestCase):
         )
         assert "Clear filters" in output
         assert "Page 2 of 2" in output
+        assert 'href="/reports/?date=2026-10-23' in output
         assert (
             self.client.get(
                 "/logs/?date=2026-10-23&download=1",
@@ -148,12 +157,15 @@ class LogControlsTests(unittest.TestCase):
         """Localize empty search and reject invalid controls."""
         for locale in ("en", "zh-hans", "zh-hant"):
             response = self.client.get(
-                "/logs/?q=never-match",
+                "/reports/?q=never-match",
                 headers={"Accept-Language": locale},
             )
             assert response.status_code == 200
             assert Interface(locale).text("logs.no_matches") in response.text
-            assert 'class="log-download"' in response.text
+            assert 'href="/logs/?date=2026-10-23&amp;download=1"' in (
+                response.text
+            )
+            assert " download>" in response.text
         for query in (
             "order=sideways",
             "page=0",
@@ -163,7 +175,8 @@ class LogControlsTests(unittest.TestCase):
             "page=-1",
         ):
             with self.subTest(query=query):
-                assert self.client.get("/logs/?" + query).status_code == 400
+                response = self.client.get("/reports/?" + query)
+                assert response.status_code == 400
         assert self.client.get("/api/logs?order=asc").status_code == 400
 
 

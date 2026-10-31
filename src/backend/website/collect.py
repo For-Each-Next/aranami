@@ -27,6 +27,10 @@ import pywikibot
 from backend.services import project_assessments
 from backend.website import backlog, homepage, newsletter, pageviews, reviews
 from backend.website.extracts import MAX_EXTRACT_BYTES, ExtractCache
+from backend.website.newsletter_archive import (
+    DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
+    NewsletterDraftArchive,
+)
 from backend.website.newsletter_history import (
     collect_article_history,
     prepared_news,
@@ -978,8 +982,44 @@ def _valid_appearance_cache(  # ruff: ignore[too-many-return-statements]
     )
 
 
+def _valid_review_times(row: dict[str, object]) -> bool:
+    """Validate observed review times while accepting older saved rows.
+
+    Returns:
+        Whether the start and optional reply are UTC timestamps or null,
+        and a known reply does not precede a known nomination start.
+    """
+    started = _cache_timestamp(row.get("started_at"))
+    replied = _cache_timestamp(row.get("replied_at"))
+    return (
+        "started_at" in row
+        and (row["started_at"] is None or started is not None)
+        and (
+            row.get("replied_at") is None
+            or (
+                replied is not None and (started is None or replied >= started)
+            )
+        )
+    )
+
+
+def _valid_review_participants(row: dict[str, object]) -> bool:
+    """Validate optional observed counts without changing older records.
+
+    Returns:
+        Whether a known count is positive and bounded, with at least two
+        participants when another user's reply was observed.
+    """
+    count = row.get("participant_count")
+    return count is None or (
+        type(count) is int
+        and 1 <= count <= _SECTION_RECORD_LIMIT
+        and (row.get("replied_at") is None or count > 1)
+    )
+
+
 def _valid_reviews_cache(value: dict[str, object]) -> bool:
-    """Validate bounded review records and observed nomination dates.
+    """Validate bounded review records and observed discussion dates.
 
     Returns:
         Whether every article and discussion link is safe to display.
@@ -992,11 +1032,8 @@ def _valid_reviews_cache(value: dict[str, object]) -> bool:
             _cache_article(row)
             and row.get("review_type") in reviews.REVIEW_TYPES
             and _cache_wiki_url(row.get("review_url"))
-            and "started_at" in row
-            and (
-                row["started_at"] is None
-                or _cache_timestamp(row["started_at"]) is not None
-            )
+            and _valid_review_times(row)
+            and _valid_review_participants(row)
             for row in items
         )
     )
@@ -1312,11 +1349,11 @@ def _report_plan(
         source_id = (
             _maintenance_cache_key()
             if name == "backlog"
-            else "nomination-sources-v1:extracts-v3"
+            else "nomination-sources-v3:participants:extracts-v3"
             if name == "reviews"
             else "zh:all-access:user:top1000:limit12:lookback7:extracts-v3"
             if name == "pageviews"
-            else "quarterly-newsletter-v8:internal-counts:talk-notices"
+            else "quarterly-newsletter-v10:daily-drafts:talk-notices"
             if name == "newsletter"
             else f"days:{days}:extracts-v3:talk-news-v1"
             if name == "news_history"
@@ -1484,13 +1521,32 @@ def _newsletter_overview_at(
         Counts and their actual observation time, or none for an
         unobserved date. This function never collects missing history.
     """
-    snapshot = project_assessments.read_snapshot(read.site, "电子游戏", day)
-    if snapshot is None:
+    observation = _newsletter_assessments_at(read, day)
+    if observation is None:
         return None
-    counts = _newsletter_counts(snapshot.tables["members"])
+    members, observed_at = observation
+    counts = _newsletter_counts(members)
+    return (counts, observed_at) if counts is not None else None
+
+
+def _newsletter_assessments_at(
+    read: WikiReader,
+    day: dt.date,
+) -> tuple[pl.DataFrame, str] | None:
+    """Read exact retained assessments with their observation time.
+
+    Args:
+        read: Configured wiki identity for the internal report store.
+        day: Exact UTC snapshot date.
+
+    Returns:
+        Full assessment rows and observation time, or none when the date
+        has no retained snapshot. Current grades never fill past dates.
+    """
+    snapshot = project_assessments.read_snapshot(read.site, "电子游戏", day)
     return (
-        (counts, snapshot.manifest["calculated_at"])
-        if counts is not None
+        (snapshot.tables["members"], snapshot.manifest["calculated_at"])
+        if snapshot is not None
         else None
     )
 
@@ -1577,7 +1633,9 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
             read,
             now=now or dt.datetime.now(dt.UTC),
             current_counts=_newsletter_counts(membership),
+            current_assessments=membership,
             overview_at=partial(_newsletter_overview_at, read),
+            assessments_at=partial(_newsletter_assessments_at, read),
             prior_facts=prior_facts,
             members=members,
             member_ids=set(
@@ -1688,6 +1746,28 @@ def _with_extracts(
     }
 
 
+def _seed_daily_drafts(
+    previous: dict | None,
+    path: Path | None,
+    clock: dt.datetime,
+    projector: Callable[[Issue, dict], dict] | None,
+) -> None:
+    """Retain an existing observation without disrupting refreshes."""
+    if previous and previous.get("data") is not None:
+        try:
+            NewsletterDraftArchive(path).save(
+                previous["data"],
+                projector=projector,
+                generated_at=clock,
+            )
+        except Exception as error:  # ruff: ignore[blind-except]
+            _LOGGER.warning(
+                "Could not retain the saved daily newsletter draft (%s); "
+                "the existing latest observation remains available.",
+                type(error).__name__,
+            )
+
+
 def collect_dashboard(  # ruff: ignore[too-many-arguments]
     today: dt.date,
     days: int = 100,
@@ -1700,6 +1780,8 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
     today_history_path: Path | None = Path(
         "cache/today-in-history-v1.parquet",
     ),
+    draft_archive_path: Path | None = DRAFT_ARCHIVE_PATH,
+    draft_projector: Callable[[Issue, dict], dict] | None = None,
 ) -> dict[str, object]:
     """Refresh due Chinese reports and preserve independent successes.
 
@@ -1712,6 +1794,8 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
         refresh_intervals: Independent report intervals in seconds.
         history_path: Durable Parquet history, or none for memory.
         today_history_path: Wiki-wide OTD cache, or none for memory.
+        draft_archive_path: Durable daily drafts, or none to disable.
+        draft_projector: Caller-owned renderer retained with new drafts.
 
     Returns:
         Schema-two snapshot with actual successful refresh timestamps,
@@ -1735,6 +1819,12 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
         "end": (today + dt.timedelta(days=1)).isoformat(),
     }
     plan = _report_plan(cache_directory, intervals, days, clock)
+    _seed_daily_drafts(
+        plan["caches"].get("newsletter"),
+        draft_archive_path,
+        clock,
+        draft_projector,
+    )
     if not plan["due"]:
         return _dashboard_snapshot(plan, intervals, period, stamp)
     # All source construction stays below persisted due selection.
@@ -1799,6 +1889,12 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
             if extracts is not None:
                 data = _with_extracts(name, data, extracts)
                 extracts.save()
+            if name == "newsletter":
+                NewsletterDraftArchive(draft_archive_path).save(
+                    data,
+                    projector=draft_projector,
+                    generated_at=now or dt.datetime.now(dt.UTC),
+                )
             completed = (
                 (now or dt.datetime.now(dt.UTC))
                 .astimezone(dt.UTC)

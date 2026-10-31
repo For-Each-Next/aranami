@@ -2,17 +2,11 @@
 {% block contents_links %}
 <ul>
   {% if reviews %}<li><a href="#reviews">{{ t.reviews.heading }}</a></li>{% endif %}
-  {% if sections %}<li><a href="#homepage">{{ t.homepage.heading }}</a>
-    <ul>{% for section in sections %}<li><a href="#homepage-{{ section.key }}">{{ section.title }}</a></li>{% endfor %}</ul>
-  </li>{% endif %}
-  {% if backlog %}<li><a href="#backlog">{{ t.nav.backlog }}</a></li>{% endif %}
-  <li><a href="#tool-status">{{ t.ops.heading }}</a></li>
+  {% for section in sections %}<li><a href="#homepage-{{ section.key }}">{{ section.title }}</a></li>{% endfor %}
 </ul>
 {% endblock %}
 {% block content %}
 {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
 {% include "includes/reviews.html" %}
 {% include "includes/highlights.html" %}
-{% include "includes/backlog.html" %}
-{% include "includes/routines.html" %}
 {% endblock %}

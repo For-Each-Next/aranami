@@ -34,11 +34,11 @@ class NavigationTests(unittest.TestCase):
     def test_tools_links_live_in_localized_native_disclosure(
         self,
     ) -> None:
-        """Keep newsletter and logs in the native tools menu."""
+        """Keep newsletter in Tools and log downloads under About."""
         for locale, tools, newsletter, logs in (
-            ("en", "Tools", "Newsletter", "Run logs"),
-            ("zh-hans", "工具", "专题简讯", "运行日志"),
-            ("zh-hant", "工具", "專題簡訊", "執行日誌"),
+            ("en", "Tools", "Newsletter drafts", "Run logs"),
+            ("zh-hans", "工具", "简讯草稿", "运行日志"),
+            ("zh-hant", "工具", "簡訊草稿", "執行日誌"),
         ):
             with self.subTest(locale=locale):
                 navigation = _navigation(locale, "/")
@@ -50,27 +50,53 @@ class NavigationTests(unittest.TestCase):
                 assert details is not None
                 assert f"<summary>{tools}</summary>" in details[1]
                 assert f'<a href="/newsletter/">{newsletter}</a>' in details[1]
-                assert f'<a href="/logs/">{logs}</a>' in details[1]
+                assert 'href="/logs/"' not in navigation
+                assert f'<a href="/logs/">{logs}</a>' in render_about(
+                    None,
+                    locale,
+                )
                 direct = navigation[: details.start()]
                 assert re.findall(r'<a href="([^"]+)"', direct) == [
                     "/",
+                    "/maintenance/",
+                    "/reports/",
                     "/about/",
                 ]
                 assert navigation.count('href="/newsletter/"') == 1
-                assert navigation.count('href="/logs/"') == 1
                 assert 'role="menu' not in navigation
                 assert "aria-expanded" not in navigation
 
     def test_current_page_remains_on_its_destination_link(self) -> None:
         """Keep the current-page marker on its destination link."""
         for locale in ("en", "zh-hans", "zh-hant"):
-            for path in ("/", "/logs/", "/about/", "/newsletter/"):
+            for path in (
+                "/",
+                "/maintenance/",
+                "/reports/",
+                "/about/",
+                "/newsletter/",
+            ):
                 with self.subTest(locale=locale, path=path):
                     navigation = _navigation(locale, path)
                     assert re.findall(
                         r'<a href="([^"]+)" aria-current="page">',
                         navigation,
                     ) == [path]
+
+    @staticmethod
+    def test_footer_names_the_project_and_omits_logs() -> None:
+        """Keep log downloads under About and name the project."""
+        for locale, project in (
+            ("en", "Video games WikiProject"),
+            ("zh-hans", "电子游戏专题"),
+            ("zh-hant", "電子遊戲專題"),
+        ):
+            output = render_about(None, locale)
+            footer = output.split("<footer>", 1)[1]
+            assert 'href="/about/"' in footer
+            assert 'href="/logs/"' not in footer
+            assert f">{project}</a>" in footer
+            assert 'href="/logs/"' in output.split("<footer>", 1)[0]
 
 
 if __name__ == "__main__":

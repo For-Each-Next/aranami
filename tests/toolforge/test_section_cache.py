@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import tempfile
 from copy import deepcopy
@@ -128,6 +129,7 @@ class DashboardFixture(TestCase):
             The assembled presentation snapshot.
         """
         now = self.clock + elapsed
+        kwargs.setdefault("draft_archive_path", self.cache / "drafts")
         return collect_dashboard(
             now.date(),
             cache_directory=self.cache,
@@ -418,6 +420,74 @@ class TestDashboardReportCache(DashboardFixture):
             with self.subTest(key=key, bad=bad):
                 first["reviews"]["items"] = [{**row, key: bad}]
                 assert not validate_dashboard_snapshot(first)
+
+    def test_review_reply_dates_and_counts_survive_restart(self) -> None:
+        """Retain review facts and accept older saved rows."""
+        row = {
+            "title": "Game",
+            "url": "https://zh.wikipedia.org/wiki/Game",
+            "review_type": "fac",
+            "review_url": "https://zh.wikipedia.org/wiki/Wikipedia:FAC#Game",
+            "started_at": "2026-10-07T03:04:00Z",
+            "replied_at": "2026-10-18T10:00:00Z",
+            "participant_count": 2,
+        }
+        self.reviews.return_value = {"items": [row]}
+        first = self._collect()
+        assert validate_dashboard_snapshot(first)
+        self.reviews.reset_mock()
+        repeated = self._collect(dt.timedelta(minutes=1))
+        self.reviews.assert_not_called()
+        assert repeated["reviews"] == first["reviews"]
+        for replied in (None, "2026-10-07T03:04:00+00:00"):
+            first["reviews"]["items"] = [{**row, "replied_at": replied}]
+            assert validate_dashboard_snapshot(first)
+        for replied in (
+            "2026-10-18",
+            "2026-10-18T10:00:00",
+            "2026-10-18T18:00:00+08:00",
+            "2026-10-06T10:00:00Z",
+            42,
+        ):
+            with self.subTest(replied=replied):
+                first["reviews"]["items"] = [{**row, "replied_at": replied}]
+                assert not validate_dashboard_snapshot(first)
+        for count in (None, 2, 10_000):
+            first["reviews"]["items"] = [{**row, "participant_count": count}]
+            assert validate_dashboard_snapshot(first)
+        for count in (0, -1, 10_001, True, False, 1, 2.0, "2"):
+            with self.subTest(count=count):
+                first["reviews"]["items"] = [
+                    {**row, "participant_count": count},
+                ]
+                assert not validate_dashboard_snapshot(first)
+        first["reviews"]["items"] = [
+            {**row, "replied_at": None, "participant_count": 1},
+        ]
+        assert validate_dashboard_snapshot(first)
+        del row["participant_count"]
+        first["reviews"]["items"] = [row]
+        assert validate_dashboard_snapshot(first)
+        del row["replied_at"]
+        first["reviews"]["items"] = [row]
+        assert validate_dashboard_snapshot(first)
+
+    def test_participant_contract_refreshes_only_reviews(self) -> None:
+        """Refresh old review facts after adding participant counts."""
+        first = self._collect()
+        path = self.cache / "reviews-v2.json"
+        record = json.loads(path.read_text())
+        previous_id = hashlib.sha256(
+            b"dashboard-v2:reviews:"
+            b"nomination-sources-v2:replies:extracts-v3:3600.0",
+        ).hexdigest()
+        record.update(config_id=previous_id, attempt_config_id=previous_id)
+        path.write_text(json.dumps(record))
+        second = self._collect(dt.timedelta(minutes=1))
+        assert self.reviews.call_count == 2
+        for name in REPORT_KEYS:
+            if name != "reviews":
+                assert second["reports"][name] == first["reports"][name]
 
     def test_independent_intervals_and_original_fallback_source_day(
         self,

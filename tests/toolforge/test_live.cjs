@@ -11,6 +11,8 @@ const source = fs.readFileSync(
 const messages = {
     "duration.seconds": "{seconds} s",
     "duration.minutes": "{minutes} min {seconds} s",
+    "duration.hours": "{hours} h {minutes} min {seconds} s",
+    "duration.days": "{days} d {hours} h {minutes} min {seconds} s",
     "time.minutes_ago": "({count} min ago)",
     "time.hours_ago": "({count} hr ago)",
     "time.days_ago": "({count} d ago)",
@@ -165,6 +167,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
         ...clockAttributes,
         id: "live-uptime", "data-clock": "uptime", "data-started-at": stamp(-100000),
         "data-uptime-template": "{days}d {hours}h {minutes}m {seconds}s",
+        "data-uptime-compact-template": "{duration}",
         "data-uptime-unknown": "Uptime unavailable",
     });
     const memory = new Element("TD", {
@@ -425,7 +428,7 @@ test("local clocks advance by elapsed time while server requests stay periodic",
     assert.equal(page.requests.length, 1);
     page.jump(1000);
     assert.equal(page.clock.textContent, "(11 s…)");
-    assert.equal(page.uptime.textContent, "0d 0h 1m 41s");
+    assert.equal(page.uptime.textContent, "1 min 41 s");
     page.jump(3200); // A delayed callback must catch up without losing seconds.
     assert.equal(page.clock.textContent, "(14 s…)");
     assert.equal(page.requests.length, 1);
@@ -637,7 +640,7 @@ test("failed syncs retain observations, expire schedules, and recover", async ()
     assert.equal(page.document.getElementById("status-button"), page.button);
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
-    assert.equal(page.uptime.textContent, "0d 0h 3m 41s");
+    assert.equal(page.uptime.textContent, "3 min 41 s");
 });
 
 test("malformed fragments do not replace received observations", async () => {
@@ -664,7 +667,7 @@ test("logs synchronize only compact server state and uptime", async () => {
     assert.equal(page.document.getElementById("tool-status"), null);
     page.jump(5000);
     assert.equal(page.requests.length, 2);
-    assert.equal(page.uptime.textContent, "0d 0h 1m 45s");
+    assert.equal(page.uptime.textContent, "1 min 45 s");
     await page.respond(fixture(5000)); // Missing the log page's expected fragment.
     assert.equal(page.notice.hidden, true);
     assert.equal(page.warnings[0][1].failure, "response");
@@ -697,10 +700,10 @@ test("About footer ticks, synchronizes, and expires without status panels", asyn
     for (const id of ["tool-status", "live-server-status", "server-runtime"]) {
         assert.equal(page.document.getElementById(id), null);
     }
-    assert.equal(page.uptime.textContent, "0d 0h 1m 40s");
+    assert.equal(page.uptime.textContent, "1 min 40 s");
     await page.respond();
     page.jump(1000);
-    assert.equal(page.uptime.textContent, "0d 0h 1m 41s");
+    assert.equal(page.uptime.textContent, "1 min 41 s");
     page.jump(4000);
     assert.equal(page.requests.length, 2);
     const next = fixture(5000, false, true, true);
@@ -708,12 +711,33 @@ test("About footer ticks, synchronizes, and expires without status panels", asyn
     await page.respond(next);
     assert.equal(page.document.getElementById("live-uptime"), page.uptime);
     assert.equal(page.uptime.dataset.serverTime, stamp(5000));
-    assert.equal(page.uptime.textContent, "0d 0h 3m 25s");
+    assert.equal(page.uptime.textContent, "3 min 25 s");
     for (const id of ["tool-status", "live-server-status", "server-runtime"]) {
         assert.equal(page.document.getElementById(id), null);
     }
     page.jump(121000);
     assert.equal(page.uptime.textContent, "Uptime unavailable");
+});
+
+test("uptime clocks omit leading zero units across duration boundaries", async () => {
+    for (const [seconds, expected] of [
+        [0, "0 s"], [59, "59 s"], [60, "1 min 0 s"],
+        [3600, "1 h 0 min 0 s"], [86400, "1 d 0 h 0 min 0 s"],
+    ]) {
+        const page = browser(false, false, { footerOnly: true });
+        const next = fixture(0, false, false, false, true);
+        next.uptime.setAttribute("data-started-at", stamp(-seconds * 1000));
+        await page.respond(next);
+        assert.equal(page.uptime.textContent, expected);
+    }
+});
+
+test("legacy uptime fragments retain their existing full-duration template", async () => {
+    const page = browser(false, false, { footerOnly: true });
+    const next = fixture(0, false, false, false, true);
+    next.uptime.removeAttribute("data-uptime-compact-template");
+    await page.respond(next);
+    assert.equal(page.uptime.textContent, "0d 0h 1m 40s");
 });
 
 test("native WebSocket pushes preserve controls and use the page locale", async () => {

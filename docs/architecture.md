@@ -180,6 +180,15 @@ dated discussion remains undated; collection or category-observation times
 never stand in for nomination starts. Sort FAC, FLC, ACC, GAN, BPAN, PR, PPR,
 DYKC, reassessment, then start ascending with unknowns last and stable titles.
 
+Review cards show whole elapsed days since nomination and days or hours since
+the latest signed response from another participant. Nominator-only follow-ups
+do not establish a response; unknown identities and dates remain null. Relative
+times expose their complete UTC instants in native hover tooltips. Older saved
+snapshots without response observations remain readable. After the response,
+show the observed count of distinct identifiable participants, including the
+nominator. Unknown counts stay omitted, and nominator-only reviews show no
+response or participant annotation.
+
 `review-sources-v1.parquet` caches parsed facts keyed by canonical source title,
 review type, and revision ID. Each due refresh checks current IDs in batches
 of fifty and downloads only changed exact revisions, including valid empty
@@ -203,6 +212,12 @@ some browsers do not include WebSocket schemes in `connect-src 'self'`.
 Pages work with ordinary links, GET forms, and native controls without
 JavaScript. Every page shares the dashboard's left contents panel on desktop
 and native collapsible contents control on narrow screens.
+The dashboard presents reviews and each available highlight group as peer
+second-level sections. `/maintenance/` owns the maintenance catalogue, with
+second-level task groups and existing filtered worklists selected by `task`.
+`/reports/` combines the live report-status panel and a concise run-history
+table. Raw daily diagnostic downloads remain under `/logs/`, reached from
+About; diagnostics are never translated into narrative event summaries.
 `/api/live` reads saved status only and renders existing live
 regions, never website datasets or logs. `/api/live/ws` pushes the same
 localized snapshot when saved status changes and periodically renews it.
@@ -285,8 +300,9 @@ to preserve dialogs, focus, and scroll. Completed durations stay fixed;
 stale state/resources expire
 after 120 seconds. Failed refreshes retain prior observations with a notice.
 Bound rendered-view caches to sixty seconds and invalidate on saved-input
-changes; logs and unseeded random views bypass them. Keep responses no-store
-and source timestamps intact. Source changes require process replacement.
+changes; report history, logs, and unseeded random views bypass them. Keep
+responses no-store and source timestamps intact. Source changes require
+process replacement.
 Distinguish network, transport, response, clock, and rendering failures in
 bounded browser diagnostics without exposing arbitrary server or error text.
 
@@ -308,7 +324,28 @@ an explicit `issue=2027-01` selects issue 29 for October–December 2026. Quarte
 calendar identities live in `shared.newsletter`; the public controller passes
 validated saved facts to `updater.services.newsletter` for wikitext projection
 and then to the webservice renderer for HTML. No request starts collection,
-publishes wiki text, or writes runtime data. Browser edits are ephemeral.
+publishes wiki text, or writes runtime data. Generated drafts appear in
+selectable read-only code blocks, enhanced with wikitext syntax highlighting.
+Copying uses the original plain wikitext, without presentation markup.
+Daily collection retains each issue's first successful draft for the inclusive
+data date `observation_end - 1 day`, skipping unelapsed quarters. The hub injects
+the updater's renderer into collection; backend storage does not import a
+frontend. `reports/newsletter-drafts-v1/<issue>/` stores validated facts, all
+three original rendered pages, an actual capture timestamp, and hash evidence
+in immutable JSON observations with an atomic, locked date catalog. These
+nested records are not tabular data. A failed archive write prevents replacing
+the latest newsletter cache while independent reports continue normally.
+Startup may retain an existing saved observation under its actual data date;
+it does not reconstruct dates for which no observation survived.
+
+The calendar uses `date=YYYY-MM-DD` within the selected issue's reporting
+quarter. Requests read one retained draft and its bounded catalog, without
+enrichment from current homepage facts, source queries, or runtime writes.
+Missing dates remain unavailable; malformed selections are rejected. The
+catalog's metadata identity invalidates cached calendar HTML when a new date
+is retained. Data-through dates and actual UTC generation times stay separate,
+and copying an archived draft preserves its original text after renderer
+changes. Daily drafts survive clearing disposable caches.
 The header's native Tools disclosure contains newsletter and run-log links.
 Issue radios navigate directly to saved drafts, with ordinary links available
 without JavaScript. Copy actions use Codex primary progressive buttons.
@@ -333,6 +370,21 @@ internally. Copied drafts retain all three quarter months, using the registered
 counts available at collection time without minimum-count or gap annotations.
 Unelapsed months therefore have zero registered articles in the draft without
 changing their unknown observation state in saved facts.
+Join curated registered titles to internal assessment observations for monthly
+grade counts and the quarterly pie chart. Prefer exact titles, then batched
+canonical titles and page IDs across renames. Current assessments apply only to
+open quarters; closed quarters require their exact retained boundary snapshot
+and its actual collection time. Registered articles without a valid project
+class count as unassessed, including subjects absent from the project snapshot.
+Older saved unknown-class counts also render as unassessed; this reporting
+category does not assert that a project banner is present.
+Copied grade summaries combine AL/A, BL/B, CL/C, List/Start, and SL/Stub at
+their common assessment level, retaining the separate source classes in saved
+facts. Featured articles and featured lists keep their distinct designations.
+Pie-chart JSON keeps each slice object on one line.
+Grade totals reconcile to registered counts even when
+daily coverage is incomplete, and missing historical observations omit the
+chart rather than borrowing later grades.
 No-data selections show collection state without copyable
 empty templates. Features and interviews are outside this numeric generator.
 
@@ -407,9 +459,15 @@ up to four preceding issues for a valid layout; older layout counts do not
 become a newer quarter's baseline. Unavailable layouts are never replaced by
 an invented plain-text design.
 Quality and announcements likewise retain their actual prior source around
-explicit data slots, including paragraph and row prototypes. Old notices,
+explicit data slots, including paragraph and row prototypes. Preserve the
+initial October 2026 quality page's nine ordered monthly placeholders
+(revision 93279502), filling absent entries with `（無）`. Keep every homepage
+subsection in its initial order: featured, DYK, good, news, and history
+(announcements revision 93279496). Empty sections stay present. Old notices,
 article lists, awards, and chart values are replaced, while a chart with no
 observed grade breakdown remains omitted rather than inheriting old numbers.
+Normalize excess blank lines before the announcement category. Generated
+empty placeholders remain reusable as the following issue's source layout.
 
 Native issue radios default to `Issue.upcoming()` for the UTC request date.
 The cache key includes this automatic selection so the default changes at
@@ -442,10 +500,10 @@ source or `site-packages`:
   retention. Record event codes and safe observed fields at their producers;
   never derive these records by parsing diagnostic messages. Bound each line
   and daily file. Logging failure must not change publication outcomes.
-  The website reads at most 100 recent events, translates them into all three
-  locales, and shows newest first in pages of 25 with chronological order,
-  localized text search, and result filtering. Full prose and configured wiki
-  destinations remain in disclosures; counts describe this bounded window.
+  Site reports read at most 100 recent events and show localized time, task,
+  result, and duration columns, newest first in pages of 25. Chronological
+  ordering, localized text search, and result filtering use this bounded
+  window. Do not restore narrative summaries or per-event disclosures.
   Missing event files remain empty; historical diagnostics are not
   backfilled. Raw downloads retain the separate diagnostic log, including
   tracebacks.

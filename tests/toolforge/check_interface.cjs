@@ -17,7 +17,7 @@ const assetRoot = path.resolve(__dirname, "../../src/webservice/public_html");
 const chromium = process.env.ARANAMI_CHROMIUM || "/Applications/Chromium.app/Contents/MacOS/Chromium";
 const widths = [320, 390, 600, 601, 639, 640, 768, 943, 944, 1120, 1440, 1680, 1920];
 const locales = ["en", "zh-hans", "zh-hant"];
-const surfaces = ["home", "maintenance", "logs", "about", "error", "newsletter"];
+const surfaces = ["home", "backlog", "maintenance", "reports", "logs", "about", "error", "newsletter"];
 const failures = [];
 fs.mkdirSync(outputRoot, { recursive: true });
 
@@ -208,6 +208,16 @@ async function main() {
                             assert.equal(card.article, true, "article title link missing");
                         }
                     }
+                    assert.equal(await evaluate("document.querySelectorAll('.page-content h3, #tool-status, #backlog').length"), 0, "dashboard sections should have peer h2 headings");
+                }
+                if (surface === "backlog") {
+                    assert.ok(await evaluate("document.querySelectorAll('.backlog-section h2').length > 0"), "maintenance groups should use h2 headings");
+                }
+                if (surface === "reports") {
+                    const detailWeights = await evaluate(`(() => [...document.querySelectorAll('.status-link')].map(button => getComputedStyle(button).fontWeight))()`);
+                    assert.ok(detailWeights.length > 0, "missing report details controls");
+                    assert.ok(detailWeights.every(weight => weight === "400"), "report details controls should use normal font weight");
+                    assert.equal(await evaluate("document.querySelectorAll('.page-content h2').length"), 2, "site reports needs status and run history sections");
                     const opened = await evaluate(`(() => { const dialog = document.querySelector('dialog:has(.table-scroll)'); const button = document.querySelector('button[command="show-modal"][commandfor="' + dialog?.id + '"]'); if (!button) return false; button.focus(); button.click(); return document.querySelector('dialog[open]')?.contains(document.activeElement); })()`);
                     assert.equal(opened, true, "dialog initial focus");
                     await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 8 }, sessionId);

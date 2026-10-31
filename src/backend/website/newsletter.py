@@ -317,6 +317,32 @@ def _retain_overview(
         facts["overview_observed_at"] = prior.get("overview_observed_at")
 
 
+def _new_page_assessment_options(
+    issue: Issue,
+    now: dt.datetime,
+    current: pl.DataFrame | None,
+    lookup: Callable[[dt.date], tuple[pl.DataFrame, str] | None] | None,
+) -> dict[str, object]:
+    """Select grades without rewriting closed-quarter history.
+
+    Returns:
+        Grade collection options with the actual observation timestamp.
+        An unavailable closed-quarter snapshot stays unavailable.
+    """
+    if now.date() < issue.end:
+        assessments, observed_at = current, now.isoformat(timespec="seconds")
+    else:
+        assessments, observed_at = (
+            lookup(issue.end) or (None, None)
+            if lookup is not None
+            else (None, None)
+        )
+    return {
+        "assessments": assessments,
+        "assessment_observed_at": observed_at,
+    }
+
+
 def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments]
     read: object,
     issue: Issue,
@@ -329,6 +355,10 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments]
     today_history_path: Path | None,
     overview_at: (
         Callable[[dt.date], tuple[Mapping[str, int | None], str] | None] | None
+    ),
+    current_assessments: pl.DataFrame | None,
+    assessments_at: (
+        Callable[[dt.date], tuple[pl.DataFrame, str] | None] | None
     ),
     prior: Mapping[str, object] | None,
 ) -> dict:
@@ -442,6 +472,15 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments]
             SimpleNamespace(at=historical),
             issue,
             through=observation_end,
+            resolve=getattr(read, "resolve", None),
+            resolve_many=getattr(read, "resolve_many", None),
+            resolve_page_id=getattr(read, "resolve_page_id", None),
+            **_new_page_assessment_options(
+                issue,
+                now,
+                current_assessments,
+                assessments_at,
+            ),
         )
         facts["awards"], facts["newcomers"] = _awards(
             _read_optional(
@@ -508,6 +547,10 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments]
     overview_at: (
         Callable[[dt.date], tuple[Mapping[str, int | None], str] | None] | None
     ) = None,
+    current_assessments: pl.DataFrame | None = None,
+    assessments_at: (
+        Callable[[dt.date], tuple[pl.DataFrame, str] | None] | None
+    ) = None,
     prior_facts: Mapping[str, object] | None = None,
 ) -> dict:
     """Collect drafts for the latest quarter and its successor.
@@ -525,6 +568,11 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments]
         overview_at: Read retained database counts for an exclusive UTC
             date boundary with their actual observation timestamp.
             Missing snapshots leave their counts unknown.
+        current_assessments: Fresh internal grades for open-quarter new
+            articles. Closed quarters never use these observations.
+        assessments_at: Read retained assessment rows for an exact UTC
+            date with their actual observation time. Missing historical
+            snapshots leave new-article grade breakdowns unavailable.
         prior_facts: Previously validated saved issues. Retain their
             overview counts only for identical reporting boundaries.
 
@@ -561,6 +609,8 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments]
                 article_history=article_history,
                 today_history_path=today_history_path,
                 overview_at=overview_at,
+                current_assessments=current_assessments,
+                assessments_at=assessments_at,
                 prior=(prior_facts or {}).get("issues", {}).get(issue.value),
             )
             for issue in issues
@@ -764,31 +814,30 @@ def _homepage_facts(  # ruff: ignore[too-many-return-statements]
     return True
 
 
-def _valid_overview_stamp(
-    facts: dict,
+def _valid_observation_stamp(
+    observed: object,
     stamp: dt.datetime,
     observation_end: dt.date,
 ) -> bool:
-    """Check that actual overview observation belongs to its saved day.
+    """Check that an actual observation belongs to its saved day.
 
     Returns:
         Whether no timestamp was retained or the aware observation is
         within its boundary's day and no later than collection.
     """
-    observed = facts.get("overview_observed_at")
     if observed is None:
         return True
     try:
-        overview = dt.datetime.fromisoformat(observed)
+        observation = dt.datetime.fromisoformat(observed)
     except ValueError, TypeError:
         return False
     return (
-        overview.tzinfo is not None
-        and overview.utcoffset() is not None
+        observation.tzinfo is not None
+        and observation.utcoffset() is not None
         and stamp.tzinfo is not None
         and stamp.utcoffset() is not None
-        and overview.astimezone(dt.UTC).date() == observation_end
-        and overview <= stamp
+        and observation.astimezone(dt.UTC).date() == observation_end
+        and observation <= stamp
     )
 
 
@@ -830,7 +879,11 @@ def _valid_issue(key: str, facts: object) -> bool:
         )
         and stamp.utcoffset() == dt.timedelta()
         and _counts(facts.get("overview"))
-        and _valid_overview_stamp(facts, stamp, observation_end)
+        and _valid_observation_stamp(
+            facts.get("overview_observed_at"),
+            stamp,
+            observation_end,
+        )
         and _counts(facts.get("previous_overview"))
         and (
             facts.get("quality_source") is None
@@ -854,6 +907,11 @@ def _valid_issue(key: str, facts: object) -> bool:
             facts.get("new_pages_data"),
             issue,
             through=observation_end,
+        )
+        and _valid_observation_stamp(
+            (facts.get("new_pages_data") or {}).get("grades_observed_at"),
+            stamp,
+            observation_end,
         )
         and _homepage_facts(facts, issue, observation_end)
         and all(

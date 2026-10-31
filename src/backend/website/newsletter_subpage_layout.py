@@ -29,9 +29,17 @@ _HOMEPAGE_KINDS = {
     "優良條目": "good",
     "特色內容": "featured",
     "典範條目": "featured",
+    "典範內容": "featured",
     "新聞動態": "news",
     "歷史上的今天": "history",
 }
+_HOMEPAGE_SECTIONS = (
+    ("featured", "典範內容", "「典範條目」或「特色列表」"),
+    ("dyk", "新條目推薦", "「新條目推薦」"),
+    ("good", "優良條目", "「優良條目」"),
+    ("news", "新聞動態", "「新聞動態」"),
+    ("history", "歷史上的今天", "「歷史上的今天」"),
+)
 _COMMON_FIELDS = {"text", "source_issue", "kind"}
 _QUALITY_FIELDS = {"month_template", "change_row", "empty_month"}
 _ANNOUNCEMENT_FIELDS = {
@@ -42,6 +50,20 @@ _ANNOUNCEMENT_FIELDS = {
     "award_row",
     "newcomer_template",
 }
+_CHART_PROTOTYPE = (
+    "{{Pie chart new | radius = 60 | precision = 0 | legend = true "
+    "| direction = row-reverse\n"
+    "| labelformat = $label $value篇 <small>$percent</small>\n"
+    "| 1 = @@aranami:chart_values@@\n}}"
+)
+_AWARD_PROTOTYPE = (
+    "* @@aranami:user_link@@：共得@@aranami:gained@@分"
+    "<small>（累計分數@@aranami:total@@分）</small>"
+)
+_NEWCOMER_PROTOTYPE = (
+    "恭喜@@aranami:names@@等@@aranami:newcomer_count@@名編者"
+    "本季度首次獲得ACG專題獎！"
+)
 
 
 def _slot(name: str) -> str:
@@ -153,7 +175,8 @@ def _quality(text: str, issue: Issue) -> dict | None:
         1,
     )
     change = re.search(
-        r"^(\*\s*\{\{icon\|)([^}]+)(\}\}&thinsp;)([^\r\n]+?)(：)(\[\[.*)$",
+        r"^(\*\s*\{\{icon\|)([^}]+)(\}\}&thinsp;)([^\r\n]+?)(：)"
+        r"(?:\[\[.*|（無）)?$",
         text[months[0].start() : category],
         re.MULTILINE,
     )
@@ -213,17 +236,34 @@ def _new_pages_prototypes(body: str, issue: Issue) -> dict | None:
     Returns:
         The original chart, quarterly summary, and monthly prototypes.
     """
+    if body.strip() in {"（無）", "來源資料暫未取得。"}:
+        return {
+            "chart_template": _CHART_PROTOTYPE,
+            "new_pages_summary": _slot("quarter")
+            + "度，專題共新進條目"
+            + _slot("count")
+            + "篇。其中：",
+            "new_pages_month": "* "
+            + _slot("month")
+            + "月計"
+            + _slot("count")
+            + "篇"
+            + _slot("grade_details")
+            + "。",
+        }
     templates = mwparserfromhell.parse(body).filter_templates()
     charts = [
         template
         for template in templates
         if template.name.matches("Pie chart new")
     ]
-    if len(charts) != 1 or not charts[0].has("1"):
+    if len(charts) > 1 or (charts and not charts[0].has("1")):
         return None
-    chart = charts[0]
-    old_values = str(chart.get("1").value)
-    chart_text = str(chart).replace(old_values, _slot("chart_values"), 1)
+    chart_text = _CHART_PROTOTYPE
+    if charts:
+        chart = charts[0]
+        old_values = str(chart.get("1").value)
+        chart_text = str(chart).replace(old_values, _slot("chart_values"), 1)
     summary = re.search(
         r"^"
         + re.escape(issue.quarter_label)
@@ -299,15 +339,114 @@ def _homepage_slots(
             old_body,
             re.MULTILINE,
         )
-        if bullet is None:
+        if bullet is None and old_body.strip() not in {
+            "",
+            "（無）",
+            "來源資料暫未取得。",
+        }:
             return None
         rows[kind] = (
             bullet[1] + _slot("title") + bullet[3] + _slot("date") + bullet[4]
+            if bullet is not None
+            else None
         )
         begin = start + heading.end() + columns.start(2)
         finish = start + heading.end() + columns.end(2)
         replacements.append((begin, finish, _slot("homepage:" + kind)))
-    return (replacements, rows) if rows else None
+    if not rows:
+        return None
+    prototype = next(
+        (row for row in rows.values() if row is not None),
+        "* " + _slot("title") + "<small>（" + _slot("date") + "）</small>",
+    )
+    return replacements, {
+        kind: row if row is not None else prototype
+        for kind, row in rows.items()
+    }
+
+
+def _complete_homepage_layout(text: str, rows: dict[str, str]) -> str:
+    """Retain every homepage section in the previous issue's order.
+
+    Existing sections retain their original headings and introductions.
+    Missing sections use the verified newsletter columns and an existing
+    bullet prototype. Empty observations fill these slots with none.
+
+    Returns:
+        The source with all five recognized homepage subsections.
+    """
+    start = _heading(text, "在首頁上", 3).end()
+    end = _award_heading(text).start()
+    section = text[start:end]
+    headings = list(
+        re.finditer(r"^==== ([^\r\n]+) ====$", section, re.MULTILINE),
+    )
+    blocks = {
+        _HOMEPAGE_KINDS[heading[1]]: section[
+            heading.start() : headings[index + 1].start()
+            if index + 1 < len(headings)
+            else len(section)
+        ]
+        for index, heading in enumerate(headings)
+    }
+    parts = [section[: headings[0].start()]]
+    prototype = next(iter(rows.values()))
+    for kind, label, introduction in _HOMEPAGE_SECTIONS:
+        if kind in blocks:
+            parts.append(blocks[kind])
+        else:
+            parts.append(
+                f"==== {label} ====\n\n"
+                f"以下條目曾登上首頁的{introduction}區塊。\n"
+                "{{div col|colwidth=27em}}\n"
+                + _slot("homepage:" + kind)
+                + "\n{{div col end}}\n\n",
+            )
+            rows[kind] = prototype
+    return text[:start] + "".join(parts) + text[end:]
+
+
+def complete_announcement_layout(layout: dict) -> dict:
+    """Complete saved announcement layouts without mutating them.
+
+    Args:
+        layout: Prepared layout from current or older saved facts.
+
+    Returns:
+        A copied layout with all homepage subsections in verified order.
+
+    Raises:
+        ValueError: The supplied layout does not satisfy its contract.
+    """
+    if (
+        not isinstance(layout, dict)
+        or not valid_subpage_layout(layout)
+        or layout.get("kind") != "announcements"
+        or _heading(layout["text"], "在首頁上", 3) is None
+        or _award_heading(layout["text"]) is None
+    ):
+        message = "Announcement completion needs a valid prepared layout."
+        raise ValueError(message)
+    result = {**layout, "homepage_rows": dict(layout["homepage_rows"])}
+    result["text"] = _complete_homepage_layout(
+        result["text"],
+        result["homepage_rows"],
+    )
+    return result
+
+
+def _award_heading(text: str) -> re.Match | None:
+    """Find either audited award heading without changing its text.
+
+    Returns:
+        The unique recognized award section, or none for ambiguity.
+    """
+    found = [
+        heading
+        for label in ("ACG專題獎", "ACG專題創作獎")
+        if (heading := _heading(text, label, 3)) is not None
+    ]
+    return found[0] if len(found) == 1 else None
 
 
 def _announcements(  # ruff: ignore[too-many-locals, too-many-return-statements]
@@ -319,8 +458,11 @@ def _announcements(  # ruff: ignore[too-many-locals, too-many-return-statements]
     Returns:
         Source-preserving section slots and prototypes, or none.
     """
-    labels = ("公告", "新進條目", "在首頁上", "ACG專題獎")
-    found = [_heading(text, label, 3) for label in labels]
+    labels = ("公告", "新進條目", "在首頁上")
+    found = [
+        *(_heading(text, label, 3) for label in labels),
+        _award_heading(text),
+    ]
     category = text.find("[[Category:電子遊戲專題簡訊宣告]]")
     if any(heading is None for heading in found) or category < 0:
         return None
@@ -349,9 +491,14 @@ def _announcements(  # ruff: ignore[too-many-locals, too-many-return-statements]
         replacements.append((begin, end, _slot(name)))
     award_body = text[awards.end() : category]
     bullets = list(re.finditer(r"^\*[^\r\n]+$", award_body, re.MULTILINE))
-    if not bullets:
+    empty = re.search(
+        r"^(?:（無新增得分）|（無）|來源資料暫未取得。)$",
+        award_body,
+        re.MULTILINE,
+    )
+    if not bullets and empty is None:
         return None
-    first = bullets[0][0]
+    first = bullets[0][0] if bullets else ""
     row = re.fullmatch(
         r"(\*\s*)(\[\[User:[^\r\n]+?\]\])(：共得)([\d,]+)(分<small[^>]*>（累計分數)([\d,]+)(分）</small>)",
         first,
@@ -360,7 +507,7 @@ def _announcements(  # ruff: ignore[too-many-locals, too-many-return-statements]
         r"恭喜([^\r\n]+?)等([一二三四五六七八九十廿卅百零〇兩\d]+)名編者本季度首次獲得ACG專題獎！",
         award_body,
     )
-    if row is None or newcomer is None:
+    if bullets and row is None:
         return None
     award_row = (
         row[1]
@@ -370,28 +517,32 @@ def _announcements(  # ruff: ignore[too-many-locals, too-many-return-statements]
         + row[5]
         + _slot("total")
         + row[7]
+        if row is not None
+        else _AWARD_PROTOTYPE
     )
     newcomer_template = (
         newcomer[0]
         .replace(newcomer[1], _slot("names"), 1)
         .replace(newcomer[2] + "名", _slot("newcomer_count") + "名", 1)
+        if newcomer is not None
+        else _NEWCOMER_PROTOTYPE
     )
-    replacements.extend([
-        (
-            awards.end() + bullets[0].start(),
-            awards.end() + bullets[-1].end(),
-            _slot("awards"),
-        ),
-        (
+    replacements.append((
+        awards.end() + (bullets[0].start() if bullets else empty.start()),
+        awards.end() + (bullets[-1].end() if bullets else empty.end()),
+        _slot("awards")
+        + ("\n\n" + _slot("newcomers") if newcomer is None else ""),
+    ))
+    if newcomer is not None:
+        replacements.append((
             awards.end() + newcomer.start(),
             awards.end() + newcomer.end(),
             _slot("newcomers"),
-        ),
-    ])
+        ))
     prepared = _metadata(_replace_regions(text, replacements), issue)
     if prepared is None:
         return None
-    return {
+    return complete_announcement_layout({
         "text": prepared,
         "source_issue": issue.value,
         "kind": "announcements",
@@ -399,7 +550,7 @@ def _announcements(  # ruff: ignore[too-many-locals, too-many-return-statements]
         "homepage_rows": homepage_rows,
         "award_row": award_row,
         "newcomer_template": newcomer_template,
-    }
+    })
 
 
 def _has_slots(value: object, expected: set[str]) -> bool:
@@ -413,6 +564,25 @@ def _has_slots(value: object, expected: set[str]) -> bool:
         and set(_SLOT.findall(value)) == expected
         and value.count("@@aranami:") == len(_SLOT.findall(value))
     )
+
+
+def _homepage_structure(text: str, rows: dict[str, str]) -> bool:
+    """Require unique section headings for the saved homepage slots.
+
+    Returns:
+        Whether every saved row belongs to one ordered source section.
+    """
+    homepage = _heading(text, "在首頁上", 3)
+    awards = _award_heading(text)
+    if homepage is None or awards is None or homepage.end() >= awards.start():
+        return False
+    headings = re.findall(
+        r"^==== ([^\r\n]+) ====$",
+        text[homepage.end() : awards.start()],
+        re.MULTILINE,
+    )
+    kinds = [_HOMEPAGE_KINDS.get(label) for label in headings]
+    return len(kinds) == len(rows) and set(kinds) == set(rows)
 
 
 def valid_subpage_layout(value: object) -> bool:
@@ -479,6 +649,7 @@ def valid_subpage_layout(value: object) -> bool:
             }
             | {"homepage:" + key for key in rows},
         )
+        and _homepage_structure(value["text"], rows)
         and _has_slots(value["new_pages_summary"], {"quarter", "count"})
         and _has_slots(
             value["new_pages_month"],

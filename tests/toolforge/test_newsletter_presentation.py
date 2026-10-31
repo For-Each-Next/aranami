@@ -1,4 +1,4 @@
-"""Verify editable newsletter output stays escaped and localized."""
+"""Verify selectable newsletter wikitext stays escaped and localized."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from webservice.pages import render_newsletter
 
 
 def _issue(*, available: bool = True) -> dict[str, object]:
-    """Return collected data pages with adversarial editable text."""
+    """Return collected data pages with adversarial source text."""
     return {
         "issue": "2027-01",
         "period": "2026-10-01 \u2013 2026-12-31",
@@ -25,7 +25,9 @@ def _issue(*, available: bool = True) -> dict[str, object]:
             {
                 "title": "WikiProject:電子遊戲/簡訊/2027-01" + suffix,
                 "url": "https://zh.wikipedia.org/wiki/Fixture" + suffix,
-                "text": "{{模板|標題}}\n</textarea><script>alert(1)</script>",
+                "text": (
+                    "{{模板|標題}}\n</code></pre><script>alert(1)</script>"
+                ),
                 "label": suffix,
             }
             for suffix in ("", "/特優內容", "/宣告")
@@ -40,7 +42,7 @@ def _issue(*, available: bool = True) -> dict[str, object]:
 
 
 class NewsletterPresentationTests(unittest.TestCase):
-    """Exercise native editing, sources, and interface locales."""
+    """Exercise selectable source displays and interface locales."""
 
     @staticmethod
     def test_evidence_is_retained_without_displaying_sources() -> None:
@@ -76,22 +78,23 @@ class NewsletterPresentationTests(unittest.TestCase):
         assert facts == original
 
     @staticmethod
-    def test_editable_drafts_escape_and_round_trip_wikitext() -> None:
+    def test_selectable_drafts_escape_and_round_trip_wikitext() -> None:
         """Keep wiki source intact without creating active HTML."""
         value = _issue()
         output = render_newsletter(value, "en")
-        editors = re.findall(
-            r"<textarea\b([^>]*)>(.*?)</textarea>",
+        displays = re.findall(
+            r"<pre\b([^>]*)><code\b[^>]*data-newsletter-wikitext>(.*?)</code></pre>",
             output,
             re.DOTALL,
         )
-        assert len(editors) == len(value["pages"])
+        assert len(displays) == len(value["pages"])
         for (attributes, text), page in zip(
-            editors,
+            displays,
             value["pages"],
             strict=True,
         ):
-            assert "readonly" not in attributes
+            assert 'tabindex="0"' in attributes
+            assert 'aria-labelledby="newsletter-code-label-' in attributes
             assert 'lang="zh"' in attributes
             assert unescape(text) == page["text"]
         assert "<script>alert(1)</script>" not in output
@@ -102,7 +105,8 @@ class NewsletterPresentationTests(unittest.TestCase):
         assert 'src="/newsletter.js" defer' in output
         assert value["period"] not in output
         assert "oldid=123" not in output
-        assert output.count("data-newsletter-copy=") == len(editors)
+        assert output.count("data-newsletter-copy=") == len(displays)
+        assert "<textarea" not in output
 
     def test_missing_data_in_all_locales(self) -> None:
         """Show collection status without empty templates."""
@@ -192,7 +196,89 @@ class NewsletterPresentationTests(unittest.TestCase):
                     output,
                 ):
                     assert set(reference.split()) <= identifiers
-                assert output.count("<textarea ") == len(value["pages"])
+                assert output.count("data-newsletter-wikitext") == len(
+                    value["pages"],
+                )
+
+    def test_daily_calendar_keeps_the_saved_date_and_actual_generation_time(
+        self,
+    ) -> None:
+        """Keep native date and issue navigation separate."""
+        for locale, label, through, generated in (
+            ("en", "Data date", "Data through", "Generated"),
+            ("zh-hans", "数据日期", "数据截至", "生成于"),
+            ("zh-hant", "資料日期", "資料截至", "產生於"),
+        ):
+            with self.subTest(locale=locale):
+                value = _issue()
+                value["draft_history"] = {
+                    "dates": ["2026-10-30", "2026-10-28"],
+                    "selected_date": "2026-10-30",
+                    "generated_at": "2026-10-31T00:04:05+00:00",
+                    "missing": False,
+                }
+                output = render_newsletter(value, locale)
+                form = re.search(
+                    r'<form class="newsletter-date-controls"([^>]*)>'
+                    r"(.*?)</form>",
+                    output,
+                    re.DOTALL,
+                )
+                assert form is not None
+                assert 'action="/newsletter/" method="get"' in form[1]
+                assert "hidden" not in form[1]
+                assert 'name="date" type="date"' in form[2]
+                assert 'value="2026-10-30"' in form[2]
+                assert 'min="2026-10-28" max="2026-10-30"' in form[2]
+                assert 'name="issue" value="2027-01"' in form[2]
+                assert f'name="lang" value="{locale}"' in form[2]
+                assert 'type="submit"' in form[2]
+                assert label in form[2]
+                assert through in output
+                assert generated in output
+                assert 'datetime="2026-10-30"' in output
+                assert 'datetime="2026-10-31T00:04:05+00:00"' in output
+                assert "2026-10-31 00:04:05 UTC" in output
+                issue_form = re.search(
+                    r"<form[^>]*data-newsletter-issue-form>(.*?)</form>",
+                    output,
+                    re.DOTALL,
+                )
+                assert issue_form is not None
+                assert 'name="date"' not in issue_form[1]
+
+    def test_missing_daily_date_never_displays_another_saved_draft(
+        self,
+    ) -> None:
+        """Show archive gaps without empty source displays."""
+        for locale, notice in (
+            ("en", "No saved draft is available for this date."),
+            ("zh-hans", "没有此日期的已保存草稿。"),
+            ("zh-hant", "沒有此日期的已儲存草稿。"),
+        ):
+            with self.subTest(locale=locale):
+                value = _issue(available=False)
+                value["draft_history"] = {
+                    "dates": ["2026-10-28", "2026-10-30"],
+                    "selected_date": "2026-10-29",
+                    "generated_at": None,
+                    "missing": True,
+                }
+                output = render_newsletter(value, locale)
+                assert notice in output
+                assert 'value="2026-10-29"' in output
+                assert "newsletter-date-controls" in output
+                assert "data-newsletter-wikitext" not in output
+                assert "newsletter-observation" not in output
+
+    @staticmethod
+    def test_legacy_issue_does_not_claim_a_daily_archive() -> None:
+        """Keep legacy output without inventing saved dates."""
+        output = render_newsletter(_issue(), "en")
+        assert "No daily draft has been saved for this issue yet." in output
+        assert "newsletter-data-date" not in output
+        assert "newsletter-observation" not in output
+        assert "data-newsletter-wikitext" in output
 
 
 if __name__ == "__main__":

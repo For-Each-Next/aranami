@@ -40,9 +40,9 @@
     "zh-hant": "條目維護"
   },
   "nav.project": {
-    "en": "Join the project",
-    "zh-hans": "参与专题",
-    "zh-hant": "參與專題"
+    "en": "Video games WikiProject",
+    "zh-hans": "电子游戏专题",
+    "zh-hant": "電子遊戲專題"
   },
   "nav.logs": {
     "en": "Run logs",
@@ -304,20 +304,50 @@
     "zh-hans": "条目",
     "zh-hant": "條目"
   },
+  "nav.reports": {
+    "en": "Site reports",
+    "zh-hans": "站内报告",
+    "zh-hant": "站內報告"
+  },
+  "reports.heading": {
+    "en": "Site reports",
+    "zh-hans": "站内报告",
+    "zh-hant": "站內報告"
+  },
+  "reports.panel": {
+    "en": "Update status",
+    "zh-hans": "更新状态",
+    "zh-hant": "更新狀態"
+  },
+  "reports.log": {
+    "en": "Run history",
+    "zh-hans": "执行记录",
+    "zh-hant": "執行紀錄"
+  },
   "reviews.heading": {
     "en": "Content reviews",
     "zh-hans": "内容评审",
     "zh-hant": "內容評審"
   },
-  "reviews.days": {
-    "en": "{count} d ago",
-    "zh-hans": "{count}日前",
-    "zh-hant": "{count}日前"
+  "reviews.started_days": {
+    "en": "Started {count} d ago",
+    "zh-hans": "{count}天前发起",
+    "zh-hant": "{count}天前發起"
   },
-  "reviews.hours": {
-    "en": "{count} h ago",
-    "zh-hans": "{count}小时前",
-    "zh-hant": "{count}小時前"
+  "reviews.replied_days": {
+    "en": "Last reply {count} d ago",
+    "zh-hans": "{count}天前回应",
+    "zh-hant": "{count}天前回應"
+  },
+  "reviews.replied_hours": {
+    "en": "Last reply {count} h ago",
+    "zh-hans": "{count}小时前回应",
+    "zh-hant": "{count}小時前回應"
+  },
+  "reviews.participants": {
+    "en": ", {count} participants",
+    "zh-hans": "，{count}参与者",
+    "zh-hant": "，{count}參與者"
   },
   "reviews.fac": {
     "en": "Featured article nomination",
@@ -544,6 +574,11 @@
     "zh-hans": "返回条目维护",
     "zh-hant": "返回條目維護"
   },
+  "backlog.overview_empty": {
+    "en": "No articles currently need maintenance.",
+    "zh-hans": "目前没有待维护条目。",
+    "zh-hant": "目前沒有待維護條目。"
+  },
   "backlog.page": {
     "en": "Page {page} of {pages}",
     "zh-hans": "第{page}页，共{pages}页",
@@ -671,8 +706,8 @@
   },
   "ops.next_run": {
     "en": "Next scheduled run: ",
-    "zh-hans": "下次计划执行：",
-    "zh-hant": "下次預定執行："
+    "zh-hans": "下次排程：",
+    "zh-hant": "下次排程："
   },
   "time.minutes_ago": {
     "en": "({count} min ago)",
@@ -965,14 +1000,14 @@
     "zh-hant": "等待執行…"
   },
   "footer.uptime": {
-    "en": "Aranami ({version}) uptime: {days} d {hours} h {minutes} min {seconds} s · since {since} UTC",
-    "zh-hans": "Aranami ({version}) 已连续运行{days}日{hours}小时{minutes}分钟{seconds}秒（始于{since} UTC）",
-    "zh-hant": "Aranami ({version}) 已連續運行{days}日{hours}小時{minutes}分鐘{seconds}秒（始於{since} UTC）"
+    "en": "Aranami ({version}) started {since} UTC, running for {duration}.",
+    "zh-hans": "Aranami ({version}) 自{since} UTC启动，已执行{duration}。",
+    "zh-hant": "Aranami ({version}) 自{since} UTC啟動，已執行{duration}。"
   },
   "footer.uptime_unknown": {
     "en": "Aranami ({version}) uptime: unavailable",
-    "zh-hans": "Aranami ({version}) 连续运行时间：未获取",
-    "zh-hant": "Aranami ({version}) 連續運行時間：未取得"
+    "zh-hans": "Aranami ({version}) 执行时间：未获取",
+    "zh-hant": "Aranami ({version}) 執行時間：未取得"
   },
   "duration.seconds": {
     "en": "{seconds} s",
@@ -983,6 +1018,16 @@
     "en": "{minutes} min {seconds} s",
     "zh-hans": "{minutes}分钟{seconds}秒",
     "zh-hant": "{minutes}分鐘{seconds}秒"
+  },
+  "duration.hours": {
+    "en": "{hours} h {minutes} min {seconds} s",
+    "zh-hans": "{hours}小时{minutes}分钟{seconds}秒",
+    "zh-hant": "{hours}小時{minutes}分鐘{seconds}秒"
+  },
+  "duration.days": {
+    "en": "{days} d {hours} h {minutes} min {seconds} s",
+    "zh-hans": "{days}日{hours}小时{minutes}分钟{seconds}秒",
+    "zh-hant": "{days}日{hours}小時{minutes}分鐘{seconds}秒"
   },
   "logs.service.hub": {
     "en": "the data hub",
@@ -1003,16 +1048,6 @@
     "en": "the web server",
     "zh-hans": "网页服务",
     "zh-hant": "網頁服務"
-  },
-  "logs.service.unknown": {
-    "en": "the service",
-    "zh-hans": "服务",
-    "zh-hant": "服務"
-  },
-  "logs.routine_unknown": {
-    "en": "report",
-    "zh-hans": "报告任务",
-    "zh-hant": "報告任務"
   },
   "logs.result.updated": {
     "en": "completed successfully",
@@ -1049,146 +1084,6 @@
     "zh-hans": "已结束，更新结果未知",
     "zh-hant": "已結束，更新結果未知"
   },
-  "logs.time_intro": {
-    "en": "At ",
-    "zh-hans": "在",
-    "zh-hant": "在"
-  },
-  "logs.time_separator": {
-    "en": ", ",
-    "zh-hans": "，",
-    "zh-hant": "，"
-  },
-  "logs.task": {
-    "en": "{count} task",
-    "zh-hans": "{count}项任务",
-    "zh-hant": "{count}項任務"
-  },
-  "logs.tasks": {
-    "en": "{count} tasks",
-    "zh-hans": "{count}项任务",
-    "zh-hant": "{count}項任務"
-  },
-  "logs.edit": {
-    "en": "{count} page edit was confirmed.",
-    "zh-hans": "已确认完成{count}次页面编辑。",
-    "zh-hant": "已確認完成{count}次頁面編輯。"
-  },
-  "logs.edits": {
-    "en": "{count} page edits were confirmed.",
-    "zh-hans": "已确认完成{count}次页面编辑。",
-    "zh-hant": "已確認完成{count}次頁面編輯。"
-  },
-  "logs.failure": {
-    "en": "The refresh encountered {count} source failure.",
-    "zh-hans": "刷新时有{count}项来源获取失败。",
-    "zh-hant": "重新整理時有{count}項來源取得失敗。"
-  },
-  "logs.failures": {
-    "en": "The refresh encountered {count} source failures.",
-    "zh-hans": "刷新时有{count}项来源获取失败。",
-    "zh-hant": "重新整理時有{count}項來源取得失敗。"
-  },
-  "logs.duration": {
-    "en": "The attempt took {duration}.",
-    "zh-hans": "本次执行耗时{duration}。",
-    "zh-hant": "本次執行耗時{duration}。"
-  },
-  "logs.related_reports": {
-    "en": "Related reports include {reports}.",
-    "zh-hans": "相关报告包括{reports}。",
-    "zh-hant": "相關報告包括{reports}。"
-  },
-  "logs.event.service_started": {
-    "en": "{service} started.",
-    "zh-hans": "{service}已启动。",
-    "zh-hant": "{service}已啟動。"
-  },
-  "logs.event.service_stopping": {
-    "en": "{service} is shutting down.",
-    "zh-hans": "{service}正在停止。",
-    "zh-hant": "{service}正在停止。"
-  },
-  "logs.event.service_stopped": {
-    "en": "{service} stopped.",
-    "zh-hans": "{service}已停止。",
-    "zh-hant": "{service}已停止。"
-  },
-  "logs.event.preview_service_started": {
-    "en": "{service} started in preview mode.",
-    "zh-hans": "{service}已在预览模式下启动。",
-    "zh-hant": "{service}已在預覽模式下啟動。"
-  },
-  "logs.event.preview_service_stopping": {
-    "en": "{service} is shutting down in preview mode.",
-    "zh-hans": "{service}正在停止（预览模式）。",
-    "zh-hant": "{service}正在停止（預覽模式）。"
-  },
-  "logs.event.preview_service_stopped": {
-    "en": "{service} stopped in preview mode.",
-    "zh-hans": "{service}已停止（预览模式）。",
-    "zh-hant": "{service}已停止（預覽模式）。"
-  },
-  "logs.event.routine_started": {
-    "en": "the {routine} task started.",
-    "zh-hans": "开始执行{routine}。",
-    "zh-hant": "開始執行{routine}。"
-  },
-  "logs.event.routine_finished": {
-    "en": "the {routine} task {result}.",
-    "zh-hans": "{routine}{result}。",
-    "zh-hant": "{routine}{result}。"
-  },
-  "logs.event.preview_routine_started": {
-    "en": "a preview of the {routine} task started.",
-    "zh-hans": "开始预览{routine}。",
-    "zh-hant": "開始預覽{routine}。"
-  },
-  "logs.event.preview_routine_finished": {
-    "en": "the preview of the {routine} task {result}.",
-    "zh-hans": "{routine}预览{result}。",
-    "zh-hant": "{routine}預覽{result}。"
-  },
-  "logs.event.website_started": {
-    "en": "the website data refresh started.",
-    "zh-hans": "开始刷新网站数据。",
-    "zh-hant": "開始重新整理網站資料。"
-  },
-  "logs.event.website_finished": {
-    "en": "the website data refresh {result}.",
-    "zh-hans": "网站数据刷新{result}。",
-    "zh-hant": "網站資料重新整理{result}。"
-  },
-  "logs.event.preview_website_started": {
-    "en": "the website data preview started.",
-    "zh-hans": "开始预览网站数据。",
-    "zh-hant": "開始預覽網站資料。"
-  },
-  "logs.event.preview_website_finished": {
-    "en": "the website data preview {result}.",
-    "zh-hans": "网站数据预览{result}。",
-    "zh-hant": "網站資料預覽{result}。"
-  },
-  "logs.event.run_started": {
-    "en": "a report run started with {tasks}.",
-    "zh-hans": "开始执行报告，共{tasks}。",
-    "zh-hant": "開始執行報告，共{tasks}。"
-  },
-  "logs.event.run_finished": {
-    "en": "the report run finished after processing {tasks}, with {failed_tasks} failing and {deferred_tasks} deferred for retry.",
-    "zh-hans": "报告执行完毕，共处理{tasks}，其中{failed_tasks}失败，{deferred_tasks}等待重试。",
-    "zh-hant": "報告執行完畢，共處理{tasks}，其中{failed_tasks}失敗，{deferred_tasks}等待重試。"
-  },
-  "logs.event.preview_run_started": {
-    "en": "a preview run started with {tasks}.",
-    "zh-hans": "开始预览报告，共{tasks}。",
-    "zh-hant": "開始預覽報告，共{tasks}。"
-  },
-  "logs.event.preview_run_finished": {
-    "en": "the preview run finished after processing {tasks}, with {failed_tasks} failing and {deferred_tasks} deferred for retry.",
-    "zh-hans": "报告预览完毕，共处理{tasks}，其中{failed_tasks}失败，{deferred_tasks}等待重试。",
-    "zh-hant": "報告預覽完畢，共處理{tasks}，其中{failed_tasks}失敗，{deferred_tasks}等待重試。"
-  },
   "logs.not_found": {
     "en": "Log not found.",
     "zh-hans": "未找到日志。",
@@ -1203,16 +1098,6 @@
     "en": "Show logs",
     "zh-hans": "查看日志",
     "zh-hant": "查看日誌"
-  },
-  "logs.recent": {
-    "en": "Recent events",
-    "zh-hans": "最近事件",
-    "zh-hant": "最近事件"
-  },
-  "logs.reader_note": {
-    "en": "Task starts, outcomes, and service lifecycle events. Logs are retained for 30 days; downloads include detailed diagnostics.",
-    "zh-hans": "这里记录任务开始、执行结果和服务启停。日志保留30日，下载文件包含详细诊断信息。",
-    "zh-hant": "此處紀錄任務開始、執行結果及服務啟停。日誌保留30日，下載檔案含詳細診斷資訊。"
   },
   "logs.no_matches": {
     "en": "No events match these filters.",
@@ -1258,11 +1143,6 @@
     "en": "Dashboard",
     "zh-hans": "专题看板",
     "zh-hant": "專題看板"
-  },
-  "nav.reports": {
-    "en": "Report updates",
-    "zh-hans": "报告更新状态",
-    "zh-hant": "報告更新狀態"
   },
   "nav.global": {
     "en": "Main navigation",
@@ -1389,11 +1269,6 @@
     "zh-hans": "清除筛选条件",
     "zh-hant": "清除篩選條件"
   },
-  "logs.details": {
-    "en": "Event details",
-    "zh-hans": "事件详情",
-    "zh-hant": "事件詳情"
-  },
   "logs.duration_label": {
     "en": "Duration",
     "zh-hans": "用时",
@@ -1433,11 +1308,6 @@
     "en": "Report run",
     "zh-hans": "报告执行",
     "zh-hant": "報告執行"
-  },
-  "logs.completed_unknown": {
-    "en": "The run finished, but its update result is unavailable. See the daily log for details.",
-    "zh-hans": "执行已结束，更新结果未知。详情请查看每日日志。",
-    "zh-hant": "執行已結束，更新結果未知。詳情請查看每日日誌。"
   },
   "assessment.description.class.FA": {
     "en": "Featured article",
@@ -1620,9 +1490,9 @@
     "zh-hant": "英文維基百科優質條目"
   },
   "nav.newsletter": {
-    "en": "Newsletter",
-    "zh-hans": "专题简讯",
-    "zh-hant": "專題簡訊"
+    "en": "Newsletter drafts",
+    "zh-hans": "简讯草稿",
+    "zh-hant": "簡訊草稿"
   },
   "nav.tools": {
     "en": "Tools",
@@ -1643,6 +1513,46 @@
     "en": "Issue month",
     "zh-hans": "期刊月份",
     "zh-hant": "期刊月份"
+  },
+  "newsletter.history.date": {
+    "en": "Data date",
+    "zh-hans": "数据日期",
+    "zh-hant": "資料日期"
+  },
+  "newsletter.history.view": {
+    "en": "View saved draft",
+    "zh-hans": "查看已保存草稿",
+    "zh-hant": "查看已儲存草稿"
+  },
+  "newsletter.history.through": {
+    "en": "Data through",
+    "zh-hans": "数据截至",
+    "zh-hant": "資料截至"
+  },
+  "newsletter.history.generated": {
+    "en": "Generated",
+    "zh-hans": "生成于",
+    "zh-hant": "產生於"
+  },
+  "newsletter.history.unavailable": {
+    "en": "No daily draft has been saved for this issue yet.",
+    "zh-hans": "本期尚未保存每日草稿。",
+    "zh-hant": "本期尚未儲存每日草稿。"
+  },
+  "newsletter.history.missing": {
+    "en": "No saved draft is available for this date.",
+    "zh-hans": "没有此日期的已保存草稿。",
+    "zh-hant": "沒有此日期的已儲存草稿。"
+  },
+  "newsletter.history.invalid_date": {
+    "en": "Choose one data date in YYYY-MM-DD format within the selected issue’s reporting quarter.",
+    "zh-hans": "请选择本期期刊统计季度内的一个数据日期，格式为YYYY-MM-DD。",
+    "zh-hant": "請選擇本期期刊統計季度內的一個資料日期，格式為YYYY-MM-DD。"
+  },
+  "newsletter.history.read_error": {
+    "en": "Saved daily drafts are temporarily unavailable. Try again later.",
+    "zh-hans": "已保存的每日草稿暂时无法读取，请稍后重试。",
+    "zh-hant": "已儲存的每日草稿暫時無法讀取，請稍後重試。"
   },
   "newsletter.unavailable": {
     "en": "Source collection for this issue has not completed yet. The next issue is collected automatically; generated wikitext appears here when data is ready.",

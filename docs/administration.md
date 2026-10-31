@@ -57,6 +57,7 @@ Paths below are relative to `/data/project/aranami`:
 | `deployment.lock/` | Concurrent-deployment guard; does not block service startup |
 | `python/`, `uv-bootstrap/` | Managed Python 3.15.0 and setup tooling |
 | `reports/` | Durable result bundles, manifests, Parquet tables, and wikitext |
+| `reports/newsletter-drafts-v1/` | Immutable daily newsletter facts, original draft text, and date catalogs |
 | `state/` | Routine, schedule, and per-destination observations |
 | `cache/` | Disposable source data, completion evidence, bytecode, and website snapshots |
 | `logs/` | UTC diagnostic logs and separate major-event records, retained for 30 dates |

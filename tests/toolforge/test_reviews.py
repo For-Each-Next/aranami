@@ -57,6 +57,7 @@ class ParserTests(TestCase):
                 assert rows[0]["started_at"] == _START
                 assert unquote(rows[0]["review_url"]).endswith("#遊戲")
                 assert rows[1]["started_at"] is None
+                assert rows[1]["participant_count"] is None
 
     @staticmethod
     def test_flc_uses_nomination_area_and_base_period() -> None:
@@ -120,6 +121,140 @@ class ParserTests(TestCase):
                 )[0]
                 assert dated["started_at"] == _START
                 assert unquote(dated["review_url"]).endswith("#" + heading)
+
+    def test_only_other_participants_supply_reply_times(self) -> None:
+        """Ignore the nominator's votes and followups."""
+        opening = (
+            "== Game ==\n提名人：[[User:Opening_editor|Editor]] "
+            f"{_SIGNATURE}\n"
+            f"投票期：{_SIGNATURE}至2026年10月21日 (三) 03:04 (UTC)\n"
+            "* Nomination vote [[用户讨论:Opening editor|talk]] "
+            "2026年10月8日 (四) 04:00 (UTC)\n"
+        )
+        other = (
+            "=== Comments ===\n"
+            ": Reviewer [[User:Reviewer|Different label]] "
+            "([[User talk:Reviewer|talk]]) 2026年10月9日 (五) 05:00 (UTC)\n"
+            ":: Followup [[User:Opening editor]] "
+            "2026年10月10日 (六) 06:00 (UTC)\n"
+        )
+        for kind in ("fac", "flc", "gan", "pr"):
+            with self.subTest(kind=kind):
+                single = community_reviews(opening, kind)[0]
+                replied = community_reviews(opening + other, kind)[0]
+                assert single["replied_at"] is None
+                assert single["participant_count"] == 1
+                assert replied["replied_at"] == "2026-10-09T05:00:00+00:00"
+                assert replied["participant_count"] == 2
+
+    @staticmethod
+    def test_participants_deduplicate_signature_accounts() -> None:
+        """Count each account once across signature aliases."""
+        row = community_reviews(
+            f"== Game ==\n[[User:opening_editor|Alias]] {_SIGNATURE}\n"
+            "* [[User talk:Opening editor|Talk]] "
+            "2026年10月8日 (四) 04:00 (UTC)\n"
+            "* [[Special:Contributions/Reviewer_One|Reviewer]] "
+            "2026年10月9日 (五) 05:00 (UTC)\n"
+            "=== Followups ===\n"
+            ": [[使用者:Reviewer One|Different alias]] "
+            "2026年10月10日 (六) 06:00 (UTC)\n"
+            ": [[User:Another reviewer]] 2026年10月11日 (日) 07:00 (UTC)\n"
+            "== Other candidate ==\n"
+            "[[User:Unrelated]] 2026年10月12日 (一) 08:00 (UTC)",
+            "fac",
+        )[0]
+        assert row["participant_count"] == 3
+        assert row["replied_at"] == "2026-10-11T07:00:00+00:00"
+
+    @staticmethod
+    def test_explicit_nominator_can_sign_after_the_period_start() -> None:
+        """Accept nominators signing after the period starts."""
+        row = community_reviews(
+            f"== Game ==\n投票期：{_SIGNATURE}\n"
+            "提名人：[[User:Opening]] 2026年10月7日 (三) 03:05 (UTC)\n"
+            "* [[User:Reviewer]] 2026年10月9日 (五) 04:00 (UTC)",
+            "fac",
+        )[0]
+        assert row["replied_at"] == "2026-10-09T04:00:00+00:00"
+
+    @staticmethod
+    def test_reply_quotes_and_unidentified_nominators() -> None:
+        """Reject quoted dates and unknown nominators."""
+        text = (
+            f"== Game ==\n[[User:Opening]] {_SIGNATURE}\n"
+            "{{quote|[[User:Quoted]] 2026年10月24日 (六) 12:00 (UTC)}}\n"
+            "<!-- [[User:Hidden]] 2026年10月24日 (六) 12:00 (UTC) -->\n"
+            "<blockquote>[[User:Quoted]] "
+            "2026年10月24日 (六) 12:00 (UTC)</blockquote>\n"
+            "<nowiki>[[User:Quoted]] "
+            "2026年10月24日 (六) 12:00 (UTC)</nowiki>\n"
+            "* Reply <span>[[使用者:Reviewer|Review]]</span> "
+            "2026年10月9日 (五) 04:00 (UTC)\n"
+            "* Newer reply [[Special:Contributions/192.0.2.1|IP]] "
+            "2026年10月10日 (六) 05:00 (UTC)\n"
+            "Unattributed 2026年10月24日 (六) 12:00 (UTC)\n"
+            "== Other ==\n[[User:Unrelated]] 2026年10月24日 (六) 12:00 (UTC)\n"
+        )
+        row = community_reviews(text, "pr")[0]
+        assert row["replied_at"] == "2026-10-10T05:00:00+00:00"
+        assert row["participant_count"] == 3
+        missing = (
+            f"== Game ==\n投票期：{_SIGNATURE}\n"
+            "* [[User:Reviewer]] 2026年10月9日 (五) 04:00 (UTC)\n"
+        )
+        unidentified = community_reviews(missing, "gan")[0]
+        assert unidentified["replied_at"] is None
+        assert unidentified["participant_count"] == 1
+
+    @staticmethod
+    def test_talk_review_replies_stay_with_the_selected_discussion() -> None:
+        """Read nested replies within the selected talk topic."""
+        row = talk_review(
+            f"== 專題同儕評審 ==\n[[User:Opening]] {_SIGNATURE}\n"
+            "=== Concerns ===\n[[User:Reviewer]] "
+            "2026年10月9日 (五) 04:00 (UTC)\n"
+            "== Other topic ==\n[[User:Other]] "
+            "2026年10月24日 (六) 12:00 (UTC)",
+            "ppr",
+            title="Game",
+            talk="Talk:Game",
+        )[0]
+        assert row["replied_at"] == "2026-10-09T04:00:00+00:00"
+        assert row["participant_count"] == 2
+
+    @staticmethod
+    def test_dyk_nominator_and_candidate_boundaries() -> None:
+        """Keep DYK comments with their own candidate and nominator."""
+        rows = community_reviews(
+            "{{DYKEntry|article=First|nominator=Opening_editor|timestamp=1791342240}}\n"
+            "* [[User:Opening editor]] 2026年10月8日 (四) 04:00 (UTC)\n"
+            "{{DYKEntry|article=Second|nominator=Opening|timestamp=1791342240}}\n"
+            "* [[User:Reviewer]] 2026年10月9日 (五) 04:00 (UTC)\n"
+            "* [[User:Opening]] 2026年10月10日 (六) 04:00 (UTC)\n"
+            "=== Other date ===\n[[User:Other]] "
+            "2026年10月24日 (六) 12:00 (UTC)\n"
+            "{{DYKEntry|article=Unknown|timestamp=1791342240}}\n"
+            "* [[User:Reviewer]] 2026年10月9日 (五) 04:00 (UTC)\n",
+            "dykc",
+        )
+        assert [row["replied_at"] for row in rows] == [
+            None,
+            "2026-10-09T04:00:00+00:00",
+            None,
+        ]
+        assert [row["participant_count"] for row in rows] == [1, 2, 1]
+
+    @staticmethod
+    def test_dyk_explicit_nominator_counts_without_signed_comments() -> None:
+        """Count DYK nominators without inventing unknown counts."""
+        rows = community_reviews(
+            "{{DYKEntry|article=Explicit|nominator=Opening|timestamp=oops}}\n"
+            "{{DYKEntry|article=Unknown|timestamp=oops}}\n",
+            "dykc",
+        )
+        assert [row["participant_count"] for row in rows] == [1, None]
+        assert all(row["replied_at"] is None for row in rows)
 
 
 class _Page:
@@ -365,6 +500,71 @@ class CollectionTests(TestCase):
         rows = self._collect()["items"]
         assert all(
             r["started_at"] is None for r in rows if r["title"] == "Pending"
+        )
+
+    def test_future_nominator_followup_preserves_reply(self) -> None:
+        """Exclude nominator timestamps before selecting a reply."""
+        self.texts[COMMUNITY_SOURCES["fac"]] = (
+            20,
+            (
+                f"== 遊戲 舊名 ==\n[[User:Opening]] {_SIGNATURE}\n"
+                "* [[User:Reviewer]] 2026年10月9日 (五) 04:00 (UTC)\n"
+                "* [[User:Opening]] 2027年10月10日 (日) 04:00 (UTC)\n"
+            ),
+        )
+        row = self._collect()["items"][0]
+        assert row["replied_at"] == "2026-10-09T04:00:00+00:00"
+        self.texts[COMMUNITY_SOURCES["fac"]] = (
+            21,
+            (
+                f"== 遊戲 舊名 ==\n[[User:Opening]] {_SIGNATURE}\n"
+                "* [[User:Reviewer]] 2027年10月9日 (六) 04:00 (UTC)\n"
+            ),
+        )
+        assert self._collect()["items"][0]["replied_at"] is None
+
+    def test_old_cache_schema_is_reparsed_for_participant_counts(self) -> None:
+        """Rebuild legacy parses to collect participant counts."""
+        first = self._collect()
+        path = self.cache / "review-sources-v1.parquet"
+        frame = pl.read_parquet(path)
+        schema = dict(frame.schema)
+        schema["items"] = pl.List(
+            pl.Struct({
+                "title": pl.String,
+                "review_type": pl.String,
+                "review_url": pl.String,
+                "started_at": pl.String,
+                "replied_at": pl.String,
+            }),
+        )
+        rows = frame.to_dicts()
+        for row in rows:
+            for item in row["items"]:
+                del item["participant_count"]
+        pl.DataFrame(rows, schema=schema).write_parquet(path)
+        self.site.simple_request.reset_mock()
+        assert self._collect() == first
+        assert any(
+            call.kwargs["prop"] == "revisions"
+            for call in self.site.simple_request.call_args_list
+        )
+
+    def test_invalid_cached_participant_count_is_reparsed(self) -> None:
+        """Discard cached zero counts and rebuild source facts."""
+        first = self._collect()
+        path = self.cache / "review-sources-v1.parquet"
+        frame = pl.read_parquet(path)
+        rows = frame.to_dicts()
+        for row in rows:
+            for item in row["items"]:
+                item["participant_count"] = 0
+        pl.DataFrame(rows, schema=frame.schema).write_parquet(path)
+        self.site.simple_request.reset_mock()
+        assert self._collect() == first
+        assert any(
+            call.kwargs["prop"] == "revisions"
+            for call in self.site.simple_request.call_args_list
         )
 
     def test_batch_boundaries_and_omitted_revision(self) -> None:

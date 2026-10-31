@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -73,15 +74,16 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         })[1]["text"]
         assert "5次有明確日期的評級變動" in text
         assert "認證條目列表變動" not in text
-        assert "新增典範條目" in text
+        assert "當選典範條目" in text
         assert "撤銷特色列表" in text
         assert "{{icon|DGA}}&thinsp;撤銷優良條目" in text
-        assert "{{icon|A}}&thinsp;新增甲級條目" in text
+        assert "{{icon|A}}&thinsp;當選甲級條目" in text
         assert "{{icon|Bplus}}&thinsp;撤銷乙上級條目" in text
         assert (
             "另保留2項日期不詳的評級變動紀錄，未列入本期按日期統計。" in text
         )
-        assert "（無已知日期的變動）" in text
+        assert "{{icon|GT}}&thinsp;當選優良話題：（無）" in text
+        assert "（無已知日期的變動）" not in text
         assert "列表新增" not in text
         assert "列表移除" not in text
 
@@ -231,29 +233,47 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             "=== 2026年12月 ===",
         )[0]
         december = quality.partition("=== 2026年12月 ===")[2]
-        assert "典範條目列表新增" in october
+        assert "當選典範條目：[[:反覆條目]]" in october
         assert "{{icon|FA}}&thinsp;" in october
         assert "反覆條目" in october
         assert "列表移除" not in october
-        assert "典範條目列表移除" in november
-        assert "優良條目列表新增" in november
-        assert "{{icon|FA}}&thinsp;" in november
+        assert "撤銷典範條目：[[:反覆條目]]" in november
+        assert "當選優良條目：[[:優良遊戲]]" in november
+        assert "{{icon|FFA}}&thinsp;" in november
         assert "反覆條目" in november
-        assert "特色列表列表新增" in december
+        assert "當選特色列表：[[:特色列表]]" in december
         assert "{{icon|FL}}&thinsp;" in december
         assert "{{icon|DGA}}&thinsp;" in december
         assert "特色列表" in december
         assert "<small>" not in quality
 
     @staticmethod
-    def test_no_changes_and_unavailable_history_are_distinct() -> None:
-        """Use no-change prose only for an observed empty result."""
+    def test_empty_quality_months_keep_initial_placeholder_rows() -> None:
+        """Keep every monthly grade slot and separate source status."""
         observed = _render({"quality_changes": []})[1]["text"]
         unknown = _render({"quality_changes": None})[1]["text"]
         months = ("2026年10月", "2026年11月", "2026年12月")
         for month in months:
-            assert f"=== {month} ===\n（無變動）" in observed
-            assert f"=== {month} ===" not in unknown
+            for text in (observed, unknown):
+                assert (
+                    f"=== {month} ===\n"
+                    "* {{icon|FA}}&thinsp;當選典範條目：（無）"
+                ) in text
+        expected = (
+            ("FA", "當選典範條目"),
+            ("FL", "當選特色列表"),
+            ("GA", "當選優良條目"),
+            ("Bplus", "當選乙上級條目"),
+            ("GT", "當選優良話題"),
+            ("FFA", "撤銷典範條目"),
+            ("FFL", "撤銷特色列表"),
+            ("DGA", "撤銷優良條目"),
+            ("GTRC", "撤銷優良話題"),
+        )
+        for icon, label in expected:
+            row = "* {{icon|" + icon + "}}&thinsp;" + label + "：（無）"
+            assert observed.count(row) == len(months)
+        assert "（無已知日期的變動）" not in observed
         assert "（無變動）" not in unknown
         assert "來源資料暫未取得" in unknown
 
@@ -301,10 +321,10 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             "* [[:展示遊戲]]<small>（12月31日）</small>"
             in sections["優良條目"]
         )
-        assert "==== 特色內容 ====" in announcements
+        assert "==== 典範內容 ====" in announcements
         assert "額外展示" in announcements
-        assert "==== 新聞動態 ====" not in announcements
-        assert "==== 歷史上的今天 ====" not in announcements
+        assert "==== 新聞動態 ====" in announcements
+        assert "==== 歷史上的今天 ====" in announcements
         snapshot["homepage"]["good"] = []
         empty = enrich_newsletter_homepage(
             {"issue": "2027-01", "available": True},
@@ -369,7 +389,7 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "* [[:新新聞]]<small>（10月8日）</small>" in announcements
         assert ("* [[:歷史遊戲]]<small>（10月15日）</small>") in announcements
         assert "10月1日" not in announcements
-        assert "==== 特色內容 ====" not in announcements
+        assert "==== 典範內容 ====" in announcements
 
     @staticmethod
     def test_existing_news_section_is_filled_without_duplicate() -> None:
@@ -380,9 +400,8 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             "* @@aranami:title@@<small>（@@aranami:date@@）</small>"
         )
         announcement["text"] = announcement["text"].replace(
-            "=== ACG專題獎 ===",
-            "==== 新聞動態 ====\n\n保留的說明。\n"
-            "@@aranami:homepage:news@@\n\n=== ACG專題獎 ===",
+            "@@aranami:homepage:news@@",
+            "保留的說明。\n@@aranami:homepage:news@@",
         )
         text = _render({
             "subpage_layouts": layouts,
@@ -402,8 +421,8 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "保留的說明。" in text
         assert "期初已在首頁，首次日期不詳" in text
         assert "10月1日" not in text
-        assert "==== 特色內容 ====" not in text
-        assert "==== 歷史上的今天 ====" not in text
+        assert "==== 典範內容 ====" in text
+        assert "==== 歷史上的今天 ====" in text
 
     @staticmethod
     def test_article_links_keep_apostrophes_without_redundant_labels() -> None:
@@ -528,6 +547,118 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "* 12月計0篇。" in text
         assert "至少" not in text
         assert "登記未完整" not in text
+
+    @staticmethod
+    def test_new_pages_include_monthly_grades_and_original_pie_chart() -> None:
+        """Populate the prior issue's chart and class-count prose."""
+        grades = {
+            "B": 1,
+            "C": 3,
+            "CL": 1,
+            "Start": 1,
+            "List": 1,
+            "Stub": 4,
+            "SL": 1,
+            "Unassessed": 23,
+            "Unknown": 1,
+        }
+        registered = 36
+        text = _render({
+            "observation_end": "2026-10-31",
+            "new_pages_data": {
+                "total": None,
+                "known_count": 36,
+                "missing_days": 2,
+                "grades": grades,
+                "months": [
+                    {
+                        "month": "2026-10",
+                        "count": None,
+                        "known_count": 36,
+                        "grades": grades,
+                    },
+                ],
+            },
+        })[2]["text"]
+        chart = next(
+            template
+            for template in mwparserfromhell.parse(text).filter_templates()
+            if template.name.matches("Pie chart new")
+        )
+        values = json.loads(str(chart.get("1").value))
+        assert values == [
+            {"label": "乙級", "value": 1, "color": "#b2ff66"},
+            {"label": "丙級", "value": 4, "color": "#ffff66"},
+            {"label": "初級", "value": 2, "color": "#ffaa66"},
+            {"label": "小作品", "value": 5, "color": "#ffa4a4"},
+            {"label": "未評級", "value": 24, "color": "#dcdcdc"},
+        ]
+        assert str(chart.get("radius").value).strip() == "60"
+        assert str(chart.get("direction").value).strip() == "row-reverse"
+        assert sum(row["value"] for row in values) == registered
+        assert (
+            "* 10月計36篇，其中乙級1篇、丙級4篇、初級2篇、"
+            "小作品級5篇、未評級24篇。"
+        ) in text
+        chart_lines = str(chart.get("1").value).strip().splitlines()
+        assert len(chart_lines) == len(values) + 2
+        assert all(
+            line.strip().startswith('{"label": ')
+            and line.rstrip(",").endswith("}")
+            for line in chart_lines[1:-1]
+        )
+        assert "* 11月計0篇。" in text
+        assert "* 12月計0篇。" in text
+        assert "登記未完整" not in text
+        assert "評級不詳" not in text
+
+    def test_new_page_lists_share_their_article_assessment_level(self) -> None:
+        """Combine list classes while preserving saved facts."""
+        for article, listing, label in (
+            ("A", "AL", "甲級"),
+            ("B", "BL", "乙級"),
+            ("C", "CL", "丙級"),
+            ("Start", "List", "初級"),
+            ("Stub", "SL", "小作品"),
+        ):
+            with self.subTest(article=article, listing=listing):
+                grades = {article: 1, listing: 2}
+                registered = sum(grades.values())
+                text = _render({
+                    "new_pages_data": {
+                        "total": 3,
+                        "grades": grades,
+                        "months": [
+                            {
+                                "month": "2026-10",
+                                "count": 3,
+                                "grades": grades,
+                            },
+                        ],
+                    },
+                })[2]["text"]
+                templates = mwparserfromhell.parse(text).filter_templates()
+                chart = next(
+                    template
+                    for template in templates
+                    if template.name.matches("Pie chart new")
+                )
+                values = json.loads(str(chart.get("1").value))
+                assert len(values) == 1
+                assert values[0]["label"] == label
+                assert values[0]["value"] == registered
+                prose = "小作品級" if article == "Stub" else label
+                assert f"* 10月計3篇，其中{prose}3篇。" in text
+                assert grades == {article: 1, listing: 2}
+
+    @staticmethod
+    def test_announcement_category_has_one_preceding_blank_line() -> None:
+        """Collapse empty newcomer slots before the final category."""
+        for newcomers in ([], ["New editor"]):
+            text = _render({"newcomers": newcomers})[2]["text"]
+            before = text.partition("[[Category:電子遊戲專題簡訊宣告]]")[0]
+            assert before.endswith("\n\n")
+            assert not before.endswith("\n\n\n")
 
     @staticmethod
     def test_current_counter_observation_is_separate_from_event_window() -> (

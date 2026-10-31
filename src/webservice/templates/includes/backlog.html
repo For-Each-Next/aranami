@@ -1,12 +1,11 @@
 {% if backlog %}
-<section class="section-flat" id="backlog" aria-labelledby="backlog-heading">
-  <h2 id="backlog-heading">{{ t.backlog.heading }}</h2>
+<div id="backlog">
   {% if backlog.unavailable %}
     <p class="empty">{{ t.backlog.unavailable }}</p>
   {% else %}
     {% for section in backlog.sections %}
-    <section class="backlog-section" aria-labelledby="backlog-section-{{ section.key }}">
-      <h3 id="backlog-section-{{ section.key }}">{{ section.label }}</h3>
+    <section class="section-flat backlog-section" aria-labelledby="backlog-section-{{ section.key }}">
+      <h2 id="backlog-section-{{ section.key }}">{{ section.label }}</h2>
       <ul class="card-grid" role="list">
         {% for task in section.tasks %}
         <li><a href="{{ task.url }}" class="backlog-task"><span class="backlog-label">{{ task.label }}</span><span class="backlog-count">{{ task.count }}</span></a></li>
@@ -16,5 +15,5 @@
     {% endfor %}
     {% with updated=backlog.updated %}{% include "includes/source_updated.html" %}{% endwith %}
   {% endif %}
-</section>
+</div>
 {% endif %}

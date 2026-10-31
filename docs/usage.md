@@ -18,25 +18,26 @@ toolforge jobs logs aranami-web
 ```
 
 The hub publishes reports; the web job serves the
-[dashboard](https://aranami.toolforge.org/) and
-[daily-log viewer](https://aranami.toolforge.org/logs/). Status shows recorded
-outcomes, progress, timing, and next runs; missing/stale observations stay unknown.
+[dashboard](https://aranami.toolforge.org/), the
+[maintenance catalogue](https://aranami.toolforge.org/maintenance/), and
+[site reports](https://aranami.toolforge.org/reports/). Site reports show recorded
+outcomes, progress, timing, next runs, and a concise run-history table.
+Missing or stale observations stay unknown.
 
 ```shell
 ls -1 logs/aranami.*.log
 tail -n 100 logs/aranami.YYYY-MM-DD.log
 ```
 
-Choose a UTC date. Logs retain the current date and previous 29 dates. The web
-viewer translates separately recorded major events into the selected language
-and links related Wikipedia reports; downloads include full diagnostics.
-Event records begin with this deployment. Older diagnostic files remain
-downloadable, without inferred historical events. Search covers the recent
-event window shown on the page.
-The viewer defaults to newest first, with 25 events per page, a result filter,
-and a chronological-order option. Download the selected day or use the daily
-archive. Choose English, Simplified Chinese, or Traditional Chinese; that choice
-lasts one year in the current browser. Article titles keep their source spelling.
+Choose a UTC date. Logs retain the current date and previous 29 dates.
+The About page links to the [daily-log archive](https://aranami.toolforge.org/logs/)
+for raw diagnostic downloads. The website does not translate diagnostics into
+narrated summaries. Site-report history uses separately recorded structured
+events, with date, task, result, and duration columns. Search, result filters,
+and chronological ordering operate on its recent event window, with 25 rows
+per page. Earlier diagnostic files remain downloadable without inferred events.
+Choose English, Simplified Chinese, or Traditional Chinese; that choice lasts
+one year in the current browser. Article titles keep their source spelling.
 
 Inspect backend-owned metadata read-only:
 
@@ -53,11 +54,12 @@ credentials in diagnostics; see [runtime locations](administration.md#runtime-fo
 
 ## Prepare a quarterly newsletter
 
-Open the header's **Tools** menu and choose **Newsletter**, or visit
+Open the header's **Tools** menu and choose **Newsletter drafts**, or visit
 `/newsletter/`, for the automatically selected next quarterly issue.
 The hub fetches source data before publication and refreshes at `00:00 UTC`
-as the reporting quarter progresses. The page provides separate editable
-wikitext for the main overview, `特優內容`, and `宣告`.
+as the reporting quarter progresses. The page provides separate selectable
+wikitext for the main overview, `特優內容`, and `宣告`, with syntax highlighting
+when JavaScript is available.
 All three pages keep the preceding issue's original wikitext design, including
 their banners, headings, columns, navigation, and count-change styling.
 For example, `/newsletter/?issue=2027-01` selects issue 29, covering October
@@ -67,16 +69,31 @@ JavaScript, ordinary issue links provide the same selection. The default
 advances at exactly `00:00 UTC` on the first day of January, April, July, and
 October. That day's refresh closes the completed quarter even if the previous
 refresh succeeded just before midnight.
-Edit each draft, copy it, and preview it at the linked Wikipedia destination
-before saving. Manual selection and copying also work without JavaScript.
-Edits in these boxes last only until the page is reloaded or another issue is
-selected; the website does not save or publish them.
+Copy each draft, then edit and preview it at the linked Wikipedia destination
+before saving. The code blocks are read-only; manual selection and copying also
+work without JavaScript. The website does not save or publish wiki edits.
+
+Use **Data date** to open a saved daily draft. For example, selecting
+`2026-10-30` opens the draft covering data through October 30, normally
+captured after the `2026-10-31 00:00 UTC` update. The page shows the actual
+generation time separately, including any delay. Each date retains its first
+successful draft, so later updates and formatter changes do not rewrite it.
+The calendar lists retained dates for the selected issue; changing issues
+opens that issue's latest saved day. Dates without a saved draft are explicitly
+unavailable. Daily history begins with retained observations rather than
+reconstructing earlier drafts from today's data.
 
 Requests use saved data only. Drafts retain all three reporting months and use
 the figures collected so far, including zero registered articles for months
 with no collected entries. The overview states its actual observation date.
 New-page prose uses the number of registered articles without collection-gap
 diagnostics; the saved facts retain coverage and unknown totals separately.
+Each month includes its grade breakdown, and the quarter includes the previous
+issue's pie chart. Open issues use assessments observed during collection;
+closed issues use their retained boundary snapshot. Unmatched articles remain
+in an explicit unknown-grade category. Missing historical snapshots never use
+current grades. Drafts retain every standard section and the initial issue's
+nine monthly quality placeholders, with empty slots marked `（無）`.
 A failed refresh retains the last
 successful draft. An issue without collected data shows its collection state
 instead of empty templates. Authored features and interviews

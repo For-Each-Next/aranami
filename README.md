@@ -29,7 +29,7 @@ A successful check can finish with **no update needed**.
 | [Pageview rankings][pageviews] | Daily cycle from `18:00`; normal first attempt `18:59`, retries at `HH:59` | Daily, weekly, monthly, seasonal, yearly, and monthly task-force rankings. |
 | [English Wikipedia comparisons][english] | Daily, `23:24` | Important and high-quality English articles, their Chinese counterparts, and relevant changes. |
 | [Database reports][database] | Daily, `00:00` | Delegated refresh requests for subscribed PexBot reports within the configured project scope. |
-| [Newsletter drafts](https://aranami.toolforge.org/newsletter/) | Daily, `00:00` | Quarterly drafts through yesterday, using database membership and recorded article and homepage history. |
+| [Newsletter drafts](https://aranami.toolforge.org/newsletter/) | Daily, `00:00` | Quarterly drafts through yesterday, with retained daily versions and date selection. |
 | Newsletter history archive | Hourly, `HH:00` | New or changed project talk-page histories, retained in Parquet for daily newsletter generation. |
 
 New pages and Pageviews fill missing daily reports and retain confirmed

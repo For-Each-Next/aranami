@@ -4,11 +4,38 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
-### 0.7.8 (2026-10-31 12:10 UTC)
+### 0.7.9 (2026-10-31 13:43 UTC)
+
+Overview: Reorganized the dashboard around content, dedicated maintenance and
+report pages, and clearer review activity. Added retained daily newsletter
+drafts with date selection, clearer assessments, and highlighted copying.
+
+- Displayed review starts and responses with relative times, complete UTC
+  tooltips, and distinct participant counts, hiding nominator-only follow-ups.
+- Moved maintenance and report status into dedicated pages, flattened dashboard
+  headings, and replaced narrated logs with concise report history.
+- Moved raw execution-log downloads behind an About-page link and removed
+  event narration and its presentation code.
+- Simplified footer links, report controls, Chinese schedule labels, and the
+  startup and uptime message.
+- Combined article and list counts at matching assessment levels in monthly
+  prose and pie charts, while retaining the separate source classes.
+- Counted registered articles without a project class as unassessed and kept
+  each pie-chart JSON slice on one line.
+- Displayed generated drafts as selectable, read-only code with wikitext
+  highlighting, preserving the original text for copying.
+- Renamed the newsletter tool to “Newsletter drafts” in all three locales.
+- Retained daily draft facts and original wikitext with actual capture times,
+  preserving history through later updates and disposable-cache clearing.
+- Added a localized date calendar for saved drafts, with explicit unavailable
+  dates and separate data-through and generation times.
+
+### 0.7.8 (2026-10-31 12:28 UTC)
 
 Overview: Improved quarterly newsletter drafts with daily collection, retained
 article history, and verified historical homepage evidence. Prepared complete
-quarterly draft layouts from internal statistics and talk-page news notices.
+quarterly draft layouts, grade counts, and charts from internal statistics
+and talk-page news notices.
 Simplified editing and navigation, maintenance labels, and report details.
 
 - Refreshed newsletter drafts at `00:00 UTC` through the previous completed day,
@@ -25,6 +52,12 @@ Simplified editing and navigation, maintenance labels, and report details.
   generated links, literal apostrophes, and all four newsletter contents links.
 - Kept all three reporting months in copyable drafts using collected figures,
   without source-version lists or new-page collection-gap annotations.
+- Restored monthly new-article grades and the quarterly pie chart using
+  current or retained historical assessments, with explicit unknown grades.
+- Preserved the initial issue's section order and nine quality placeholders,
+  retained empty sections, and removed excess whitespace before categories.
+- Kept generated drafts reusable as later issue layouts, including empty
+  quality lists, homepage sections, charts, and awards.
 - Reused internal assessment observations for newsletter counts and quality
   changes instead of rereading published assessment lists and logs.
 - Unified every website page around the dashboard's left contents panel,

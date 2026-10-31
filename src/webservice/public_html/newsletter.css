@@ -1,4 +1,4 @@
-/* Newsletter editing follows the shared Codex colors and native controls. */
+/* Newsletter code displays follow the shared Codex colors and native controls. */
 .newsletter-controls {
     margin-block: 1.5rem;
 }
@@ -57,6 +57,34 @@
     margin-block: 1.5rem;
 }
 
+.newsletter-date-controls {
+    margin-block: 1.5rem;
+}
+
+.newsletter-date-controls label {
+    display: block;
+    margin-block-end: 0.5rem;
+    font-weight: 700;
+}
+
+.newsletter-date-selection {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.newsletter-date-selection input {
+    box-sizing: border-box;
+    inline-size: 12rem;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+}
+
+.newsletter-observation {
+    overflow-wrap: anywhere;
+}
+
 .newsletter-draft {
     min-width: 0;
     margin-block: 2rem;
@@ -67,7 +95,7 @@
     overflow-wrap: anywhere;
 }
 
-.newsletter-draft label {
+.newsletter-code-label {
     display: block;
     margin-block: 0.75rem 0.5rem;
     font-weight: 700;
@@ -79,8 +107,10 @@
     width: 100%;
     min-width: 0;
     max-width: 100%;
+    height: 24rem;
     min-height: 12rem;
     resize: vertical;
+    overflow: auto;
     padding: 0.75rem;
     border: 1px solid var(--border-color-base, #a2a9b1);
     border-radius: 2px;
@@ -89,7 +119,44 @@
     font-family: monospace;
     font-size: 0.875rem;
     line-height: 1.6;
+    white-space: pre-wrap;
     overflow-wrap: anywhere;
+}
+
+.newsletter-text code {
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    white-space: inherit;
+}
+
+.newsletter-token-comment {
+    color: var(--color-subtle, #54595d);
+}
+
+.newsletter-token-link {
+    color: var(--color-progressive, #36c);
+}
+
+.newsletter-token-template,
+.newsletter-token-delimiter {
+    color: #6f3d91;
+}
+
+.newsletter-token-tag {
+    color: #006d77;
+}
+
+.newsletter-token-heading,
+.newsletter-token-emphasis {
+    font-weight: 700;
+}
+
+@media (forced-colors: active) {
+    .newsletter-text span {
+        color: CanvasText;
+    }
 }
 
 .newsletter-text:focus-visible {

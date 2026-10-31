@@ -26,10 +26,13 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_ROWS = 10_000
 _RETENTION = 30 * 24 * 3600
-ITEM_SCHEMA = dict.fromkeys(
-    ("title", "review_type", "review_url", "started_at"),
-    pl.String,
-)
+ITEM_SCHEMA = {
+    **dict.fromkeys(
+        ("title", "review_type", "review_url", "started_at", "replied_at"),
+        pl.String,
+    ),
+    "participant_count": pl.Int64,
+}
 _SCHEMA = {
     "source": pl.String,
     "kind": pl.String,
@@ -63,14 +66,23 @@ def _valid_items(frame: pl.DataFrame) -> bool:
         )
         | pl.col("review_url").str.contains(r"[\x00-\x20\\]")
         | (
-            pl.col("started_at").is_not_null()
-            & pl
-            .col("started_at")
-            .str.to_datetime(
-                "%Y-%m-%dT%H:%M:%S%:z",
-                strict=False,
+            pl.any_horizontal(
+                pl.col("started_at", "replied_at").is_not_null()
+                & pl
+                .col("started_at", "replied_at")
+                .str.to_datetime(
+                    "%Y-%m-%dT%H:%M:%S%:z",
+                    strict=False,
+                )
+                .is_null(),
             )
-            .is_null()
+        )
+        | (pl.col("replied_at") < pl.col("started_at"))
+        | (pl.col("participant_count") < 1)
+        | (pl.col("participant_count") > _MAX_ROWS)
+        | (
+            pl.col("replied_at").is_not_null()
+            & (pl.col("participant_count") <= 1)
         ),
     ).is_empty()
 

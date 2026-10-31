@@ -1,5 +1,5 @@
 <section class="section-flat" id="tool-status" aria-labelledby="tool-status-heading" {% include "includes/clock_attributes.html" %}>
-  <h2 id="tool-status-heading">{{ t.ops.heading }}</h2>
+  <h2 id="tool-status-heading">{{ t.reports.panel }}</h2>
   <p id="live-notice" class="context" role="status" hidden>{{ t.ops.reconnecting }}</p>
   {% if not routines %}<p class="empty">{{ t.ops.schedule_missing }}</p>{% endif %}
   <div class="routine-rows">

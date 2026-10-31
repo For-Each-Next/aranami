@@ -107,6 +107,10 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
             "bplus": 0,
         }
         assert self.newsletter.call_args.kwargs["members"] == {"Game"}
+        assert (
+            self.newsletter.call_args.kwargs["current_assessments"]
+            is self.membership.return_value
+        )
         assert self.newsletter.call_args.kwargs["member_ids"] == {11}
         assert self.newsletter.call_count == 2
         assert refreshed["newsletter"] == first["newsletter"]
@@ -261,6 +265,31 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
             "ga": 1,
             "bplus": 2,
         }
+
+    def test_new_page_grades_read_exact_retained_assessments(self) -> None:
+        """Keep retained grades and their actual source timestamp."""
+        self._collect()
+        assessments_at = self.newsletter.call_args.kwargs["assessments_at"]
+        boundary = dt.date(2026, 10, 1)
+        members = pl.DataFrame({"full_title": ["Game"], "pa_class": ["GA"]})
+        observed = "2026-10-01T08:37:12+00:00"
+        with patch(
+            "backend.website.collect.project_assessments.read_snapshot",
+            return_value=SimpleNamespace(
+                tables={"members": members},
+                manifest={"calculated_at": observed},
+            ),
+        ) as read:
+            rows, stamp = assessments_at(boundary)
+            assert rows is members
+            assert stamp == observed
+            read.assert_called_once_with(
+                self.reader.site,
+                "电子游戏",
+                boundary,
+            )
+            read.return_value = None
+            assert assessments_at(dt.date(2026, 7, 1)) is None
 
     def test_newsletter_validation_rejects_invalid_refresh(self) -> None:
         """Retain the prior newsletter after an invalid replacement."""

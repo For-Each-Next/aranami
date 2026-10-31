@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<a href="/#backlog" class="back">{{ t.backlog.back }}</a>
+<a href="/maintenance/" class="back">{{ t.backlog.back }}</a>
 <p class="context">{{ t.backlog.heading }}</p>
 <div class="metadata"><p>{{ count }}</p>{% include "includes/source_updated.html" %}</div>
 <form class="maintenance-controls" action="/maintenance/" method="get">

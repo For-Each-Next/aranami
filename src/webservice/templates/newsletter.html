@@ -24,14 +24,29 @@
     {% for choice in issue_choices %}<a href="{{ choice.url }}"{% if choice.checked %} aria-current="page"{% endif %}>{{ choice.value }} ({{ choice.label }})</a>{% endfor %}
   </nav>
 </noscript>
-{% if not available %}<p class="notice" role="status">{{ t.newsletter.unavailable }}</p>{% endif %}
+{% if draft_history.dates or draft_history.selected %}
+<form class="newsletter-date-controls" action="/newsletter/" method="get">
+  <label for="newsletter-data-date">{{ t.newsletter.history.date }}</label>
+  <div class="newsletter-date-selection">
+    <input id="newsletter-data-date" name="date" type="date" value="{{ draft_history.form_date }}"{% if draft_history.minimum %} min="{{ draft_history.minimum }}" max="{{ draft_history.maximum }}" list="newsletter-saved-dates"{% endif %} required>
+    <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.history.view }}</button>
+  </div>
+  <input type="hidden" name="issue" value="{{ selected_issue }}">
+  <input type="hidden" name="lang" value="{{ locale }}">
+  {% if draft_history.dates %}<datalist id="newsletter-saved-dates">{% for day in draft_history.dates %}<option value="{{ day }}"></option>{% endfor %}</datalist>{% endif %}
+</form>
+{% else %}<p class="context">{{ t.newsletter.history.unavailable }}</p>{% endif %}
+{% if draft_history.missing %}<p class="notice" role="status">{{ t.newsletter.history.missing }}</p>
+{% elif draft_history.selected and available %}<p class="context newsletter-observation">{{ t.newsletter.history.through }} <time datetime="{{ draft_history.selected }}">{{ draft_history.selected }}</time> · {{ t.newsletter.history.generated }} {% with time=draft_history.generated %}{% include "includes/time.html" %}{% endwith %}</p>
+{% endif %}
+{% if not available and not draft_history.missing %}<p class="notice" role="status">{{ t.newsletter.unavailable }}</p>{% endif %}
 {% if available %}
 {% for draft in drafts %}
 <section class="newsletter-draft" id="newsletter-page-{{ loop.index }}" aria-labelledby="newsletter-heading-{{ loop.index }}">
   <h2 id="newsletter-heading-{{ loop.index }}">{{ draft.heading }}</h2>
   <p class="newsletter-destination"><bdi lang="zh">{{ draft.link }}</bdi></p>
-  <label for="newsletter-text-{{ loop.index }}">{{ t.newsletter.wikicode }} · {{ draft.heading }}</label>
-  <textarea id="newsletter-text-{{ loop.index }}" class="newsletter-text" rows="16" lang="zh" dir="ltr" spellcheck="false">{{ draft.text }}</textarea>
+  <p id="newsletter-code-label-{{ loop.index }}" class="newsletter-code-label">{{ t.newsletter.wikicode }} · {{ draft.heading }}</p>
+  <pre class="newsletter-text" tabindex="0" aria-labelledby="newsletter-code-label-{{ loop.index }}" lang="zh" dir="ltr"><code id="newsletter-text-{{ loop.index }}" data-newsletter-wikitext>{{ draft.text }}</code></pre>
   <div class="newsletter-copy-controls">
     <button type="button" class="cdx-button cdx-button--action-progressive cdx-button--weight-primary" hidden data-newsletter-copy="newsletter-text-{{ loop.index }}" data-copy-success="{{ t.newsletter.copied }}" data-copy-failure="{{ t.newsletter.copy_fallback }}" aria-describedby="newsletter-copy-status-{{ loop.index }}">{{ t.newsletter['copy'] }}</button>
     <span id="newsletter-copy-status-{{ loop.index }}" role="status" aria-live="polite" data-newsletter-status></span>

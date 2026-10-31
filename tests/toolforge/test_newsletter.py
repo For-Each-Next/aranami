@@ -22,6 +22,10 @@ from newsletter_fixtures import subpage_layouts
 
 from backend.public import create_app
 from backend.website.collect import REPORT_KEYS, validate_dashboard_snapshot
+from backend.website.newsletter_archive import (
+    DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
+    NewsletterDraftArchive,
+)
 from backend.website.newsletter_layout import prepare_main_layout
 from shared.newsletter import ROOT, SUFFIXES, Issue
 from updater.services.newsletter import render_issue
@@ -287,7 +291,7 @@ class NewsletterRouteTests(unittest.TestCase):
         }
         assert validate_dashboard_snapshot(snapshot)
         path = self.runtime / "cache" / "toolforge" / "dashboard.json"
-        path.parent.mkdir(parents=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(snapshot), encoding="utf-8")
         return path
 
@@ -359,7 +363,7 @@ class NewsletterRouteTests(unittest.TestCase):
         ) as upcoming:
             response = self.client.get("/newsletter/?lang=en")
         assert response.status_code == HTTPStatus.OK
-        assert response.text.count("<textarea ") == len(SUFFIXES)
+        assert response.text.count("data-newsletter-wikitext") == len(SUFFIXES)
         assert "13,025篇條目" in response.text
         assert "待補" not in response.text
         upcoming.assert_called_once()
@@ -378,8 +382,8 @@ class NewsletterRouteTests(unittest.TestCase):
             assert parse_qs(target.query)["issue"] == ["2028-04"]
 
     def test_source_and_editorial_text_are_escaped(self) -> None:
-        """Keep saved wiki text inside escaped editable controls."""
-        dangerous = "</textarea><script>alert('saved')</script>"
+        """Keep saved wiki text inside escaped source displays."""
+        dangerous = "</code></pre><script>alert('saved')</script>"
         facts = {
             "issue": "2027-01",
             "announcements": dangerous,
@@ -399,7 +403,7 @@ class NewsletterRouteTests(unittest.TestCase):
             response = self.client.get("/newsletter/?issue=2027-01")
         assert response.status_code == HTTPStatus.OK
         assert dangerous not in response.text
-        assert "&lt;/textarea&gt;&lt;script&gt;" in response.text
+        assert "&lt;/code&gt;&lt;/pre&gt;&lt;script&gt;" in response.text
         assert "onerror=alert(1)" not in response.text
         assert "newsletter-sources" not in response.text
         assert path.read_bytes() == original
@@ -419,6 +423,148 @@ class NewsletterRouteTests(unittest.TestCase):
         assert "本期已寫好的獨有公告" in selected.text
         assert "本期已寫好的獨有公告" not in different.text
         assert "<textarea " not in different.text
+
+    def _archive_issue(self, day: str, total: int) -> dict:
+        """Save a synthetic daily draft with its actual capture time.
+
+        Returns:
+            The validated archive envelope for the selected day.
+        """
+        boundary = dt.date.fromisoformat(day) + dt.timedelta(days=1)
+        issue = Issue.parse("2027-01")
+        path = self._save_issue({
+            "updated_at": f"{boundary}T00:00:00+00:00",
+            "observation_end": str(boundary),
+            "complete": boundary == issue.end,
+            "overview": {"total": total},
+        })
+        archive = NewsletterDraftArchive(self.runtime / DRAFT_ARCHIVE_PATH)
+        archive.save(
+            json.loads(path.read_text())["newsletter"],
+            projector=render_issue,
+            generated_at=dt.datetime.combine(
+                boundary,
+                dt.time(0, 4, 5),
+                dt.UTC,
+            ),
+        )
+        entry = archive.read_entry(issue, dt.date.fromisoformat(day))
+        assert entry is not None
+        return entry
+
+    def test_selected_day_uses_original_text_without_current_enrichment(
+        self,
+    ) -> None:
+        """Read the original draft without collection or writes."""
+        self._archive_issue("2026-10-29", 13000)
+        self._archive_issue("2026-10-30", 13100)
+        before = {
+            path: path.read_bytes()
+            for path in self.runtime.rglob("*")
+            if path.is_file()
+        }
+        with (
+            patch("pywikibot.Site") as site,
+            patch("backend.public.render_issue") as project,
+            patch("backend.public.enrich_newsletter_homepage") as enrich,
+        ):
+            response = self.client.get(
+                "/newsletter/?issue=2027-01&date=2026-10-29&lang=en",
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert "13,000篇條目" in response.text
+        assert "13,100篇條目" not in response.text
+        assert 'type="date" value="2026-10-29"' in response.text
+        assert "00:04:05" in response.text
+        assert "2026-10-30" in response.text
+        assert all(
+            path.read_bytes() == value for path, value in before.items()
+        )
+        site.assert_not_called()
+        project.assert_not_called()
+        enrich.assert_not_called()
+
+    def test_missing_daily_draft_never_substitutes_latest_data(self) -> None:
+        """Keep missing dates separate from current drafts."""
+        self._archive_issue("2026-10-30", 13100)
+        response = self.client.get(
+            "/newsletter/?issue=2027-01&date=2026-10-29&lang=en",
+        )
+        assert response.status_code == HTTPStatus.OK
+        assert "No saved draft is available for this date." in response.text
+        assert "13,100篇條目" not in response.text
+        assert "data-newsletter-wikitext" not in response.text
+
+    def test_calendar_rejects_invalid_duplicate_and_wrong_quarter_dates(
+        self,
+    ) -> None:
+        """Reject malformed controls before reading the archive."""
+        for query in (
+            "date=",
+            "date=20261030",
+            "date=2026-02-30",
+            "date=2027-01-01",
+            "date=2026-09-30",
+            "date=2026-10-29&date=2026-10-30",
+            "date=../../other",
+        ):
+            with self.subTest(query=query):
+                response = self.client.get(
+                    f"/newsletter/?issue=2027-01&{query}&lang=zh-hant",
+                )
+                assert response.status_code == HTTPStatus.BAD_REQUEST
+                assert "YYYY-MM-DD" in response.text
+
+    def test_language_links_retain_daily_selection(self) -> None:
+        """Carry the selected data date through locale switches."""
+        output = self.client.get(
+            "/newsletter/?issue=2027-01&date=2026-10-30&lang=en",
+        ).text
+        links = re.findall(
+            r'<a href="([^"]+)" lang="(?:en|zh-Hans|zh-Hant)"',
+            output,
+        )
+        assert links
+        for href in links:
+            values = parse_qs(urlsplit(unescape(href)).query)
+            assert values["issue"] == ["2027-01"]
+            assert values["date"] == ["2026-10-30"]
+
+    def test_calendar_cache_tracks_archive_without_dashboard_replacement(
+        self,
+    ) -> None:
+        """Invalidate cached HTML when a new daily entry is captured."""
+        entry = self._archive_issue("2026-10-29", 13000)
+        url = "/newsletter/?issue=2027-01&lang=en"
+        first = self.client.get(url)
+        assert "13,000篇條目" in first.text
+        facts = entry["facts"]
+        facts.update(
+            updated_at="2026-10-31T00:00:00+00:00",
+            observation_end="2026-10-31",
+        )
+        facts["overview"]["total"] = 13100
+        archive = NewsletterDraftArchive(self.runtime / DRAFT_ARCHIVE_PATH)
+        archive.save(
+            {"issues": {"2027-01": facts}},
+            projector=render_issue,
+            generated_at=dt.datetime(2026, 10, 31, 0, 4, 5, tzinfo=dt.UTC),
+        )
+        second = self.client.get(url)
+        assert "13,100篇條目" in second.text
+        assert 'max="2026-10-30"' in second.text
+
+    def test_corrupt_daily_catalog_reports_unavailable(self) -> None:
+        """Keep unreadable history distinct from an unrecorded date."""
+        self._archive_issue("2026-10-30", 13100)
+        path = self.runtime / DRAFT_ARCHIVE_PATH / "2027-01" / "catalog.json"
+        path.write_text("{}", encoding="utf-8")
+        response = self.client.get(
+            "/newsletter/?issue=2027-01&date=2026-10-30&lang=en",
+        )
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        assert "temporarily unavailable" in response.text
+        assert "13,100篇條目" not in response.text
 
 
 if __name__ == "__main__":

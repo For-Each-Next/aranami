@@ -43,6 +43,10 @@ from shared.deployment import project_version
 from shared.newsletter import Issue
 from shared.support.files import open_regular, read_json_object, read_regular
 lazy from backend.website.collect import validate_dashboard_snapshot
+lazy from backend.website.newsletter_archive import (
+    DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
+    NewsletterDraftArchive,
+)
 lazy from backend.website.newsletter_homepage import enrich_newsletter_homepage
 lazy from updater.services.newsletter import render_issue
 lazy from webservice import pages
@@ -76,6 +80,43 @@ _CONTENT_TYPES = {
     ".svg": "image/svg+xml",
     ".png": "image/png",
 }
+
+
+def _newsletter_selection(
+    parameters: dict[str, list[str]],
+    automatic_issue: Issue,
+) -> tuple[Issue, dt.date | None]:
+    """Validate a newsletter issue and optional saved data date.
+
+    Returns:
+        The selected issue and completed data date, if supplied.
+
+    Raises:
+        ValueError: Controls repeat, are malformed, or cross quarters.
+    """
+    if set(parameters) - {"issue", "date"} or any(
+        len(values) != 1 for values in parameters.values()
+    ):
+        message = "Choose one newsletter issue and data date."
+        raise ValueError(message)
+    day = None
+    if "date" in parameters:
+        value = parameters["date"][0]
+        day = dt.date.fromisoformat(value)
+        if day.isoformat() != value:
+            message = "Newsletter dates require YYYY-MM-DD."
+            raise ValueError(message)
+    issue = (
+        Issue.parse(parameters["issue"][0])
+        if "issue" in parameters
+        else Issue.upcoming(day)
+        if day is not None
+        else automatic_issue
+    )
+    if day is not None and not issue.start <= day < issue.end:
+        message = "The saved date must belong to the selected quarter."
+        raise ValueError(message)
+    return issue, day
 
 
 def _json(value: object, status: HTTPStatus = HTTPStatus.OK) -> Response:
@@ -412,7 +453,7 @@ class _PublicViews:
         """Return a page cached by locale and saved-input identity."""
         path = request.url.path
         locale = _request_locale(request)
-        if path == "/logs/":
+        if path in {"/logs/", "/reports/"}:
             return self.logs(request, locale=locale)
         try:
             query = request.scope.get("query_string", b"").decode("ascii")
@@ -447,6 +488,10 @@ class _PublicViews:
             automatic_issue.value if automatic_issue is not None else "",
         )
         identity = self._page_identity()
+        if automatic_issue is not None:
+            identity += (
+                self._newsletter_identity(parameters, automatic_issue),
+            )
         if not randomized:
             content = self.pages.get(key, identity)
             if content is not None:
@@ -493,6 +538,25 @@ class _PublicViews:
             self.pages.put(key, identity, response.body.decode())
         return response
 
+    def _newsletter_identity(
+        self,
+        parameters: dict[str, list[str]],
+        automatic_issue: Issue,
+    ) -> tuple | None:
+        """Read daily calendar metadata for page caching.
+
+        Returns:
+            Catalog metadata, or none for absent or invalid selections.
+            The page handler reports validation and read errors.
+        """
+        try:
+            issue, _ = _newsletter_selection(parameters, automatic_issue)
+            return NewsletterDraftArchive(
+                self.runtime / DRAFT_ARCHIVE_PATH,
+            ).identity(issue)
+        except OSError, ValueError:
+            return None
+
     def _newsletter_page(
         self,
         parameters: dict[str, list[str]],
@@ -505,35 +569,56 @@ class _PublicViews:
         Returns:
             A draft page or a localized invalid-selection response.
         """
-        values = parameters.get("issue", [automatic_issue.value])
-        if set(parameters) - {"issue"} or len(values) != 1:
-            return _page_error(
-                "newsletter.invalid_issue",
-                locale,
-                HTTPStatus.BAD_REQUEST,
-            )
         try:
-            issue = Issue.parse(values[0])
+            issue, day = _newsletter_selection(parameters, automatic_issue)
         except ValueError:
             return _page_error(
-                "newsletter.invalid_issue",
+                "newsletter.history.invalid_date"
+                if "date" in parameters
+                else "newsletter.invalid_issue",
                 locale,
                 HTTPStatus.BAD_REQUEST,
             )
-        snapshot = self._dashboard() or {}
-        data = snapshot.get("newsletter") or {}
-        facts = enrich_newsletter_homepage(
-            data.get("issues", {}).get(issue.value) or {},
-            snapshot,
-            issue,
-        )
-        value = render_issue(issue, facts)
+        archive = NewsletterDraftArchive(self.runtime / DRAFT_ARCHIVE_PATH)
+        try:
+            dates = archive.available_dates(issue)
+            if day is None and dates:
+                day = dt.date.fromisoformat(dates[-1])
+            entry = archive.read_entry(issue, day) if day is not None else None
+        except OSError, ValueError:
+            return _page_error(
+                "newsletter.history.read_error",
+                locale,
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+        if entry is not None:
+            value = entry["rendered"] or render_issue(issue, entry["facts"])
+            generated_at = entry["generated_at"]
+        elif day is not None:
+            value = render_issue(issue)
+            generated_at = None
+        else:
+            snapshot = self._dashboard() or {}
+            data = snapshot.get("newsletter") or {}
+            facts = enrich_newsletter_homepage(
+                data.get("issues", {}).get(issue.value) or {},
+                snapshot,
+                issue,
+            )
+            value = render_issue(issue, facts)
+            generated_at = facts.get("updated_at")
         choices = [automatic_issue.previous, automatic_issue.value]
         if issue.value not in choices:
             choices.append(issue.value)
         value.update(
             automatic_issue=automatic_issue.value,
             issue_choices=choices,
+            draft_history={
+                "dates": dates,
+                "selected_date": day.isoformat() if day is not None else None,
+                "generated_at": generated_at,
+                "missing": day is not None and entry is None,
+            },
         )
         return _html(
             pages.render_newsletter(
@@ -544,14 +629,25 @@ class _PublicViews:
             locale,
         )
 
-    @staticmethod
     def _maintenance_page(
+        self,
         snapshot: dict[str, object] | None,
         parameters: dict[str, list[str]],
         locale: str,
         navigation: dict[str, object],
     ) -> Response:
-        """Return a worklist or its localized selection error."""
+        """Return the saved catalogue or a selected task worklist."""
+        if not parameters:
+            return _html(
+                pages.render_maintenance_overview(
+                    snapshot,
+                    saved_status(self.runtime),
+                    _configuration(),
+                    locale,
+                    navigation=navigation,
+                ),
+                locale,
+            )
         try:
             content = pages.render_maintenance(
                 snapshot,
@@ -692,7 +788,7 @@ class _PublicViews:
         *,
         locale: str | None = None,
     ) -> Response:
-        """Return a bounded excerpt or stream one complete daily log."""
+        """Return saved events, a file archive, or a daily download."""
         directory = self.runtime / "logs"
         files = available_logs(directory)
         try:
@@ -735,6 +831,7 @@ class _PublicViews:
         excerpt = (
             {"events": [], "truncated": False}
             if filename is None
+            or (locale is not None and request.url.path == "/logs/")
             else log_excerpt(directory, filename, text)
         )
         value = {
@@ -748,7 +845,11 @@ class _PublicViews:
             _json(value)
             if locale is None
             else _html(
-                pages.render_logs(
+                (
+                    pages.render_reports
+                    if request.url.path == "/reports/"
+                    else pages.render_logs
+                )(
                     value,
                     locale,
                     status=saved_status(self.runtime),
@@ -1075,7 +1176,14 @@ def create_app(runtime: Path, assets: Path = _ASSETS) -> FastAPI:
     ):
         app.add_exception_handler(exception, _routing_error)
     views = _PublicViews(runtime, assets)
-    for path in ("/", "/about/", "/maintenance/", "/logs/", "/newsletter/"):
+    for path in (
+        "/",
+        "/about/",
+        "/maintenance/",
+        "/reports/",
+        "/logs/",
+        "/newsletter/",
+    ):
         app.add_api_route(path, views.page, methods=["GET", "HEAD"])
     for kind in ("config", "status", "live", "dashboard"):
         app.add_api_route(f"/api/{kind}", views.api, methods=["GET", "HEAD"])

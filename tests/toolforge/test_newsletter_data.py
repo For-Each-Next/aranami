@@ -15,6 +15,7 @@ import polars as pl
 from pywikibot.exceptions import NoPageError
 
 from backend.website.newsletter import collect_newsletter, valid_newsletter
+from backend.website.newsletter_newpages import collect_new_pages
 from shared.newsletter import ROOT, Issue
 from updater.services.newsletter import render_issue
 
@@ -534,6 +535,56 @@ class NewsletterDataTests(unittest.TestCase):
             ),
         )
         assert changed["issues"]["2027-01"]["overview"]["ga"] == 6
+
+    def test_new_page_grades_select_current_or_historical_observation(
+        self,
+    ) -> None:
+        """Keep open-quarter grades separate from closed history."""
+        current = pl.DataFrame({"full_title": ["Game"], "pa_class": ["Stub"]})
+        previous = pl.DataFrame({"full_title": ["Game"], "pa_class": ["GA"]})
+        observed = "2026-10-01T05:37:12+00:00"
+        lookup = Mock(return_value=(previous, observed))
+        now = dt.datetime(2026, 10, 31, 12, tzinfo=dt.UTC)
+        with patch(
+            "backend.website.newsletter.collect_new_pages",
+            wraps=collect_new_pages,
+        ) as collect:
+            result = collect_newsletter(
+                Reader(),
+                now=now,
+                current_assessments=current,
+                assessments_at=lookup,
+            )
+        lookup.assert_called_once_with(dt.date(2026, 10, 1))
+        closed, opened = collect.call_args_list
+        assert closed.kwargs["assessments"] is previous
+        assert closed.kwargs["assessment_observed_at"] == observed
+        assert opened.kwargs["assessments"] is current
+        assert opened.kwargs["assessment_observed_at"] == now.isoformat()
+        assert (
+            result["issues"]["2026-10"]["new_pages_data"]["grades_observed_at"]
+            == observed
+        )
+        assert valid_newsletter(result)
+        future = copy.deepcopy(result)
+        future["issues"]["2027-01"]["new_pages_data"]["grades_observed_at"] = (
+            "2026-10-31T13:00:00+00:00"
+        )
+        assert not valid_newsletter(future)
+
+    def test_missing_historical_grades_never_use_current_membership(
+        self,
+    ) -> None:
+        """Leave an unobserved closed-quarter breakdown unavailable."""
+        current = pl.DataFrame({"full_title": ["Game"], "pa_class": ["GA"]})
+        result = collect_newsletter(
+            Reader(),
+            now=dt.datetime(2026, 10, 31, tzinfo=dt.UTC),
+            current_assessments=current,
+            assessments_at=lambda _day: None,
+        )
+        assert result["issues"]["2026-10"]["new_pages_data"]["grades"] is None
+        assert result["issues"]["2027-01"]["new_pages_data"]["grades"] == {}
 
     def test_awards_keep_fifth_place_ties_and_newcomer_threshold(self) -> None:
         """Include every award user tied at fifth place."""

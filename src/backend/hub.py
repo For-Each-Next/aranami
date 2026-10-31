@@ -44,6 +44,7 @@ from backend.website.newsletter_history import (
 from shared.deployment import project_version
 from shared.sources.cycle import source_cycle
 from shared.sources.quarry.projects import query_pages_by_wikiproject
+lazy from updater.services.newsletter import render_issue
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -230,7 +231,7 @@ def run(config: HubConfig) -> None:
                 config.output,
                 lambda: collect_dashboard_pass(
                     updater,
-                    collect_dashboard,
+                    partial(collect_dashboard, draft_projector=render_issue),
                     save_snapshot,
                     config.days,
                     config.refresh_intervals,

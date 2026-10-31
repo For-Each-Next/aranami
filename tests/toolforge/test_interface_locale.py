@@ -18,6 +18,7 @@ from shared.config import routine_configuration
 from webservice.pages import (
     _Page,
     render_dashboard,
+    render_reports,
 )
 from webservice.presentation import Interface, assessment_code
 
@@ -128,11 +129,10 @@ class AssessmentFallbackTests(unittest.TestCase):
     @staticmethod
     def test_report_names_explain_destinations() -> None:
         """Keep grouped headings compact and page links in dialogs."""
-        output = render_dashboard(
-            None,
-            None,
-            {"routines": routine_configuration()},
+        output = render_reports(
+            {},
             "en",
+            config={"routines": routine_configuration()},
         )
         for label in (
             "B-plus reviews",

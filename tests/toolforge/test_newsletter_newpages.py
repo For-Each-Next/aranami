@@ -6,8 +6,11 @@
 from __future__ import annotations
 
 import datetime as dt
+from copy import deepcopy
 from unittest import TestCase
 from unittest.mock import Mock
+
+import polars as pl
 
 from backend.website.newsletter_newpages import (
     collect_new_pages,
@@ -212,3 +215,160 @@ class TestNewsletterNewPages(TestCase):
         assert all(row["count"] is None for row in result["months"])
         self.read.at.assert_not_called()
         assert valid_new_pages(result, self.issue)
+
+    def test_monthly_grades_sum_to_the_registered_quarter(self) -> None:
+        """Join registered titles to the supplied grade snapshot."""
+        self.read.at.side_effect = [
+            _quarter(
+                self.issue,
+                {
+                    "2026-10-01": (
+                        "[[Good]]、[[Stub]]、[[Unassessed]]、[[Missing]]"
+                    ),
+                    "2026-11-02": "[[Start]]、[[List]]、[[Unsupported]]",
+                    "2026-12-04": "[[Bplus]]",
+                },
+            ),
+            "",
+        ]
+        assessments = pl.DataFrame({
+            "full_title": [
+                "Good",
+                "Stub",
+                "Unassessed",
+                "Start",
+                "List",
+                "Unsupported",
+                "Bplus",
+                "Unregistered",
+            ],
+            "pa_class": [
+                "優良級",
+                "小作品級",
+                None,
+                "Start",
+                "特色列表",
+                "Unsupported",
+                "B+",
+                "FA",
+            ],
+        })
+        result = collect_new_pages(
+            self.read,
+            self.issue,
+            assessments=assessments,
+            assessment_observed_at="2027-01-01T00:02:00+00:00",
+        )
+        assert result["grades"] == {
+            "GA": 1,
+            "Stub": 1,
+            "Unassessed": 3,
+            "Start": 1,
+            "FL": 1,
+            "Bplus": 1,
+        }
+        assert result["months"][0]["grades"] == {
+            "GA": 1,
+            "Stub": 1,
+            "Unassessed": 2,
+        }
+        assert result["total"] == 8
+        assert valid_new_pages(result, self.issue)
+
+    def test_grade_resolution_handles_redirects_and_historical_renames(
+        self,
+    ) -> None:
+        """Match a renamed subject by its retained page identity."""
+        self.read.at.side_effect = [
+            _quarter(self.issue, {"2026-10-01": "[[Alias]]、[[Old name]]"}),
+            "",
+        ]
+        assessments = pl.DataFrame({
+            "full_title": ["Canonical", "Previous title"],
+            "pa_class": ["丙級", "乙級"],
+            "page_id": [1, 2],
+        })
+        resolve = Mock(
+            side_effect=lambda title: {
+                "Alias": "Canonical",
+                "Old name": "Current title",
+            }[title],
+        )
+        prime = Mock()
+        result = collect_new_pages(
+            self.read,
+            self.issue,
+            assessments=assessments,
+            resolve=resolve,
+            resolve_many=prime,
+            resolve_page_id=lambda title: {"Alias": 1, "Old name": 2}[title],
+        )
+        assert result["grades"] == {"B": 1, "C": 1}
+        assert prime.call_count == 1
+        assert set(prime.call_args.args[0]) == {"Alias", "Old name"}
+        assert valid_new_pages(result, self.issue)
+
+    def test_partial_and_future_dates_keep_grade_counts_bounded(self) -> None:
+        """Count grades only for unambiguous completed daily records."""
+        self.read.at.side_effect = [
+            _quarter(
+                self.issue,
+                {
+                    "2026-10-01": "[[Known]]",
+                    "2026-10-02": "",
+                    "2026-11-01": "[[Future]]",
+                },
+            ),
+            "",
+        ]
+        result = collect_new_pages(
+            self.read,
+            self.issue,
+            through=dt.date(2026, 10, 31),
+            assessments=pl.DataFrame({
+                "full_title": ["Known", "Future"],
+                "pa_class": ["B", "FA"],
+            }),
+        )
+        assert result["total"] is None
+        assert result["grades"] == {"B": 1}
+        assert result["months"][1]["grades"] == {}
+        assert result["months"][2]["grades"] == {}
+        assert valid_new_pages(result, self.issue)
+
+    def test_grade_validation_rejects_inconsistent_or_unknown_buckets(
+        self,
+    ) -> None:
+        """Reject fabricated totals and malformed observation times."""
+        self.read.at.side_effect = [
+            _quarter(self.issue, {"2026-10-01": "[[Game]]"}),
+            "",
+        ]
+        original = collect_new_pages(
+            self.read,
+            self.issue,
+            assessments=pl.DataFrame({
+                "full_title": ["Game"],
+                "pa_class": ["Stub"],
+            }),
+        )
+        for grades in (
+            {"Stub": True},
+            {"Stub": 2},
+            {"Invented": 1},
+            {"Stub": 0},
+        ):
+            value = deepcopy(original)
+            value["grades"] = grades
+            assert not valid_new_pages(value, self.issue)
+        value = deepcopy(original)
+        value["months"][0]["grades"] = {"Start": 1}
+        assert not valid_new_pages(value, self.issue)
+        for stamp in (
+            "not-a-date",
+            "2027-01-01T00:00:00",
+            "2027-01-02T00:00:00+00:00",
+        ):
+            value = deepcopy(original)
+            value["grades_observed_at"] = stamp
+            assert not valid_new_pages(value, self.issue)

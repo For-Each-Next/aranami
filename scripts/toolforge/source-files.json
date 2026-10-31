@@ -58,6 +58,7 @@
     "src/backend/website/history_archive.py",
     "src/backend/website/maintenance.json",
     "src/backend/website/newsletter.py",
+    "src/backend/website/newsletter_archive.py",
     "src/backend/website/newsletter_history.py",
     "src/backend/website/newsletter_homepage.py",
     "src/backend/website/newsletter_layout.py",
@@ -144,6 +145,7 @@
     "src/webservice/public_html/review-icons/project-peer-review.png",
     "src/webservice/public_html/styles.css",
     "src/webservice/templates/about.html",
+    "src/webservice/templates/backlog.html",
     "src/webservice/templates/base.html",
     "src/webservice/templates/dashboard.html",
     "src/webservice/templates/error.html",
@@ -156,6 +158,7 @@
     "src/webservice/templates/includes/maintenance_pagination.html",
     "src/webservice/templates/includes/relative.html",
     "src/webservice/templates/includes/report_details.html",
+    "src/webservice/templates/includes/report_log.html",
     "src/webservice/templates/includes/reviews.html",
     "src/webservice/templates/includes/routine_links.html",
     "src/webservice/templates/includes/routines.html",
@@ -167,6 +170,7 @@
     "src/webservice/templates/live.html",
     "src/webservice/templates/logs.html",
     "src/webservice/templates/maintenance.html",
-    "src/webservice/templates/newsletter.html"
+    "src/webservice/templates/newsletter.html",
+    "src/webservice/templates/reports.html"
   ]
 }

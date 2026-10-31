@@ -14,6 +14,7 @@ import mwparserfromhell
 from newsletter_fixtures import subpage_layouts
 
 from backend.website.newsletter_subpage_layout import (
+    complete_announcement_layout,
     prepare_subpage_layout,
     valid_subpage_layout,
     valid_subpage_layouts,
@@ -63,6 +64,157 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
     """Keep verified source styling while replacing factual content."""
 
     @staticmethod
+    def test_featured_content_heading_alias_keeps_original_source() -> None:
+        """Recognize the preceding issue's featured-content heading."""
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "fixtures"
+            / "newsletter-announcements-2026-10.wikitext"
+        ).read_text(encoding="utf-8")
+        source = source.replace("==== 優良條目 ====", "==== 典範內容 ====")
+        layout = prepare_subpage_layout(
+            source,
+            Issue.parse("2026-10"),
+            "announcements",
+        )
+        assert layout is not None
+        assert "featured" in layout["homepage_rows"]
+        assert set(layout["homepage_rows"]) == {
+            "featured",
+            "dyk",
+            "good",
+            "news",
+            "history",
+        }
+        assert "==== 典範內容 ====" in layout["text"]
+        assert "@@aranami:homepage:featured@@" in layout["text"]
+        assert valid_subpage_layout(layout)
+
+    @staticmethod
+    def test_homepage_sections_are_completed_in_previous_issue_order() -> None:
+        """Keep missing sections as explicit empty article lists."""
+        layout = subpage_layouts()["宣告"]
+        headings = (
+            "典範內容",
+            "新條目推薦",
+            "優良條目",
+            "新聞動態",
+            "歷史上的今天",
+        )
+        offsets = [
+            layout["text"].index(f"==== {label} ====") for label in headings
+        ]
+        assert offsets == sorted(offsets)
+        assert all(
+            f"@@aranami:homepage:{kind}@@" in layout["text"]
+            for kind in ("featured", "dyk", "good", "news", "history")
+        )
+        assert layout["text"].count("{{div col|colwidth=27em}}") == 5
+        assert valid_subpage_layout(layout)
+
+    @staticmethod
+    def test_empty_homepage_source_sections_remain_reusable() -> None:
+        """Keep empty lists reusable as next-quarter prototypes."""
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "fixtures"
+            / "newsletter-announcements-2026-10.wikitext"
+        ).read_text(encoding="utf-8")
+        source = re.sub(
+            r"\{\{div col\|colwidth=27em\}\}.*?\{\{div col end\}\}",
+            "{{div col|colwidth=27em}}\n（無）\n{{div col end}}",
+            source,
+            flags=re.DOTALL,
+        )
+        layout = prepare_subpage_layout(
+            source,
+            Issue.parse("2026-10"),
+            "announcements",
+        )
+        assert layout is not None
+        assert len(layout["homepage_rows"]) == 5
+        assert valid_subpage_layout(layout)
+
+    @staticmethod
+    def test_generated_empty_subpages_can_prepare_the_next_issue() -> None:
+        """Reuse empty placeholders without requiring article links."""
+        for observations in (
+            {
+                "quality_changes": [],
+                "dyk": [],
+                "homepage": {
+                    key: [] for key in ("featured", "good", "news", "history")
+                },
+                "awards": [],
+            },
+            {},
+        ):
+            pages = render_issue(
+                Issue.parse("2027-01"),
+                {
+                    "issue": "2027-01",
+                    "available": True,
+                    "subpage_layouts": subpage_layouts(),
+                    **observations,
+                },
+            )["pages"]
+            for page, kind in zip(
+                pages[1:],
+                ("quality", "announcements"),
+                strict=True,
+            ):
+                layout = prepare_subpage_layout(
+                    page["text"],
+                    Issue.parse("2027-01"),
+                    kind,
+                )
+                assert layout is not None
+                assert valid_subpage_layout(layout)
+
+    @staticmethod
+    def test_legacy_completion_is_pure_and_keeps_custom_source() -> None:
+        """Normalize older saved layouts without altering the input."""
+        layout = subpage_layouts()["宣告"]
+        for label, kind in (
+            ("典範內容", "featured"),
+            ("新聞動態", "news"),
+            ("歷史上的今天", "history"),
+        ):
+            layout["text"] = re.sub(
+                r"^==== " + label + r" ====\n.*?(?=^===)",
+                "",
+                layout["text"],
+                flags=re.MULTILINE | re.DOTALL,
+            )
+            del layout["homepage_rows"][kind]
+        layout["text"] = layout["text"].replace(
+            "以下條目曾登上首頁的「新條目推薦」區塊。",
+            "保留原本說明。",
+        )
+        original = deepcopy(layout)
+        result = complete_announcement_layout(layout)
+        assert layout == original
+        assert len(result["homepage_rows"]) == 5
+        assert "保留原本說明。" in result["text"]
+        assert valid_subpage_layout(result)
+
+    @staticmethod
+    def test_saved_layout_requires_unambiguous_source_sections() -> None:
+        """Reject missing or duplicate headings before rendering."""
+        original = subpage_layouts()["宣告"]
+        for before, after in (
+            ("=== 在首頁上 ===", "=== Missing ==="),
+            ("=== ACG專題獎 ===", "=== Missing ==="),
+            ("=== 在首頁上 ===", "=== 在首頁上 ===\n=== 在首頁上 ==="),
+            ("==== 新聞動態 ====", "==== 優良條目 ===="),
+        ):
+            layout = {
+                **original,
+                "text": original["text"].replace(before, after),
+            }
+            assert not valid_subpage_layout(layout)
+
+    @staticmethod
     def test_source_banner_and_language_conversion_are_retained() -> None:
         """Retain the source banner and conversion invocation."""
         prefix = (
@@ -88,14 +240,28 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
             for template in templates
             if template.name.matches("icon")
         ]
-        assert sorted(icons) == ["DGA", "FA", "FL", "GA"]
-        assert text.count("}}&thinsp;") == 4
-        assert "優良條目列表新增" in text
-        assert "優良條目列表移除" in text
+        assert (
+            icons
+            == [
+                "FA",
+                "FL",
+                "GA",
+                "Bplus",
+                "GT",
+                "FFA",
+                "FFL",
+                "DGA",
+                "GTRC",
+            ]
+            * 3
+        )
+        assert text.count("}}&thinsp;") == 27
+        assert "當選優良條目：[[:新增遊戲]]" in text
+        assert "撤銷優良條目：[[:移除遊戲]]" in text
         assert "=== 2026年10月 ===" in text
         assert "<small>（10月4日）</small>" not in text
-        assert "當選優良條目" not in text
-        assert "撤銷優良條目" not in text
+        assert "當選優良話題：（無）" in text
+        assert "撤銷優良話題：（無）" in text
 
     @staticmethod
     def test_homepage_lists_retain_columns_introductions_and_dates() -> None:
@@ -124,7 +290,7 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
             for template in templates
             if template.name.matches("div col end")
         ]
-        assert len(starts) == len(ends) == 2
+        assert len(starts) == len(ends) == 5
         assert all(
             str(template.get("colwidth").value) == "27em"
             for template in starts
@@ -142,6 +308,8 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
         ):
             layout = layouts[suffix]
             chunks = re.split(r"@@aranami:[a-z_:]+@@", layout["text"])
+            if suffix == "宣告":
+                chunks[-1] = chunks[-1].lstrip()
             pattern = r"\A" + ".*?".join(map(re.escape, chunks)) + r"\Z"
             assert re.fullmatch(pattern, page["text"], re.DOTALL) is not None
             assert "@@aranami:" not in page["text"]

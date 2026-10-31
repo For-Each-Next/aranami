@@ -1,28 +1,13 @@
 {% extends "base.html" %}
 {% block contents_links %}
-<ul>
-  {% if files %}<li><a href="#recent-events">{{ t.logs.recent }}</a></li><li><a href="#log-archive">{{ t.logs.archive }}</a></li>{% endif %}
-  <li><a href="#live-server-status">{{ t.server.heading }}</a></li>
-</ul>
+<ul><li><a href="#log-archive">{{ t.logs.archive }}</a></li><li><a href="#live-server-status">{{ t.server.heading }}</a></li></ul>
 {% endblock %}
 {% block content %}
-{% if files %}
-<form action="/logs/" method="get" class="log-query">
-<div class="field cdx-field"><div class="cdx-label"><label class="cdx-label__label" for="log-date"><span class="cdx-label__label__text">{{ t.logs.column_date }}</span></label></div><div class="cdx-field__control"><select class="cdx-select" id="log-date" name="date">{% for file in files %}<option value="{{ file.date }}"{% if file.selected %} selected{% endif %}>{{ file.date }}</option>{% endfor %}</select></div></div>
-<div class="field search cdx-field"><div class="cdx-label"><label class="cdx-label__label" for="log-query"><span class="cdx-label__label__text">{{ t.logs.query }}</span></label></div><div class="cdx-field__control cdx-text-input"><input class="cdx-text-input__input" id="log-query" type="search" name="q" maxlength="256" value="{{ query }}"></div></div>
-<div class="field cdx-field"><div class="cdx-label"><label class="cdx-label__label" for="log-status"><span class="cdx-label__label__text">{{ t.logs.status }}</span></label></div><div class="cdx-field__control"><select class="cdx-select" id="log-status" name="status"><option value="all">{{ t.logs.all }}</option>{% for choice in status_choices %}<option value="{{ choice.value }}"{% if choice.value == selected_status %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select></div></div>
-<div class="field cdx-field"><div class="cdx-label"><label class="cdx-label__label" for="log-order"><span class="cdx-label__label__text">{{ t.logs.order }}</span></label></div><div class="cdx-field__control"><select class="cdx-select" id="log-order" name="order"><option value="desc"{% if order == 'desc' %} selected{% endif %}>{{ t.logs.newest }}</option><option value="asc"{% if order == 'asc' %} selected{% endif %}>{{ t.logs.oldest }}</option></select></div></div>
-<div class="form-actions"><button type="submit" class="cdx-button cdx-button--action-progressive cdx-button--weight-primary cdx-button--size-large">{{ t.logs.apply }}</button><a href="{{ clear_url }}">{{ t.logs["clear"] }}</a></div>
-</form>
-<p class="log-toolbar"><a href="{{ selected_download }}" download>{{ t.logs.download }} · {{ selected_date }}</a></p>
-<h2 id="recent-events">{{ t.logs.recent }}</h2><p class="context">{{ t.logs.reader_note }}</p>
-<p class="log-match-count" role="status">{{ match_count }}</p>
-{% if truncated %}<p class="source-updated">{{ t.logs.truncated }}</p>{% endif %}
-{% include "includes/log_pagination.html" %}
-{% if events %}<div class="major-events">{% for event in events %}<article class="log-event"><dl class="log-event-fields"><dt>{{ t.logs.column_date }}</dt><dd>{% with time=event.time %}{% include "includes/time.html" %}{% endwith %}</dd><dt>{{ t.logs.task_label }}</dt><dd>{{ event.task }}</dd><dt>{{ t.logs.status }}</dt><dd>{{ event.result }}</dd><dt>{{ t.logs.duration_label }}</dt><dd>{{ event.duration }}</dd></dl><details><summary>{{ t.logs.details }}</summary><p>{{ event.time_intro }}{% with time=event.time %}{% include "includes/time.html" %}{% endwith %}{{ event.time_separator }}{{ event.summary }}{% if event.reports %}{{ event.sentence_separator }}{{ event.reports.before }}{% for link in event.reports.links %}{% if not loop.first %}{{ event.reports.last_separator if loop.last else event.reports.separator }}{% endif %}<span lang="zh">{{ link }}</span>{% endfor %}{{ event.reports.after }}{% endif %}</p>{% if event.completion_note %}<p class="context">{{ event.completion_note }}</p>{% endif %}</details></article>{% endfor %}</div>{% else %}<p class="empty">{{ t.logs.no_matches }}</p>{% endif %}
-{% include "includes/log_pagination.html" %}
+<section class="section-flat" aria-labelledby="log-archive">
 <h2 id="log-archive">{{ t.logs.archive }}</h2>
-<div class="table-scroll"><table class="logs-table"><thead><tr><th scope="col">{{ t.logs.column_date }}</th><th scope="col">{{ t.logs.column_file }}</th><th scope="col">{{ t.logs.column_size }}</th></tr></thead><tbody>{% for file in files %}<tr><td><a href="{{ file.url }}">{{ file.date }}</a></td><td class="log-download"><a class="filename" href="{{ file.download_url }}" download>{{ file.name }}</a></td><td>{{ file.size_label }}</td></tr>{% endfor %}</tbody></table></div>
+{% if selected_download %}<p class="log-toolbar"><a href="{{ selected_download }}" download>{{ t.logs.download }} · {{ selected_date }}</a></p>{% endif %}
+{% if files %}<div class="table-scroll"><table class="logs-table"><thead><tr><th scope="col">{{ t.logs.column_date }}</th><th scope="col">{{ t.logs.column_file }}</th><th scope="col">{{ t.logs.column_size }}</th></tr></thead><tbody>{% for file in files %}<tr><td><a href="{{ file.url }}">{{ file.date }}</a></td><td class="log-download"><a class="filename" href="{{ file.download_url }}" download>{{ file.name }}</a></td><td>{{ file.size_label }}</td></tr>{% endfor %}</tbody></table></div>
 {% else %}<p class="empty">{{ t.logs.empty }}</p>{% endif %}
+</section>
 <section class="system-details" aria-label="{{ t.logs.system_details }}">{% include "includes/server.html" %}</section>
 {% endblock %}

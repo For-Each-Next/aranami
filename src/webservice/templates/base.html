@@ -19,12 +19,13 @@
       <a href="/" class="brand"><img src="/aranami.svg" width="36" height="36" alt=""><span>Aranami</span></a>
       <nav class="global-navigation" aria-label="{{ t.nav.global }}">
         <a href="/"{% if navigation and navigation.path == '/' %} aria-current="page"{% endif %}>{{ t.nav.dashboard }}</a>
+        <a href="/maintenance/"{% if navigation and navigation.path == '/maintenance/' %} aria-current="page"{% endif %}>{{ t.nav.backlog }}</a>
+        <a href="/reports/"{% if navigation and navigation.path == '/reports/' %} aria-current="page"{% endif %}>{{ t.nav.reports }}</a>
         <a href="/about/"{% if navigation and navigation.path == '/about/' %} aria-current="page"{% endif %}>{{ t.nav.about }}</a>
         <details class="navigation-tools">
           <summary>{{ t.nav.tools }}</summary>
           <ul class="navigation-tools-list">
             <li><a href="/newsletter/"{% if navigation and navigation.path == '/newsletter/' %} aria-current="page"{% endif %}>{{ t.nav.newsletter }}</a></li>
-            <li><a href="/logs/"{% if navigation and navigation.path == '/logs/' %} aria-current="page"{% endif %}>{{ t.nav.logs }}</a></li>
           </ul>
         </details>
       </nav>
@@ -59,7 +60,7 @@
   <footer>
     <div class="shell footer-inner">
       <p class="footer-uptime">{% if footer %}{% include "includes/uptime.html" %}{% endif %}</p>
-      <nav aria-label="Aranami"><a href="/about/">{{ t.nav.about }}</a><a href="/logs/">{{ t.nav.logs }}</a>{{ project_link }}</nav>
+      <nav aria-label="Aranami"><a href="/about/">{{ t.nav.about }}</a>{{ project_link }}</nav>
       <p class="extract-attribution">{{ extract_attribution.before }}<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>{{ extract_attribution.after }}</p>
     </div>
   </footer>

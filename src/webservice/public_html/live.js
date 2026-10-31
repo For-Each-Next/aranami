@@ -144,12 +144,20 @@
                     const seconds = Math.max(0, elapsed);
                     const whole = Math.floor(seconds);
                     if (node.dataset.clock === "uptime") {
+                        const values = {
+                            days: Math.floor(whole / 86400),
+                            hours: Math.floor(whole / 3600) % 24,
+                            minutes: Math.floor(whole / 60) % 60,
+                            seconds: whole % 60,
+                        };
+                        const unit = whole >= 86400 ? "days" : whole >= 3600 ? "hours"
+                            : whole >= 60 ? "minutes" : "seconds";
+                        const duration = anchor.messages[`duration.${unit}`];
+                        const compact = node.dataset.uptimeCompactTemplate && typeof duration === "string";
                         text = stale ? node.dataset.uptimeUnknown : format(
-                            node.dataset.uptimeTemplate, {
-                                days: Math.floor(whole / 86400),
-                                hours: Math.floor(whole / 3600) % 24,
-                                minutes: Math.floor(whole / 60) % 60,
-                                seconds: whole % 60,
+                            compact ? node.dataset.uptimeCompactTemplate : node.dataset.uptimeTemplate, {
+                                ...values,
+                                ...(compact ? { duration: format(duration, values) } : {}),
                             },
                         );
                     } else {

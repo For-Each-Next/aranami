@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block contents_links %}
+{% if backlog and backlog.sections %}<ul>{% for section in backlog.sections %}<li><a href="#backlog-section-{{ section.key }}">{{ section.label }}</a></li>{% endfor %}</ul>{% else %}{{ super() }}{% endif %}
+{% endblock %}
+{% block content %}
+{% if backlog %}{% include "includes/backlog.html" %}{% else %}<p class="empty">{{ t.backlog.overview_empty }}</p>{% include "includes/source_updated.html" %}{% endif %}
+{% endblock %}

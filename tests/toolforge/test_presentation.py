@@ -33,7 +33,9 @@ from webservice.pages import (
     render_live_status,
     render_logs,
     render_maintenance,
+    render_maintenance_overview,
     render_newsletter,
+    render_reports,
 )
 from webservice.presentation import (
     Interface,
@@ -234,7 +236,7 @@ def write_interface_fixtures(destination: Path) -> None:
     text. It contains no runtime data and performs no external requests.
 
     Args:
-        destination: Directory receiving six HTML pages per locale.
+        destination: Directory receiving localized browser-check pages.
     """
     fixture = _fixtures()
     fixture["config"]["routines"] = routine_configuration()
@@ -260,6 +262,8 @@ def write_interface_fixtures(destination: Path) -> None:
                     f"https://zh.wikipedia.org/wiki/Talk:Game#Review_{kind}"
                 ),
                 "started_at": "2026-10-07T03:04:00Z",
+                "replied_at": "2026-10-18T10:00:00Z",
+                "participant_count": 3,
                 "extract": "An article introduction for this review.",
                 "extract_zh": "用于评审卡片的条目简介。",
                 "extract_hant": "用於評審卡片的條目簡介。",
@@ -330,10 +334,24 @@ def write_interface_fixtures(destination: Path) -> None:
                 locale,
                 now,
             ),
+            "backlog": render_maintenance_overview(
+                snapshot,
+                fixture["status"],
+                fixture["config"],
+                locale,
+                now,
+            ),
             "maintenance": render_maintenance(
                 maintenance,
                 {"task": ["references"]},
                 locale,
+            ),
+            "reports": render_reports(
+                logs,
+                locale,
+                status=fixture["status"],
+                config=fixture["config"],
+                now=now,
             ),
             "logs": render_logs(
                 logs,
@@ -353,6 +371,12 @@ def write_interface_fixtures(destination: Path) -> None:
                 {
                     "issue": "2027-01",
                     "available": True,
+                    "draft_history": {
+                        "dates": ["2026-10-29", "2026-10-30"],
+                        "selected_date": "2026-10-30",
+                        "generated_at": "2026-10-31T00:04:05+00:00",
+                        "missing": False,
+                    },
                     "pages": [
                         {
                             "title": "WikiProject:電子遊戲/簡訊/2027-01"
@@ -397,6 +421,11 @@ class ReviewPresentationTests(unittest.TestCase):
                     else "2026-10-18T10:00:00Z"
                     if index == 1
                     else None,
+                    "replied_at": "2026-10-16T12:00:30Z"
+                    if index == 0
+                    else "2026-10-18T10:00:00Z"
+                    if index == 1
+                    else None,
                 }
                 for index, kind in enumerate((
                     "fac",
@@ -416,7 +445,7 @@ class ReviewPresentationTests(unittest.TestCase):
                 interface = Interface(locale)
                 rendered = render_dashboard(snapshot, {}, {}, locale, self.now)
                 assert rendered.index('id="reviews-heading"') < rendered.index(
-                    'id="homepage-heading"',
+                    'id="homepage-pageviews"',
                 )
                 section = rendered.split('id="reviews"', 1)[1].split(
                     "</section>",
@@ -443,12 +472,22 @@ class ReviewPresentationTests(unittest.TestCase):
                     (
                         "2026-10-07T03:04:00Z",
                         "2026-10-07 03:04:00 UTC",
-                        interface.text("reviews.days", count=11),
+                        interface.text("reviews.started_days", count=11),
+                    ),
+                    (
+                        "2026-10-16T12:00:30Z",
+                        "2026-10-16 12:00:30 UTC",
+                        interface.text("reviews.replied_days", count=2),
                     ),
                     (
                         "2026-10-18T10:00:00Z",
                         "2026-10-18 10:00:00 UTC",
-                        interface.text("reviews.hours", count=2),
+                        interface.text("reviews.started_days", count=0),
+                    ),
+                    (
+                        "2026-10-18T10:00:00Z",
+                        "2026-10-18 10:00:00 UTC",
+                        interface.text("reviews.replied_hours", count=2),
                     ),
                 ]
                 assert "Review 0 &lt;&amp;&gt;" in section
@@ -460,6 +499,91 @@ class ReviewPresentationTests(unittest.TestCase):
                 assert 'data-assessment="class"' in section
                 assert 'data-assessment="importance"' in section
                 assert 'href="#reviews"' in rendered
+
+    def test_review_reply_boundaries_and_missing_observations(self) -> None:
+        """Keep reply age units and tooltips tied to saved replies."""
+        row = {
+            **self.data["article"],
+            "review_type": "fac",
+            "review_url": "https://zh.wikipedia.org/wiki/Talk:Game#Review",
+            "started_at": "2026-10-07T03:04:00Z",
+        }
+        snapshot = self.data["snapshot"]
+        snapshot["reviews"] = {"items": [row]}
+        for locale in ("en", "zh-hans", "zh-hant", "zh"):
+            interface = Interface(locale)
+            for hours in (0, 23, 24, 48, None):
+                with self.subTest(locale=locale, hours=hours):
+                    if hours is None:
+                        row.pop("replied_at", None)
+                    else:
+                        row["replied_at"] = (
+                            self.now - dt.timedelta(hours=hours)
+                        ).isoformat()
+                    rendered = render_dashboard(
+                        snapshot,
+                        {},
+                        {},
+                        locale,
+                        self.now,
+                    )
+                    section = rendered.split('id="reviews"', 1)[1].split(
+                        "</section>",
+                        1,
+                    )[0]
+                    if hours is None:
+                        assert section.count("<time") == 1
+                        continue
+                    assert section.count("<time") == 2
+                    label = interface.text(
+                        "reviews.replied_days"
+                        if hours >= 24
+                        else "reviews.replied_hours",
+                        count=hours // 24 if hours >= 24 else hours,
+                    )
+                    assert (
+                        f'<time datetime="{row["replied_at"]}" '
+                        f'title="{utc_time(row["replied_at"], seconds=True)}">'
+                        f"{label}</time>" in section
+                    )
+
+    def test_participant_counts_follow_observed_replies(self) -> None:
+        """Count signed participants and hide solo annotations."""
+        row = {
+            **self.data["article"],
+            "review_type": "fac",
+            "review_url": "https://zh.wikipedia.org/wiki/Talk:Game#Review",
+            "started_at": "2026-10-07T03:04:00Z",
+        }
+        snapshot = self.data["snapshot"]
+        snapshot["reviews"] = {"items": [row]}
+        for locale, label in (
+            ("en", ", 3 participants"),
+            ("zh-hans", "\uff0c3参与者"),
+            ("zh-hant", "\uff0c3參與者"),
+            ("zh", "\uff0c3参与者"),
+        ):
+            for replied, count in (
+                ("2026-10-18T10:00:00Z", 3),
+                ("2026-10-18T10:00:00Z", None),
+                (None, 1),
+            ):
+                with self.subTest(locale=locale, replied=replied, count=count):
+                    row.update(replied_at=replied, participant_count=count)
+                    output = render_dashboard(
+                        snapshot,
+                        {},
+                        {},
+                        locale,
+                        self.now,
+                    )
+                    if replied is None or count is None:
+                        assert 'class="review-participants"' not in output
+                    else:
+                        assert (
+                            '</time><span class="review-participants">'
+                            f"{label}</span>" in output
+                        )
 
     def test_empty_reviews_hide_section_and_missing_reviews_stay_unknown(
         self,
@@ -477,6 +601,54 @@ class ReviewPresentationTests(unittest.TestCase):
             0
         ]
         assert self.en.text("empty.section") in section
+
+
+class MaintenanceOverviewTests(unittest.TestCase):
+    """Keep saved maintenance tasks on a dedicated localized page."""
+
+    @staticmethod
+    def test_overview_uses_top_level_category_headings() -> None:
+        """Link grouped tasks and retain the actual observation time."""
+        data = _fixtures()
+        for locale in ("en", "zh-hans", "zh-hant"):
+            interface = Interface(locale)
+            output = render_maintenance_overview(
+                data["snapshot"],
+                data["status"],
+                data["config"],
+                locale,
+                dt.datetime(2026, 10, 18, 12, tzinfo=dt.UTC),
+            )
+            assert f"<h1>{interface.text('backlog.heading')}</h1>" in output
+            assert '<h2 id="backlog-section-sources">' in output
+            assert '<h3 id="backlog-section-sources">' not in output
+            assert 'href="#backlog-section-sources"' in output
+            assert 'href="/maintenance/?task=references&amp;page=1"' in output
+            assert "2026-10-18 12:00 UTC" in output
+            assert 'id="tool-status"' not in output
+            assert 'id="homepage-pageviews"' not in output
+            assert 'id="live-uptime"' in output
+
+    @staticmethod
+    def test_empty_and_unavailable_catalogues_remain_distinct() -> None:
+        """Distinguish empty observations from unavailable data."""
+        data = _fixtures()
+        backlog = data["snapshot"]["backlog"]
+        backlog.update(total=0, groups=[])
+        for locale in ("en", "zh-hans", "zh-hant"):
+            interface = Interface(locale)
+            output = render_maintenance_overview(
+                data["snapshot"],
+                None,
+                None,
+                locale,
+            )
+            assert interface.text("backlog.overview_empty") in output
+            assert interface.text("backlog.unavailable") not in output
+            assert "2026-10-18 12:00 UTC" in output
+            missing = render_maintenance_overview(None, None, None, locale)
+            assert interface.text("backlog.unavailable") in missing
+            assert interface.text("backlog.overview_empty") not in missing
 
 
 class ContentsNavigationTests(unittest.TestCase):
@@ -886,7 +1058,7 @@ class PresentationTests(unittest.TestCase):
         assert (
             next_run(selected, "pageviews", self.en) == "2026-10-20 18:59 UTC"
         )
-        assert "uptime: 2 d 3 h 4 min" in uptime(
+        assert "running for 2 d 3 h 4 min" in uptime(
             selected,
             "0.6.0",
             self.en,
@@ -936,11 +1108,11 @@ class PresentationTests(unittest.TestCase):
             assert next_run(selected, key, self.en) == "2026-10-20 18:59 UTC"
 
     def test_all_localized_dashboards(self) -> None:
-        """Build escaped pages with native accessible status popups."""
-        for locale, deferred, extract in (
-            ("en", "Waiting to retry", "简介"),
-            ("zh-hans", "待重试", "简介"),
-            ("zh-hant", "待重試", "簡介"),
+        """Build escaped article pages with direct section headings."""
+        for locale, extract in (
+            ("en", "简介"),
+            ("zh-hans", "简介"),
+            ("zh-hant", "簡介"),
         ):
             output = render_dashboard(
                 self.data["snapshot"],
@@ -949,7 +1121,6 @@ class PresentationTests(unittest.TestCase):
                 locale,
                 self.now,
             )
-            assert deferred in output
             assert (
                 f"{extract} &lt;script&gt;never execute&lt;/script&gt;"
                 " &amp; 中文" in output
@@ -963,34 +1134,18 @@ class PresentationTests(unittest.TestCase):
             main, footer = output.split("<footer>", 1)
             assert 'class="extract-attribution"' not in main
             assert 'class="extract-attribution"' in footer
-            assert output.count('scope="col"') == 5
-            assert 'class="assessment-guide"' not in output
-            assert 'commandfor="report-details-pageviews"' in output
-            assert '<dialog id="report-details-pageviews"' in output
-            assert (
-                'aria-labelledby="report-details-pageviews-heading"' in output
-            )
-            assert 'command="close" autofocus' in output
-            assert '<span aria-hidden="true">⏸️</span>' not in output
-            assert 'class="routine-status" data-status=' in output
-            task = re.search(
-                r'<a href="/maintenance/\?task=references&amp;page=1" '
-                r'class="backlog-task">(.*?)</a>',
-                output,
-            )
-            assert task is not None
-            label = Interface(locale).label(
-                self.data["snapshot"]["backlog"]["groups"][0]["label"],
-                "",
-            )
-            count = Interface(locale).text("backlog.count", count=1)
-            assert task[1] == (
-                f'<span class="backlog-label">{label}</span>'
-                f'<span class="backlog-count">{count}</span>'
-            )
-            assert "5.000" not in output
-            assert "&lt;Latest &amp; safe&gt;" in output
-            assert "2026-10-20 18:59 UTC" in output
+            for key in ("pageviews", "recognized", "dyk", "news_history"):
+                assert f'<h2 id="homepage-{key}">' in output
+            for removed in (
+                'id="homepage-heading"',
+                'id="tool-status"',
+                'id="backlog"',
+                'class="backlog-task"',
+                'commandfor="report-details-pageviews"',
+            ):
+                assert removed not in output
+            assert 'href="/maintenance/"' in output
+            assert 'href="/reports/"' in output
             assert "https://creativecommons.org/licenses/by-sa/4.0/" in output
         generic = render_dashboard(
             self.data["snapshot"],
@@ -1011,22 +1166,22 @@ class PresentationTests(unittest.TestCase):
             (
                 "zh-hans",
                 "结束时间\uff1a",
-                "下次计划执行\uff1a",
+                "下次排程\uff1a",
                 "5.00秒",
             ),
             (
                 "zh-hant",
                 "結束時間\uff1a",
-                "下次預定執行\uff1a",
+                "下次排程\uff1a",
                 "5.00秒",
             ),
         ):
-            output = render_dashboard(
-                self.data["snapshot"],
-                self.data["status"],
-                self.data["config"],
+            output = render_reports(
+                {"files": []},
                 locale,
-                self.now,
+                status=self.data["status"],
+                config=self.data["config"],
+                now=self.now,
             )
             line = re.search(
                 r'<li class="routine-status"[^>]*>(.*?)</li>',
@@ -1050,12 +1205,12 @@ class PresentationTests(unittest.TestCase):
             assert f">{report_duration}</td>" in output
             assert "5.000" not in output
         self.data["status"]["reports"] = None
-        output = render_dashboard(
-            self.data["snapshot"],
-            self.data["status"],
-            self.data["config"],
+        output = render_reports(
+            {"files": []},
             "en",
-            self.now,
+            status=self.data["status"],
+            config=self.data["config"],
+            now=self.now,
         )
         assert '<dialog id="report-details-pageviews"' in output
         assert '<p class="empty">No record</p>' in output
@@ -1111,12 +1266,12 @@ class PresentationTests(unittest.TestCase):
                 assert row[1].count(waiting) == 2
                 assert "<time" not in row[1]
             assert 'data-clock="elapsed"' not in output
-            page = render_dashboard(
-                self.data["snapshot"],
-                status,
-                self.data["config"],
+            page = render_reports(
+                {"files": []},
                 locale,
-                later,
+                status=status,
+                config=self.data["config"],
+                now=later,
             )
             assert row[0] in page
             report.update(status="running", started_at=later.isoformat())
@@ -1230,12 +1385,12 @@ class PresentationTests(unittest.TestCase):
         schedule["routines"]["pageviews"]["next_run_at"] = (
             self.now + dt.timedelta(minutes=23, seconds=40)
         ).isoformat()
-        output = render_dashboard(
-            self.data["snapshot"],
-            status,
-            self.data["config"],
+        output = render_reports(
+            {"files": []},
             "zh-hans",
-            self.now,
+            status=status,
+            config=self.data["config"],
+            now=self.now,
         )
         assert "2026-10-18 08:25 UTC</time> \uff083小时前\uff09" in output
         assert "2026-10-18 12:24 UTC \uff0823分钟后\uff09" in output
@@ -1249,12 +1404,12 @@ class PresentationTests(unittest.TestCase):
             {"updated_at": "2026-10-18T11:00:00Z"},
         ):
             status["schedule"] = {**schedule, **change}
-            output = render_dashboard(
-                self.data["snapshot"],
-                status,
-                self.data["config"],
+            output = render_reports(
+                {"files": []},
                 "zh-hans",
-                self.now,
+                status=status,
+                config=self.data["config"],
+                now=self.now,
             )
             assert 'class="relative-time"' not in output
 
@@ -1299,7 +1454,9 @@ class PresentationTests(unittest.TestCase):
             )
             assert output.count('<script src="/live.js" defer>') == 1
             assert "<script>bad</script>" not in output
-            assert "&lt;script&gt;bad&lt;/script&gt;" in output
+            assert "&lt;script&gt;bad&lt;/script&gt;" not in output
+            assert 'id="recent-events"' not in output
+            assert 'class="log-query"' not in output
             assert "<pre" not in output
             assert "1.0 KiB" in output
             assert "/logs/?date=2026-10-18&amp;download=1" in output
@@ -1311,6 +1468,8 @@ class PresentationTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2] / "src" / "webservice"
         for output in (
             render_dashboard(None, None, None, "en"),
+            render_reports({"files": []}, "en"),
+            render_maintenance_overview(None, None, None, "en"),
             render_logs({"files": []}, "en"),
             render_about(None, "en"),
         ):
@@ -1347,15 +1506,15 @@ class LiveVisibilityTests(unittest.TestCase):
             locale: Interface language for both renderers.
 
         Returns:
-            Complete dashboard followed by its live status fragments.
+            Complete reports page followed by its live status fragments.
         """
         return (
-            render_dashboard(
-                self.data["snapshot"],
-                self.data["status"],
-                self.data["config"],
+            render_reports(
+                {"files": []},
                 locale,
-                self.now,
+                status=self.data["status"],
+                config=self.data["config"],
+                now=self.now,
             ),
             render_live_status(
                 self.data["status"],
@@ -1413,42 +1572,47 @@ class LiveVisibilityTests(unittest.TestCase):
                             )
                             assert 'data-status="updated"' in card
 
-    def test_contents_links_only_visible_dashboard_sections(self) -> None:
-        """Keep contents links valid when navigation moves."""
+    def test_contents_links_match_each_page(self) -> None:
+        """Link dashboard and report contents to visible sections."""
         for locale in ("en", "zh-hans", "zh-hant"):
-            output = self._outputs(locale)[0]
-            header = output.split("</header>")[0]
-            contents = re.search(
-                r'<nav class="page-toc"[^>]*>(.*?)</nav>',
-                output,
-                re.DOTALL,
+            dashboard = render_dashboard(
+                self.data["snapshot"],
+                self.data["status"],
+                self.data["config"],
+                locale,
+                self.now,
             )
-            assert contents is not None
-            contents = contents[1]
-            assert 'href="/"' not in contents
-            assert 'class="brand"' in header
-            for anchor in (
-                "#homepage-pageviews",
-                "#homepage-recognized",
-                "#homepage-dyk",
-                "#homepage-news_history",
-                "#backlog",
-                "#tool-status",
+            reports = self._outputs(locale)[0]
+            for output, anchors in (
+                (
+                    dashboard,
+                    (
+                        "homepage-pageviews",
+                        "homepage-recognized",
+                        "homepage-dyk",
+                        "homepage-news_history",
+                    ),
+                ),
+                (reports, ("tool-status", "recent-events")),
             ):
-                assert f'href="{anchor}"' in contents
-                assert f'id="{anchor[1:]}"' in output
+                contents = re.search(
+                    r'<nav class="page-toc"[^>]*>(.*?)</nav>',
+                    output,
+                    re.DOTALL,
+                )
+                assert contents is not None
+                assert 'href="/"' not in contents[1]
+                assert 'class="brand"' in output.split("</header>")[0]
+                for anchor in anchors:
+                    assert f'href="#{anchor}"' in contents[1]
+                    assert f'id="{anchor}"' in output
+            assert 'href="#tool-status"' not in dashboard
+            assert 'href="#homepage-pageviews"' not in reports
         snapshot = self.data["snapshot"]
         snapshot["pageviews"]["items"] = []
-        snapshot["backlog"]["total"] = 0
-        output = self._outputs("en")[0]
-        contents = re.search(
-            r'<nav class="page-toc"[^>]*>(.*?)</nav>',
-            output,
-            re.DOTALL,
-        )
-        assert contents is not None
-        assert 'href="#homepage-pageviews"' not in contents[1]
-        assert 'href="#backlog"' not in contents[1]
+        output = render_dashboard(snapshot, None, None, "en", self.now)
+        assert 'href="#homepage-pageviews"' not in output
+        assert 'href="#backlog"' not in output
 
     def test_logs_monitor_uses_saved_environment_and_fresh_usage(
         self,
@@ -2024,7 +2188,7 @@ class LiveVisibilityTests(unittest.TestCase):
                 "zh-hans",
                 "开始时间\uff1a",
                 "结束时间\uff1a",
-                "下次计划执行\uff1a",
+                "下次排程\uff1a",
                 "\uff082分钟前\uff09",
                 "\uff0835分钟后\uff09",
             ),
@@ -2032,7 +2196,7 @@ class LiveVisibilityTests(unittest.TestCase):
                 "zh-hant",
                 "開始時間\uff1a",
                 "結束時間\uff1a",
-                "下次預定執行\uff1a",
+                "下次排程\uff1a",
                 "\uff082分鐘前\uff09",
                 "\uff0835分鐘後\uff09",
             ),
@@ -2122,6 +2286,49 @@ class ServerPresentationTests(unittest.TestCase):
             locale,
             self.now,
         )
+
+    def test_uptime_sentence_omits_leading_zero_units(self) -> None:
+        """Keep observed starts and natural elapsed-time sentences."""
+        for locale, prefix, suffix, elapsed in (
+            ("en", "started ", ", running for ", "1 h 7 min 16 s."),
+            ("zh-hans", "自", "启动\uff0c已执行", "1小时7分钟16秒。"),
+            ("zh-hant", "自", "啟動\uff0c已執行", "1小時7分鐘16秒。"),
+        ):
+            with self.subTest(locale=locale):
+                started = self.now - dt.timedelta(
+                    hours=1,
+                    minutes=7,
+                    seconds=16,
+                )
+                schedule = {
+                    "state": "running",
+                    "started_at": started.isoformat(),
+                    "updated_at": self.now.isoformat(),
+                }
+                label = uptime(schedule, "0.7.9", Interface(locale), self.now)
+                assert prefix + utc_time(started.isoformat()) + suffix in label
+                assert label.endswith(elapsed)
+                assert "0日" not in label
+                assert "0 d" not in label
+        for seconds, expected in (
+            (0, "0 s."),
+            (59, "59 s."),
+            (60, "1 min 0 s."),
+            (3600, "1 h 0 min 0 s."),
+            (86400, "1 d 0 h 0 min 0 s."),
+        ):
+            started = self.now - dt.timedelta(seconds=seconds)
+            label = uptime(
+                {
+                    "state": "running",
+                    "started_at": started.isoformat(),
+                    "updated_at": self.now.isoformat(),
+                },
+                "0.7.9",
+                Interface("en"),
+                self.now,
+            )
+            assert label.endswith(expected)
 
     def test_about_explains_name_purpose_and_contact(self) -> None:
         """Localize the linked name, explanation, and contact."""
@@ -2220,19 +2427,16 @@ class ServerPresentationTests(unittest.TestCase):
 
 
 class EventPresentationTests(unittest.TestCase):
-    """Show major events as localized prose and safe report links."""
+    """Show saved report events as localized, bounded table rows."""
 
     def setUp(self) -> None:
-        """Create configured report targets for each test."""
+        """Create saved status observations and a fixed UTC clock."""
         self.data = _fixtures()
+        self.now = dt.datetime(2026, 10, 18, 12, 0, 30, tzinfo=dt.UTC)
 
     @staticmethod
     def _event(kind: str, **facts: object) -> dict[str, object]:
-        """Prepare one saved event with a fixed exact UTC timestamp.
-
-        Returns:
-            A structured major event without diagnostic text.
-        """
+        """Return one structured event with an exact UTC timestamp."""
         return {
             "schema": 1,
             "time": "2026-10-18T12:00:02Z",
@@ -2245,17 +2449,14 @@ class EventPresentationTests(unittest.TestCase):
         self,
         events: list[dict[str, object]],
         locale: str = "en",
-        *,
-        query: str = "",
-        config: dict[str, object] | None = None,
-        page: int = 1,
+        **controls: object,
     ) -> str:
-        """Render event prose alongside daily download controls.
+        """Render a reports page from saved events and controls.
 
         Returns:
-            A complete localized logs page using only supplied facts.
+            A complete page containing a status panel and event table.
         """
-        return render_logs(
+        return render_reports(
             {
                 "files": [
                     {
@@ -2265,130 +2466,115 @@ class EventPresentationTests(unittest.TestCase):
                     },
                 ],
                 "date": "2026-10-18",
-                "query": query,
-                "page": page,
                 "events": events,
-                "truncated": False,
+                **controls,
             },
             locale,
-            config=self.data["config"] if config is None else config,
+            status=self.data["status"],
+            config=self.data["config"],
+            now=self.now,
         )
 
     @staticmethod
-    def _paragraphs(output: str) -> list[str]:
-        """Read visible text from the fixed event-paragraph markup.
-
-        Returns:
-            Unescaped prose paragraphs, retaining linked report titles.
-        """
-        events = re.search(r'<div class="major-events">(.*?)</div>', output)
-        if events is None:
+    def _rows(output: str) -> list[list[str]]:
+        """Return visible cell text from the execution-event table."""
+        table = re.search(
+            r'<table class="logs-table">.*?<tbody>(.*?)</tbody>',
+            output,
+            re.DOTALL,
+        )
+        if table is None:
             return []
         return [
-            unescape(re.sub(r"<[^>]+>", "", paragraph))
-            for paragraph in re.findall(r"<p>(.*?)</p>", events[1])
+            [
+                unescape(re.sub(r"<[^>]+>", "", cell))
+                for cell in re.findall(r"<td>(.*?)</td>", row, re.DOTALL)
+            ]
+            for row in re.findall(r"<tr>(.*?)</tr>", table[1], re.DOTALL)
         ]
 
-    def test_major_event_kinds_use_normal_localized_prose(self) -> None:
-        """Describe services, tasks, refreshes, and report runs."""
-        events = [
-            self._event("service_started", service=service)
-            for service in ("hub", "scheduler", "website", "web")
-        ]
-        events.extend([
-            self._event("service_stopping", service="hub"),
-            self._event("service_stopped", service="hub"),
-            self._event("routine_started", routine="pageviews"),
-            self._event(
-                "routine_finished",
-                routine="pageviews",
-                status="updated",
-                updated=2,
-                duration_seconds=5.3,
-            ),
-            self._event("website_started"),
-            self._event(
-                "website_finished",
-                status="partial",
-                failures=1,
-                duration_seconds=0.44,
-            ),
-            self._event("run_started", tasks=6),
-            self._event(
-                "run_finished",
-                tasks=6,
-                failures=1,
-                deferred=2,
-                duration_seconds=65.1,
-            ),
-        ])
-        events.extend(
-            self._event("routine_started", routine=routine)
-            for routine in routine_configuration()["routines"]
-            if routine != "pageviews"
+    def test_reports_keep_status_panel_and_four_column_log(self) -> None:
+        """Localize status, accessible details, and event columns."""
+        event = self._event(
+            "routine_finished",
+            routine="pageviews",
+            status="updated",
+            duration_seconds=5.3,
         )
-        events.extend({**event, "dry": True} for event in events.copy())
         for locale in ("en", "zh-hans", "zh-hant"):
             interface = Interface(locale)
-            output = "".join(
-                self._render(events, locale, page=number)
-                for number in range(1, (len(events) + 24) // 25 + 1)
-            )
-            listing = re.search(
-                r'<div class="major-events">(.*)</div>',
-                '<div class="major-events">'
-                + "".join(
-                    re.findall(
-                        r'<div class="major-events">(.*?)</div>',
-                        output,
-                        re.DOTALL,
-                    ),
-                )
-                + "</div>",
-                re.DOTALL,
-            )
-            assert listing is not None
-            assert listing[1].count("<p>") == len(events)
-            assert "<ul" not in listing[1]
-            assert "<li" not in listing[1]
-            assert " · " not in listing[1]
-            assert (
-                '<time datetime="2026-10-18T12:00:02Z">'
-                "2026-10-18 12:00:02 UTC</time>" in listing[1]
-            )
-            for service in ("hub", "scheduler", "website", "web"):
-                assert interface.text(f"logs.service.{service}") in listing[1]
-            for routine in routine_configuration()["routines"]:
-                assert interface.text(f"routine.{routine}") in listing[1]
-            assert interface.text("logs.result.partial") in listing[1]
-            assert interface.text("logs.edits", count=2) in listing[1]
-            assert interface.text("logs.failure", count=1) in listing[1]
-            assert (
-                interface.text("duration.seconds", seconds="5.30")
-                in listing[1]
-            )
-            assert (
-                interface.text(
-                    "duration.minutes",
-                    minutes=1,
-                    seconds="05.10",
-                )
-                in listing[1]
-            )
-            assert "https://zh.wikipedia.org/wiki/" in listing[1]
-            assert "<pre" not in output
-            assert "<code" not in output
-            for identifier in (
-                "routine_started",
-                "service_started",
-                "run_finished",
+            output = self._render([event], locale)
+            for identifier, key in (
+                ("tool-status-heading", "reports.panel"),
+                ("recent-events", "reports.log"),
             ):
-                assert identifier not in listing[1]
+                assert (
+                    f'<h2 id="{identifier}">{interface.text(key)}</h2>'
+                    in output
+                )
+            assert '<dialog id="report-details-pageviews"' in output
+            assert (
+                'aria-labelledby="report-details-pageviews-heading"' in output
+            )
+            assert 'commandfor="report-details-pageviews"' in output
+            assert 'command="close" autofocus' in output
+            assert "&lt;Latest &amp; safe&gt;" in output
+            assert 'class="routine-status" data-status=' in output
+            assert output.count('<script src="/live.js" defer>') == 1
+            assert 'id="live-server-status"' not in output
+            assert 'class="major-events"' not in output
+            for key in (
+                "logs.column_date",
+                "logs.task_label",
+                "logs.status",
+                "logs.duration_label",
+            ):
+                assert f'<th scope="col">{interface.text(key)}</th>' in output
+            assert self._rows(output) == [
+                [
+                    "2026-10-18 12:00:02 UTC",
+                    interface.text("routine.pageviews"),
+                    interface.text("logs.result.updated"),
+                    interface.text("duration.seconds", seconds="5.30"),
+                ],
+            ]
 
-    def test_results_preserve_unknown_counts_and_preview_semantics(
-        self,
-    ) -> None:
-        """Distinguish unavailable results, zero, and previews."""
+    def test_event_kinds_use_tasks_and_observed_results(self) -> None:
+        """Distinguish services, report tasks, refreshes, and runs."""
+        events = [
+            self._event("service_started", service="hub"),
+            self._event("routine_started", routine="pageviews"),
+            self._event("website_finished", status="partial"),
+            self._event(
+                "run_finished",
+                status="failed",
+                duration_seconds=65.1,
+            ),
+        ]
+        for locale in ("en", "zh-hans", "zh-hant"):
+            interface = Interface(locale)
+            rows = self._rows(self._render(events, locale))
+            assert [row[1] for row in rows] == [
+                interface.text("logs.service.hub"),
+                interface.text("routine.pageviews"),
+                interface.text("logs.service.website"),
+                interface.text("logs.run_task"),
+            ]
+            assert [row[2] for row in rows] == [
+                interface.text("state.Running"),
+                interface.text("state.Running"),
+                interface.text("logs.result.partial"),
+                interface.text("logs.result.failed"),
+            ]
+            assert [row[3] for row in rows[:3]] == ["—"] * 3
+            assert rows[3][3] == interface.text(
+                "duration.minutes",
+                minutes=1,
+                seconds="05.10",
+            )
+
+    def test_unknown_and_preview_outcomes_remain_explicit(self) -> None:
+        """Retain zero durations, unknown results, and previews."""
         for locale in ("en", "zh-hans", "zh-hant"):
             interface = Interface(locale)
             for outcome in (
@@ -2398,345 +2584,100 @@ class EventPresentationTests(unittest.TestCase):
                 "deferred",
                 "unconfirmed",
             ):
-                output = self._render(
-                    [
-                        self._event(
-                            "routine_finished",
-                            routine="pageviews",
-                            status=outcome,
-                            updated=None,
-                            duration_seconds=1,
-                        ),
-                    ],
-                    locale,
+                event = self._event(
+                    "routine_finished",
+                    routine="pageviews",
+                    status=outcome,
+                    duration_seconds=0,
+                    updated=None,
                 )
-                assert interface.text(f"logs.result.{outcome}") in output
-                assert interface.text("logs.edits", count=0) not in output
-            output = self._render(
-                [
-                    self._event(
-                        "routine_finished",
-                        routine="pageviews",
-                        status="no_update",
-                        updated=0,
-                        duration_seconds=0,
-                    ),
-                ],
-                locale,
-            )
-            assert interface.text("logs.edits", count=0) in output
-            output = self._render(
-                [
-                    self._event(
-                        "routine_finished",
-                        routine="pageviews",
-                        status="updated",
-                        updated=0,
-                        duration_seconds=0,
-                        dry=True,
-                    ),
-                ],
-                locale,
-            )
-            assert interface.text("logs.edits", count=0) not in output
-            assert (
-                interface.text(
-                    "logs.event.preview_routine_finished",
-                    routine=interface.text("routine.pageviews"),
-                    result=interface.text("logs.result.updated"),
+                rows = self._rows(self._render([event], locale))
+                assert rows[0][2] == interface.text(f"logs.result.{outcome}")
+                assert rows[0][3] == interface.text(
+                    "duration.seconds",
+                    seconds="0.00",
                 )
-                in output
-            )
-
-    def test_search_matches_localized_summaries_and_escaped_target_titles(
-        self,
-    ) -> None:
-        """Find translated words and safely linked report titles."""
-        events = [self._event("routine_started", routine="pageviews")]
-        for locale, query in (
-            ("en", "STARTED"),
-            ("zh-hans", "开始执行"),
-            ("zh-hant", "開始執行"),
-        ):
-            output = self._render(events, locale, query=query)
-            assert '<div class="major-events">' in output
-        config = copy.deepcopy(self.data["config"])
-        config["routines"]["routines"]["pageviews"]["pages"] = {
-            "report": 'WikiProject:<script>never execute</script> & "title"',
-        }
-        output = self._render(events, query="never execute", config=config)
-        assert '<div class="major-events">' in output
-        assert "&lt;script&gt;never execute&lt;/script&gt;" in output
-        assert "<script>never execute</script>" not in output
-        assert (
-            "https://zh.wikipedia.org/wiki/WikiProject%3A%3Cscript%3E"
-            in output
-        )
-        assert '<div class="major-events">' not in self._render(
-            events,
-            query="no match",
-            config=config,
-        )
-        definition = config["routines"]["routines"]["pageviews"]
-        definition["pages"] = {}
-        definition["prefixes"] = ["WikiProject:Report prefix/"]
-        output = self._render(events, query="Report prefix", config=config)
-        assert "WikiProject%3AReport_prefix%2F" in output
-
-    def test_unknown_identifiers_never_expose_diagnostics(self) -> None:
-        """Omit unknown kinds and retain generic outcome labels."""
+                if outcome in {"updated", "no_update"}:
+                    rows = self._rows(
+                        self._render([{**event, "dry": True}], locale),
+                    )
+                    assert rows[0][2] == interface.text("logs.result.updated")
         output = self._render([
+            self._event("private_traceback", detail="secret diagnostic"),
             self._event(
-                "traceback_secret_diagnostic",
-                detail="private message",
+                "routine_finished",
+                routine="private_routine",
+                status="private_exception",
+            ),
+        ])
+        rows = self._rows(output)
+        assert len(rows) == 1
+        assert rows[0][2] == Interface("en").text("logs.result.unknown")
+        assert rows[0][3] == "—"
+        for private in (
+            "private_traceback",
+            "secret diagnostic",
+            "private_routine",
+            "private_exception",
+        ):
+            assert private not in output
+
+    def test_search_status_order_and_query_escaping(self) -> None:
+        """Filter visible cells and escape search controls."""
+        events = [
+            self._event(
+                "routine_started",
+                routine="pageviews",
+                time="2026-10-18T11:00:00Z",
             ),
             self._event(
                 "routine_finished",
                 routine="pageviews",
-                status="secret_exception_name",
-                updated=None,
-                duration_seconds=1,
-            ),
-        ])
-        assert Interface("en").text("logs.result.unknown") in output
-        for secret in (
-            "traceback_secret_diagnostic",
-            "private message",
-            "secret_exception_name",
-        ):
-            assert secret not in output
-
-    def test_event_display_remains_bounded(self) -> None:
-        """Keep no more than one hundred saved major events visible."""
-        output = self._render([
-            self._event("service_started", service="hub") for _ in range(105)
-        ])
-        listing = re.search(r'<div class="major-events">(.*?)</div>', output)
-        assert listing is not None
-        assert listing[1].count("<p>") == 25
-
-    def test_failed_attempts_keep_confirmed_edits_in_complete_sentences(
-        self,
-    ) -> None:
-        """Separate confirmed edits and elapsed work from retries."""
-        event = self._event(
-            "routine_finished",
-            routine="pageviews",
-            status="failed",
-            updated=1,
-            duration_seconds=5.3,
-        )
-        for locale, expected in (
-            (
-                "en",
-                (
-                    "At 2026-10-18 12:00:02 UTC, "
-                    "the Pageview rankings task failed. "
-                    "1 page edit was confirmed. The attempt took 5.30 s. "
-                    "Related reports include WikiProject:电子游戏/热门条目."
-                ),
-            ),
-            (
-                "zh-hans",
-                (
-                    "在2026-10-18 12:00:02 UTC\uff0c浏览量排行执行失败。"
-                    "已确认完成1次页面编辑。本次执行耗时5.30秒。"
-                    "相关报告包括WikiProject:电子游戏/热门条目。"
-                ),
-            ),
-            (
-                "zh-hant",
-                (
-                    "在2026-10-18 12:00:02 UTC\uff0c瀏覽量排行執行失敗。"
-                    "已確認完成1次頁面編輯。本次執行耗時5.30秒。"
-                    "相關報告包括WikiProject:电子游戏/热门条目。"
-                ),
-            ),
-        ):
-            with self.subTest(locale=locale):
-                assert self._paragraphs(self._render([event], locale)) == [
-                    expected,
-                ]
-
-    def test_pending_unconfirmed_and_preview_prose_preserves_outcomes(
-        self,
-    ) -> None:
-        """Keep pending, unconfirmed, and preview outcomes distinct."""
-        for locale, prefix, duration_sentence, reports, clauses in (
-            (
-                "en",
-                "At 2026-10-18 12:00:02 UTC, ",
-                " The attempt took 0.44 s.",
-                " Related reports include WikiProject:电子游戏/热门条目.",
-                (
-                    "the Pageview rankings task was deferred for retry.",
-                    (
-                        "the Pageview rankings task finished, "
-                        "but its result is unconfirmed."
-                    ),
-                    (
-                        "the preview of the Pageview rankings task "
-                        "completed successfully."
-                    ),
-                ),
-            ),
-            (
-                "zh-hans",
-                "在2026-10-18 12:00:02 UTC\uff0c",
-                "本次执行耗时0.44秒。",
-                "相关报告包括WikiProject:电子游戏/热门条目。",
-                (
-                    "浏览量排行已推迟执行\uff0c等待重试。",
-                    "浏览量排行已结束\uff0c但结果尚未确认。",
-                    "浏览量排行预览已完成。",
-                ),
-            ),
-            (
-                "zh-hant",
-                "在2026-10-18 12:00:02 UTC\uff0c",
-                "本次執行耗時0.44秒。",
-                "相關報告包括WikiProject:电子游戏/热门条目。",
-                (
-                    "瀏覽量排行已延後執行\uff0c等待重試。",
-                    "瀏覽量排行已結束\uff0c但結果尚未確認。",
-                    "瀏覽量排行預覽已完成。",
-                ),
-            ),
-        ):
-            for (status, dry), clause in zip(
-                (
-                    ("deferred", False),
-                    ("unconfirmed", False),
-                    ("updated", True),
-                ),
-                clauses,
-                strict=True,
-            ):
-                event = self._event(
-                    "routine_finished",
-                    routine="pageviews",
-                    status=status,
-                    dry=dry,
-                    updated=1 if dry else None,
-                    duration_seconds=0.44,
-                )
-                expected = prefix + clause + duration_sentence + reports
-                with self.subTest(locale=locale, status=status, dry=dry):
-                    assert self._paragraphs(self._render([event], locale)) == [
-                        expected,
-                    ]
-                    if dry:
-                        proposed = {
-                            **event,
-                            "status": "no_update",
-                            "updated": 0,
-                        }
-                        assert self._paragraphs(
-                            self._render([proposed], locale),
-                        ) == [expected]
-
-    def test_run_counts_and_source_failures_use_sentence_grammar(self) -> None:
-        """Keep noun forms correct and source failures separate."""
-        events = [
-            self._event(
-                "run_finished",
-                tasks=1,
-                failures=0,
-                deferred=1,
-                duration_seconds=1,
-            ),
-            self._event(
-                "website_finished",
-                status="partial",
-                failures=1,
-                duration_seconds=0.44,
+                status="failed",
+                duration_seconds=5.3,
             ),
         ]
-        for locale, expected in (
-            (
-                "en",
-                [
-                    (
-                        "At 2026-10-18 12:00:02 UTC, "
-                        "the report run finished after processing 1 task, "
-                        "with 0 tasks failing and 1 task deferred for retry. "
-                        "The attempt took 1.00 s."
-                    ),
-                    (
-                        "At 2026-10-18 12:00:02 UTC, "
-                        "the website data refresh completed with some "
-                        "failures. The refresh encountered 1 source failure. "
-                        "The attempt took 0.44 s."
-                    ),
-                ],
-            ),
-            (
-                "zh-hans",
-                [
-                    (
-                        "在2026-10-18 12:00:02 UTC\uff0c报告执行完毕\uff0c"
-                        "共处理1项任务\uff0c其中0项任务失败\uff0c"
-                        "1项任务等待重试。本次执行耗时1.00秒。"
-                    ),
-                    (
-                        "在2026-10-18 12:00:02 UTC\uff0c"
-                        "网站数据刷新已部分完成。"
-                        "刷新时有1项来源获取失败。本次执行耗时0.44秒。"
-                    ),
-                ],
-            ),
-            (
-                "zh-hant",
-                [
-                    (
-                        "在2026-10-18 12:00:02 UTC\uff0c報告執行完畢\uff0c"
-                        "共處理1項任務\uff0c其中0項任務失敗\uff0c"
-                        "1項任務等待重試。本次執行耗時1.00秒。"
-                    ),
-                    (
-                        "在2026-10-18 12:00:02 UTC\uff0c"
-                        "網站資料重新整理已部分完成。"
-                        "重新整理時有1項來源取得失敗。本次執行耗時0.44秒。"
-                    ),
-                ],
-            ),
-        ):
-            with self.subTest(locale=locale):
-                assert (
-                    self._paragraphs(self._render(events, locale)) == expected
-                )
+        for locale in ("en", "zh-hans", "zh-hant"):
+            interface = Interface(locale)
+            for controls, count in (
+                ({"query": interface.text("routine.pageviews").upper()}, 2),
+                ({"query": interface.text("logs.result.failed")}, 1),
+                ({"status": "running"}, 1),
+            ):
+                output = self._render(events, locale, **controls)
+                assert len(self._rows(output)) == count
+        rows = self._rows(self._render(events, order="asc"))
+        assert rows[0][0] == "2026-10-18 11:00:00 UTC"
+        assert self._rows(self._render(events))[0][0] == rows[1][0]
+        for query in ("2026-10-18 12:00:02", "5.30 s"):
+            assert len(self._rows(self._render(events, query=query))) == 1
+        output = self._render(events, query='"><script>bad</script>')
+        assert not self._rows(output)
+        assert "&lt;script&gt;bad&lt;/script&gt;" in output
+        assert "<script>bad</script>" not in output
+        assert '<form action="/reports/"' in output
+        assert 'href="/logs/?date=2026-10-18&amp;download=1"' in output
 
-    def test_full_prose_search_and_related_targets_remain_safe(self) -> None:
-        """Search complete prose and retain related targets as links."""
-        event = self._event(
-            "routine_finished",
-            routine="pageviews",
-            status="failed",
-            updated=0,
-            duration_seconds=5.3,
-        )
-        for query in (
-            "0 page edits were confirmed",
-            "attempt took 5.30",
-            "Related reports include",
-            "2026-10-18 12:00:02 UTC",
-        ):
-            assert (
-                len(self._paragraphs(self._render([event], query=query))) == 1
+    def test_event_table_is_bounded_and_paged(self) -> None:
+        """Retain one hundred rows with twenty-five on each page."""
+        events = [
+            self._event(
+                "routine_finished",
+                routine="pageviews",
+                status="updated",
+                time=(self.now + dt.timedelta(minutes=index)).isoformat(),
             )
-        config = copy.deepcopy(self.data["config"])
-        config["routines"]["routines"]["pageviews"]["pages"] = {
-            "first": "Report A",
-            "second": "Report B",
-            "third": "Report <C>",
-        }
-        output = self._render([event], config=config)
-        assert self._paragraphs(output)[0].endswith(
-            "0 page edits were confirmed. The attempt took 5.30 s. "
-            "Related reports include Report A, Report B and Report <C>.",
+            for index in range(105)
+        ]
+        outputs = [self._render(events, page=number) for number in range(1, 5)]
+        assert all(len(self._rows(output)) == 25 for output in outputs)
+        assert "page=2" in outputs[0]
+        assert "/reports/?" in outputs[0]
+        assert "page=3" in outputs[-1]
+        assert self._rows(self._render(events, page=100)) == self._rows(
+            outputs[-1],
         )
-        assert "Report &lt;C&gt;" in output
-        assert "<C>" not in output
+        assert not self._rows(self._render(events, query="no match"))
 
 
 if __name__ == "__main__":

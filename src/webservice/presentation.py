@@ -926,7 +926,8 @@ def uptime(
     """Show runtime only when fresh observations confirm it.
 
     Returns:
-        Localized continuous uptime or an unavailable explanation.
+        Localized observed runtime, omitting leading zero units.
+        Unavailable observations retain their explanation.
     """
     started = timestamp(schedule.get("started_at"))
     updated = timestamp(schedule.get("updated_at"))
@@ -939,14 +940,27 @@ def uptime(
         or (now - updated).total_seconds() > _SCHEDULE_MAX_AGE
     ):
         return interface.text("footer.uptime_unknown", version=version)
-    minutes = int((now - started).total_seconds() // _MINUTE)
+    seconds = int((now - started).total_seconds())
+    minutes = seconds // _MINUTE
+    unit = (
+        "days"
+        if minutes >= _DAY_MINUTES
+        else "hours"
+        if minutes >= _HOUR_MINUTES
+        else "minutes"
+        if minutes
+        else "seconds"
+    )
     return interface.text(
         "footer.uptime",
         version=version,
-        days=minutes // _DAY_MINUTES,
-        hours=minutes % _DAY_MINUTES // _HOUR_MINUTES,
-        minutes=minutes % _HOUR_MINUTES,
-        seconds=int((now - started).total_seconds()) % _MINUTE,
+        duration=interface.text(
+            f"duration.{unit}",
+            days=minutes // _DAY_MINUTES,
+            hours=minutes % _DAY_MINUTES // _HOUR_MINUTES,
+            minutes=minutes % _HOUR_MINUTES,
+            seconds=seconds % _MINUTE,
+        ),
         since=utc_time(schedule["started_at"]).removesuffix(" UTC"),
     )
 

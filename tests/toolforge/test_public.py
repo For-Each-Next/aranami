@@ -241,7 +241,13 @@ class PublicWebsiteTests(unittest.TestCase):
     def test_python_pages_render_before_optional_live_updates(self) -> None:
         """Keep complete HTML with optional dashboard status updates."""
         with patch("pywikibot.Site", side_effect=AssertionError("No sources")):
-            for target in ("/", "/about/", "/logs/"):
+            for target in (
+                "/",
+                "/about/",
+                "/reports/",
+                "/logs/",
+                "/maintenance/",
+            ):
                 with self.subTest(target=target):
                     status, headers, body = self.request(target)
                     assert status == 200
@@ -259,6 +265,12 @@ class PublicWebsiteTests(unittest.TestCase):
                         assert b'id="live-server-status"' in body
                         assert b'id="live-uptime"' in body
                         assert b'class="routine-row"' not in body
+                        assert b'id="recent-events"' not in body
+                    if target == "/reports/":
+                        assert b'id="tool-status"' in body
+                        assert b'id="recent-events"' in body
+                        assert b'class="routine-row"' in body
+                        assert b'id="live-server-status"' not in body
                     assert b"Enable JavaScript" not in body
             head = self.request("/", "HEAD")
             assert head[0] == 200
@@ -269,6 +281,76 @@ class PublicWebsiteTests(unittest.TestCase):
             assert self.request("/maintenance/?task=../private")[0] == 400
             assert self.request("/logs/?q=one&q=two")[0] == 400
         assert not (self.runtime / "state").exists()
+
+    def test_maintenance_overview_uses_saved_categories_and_task_links(
+        self,
+    ) -> None:
+        """Keep the overview separate from filtered task worklists."""
+        snapshot = {
+            "backlog": {
+                "observed_at": "2026-10-31T12:00:00Z",
+                "total": 1,
+                "groups": [
+                    {
+                        "key": "sources",
+                        "category": "缺少可靠来源的条目",
+                        "source_url": (
+                            "https://zh.wikipedia.org/wiki/Category:Sources"
+                        ),
+                        "label": "Sources <&>",
+                        "section_key": "sources",
+                        "section_label": "References <&>",
+                        "count": 1,
+                        "items": [],
+                    },
+                ],
+            },
+        }
+        with (
+            patch("pywikibot.Site", side_effect=AssertionError("No sources")),
+            patch(
+                "backend.public._PublicViews._dashboard",
+                return_value=snapshot,
+            ),
+        ):
+            status, headers, body = self.request("/maintenance/?lang=zh-hant")
+            assert status == 200
+            assert headers["Content-Language"] == "zh-Hant"
+            text = body.decode()
+            assert "<h1>條目維護</h1>" in text
+            assert '<h2 id="backlog-section-sources">' in text
+            assert 'href="#backlog-section-sources"' in text
+            assert "References &lt;&amp;&gt;" in text
+            assert "Sources &lt;&amp;&gt;" in text
+            assert 'href="/maintenance/?task=sources&amp;page=1"' in text
+            assert "2026-10-31 12:00 UTC" in text
+            assert 'href="/maintenance/?lang=en"' in text
+            head = self.request("/maintenance/?lang=zh-hant", "HEAD")
+            assert head[0] == 200
+            assert head[2] == b""
+            assert head[1]["Content-Length"] == headers["Content-Length"]
+            detail = self.request("/maintenance/?task=sources")[2].decode()
+            assert '<form class="maintenance-controls"' in detail
+            assert 'href="/maintenance/" class="back"' in detail
+            assert self.request("/maintenance/?task=missing")[0] == 404
+            assert self.request("/maintenance/?sort=title")[0] == 400
+        assert not (self.runtime / "state").exists()
+
+        with patch(
+            "backend.public._PublicViews._dashboard",
+            return_value={
+                "backlog": {
+                    "observed_at": "2026-10-31T12:00:00Z",
+                    "total": 0,
+                    "groups": [],
+                },
+            },
+        ):
+            status, _, body = self.request("/maintenance/?lang=en")
+            assert status == 200
+            assert b"No articles currently need maintenance." in body
+            assert b"2026-10-31 12:00 UTC" in body
+            assert b"temporarily unavailable" not in body
 
     def test_live_status_bypasses_page_cache_and_never_collects(self) -> None:
         """Refresh saved status without reading dashboard datasets."""
@@ -366,18 +448,28 @@ class PublicWebsiteTests(unittest.TestCase):
         assert value["events"] == events[-100:]
         assert value["truncated"]
         assert value["query"] == "[x]"
-        human = self.request("/logs/")[2].decode()
-        _, marker, remainder = human.partition('<div class="major-events">')
+        with (
+            patch("pywikibot.Site", side_effect=AssertionError("No sources")),
+            patch(
+                "backend.public._PublicViews._dashboard",
+                side_effect=AssertionError("No dataset reads"),
+            ),
+        ):
+            human = self.request("/reports/")[2].decode()
+        _, marker, remainder = human.partition("<tbody>")
         assert marker
-        prose = remainder.partition("</div>")[0]
-        assert prose.count("<p>") == 25
-        assert "<ul" not in prose
-        assert "<li" not in prose
-        assert " · " not in prose
-        assert "the Pageview rankings task started." in prose
-        assert "https://zh.wikipedia.org/wiki/" in prose
+        rows = remainder.partition("</tbody>")[0]
+        assert rows.count("<tr>") == 25
+        assert "Pageview rankings" in rows
+        assert "Running" in rows
+        assert "2026-10-23 12:02:29 UTC" in rows
+        assert '<form action="/reports/"' in human
+        assert 'href="/reports/?date=2026-10-23' in human
+        assert "the Pageview rankings task started." not in human
         assert "Line 149" not in human
         assert "<script>" not in human
+        assert '<div class="major-events">' not in human
+        self._assert_report_navigation(content, filename)
         downloaded = self.request("/api/logs?date=2026-10-23&download=1")
         assert downloaded[2] == content.encode()
         assert filename in downloaded[1]["Content-Disposition"]
@@ -395,6 +487,41 @@ class PublicWebsiteTests(unittest.TestCase):
                 assert self.request("/api/logs?" + query)[0] == 400
         assert self.request("/api/logs?date=2026-01-01")[0] == 404
         assert self.request("/api/logs?date=2026-10-22")[0] == 404
+
+    def _assert_report_navigation(self, content: str, filename: str) -> None:
+        """Verify report controls and separate diagnostic downloads."""
+        assert self.request("/reports/", "HEAD")[2] == b""
+        assert self.request("/reports/", "POST")[0] == 405
+        filtered = self.request(
+            "/reports/?date=2026-10-23&order=asc&page=2&status=running",
+        )[2].decode()
+        assert "2026-10-23 12:01:15 UTC" in filtered
+        assert 'href="/reports/?date=2026-10-23' in filtered
+        assert "lang=zh-hant" in filtered
+        assert (
+            b"No events match"
+            in self.request(
+                "/reports/?status=failed",
+            )[2]
+        )
+        for query in ("status=other", "page=5", "order=other", "q=a&q=b"):
+            with self.subTest(query=query):
+                assert self.request("/reports/?" + query)[0] == 400
+        with patch(
+            "backend.public.log_excerpt",
+            side_effect=AssertionError("Archive must not read run events"),
+        ):
+            status, _, archive = self.request("/logs/")
+        assert status == 200
+        assert filename.encode() in archive
+        assert b'id="recent-events"' not in archive
+        assert b'class="log-query"' not in archive
+        assert (
+            self.request(
+                "/logs/?date=2026-10-23&download=1",
+            )[2]
+            == content.encode()
+        )
 
     def test_raw_targets_and_query_bounds_remain_strict(self) -> None:
         """Reject encoded paths and oversized or invalid queries."""
