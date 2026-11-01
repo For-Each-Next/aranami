@@ -14,6 +14,7 @@ import polars as pl
 from dateutil.relativedelta import relativedelta
 
 from backend.services.zhwiki import pageviews
+from backend.support.pageviews_cache import PageviewsCache
 from shared.reports import ReportResult, ReportStore, report_key
 
 _TITLE = "WikiProject:电子游戏/热门条目"
@@ -277,6 +278,146 @@ class TestAnnualPageviewsPreparation(TestCase):
         assert actual["article_count"] == 2
         assert actual["total_views"] is None
         assert actual["items"] == [{"title": "A", "views": 10}]
+
+
+class TestRecalculatedAnnualPageviews(TestCase):
+    """Rebuild annual newsletter facts from validated daily Parquet."""
+
+    @staticmethod
+    def test_existing_daily_parquet_fills_missing_annual_result() -> None:
+        """Use calendar bounds, project members, and observed zeroes."""
+        start, stop = dt.date(2026, 1, 1), dt.date(2026, 1, 3)
+        with TemporaryDirectory() as directory, chdir(directory):
+            cache = PageviewsCache.load("zh.wikipedia.org")
+            for title, rows in (
+                (
+                    "A",
+                    [
+                        (dt.date(2025, 12, 31), 999),
+                        (start, 10),
+                        (dt.date(2026, 1, 2), 20),
+                        (stop, 888),
+                    ],
+                ),
+                ("B", [(start, 0), (dt.date(2026, 1, 2), 0)]),
+                ("Outside", [(dt.date(2026, 1, 2), 999)]),
+            ):
+                cache.replace(
+                    title,
+                    dt.date(2025, 12, 1),
+                    stop + dt.timedelta(days=1),
+                    pl.DataFrame(
+                        rows,
+                        schema={"date": pl.Date, "pageview": pl.Int64},
+                        orient="row",
+                    ),
+                )
+            cache.save(["A", "B", "Outside"])
+            with patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+            ) as fetch:
+                actual = pageviews.read_annual_popularity(
+                    _site(),
+                    2026,
+                    stop,
+                    title=_TITLE,
+                    titles=["A", "B", "A"],
+                )
+            fetch.assert_not_called()
+        assert actual == {
+            "start": "2026-01-01",
+            "end": "2026-01-02",
+            "article_count": 2,
+            "total_views": 30,
+            "items": [{"title": "A", "views": 30}, {"title": "B", "views": 0}],
+            "provisional": True,
+        }
+
+    @staticmethod
+    def test_every_update_rereads_changed_daily_observations() -> None:
+        """Replace equally dated saved totals with current inputs."""
+        start, stop = dt.date(2026, 1, 1), dt.date(2026, 1, 2)
+        with TemporaryDirectory() as directory, chdir(directory):
+            _save(_annual_rows(stop=stop), day=start)
+            cache = PageviewsCache.load("zh.wikipedia.org")
+            totals = []
+            for value in (12, 42):
+                cache.replace(
+                    "A",
+                    start,
+                    stop,
+                    pl.DataFrame({"date": [start], "pageview": [value]}),
+                )
+                cache.save(["A"])
+                actual = pageviews.read_annual_popularity(
+                    _site(),
+                    2026,
+                    stop,
+                    title=_TITLE,
+                    titles=["A"],
+                )
+                totals.append(actual["total_views"])
+        assert totals == [12, 42]
+
+    @staticmethod
+    def test_truncated_and_unobserved_members_keep_project_total_unknown() -> (
+        None
+    ):
+        """Keep partial-year traffic out of full-year totals."""
+        start, stop = dt.date(2026, 1, 1), dt.date(2027, 1, 1)
+        with TemporaryDirectory() as directory, chdir(directory):
+            cache = PageviewsCache.load("zh.wikipedia.org")
+            for title, coverage in (
+                ("A", start),
+                ("Truncated", dt.date(2026, 6, 1)),
+            ):
+                cache.replace(
+                    title,
+                    coverage,
+                    stop,
+                    pl.DataFrame({
+                        "date": [stop - dt.timedelta(days=1)],
+                        "pageview": [10],
+                    }),
+                )
+            cache.save(["A", "Truncated"])
+            actual = pageviews.read_annual_popularity(
+                _site(),
+                2026,
+                stop,
+                title=_TITLE,
+                titles=["A", "Truncated", "Missing"],
+            )
+        assert actual["article_count"] == 3
+        assert actual["total_views"] is None
+        assert actual["items"] == [{"title": "A", "views": 10}]
+        assert actual["end"] == "2026-12-31"
+        assert actual["provisional"] is False
+
+    @staticmethod
+    def test_newer_saved_calculation_survives_older_daily_history() -> None:
+        """Keep durable results when retained inputs are older."""
+        start, stop = dt.date(2026, 1, 1), dt.date(2026, 1, 2)
+        with TemporaryDirectory() as directory, chdir(directory):
+            _save(_annual_rows())
+            cache = PageviewsCache.load("zh.wikipedia.org")
+            cache.replace(
+                "A",
+                start,
+                stop,
+                pl.DataFrame({"date": [start], "pageview": [10]}),
+            )
+            cache.save(["A"])
+            actual = pageviews.read_annual_popularity(
+                _site(),
+                2026,
+                _STOP,
+                title=_TITLE,
+                titles=["A"],
+            )
+        assert actual["end"] == "2026-10-30"
+        assert actual["article_count"] == 3
 
 
 class TestSavedAnnualPageviews(TestCase):

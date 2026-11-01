@@ -11,6 +11,7 @@ import gzip
 import http.client
 import io
 import json
+import re
 import tempfile
 import threading
 import unittest
@@ -279,8 +280,11 @@ class PublicWebsiteTests(unittest.TestCase):
                         assert b'id="live-server-status"' in body
                         assert b'id="live-uptime"' in body
                         assert b"data-clock-messages=" in body
+                        assert b'href="/logs/"' not in body
                     if target == "/logs/":
-                        assert b'id="live-server-status"' in body
+                        assert b'id="live-server-status"' not in body
+                        assert b'id="server-runtime"' not in body
+                        assert b'href="#live-server-status"' not in body
                         assert b'id="live-uptime"' in body
                         assert b'class="routine-row"' not in body
                         assert b'id="recent-events"' not in body
@@ -589,12 +593,24 @@ class PublicWebsiteTests(unittest.TestCase):
         assert status == 200
         assert b'id="tool-status"' in body
         assert b'id="recent-events"' in body
-        assert b'<table class="logs-table">' not in body
+        assert (
+            re.search(
+                rb'<table class="[^"]*\blogs-table\b[^"]*">',
+                body,
+            )
+            is None
+        )
         history.write_text("invalid history")
         status, _, body = self.request("/reports/")
         assert status == 200
         assert b'id="tool-status"' in body
-        assert b'<table class="logs-table">' not in body
+        assert (
+            re.search(
+                rb'<table class="[^"]*\blogs-table\b[^"]*">',
+                body,
+            )
+            is None
+        )
         assert history.read_text() == "invalid history"
 
     def test_raw_targets_and_query_bounds_remain_strict(self) -> None:

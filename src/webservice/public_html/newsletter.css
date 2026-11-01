@@ -1,8 +1,8 @@
 /* Newsletter code displays follow the shared Codex colors and native controls. */
-.newsletter-controls > select,
-.newsletter-controls > button,
-.newsletter-date-selection > input,
-.newsletter-date-selection > button,
+.newsletter-controls .cdx-select,
+.newsletter-controls .cdx-button,
+.newsletter-date-selection .cdx-text-input__input,
+.newsletter-date-selection .cdx-button,
 .newsletter-copy-controls > .cdx-button {
     block-size: 2rem;
     min-block-size: 2rem;
@@ -17,12 +17,14 @@
     margin-block: 1.5rem;
 }
 
-.newsletter-controls > label {
-    flex-basis: 100%;
-    font-weight: 700;
+.newsletter-issue-selection {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
 }
 
-.newsletter-controls > select {
+.newsletter-controls .cdx-select {
     inline-size: 18rem;
     max-inline-size: 100%;
 }
@@ -44,7 +46,7 @@
     gap: 0.5rem;
 }
 
-.newsletter-date-selection input {
+.newsletter-date-selection .cdx-text-input {
     box-sizing: border-box;
     inline-size: 12rem;
     min-inline-size: 0;

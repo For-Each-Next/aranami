@@ -1,14 +1,16 @@
 {% if section.empty %}
-<p class="empty">{{ section.empty }}</p>
+<div class="cdx-message cdx-message--notice" aria-live="polite"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#message-notice"></use></svg><div class="cdx-message__content">{{ section.empty }}</div></div>
 {% else %}
 {% if section.is_review %}<ul class="card-grid article-list review-cards" role="list">{% else %}<ol class="card-grid article-list highlights" role="list">{% endif %}
   {% for card in section.cards %}
   <li class="article-card"{% if card.rank and not section.is_review %} value="{{ card.rank }}"{% endif %}>
-    <div class="article-card-body">
-      {% include "includes/article_summary.html" %}
+    <div class="article-card-body cdx-card">
+      <div class="cdx-card__text">
+      <div class="cdx-card__text__title">{% include "includes/article_summary.html" %}</div>
       {% if card.extract is not none %}
-        <p class="article-extract"><bdi lang="{{ card.extract_language }}">{{ card.extract }}</bdi></p>
+        <div class="cdx-card__text__description"><p class="article-extract"><bdi lang="{{ card.extract_language }}">{{ card.extract }}</bdi></p></div>
       {% endif %}
+      <div class="cdx-card__text__supporting-text">
       {% if card.review_link %}
       <ul class="card-meta review-meta" role="list">
         <li>{{ card.review_link }}</li>
@@ -20,6 +22,8 @@
       {% else %}
       <p class="card-meta">{% if card.pageviews_url %}<a href="{{ card.pageviews_url }}" class="pageviews-number">{{ card.views }}</a>{% if card.site_rank %} · <a class="site-rank" href="{{ card.site_rank_url }}">{{ card.site_rank }}</a>{% endif %}{% else %}{{ card.scheduled }}{% if card.date %}<time datetime="{{ card.date.value }}">{{ card.date.label }}</time>{% endif %}{% if card.separator %} · {% endif %}{% if card.kind %}{{ card.kind }}{% endif %}{% if card.date_note %}<abbr class="date-note-marker" title="{{ card.date_note }}" aria-label="{{ card.date_note }}">†</abbr>{% endif %}{% endif %}</p>
       {% endif %}
+      </div>
+      </div>
     </div>
   </li>
   {% endfor %}

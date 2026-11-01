@@ -44,11 +44,6 @@
     "zh-hans": "电子游戏专题",
     "zh-hant": "電子遊戲專題"
   },
-  "nav.logs": {
-    "en": "Run logs",
-    "zh-hans": "运行日志",
-    "zh-hant": "執行日誌"
-  },
   "nav.about": {
     "en": "About Aranami",
     "zh-hans": "关于Aranami",
@@ -1299,11 +1294,6 @@
     "zh-hans": "每日日志归档",
     "zh-hant": "每日日誌封存"
   },
-  "logs.system_details": {
-    "en": "System details",
-    "zh-hans": "系统详情",
-    "zh-hant": "系統詳情"
-  },
   "logs.task_label": {
     "en": "Task or service",
     "zh-hans": "任务或服务",
@@ -1626,8 +1616,8 @@
   },
   "newsletter.page.feature": {
     "en": "Feature",
-    "zh-hans": "专题",
-    "zh-hant": "專題"
+    "zh-hans": "专题报道",
+    "zh-hant": "專題報導"
   },
   "newsletter.page.interview": {
     "en": "Interview",
@@ -1888,11 +1878,6 @@
     "en": "({count} months from now)",
     "zh-hans": "（{count}月后）",
     "zh-hant": "（{count}月後）"
-  },
-  "server.storage": {
-    "en": "Storage used / total",
-    "zh-hans": "存储已用／总量",
-    "zh-hant": "儲存已用／總量"
   },
   "time.minutes_ago_one": {
     "en": "({count} minute ago)",

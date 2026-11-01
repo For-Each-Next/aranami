@@ -109,8 +109,8 @@ class LogControlsTests(unittest.TestCase):
                 output = response.text
                 listing = self._listing(output)
                 assert listing.count("<tr>") == 20
-                assert listing.count("<td>") == 80
-                assert output.count('<th scope="col">') == 4
+                assert len(re.findall(r"<td\b[^>]*>", listing)) == 80
+                assert len(re.findall(r'<th\b[^>]*scope="col"', output)) == 4
                 assert re.findall(r'<time datetime="([^"]+)"', listing) == [
                     event["time"] for event in reversed(self.events[-20:])
                 ]
@@ -133,14 +133,14 @@ class LogControlsTests(unittest.TestCase):
                     "/logs/",
                     headers={"Accept-Language": locale},
                 ).text
-                archive = archive_output.split(
-                    '<table class="logs-table">',
-                    1,
-                )[1].split(
-                    "</table>",
-                    1,
-                )[0]
-                assert archive.count('<th scope="col">') == 3
+                table = re.search(
+                    r'<table class="[^"]*\blogs-table\b[^"]*">(.*?)</table>',
+                    archive_output,
+                    re.DOTALL,
+                )
+                assert table is not None
+                archive = table[1]
+                assert len(re.findall(r'<th\b[^>]*scope="col"', archive)) == 3
                 assert archive.count("<td") == 3
                 assert (
                     '<td class="log-download"><a class="filename" href="'
@@ -150,7 +150,9 @@ class LogControlsTests(unittest.TestCase):
                 assert interface.text("logs.download") not in archive
                 assert 'class="log-query"' not in archive_output
                 assert 'id="recent-events"' not in archive_output
-                assert 'class="system-details"' in archive_output
+                assert 'id="live-server-status"' not in archive_output
+                assert 'href="#live-server-status"' not in archive_output
+                assert 'id="live-uptime"' in archive_output
                 assert 'class="system-details"' not in output
                 assert (
                     self.client.get(
@@ -201,7 +203,13 @@ class LogControlsTests(unittest.TestCase):
             assert Interface(locale).text("reports.empty") in response.text
             assert "download=1" not in response.text
             assert " download>" not in response.text
-            assert '<table class="logs-table">' not in response.text
+            assert (
+                re.search(
+                    r'<table class="[^"]*\blogs-table\b[^"]*">',
+                    response.text,
+                )
+                is None
+            )
             assert 'class="log-query"' not in response.text
 
     def test_history_is_independent_of_diagnostic_files(self) -> None:

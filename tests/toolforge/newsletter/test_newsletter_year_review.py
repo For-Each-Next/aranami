@@ -530,7 +530,9 @@ class TestYearReview(TestCase):
                     Reader(),
                     now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
                     current_assessments=current,
-                    assessments_at=lambda _date, retained=retained: retained,
+                    assessments_at=lambda date, retained=retained: (
+                        retained if date == dt.date(2027, 1, 1) else None
+                    ),
                 )
                 annual = result["issues"]["2027-01"]["year_review"]
                 assert annual["dyk"][0]["grade"] == expected

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import re
 
+import mwparserfromhell
+
 from shared.newsletter import Issue
 
 _MAX_BYTES = 250_000
@@ -44,6 +46,37 @@ _SLOT = re.compile(r"@@aranami:([a-z_:]+)@@")
 _NUMBER = re.compile(r"第([0-9一二三四五六七八九十廿卅百零〇兩]+)號")
 _FORBIDDEN_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _AUTHORED_LINKS = (("專題", "專題報導：<待定>"), ("訪談", "訪談：<待定>"))
+_SOURCE_BANNER_SUFFIX = (
+    "{{pb}}可於[[toolforge:aranami/newsletter/|此處]]參看"
+    "自動生成的wikitext文字。"
+)
+
+
+def newsletter_source_banner(text: str) -> str:
+    """Link the leading draft notice to its generated source.
+
+    Args:
+        text: Saved source with its original top-level draft banner.
+
+    Returns:
+        Source with the automatic-draft link appended once to the first
+        mbox text. Other parameters, whitespace, and authored text stay
+        intact; missing or nested-only banners leave source unchanged.
+    """
+    code = mwparserfromhell.parse(text)
+    for template in code.filter_templates(recursive=False):
+        if not template.name.matches("mbox"):
+            continue
+        if template.has("text"):
+            parameter = template.get("text")
+            value = str(parameter.value)
+            if _SOURCE_BANNER_SUFFIX not in value:
+                content = value.rstrip()
+                parameter.value = (
+                    content + _SOURCE_BANNER_SUFFIX + value[len(content) :]
+                )
+        break
+    return str(code)
 
 
 def _slot(name: str) -> str:

@@ -101,7 +101,10 @@ class SourceReader:
 
     def __init__(self, originals: dict[str, str]) -> None:
         """Retain source pages and their revision provenance."""
-        self.originals = originals
+        self.originals = {
+            "Module:VGNL/data": ('return {{id="2026-10",date={2026,10,nil}}}'),
+            **originals,
+        }
         self.sources = {}
         self.reads = []
 

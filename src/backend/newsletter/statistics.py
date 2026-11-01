@@ -360,7 +360,7 @@ def collect_popularity(  # ruff: ignore[too-many-arguments]
     if annual_pageviews is not None:
         prepared = annual_pageviews(year, min(issue.end, now.date()))
         if prepared is not None and (
-            annual is None or prepared["end"] > annual["end"]
+            annual is None or prepared["end"] >= annual["end"]
         ):
             annual = {
                 **prepared,

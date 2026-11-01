@@ -62,6 +62,7 @@ class DashboardFixture(TestCase):
                 "page_namespace": [0, 14],
                 "full_title": ["Game", "Category:Games"],
                 "pa_class": ["GA", "NA"],
+                "pa_importance": ["低", "不适用"],
             }),
         )
         self.page_projects = self._patch(

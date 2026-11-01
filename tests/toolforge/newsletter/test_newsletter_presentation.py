@@ -57,8 +57,8 @@ class NewsletterPresentationTests(unittest.TestCase):
             )
             for locale, feature, interview in (
                 ("en", "Feature", "Interview"),
-                ("zh-hans", "专题", "访谈"),
-                ("zh-hant", "專題", "訪談"),
+                ("zh-hans", "专题报道", "访谈"),
+                ("zh-hant", "專題報導", "訪談"),
             ):
                 with self.subTest(issue=value, locale=locale):
                     output = render_newsletter(result, locale)
@@ -311,7 +311,8 @@ class NewsletterPresentationTests(unittest.TestCase):
                 assert submit is not None
                 assert "hidden" not in submit[1]
                 assert (
-                    '<p class="notice" role="status" hidden '
+                    '<p class="cdx-message cdx-message--notice '
+                    'cdx-message--inline" role="status" hidden '
                     "data-newsletter-load-status" in output
                 )
                 assert "newsletter-code-label" not in output

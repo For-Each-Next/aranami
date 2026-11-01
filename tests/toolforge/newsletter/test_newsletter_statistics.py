@@ -446,9 +446,15 @@ class AnnualFigureIntroductionTests(TestCase):
         ]
         assert len(children) == 2
         for child in children:
+            assert not any(
+                tag.tag == "div"
+                for tag in child.contents.filter_tags(recursive=False)
+            )
             charts = [
                 template
-                for template in child.contents.filter_templates()
+                for template in child.contents.filter_templates(
+                    recursive=False,
+                )
                 if template.name.matches("Graph:Chart")
             ]
             assert len(charts) == 1
@@ -500,7 +506,7 @@ class AnnualFigureIntroductionTests(TestCase):
             (
                 quality,
                 next(tag for tag in quality_blocks if tag.tag == "li"),
-                "誕生條目具體如下：",
+                "新入選或晉級條目如下：",
                 "2026年10月31日",
             ),
             (

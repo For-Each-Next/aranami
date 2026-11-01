@@ -1452,7 +1452,7 @@ class PresentationTests(unittest.TestCase):
             now=self.now,
         )
         assert '<dialog id="report-details-pageviews"' in output
-        assert '<p class="empty">No record</p>' in output
+        assert '<div class="cdx-message__content">No record</div>' in output
 
     def test_queued_reports_wait_until_individual_execution_starts(
         self,
@@ -1699,7 +1699,10 @@ class PresentationTests(unittest.TestCase):
             assert "<pre" not in output
             assert "1.0 KiB" in output
             assert "/logs/?date=2026-10-18&amp;download=1" in output
-            assert 'class="empty"' in render_logs({"files": []}, locale)
+            assert Interface(locale).text("logs.empty") in render_logs(
+                {"files": []},
+                locale,
+            )
 
     @staticmethod
     def test_interface_assets_are_self_contained() -> None:
@@ -1724,6 +1727,7 @@ class PresentationTests(unittest.TestCase):
             )
         assert not list(root.rglob("*.php"))
         assert set(root.rglob("*.js")) == {
+            root / "public_html" / "components.js",
             root / "public_html" / "live.js",
             root / "public_html" / "newsletter.js",
             root / "public_html" / "navigation.js",
@@ -1885,7 +1889,7 @@ class LiveVisibilityTests(unittest.TestCase):
         assert 'href="#homepage-pageviews"' not in output
         assert 'href="#backlog"' not in output
 
-    def test_logs_monitor_uses_saved_environment_and_fresh_usage(
+    def test_about_monitor_uses_saved_environment_and_fresh_usage(
         self,
     ) -> None:
         """Refresh saved resource facts and hide stale measurements."""
@@ -1898,6 +1902,8 @@ class LiveVisibilityTests(unittest.TestCase):
             "memory_limit_bytes": 4_294_967_296,
             "cpu_percent": 12.5,
             "cpu_limit": 2,
+            "storage_used_bytes": 8_686_141_859_840,
+            "storage_total_bytes": 10_885_165_114_982,
         }
         for locale, memory, cpu, started in (
             ("en", "100.0 MiB / 4.0 GiB", "12.5% (2 cores)", "started at "),
@@ -1914,11 +1920,10 @@ class LiveVisibilityTests(unittest.TestCase):
                 "啟動時間",
             ),
         ):
-            initial = render_logs(
-                {"files": []},
+            initial = render_about(
+                self.data["config"],
                 locale,
                 status=status,
-                config=self.data["config"],
                 now=self.now,
             )
             live = self._outputs(locale)[1]
@@ -1935,18 +1940,25 @@ class LiveVisibilityTests(unittest.TestCase):
                 assert "data-relative-inline" not in output
                 assert output.count('id="server-runtime"') == 1
                 metrics = re.search(
-                    r'<table class="server-metrics">(.*?)</table>',
+                    r'<table class="[^"]*\bserver-metrics\b[^"]*">'
+                    r"(.*?)</table>",
                     output,
                 )
                 assert metrics is not None
-                assert metrics[1].count("<tr>") == 6
+                assert metrics[1].count("<tr>") == 5
+                assert "TiB" not in metrics[1]
+                for label in (
+                    "Storage used / total",
+                    "存储已用\uff0f总量",
+                    "儲存已用\uff0f總量",
+                ):
+                    assert label not in metrics[1]
             assert 'src="/live.js"' in initial
             assert 'id="live-server-status"' in initial
-        stale = render_logs(
-            {"files": []},
+        stale = render_about(
+            self.data["config"],
             "en",
             status=status,
-            config=self.data["config"],
             now=self.now + dt.timedelta(minutes=3),
         )
         assert "12.5%" not in stale
@@ -2361,45 +2373,10 @@ class LiveVisibilityTests(unittest.TestCase):
                 assert ("data-progress-active" in card) is visible
                 assert ("data-progress-label" in card) is visible
 
-    def test_logs_use_current_server_observations(self) -> None:
-        """Show compact live state independently of log availability."""
-        for locale, labels in (
-            (
-                "en",
-                (
-                    "Running",
-                    "Running; scheduled work is paused",
-                    "Stopped",
-                    "Unavailable; the last server observation is stale",
-                    "Unavailable; no current server observation",
-                ),
-            ),
-            (
-                "zh-hans",
-                (
-                    "运行中",
-                    "运行中\uff0c定时任务已暂停",
-                    "已停止",
-                    "无法确认\uff0c上次服务器状态记录已过期",
-                    "无法确认\uff0c尚无服务器状态记录",
-                ),
-            ),
-            (
-                "zh-hant",
-                (
-                    "運行中",
-                    "運行中\uff0c排程任務已暫停",
-                    "已停止",
-                    "無法確認\uff0c上次伺服器狀態紀錄已過期",
-                    "無法確認\uff0c尚無伺服器狀態紀錄",
-                ),
-            ),
-        ):
-            for state, label in zip(
-                ("running", "paused", "stopped", "stale", "missing"),
-                labels,
-                strict=True,
-            ):
+    def test_logs_keep_footer_without_server_status(self) -> None:
+        """Keep footer uptime without the removed server panel."""
+        for locale in ("en", "zh-hans", "zh-hant"):
+            for state in ("running", "paused", "stopped", "stale", "missing"):
                 status = copy.deepcopy(self.data["status"])
                 if state == "missing":
                     status["schedule"] = None
@@ -2416,13 +2393,9 @@ class LiveVisibilityTests(unittest.TestCase):
                     config=self.data["config"],
                     now=self.now,
                 )
-                line = re.search(
-                    r'<span id="server-state"[^>]*>(.*?)</span>',
-                    output,
-                )
-                assert line is not None
-                assert line[1] == label
-                assert 'id="live-server-status"' in output
+                assert 'id="live-server-status"' not in output
+                assert 'id="server-runtime"' not in output
+                assert 'href="#live-server-status"' not in output
                 assert 'id="live-uptime"' in output
                 assert 'id="tool-status"' not in output
                 assert 'class="routine-row"' not in output
@@ -2625,6 +2598,7 @@ class ServerPresentationTests(unittest.TestCase):
             assert purpose in output
             assert 'id="server-runtime"' in output
             assert 'id="live-server-status"' in output
+            assert 'href="/logs/"' not in output
             assert 'id="credits"' in output
             assert "CC0-1.0" in output
             assert "CC BY-SA 4.0" in output
@@ -2766,7 +2740,7 @@ class EventPresentationTests(unittest.TestCase):
     def _rows(output: str) -> list[list[str]]:
         """Return visible cell text from the invocation table."""
         table = re.search(
-            r'<table class="logs-table">.*?<tbody>(.*?)</tbody>',
+            r'<table class="[^"]*\blogs-table\b[^"]*">.*?<tbody>(.*?)</tbody>',
             output,
             re.DOTALL,
         )
@@ -2775,7 +2749,11 @@ class EventPresentationTests(unittest.TestCase):
         return [
             [
                 unescape(re.sub(r"<[^>]+>", "", cell))
-                for cell in re.findall(r"<td>(.*?)</td>", row, re.DOTALL)
+                for cell in re.findall(
+                    r"<td\b[^>]*>(.*?)</td>",
+                    row,
+                    re.DOTALL,
+                )
             ]
             for row in re.findall(r"<tr>(.*?)</tr>", table[1], re.DOTALL)
         ]

@@ -5,6 +5,7 @@ __pycache__/
 *.so
 
 # Build and packaging
+node_modules/
 build/
 dist/
 *.egg

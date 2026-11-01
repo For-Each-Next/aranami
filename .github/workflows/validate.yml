@@ -36,6 +36,11 @@ jobs:
       - name: Check lockfile
         run: uv lock --check
 
+      - name: Verify TypeScript and Codex browser assets
+        run: |
+          npm ci --ignore-scripts
+          npm run check:web
+
       - name: Install locked dependencies
         run: uv sync --locked --dev
 

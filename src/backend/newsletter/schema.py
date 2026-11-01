@@ -19,6 +19,7 @@ from backend.newsletter.annual import (
 from backend.newsletter.layout import valid_main_layout
 from backend.newsletter.newpages import valid_new_pages
 from backend.newsletter.observations import OBSERVATIONS_PATH, load_observation
+from backend.newsletter.publication import MAX_ISSUES, valid_lifecycle
 from backend.newsletter.statistics import QUALITY_GRADES
 from backend.newsletter.subpages import valid_subpage_layouts
 from shared.newsletter import DYK_PROJECTS, SUFFIXES, Issue
@@ -32,7 +33,6 @@ _HOMEPAGE_KEYS = {"featured", "good", "news", "history"}
 _MAX_TEXT = 250_000
 _MAX_ROWS = 5000
 _MAX_SOURCES = 1600
-_MAX_ISSUES = 4
 _MAX_COUNT = 10_000_000
 _EARLIEST_GAME_YEAR = 1900
 _LATEST_GAME_YEAR = 2099
@@ -776,7 +776,12 @@ def valid_newsletter(value: object) -> bool:
     return (
         isinstance(value, dict)
         and isinstance(value.get("issues"), dict)
-        and len(value["issues"]) <= _MAX_ISSUES
+        and len(value["issues"]) <= MAX_ISSUES
+        and valid_lifecycle(value.get("lifecycle"))
+        and (
+            value.get("lifecycle") is None
+            or set(value["lifecycle"]["active"]) <= value["issues"].keys()
+        )
         and all(starmap(_valid_issue, value["issues"].items()))
     )
 

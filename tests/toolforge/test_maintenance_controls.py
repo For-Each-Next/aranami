@@ -273,7 +273,10 @@ class TestMaintenanceControls(unittest.TestCase):
                     {"task": ["references"]},
                     locale,
                 )
-                assert 'class="maintenance-table"' in output
+                assert (
+                    '<table class="maintenance-table cdx-table__table"'
+                    in output
+                )
                 assert f'data-label="{heading}"' in output
                 assert 'scope="col"' in output
                 assert 'scope="row"' in output
@@ -285,7 +288,7 @@ class TestMaintenanceControls(unittest.TestCase):
                 )
                 assert '<script>"' not in output
                 assert "&lt;script&gt;&#34;" in output
-                assert 'class="empty"' in output
+                assert Interface(locale).text("backlog.empty") in output
 
 
 class TestMaintenanceHttpControls(unittest.TestCase):
@@ -401,5 +404,5 @@ class TestMaintenanceHttpControls(unittest.TestCase):
         output = self.client.get(
             "/maintenance/?task=references&q=no-match&page=999",
         ).text
-        assert 'class="empty"' in output
+        assert Interface("en").text("backlog.empty") in output
         assert "Articles 0\u20130 of 0" in output

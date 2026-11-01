@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 
 import mwparserfromhell
+from mwparserfromhell.nodes import Comment, Tag, Template, Text
 
 from shared.newsletter import Issue
 
@@ -53,7 +54,7 @@ _ANNOUNCEMENT_FIELDS = {
 }
 _CHART_PROTOTYPE = (
     "{{Pie chart new | radius = 60 | precision = 0 | legend = true "
-    "| direction = row-reverse\n"
+    "| direction = row-reverse | autoscale = true\n"
     "| labelformat = $label $value篇 <small>$percent</small>\n"
     "| 1 = @@aranami:chart_values@@\n}}"
 )
@@ -286,7 +287,7 @@ def _new_pages_prototypes(body: str, issue: Issue) -> dict | None:
         old_values = str(chart.get("1").value)
         chart_text = str(chart).replace(old_values, _slot("chart_values"), 1)
     summary = re.search(
-        r"^"
+        r"^[ \t]*"
         + re.escape(issue.quarter_label)
         + r"度，專題共新進條目([\d,]+)篇。其中：$",
         body,
@@ -299,7 +300,14 @@ def _new_pages_prototypes(body: str, issue: Issue) -> dict | None:
     )
     if summary is None or month is None:
         return None
-    summary_text = summary[0].replace(issue.quarter_label, _slot("quarter"))
+    summary_text = (
+        summary[0]
+        .lstrip(" \t")
+        .replace(
+            issue.quarter_label,
+            _slot("quarter"),
+        )
+    )
     summary_text = summary_text.replace(
         summary[1] + "篇",
         _slot("count") + "篇",
@@ -319,6 +327,19 @@ def _new_pages_prototypes(body: str, issue: Issue) -> dict | None:
         "new_pages_summary": summary_text,
         "new_pages_month": month_text,
     }
+
+
+def _homepage_date_text(body: str) -> str:
+    """Read linked date labels without changing source row typography.
+
+    Returns:
+        Rows with only small-tag contents reduced to display text.
+    """
+    code = mwparserfromhell.parse(body)
+    for tag in code.filter_tags():
+        if str(tag.tag).strip().casefold() == "small" and tag.contents:
+            tag.contents = tag.contents.strip_code()
+    return str(code)
 
 
 def _homepage_slots(
@@ -354,7 +375,7 @@ def _homepage_slots(
         )
         if columns is None:
             return None
-        old_body = columns[2]
+        old_body = _homepage_date_text(_without_cutoff_memos(columns[2]))
         bullet = re.search(
             r"^(\*\s*)(\[\[[^\r\n]+?\]\])(<small[^>]*>（)"
             r"(?:\d{1,2}月\d{1,2}日(?:典範條目|特色列表|優良條目)?"
@@ -447,7 +468,7 @@ def complete_announcement_layout(layout: dict) -> dict:
         layout: Prepared layout from current or older saved facts.
 
     Returns:
-        A copied layout with all homepage subsections in verified order.
+        A copied layout with ordered sections and a count-scaled pie.
 
     Raises:
         ValueError: The supplied layout does not satisfy its contract.
@@ -466,7 +487,96 @@ def complete_announcement_layout(layout: dict) -> dict:
         result["text"],
         result["homepage_rows"],
     )
+    chart = mwparserfromhell.parse(result["chart_template"])
+    for template in chart.filter_templates():
+        if template.name.matches("Pie chart new"):
+            # Module:Piechart 91397381 otherwise assumes percentages.
+            template.add("autoscale", "true", before="1")
+    result["chart_template"] = str(chart)
     return result
+
+
+def _introduction_start(text: str) -> int:
+    """Find introductory prose after optional notes and blank lines.
+
+    Returns:
+        The first visible prose position, or the fragment end.
+    """
+    offset = 0
+    for node in mwparserfromhell.parse(text).nodes:
+        value = str(node)
+        note = isinstance(node, Comment) or (
+            isinstance(node, Template) and node.name.matches("Memo")
+        )
+        toolbox = (
+            isinstance(node, Tag)
+            and str(node.tag).strip().casefold() == "div"
+            and any(
+                {"floatright", "toccolours"} <= set(str(attr.value).split())
+                for attr in node.attributes
+                if str(attr.name).strip().casefold() == "class"
+            )
+        )
+        if (
+            not note
+            and not toolbox
+            and (not isinstance(node, Text) or value.strip())
+        ):
+            return offset + len(value) - len(value.lstrip())
+        offset += len(value)
+    return offset
+
+
+def _introduction_ranges(text: str) -> list[tuple[int, int, str]]:
+    """Locate retained introductions before homepage and award data.
+
+    Returns:
+        Source ranges and their render-only date-slot names.
+    """
+    start = _heading(text, "在首頁上", 3).end()
+    awards = _award_heading(text)
+    section = text[start : awards.start()]
+    headings = list(
+        re.finditer(r"^==== ([^\r\n]+) ====$", section, re.MULTILINE),
+    )
+    ranges = []
+    for index, heading in enumerate(headings):
+        end = (
+            headings[index + 1].start()
+            if index + 1 < len(headings)
+            else len(section)
+        )
+        column = section.find("{{div col|colwidth=27em}}", heading.end(), end)
+        if column < 0:
+            continue
+        kind = _HOMEPAGE_KINDS[heading[1]]
+        ranges.append((
+            start + heading.end(),
+            start + column,
+            "asof:homepage:" + kind,
+        ))
+    award_data = text.find(_slot("awards"), awards.end())
+    if award_data >= 0:
+        ranges.append((awards.end(), award_data, "asof:awards"))
+    return ranges
+
+
+def announcement_intro_slots(layout: dict) -> str:
+    """Expose date slots before retained announcement introductions.
+
+    Args:
+        layout: Valid completed announcement layout for rendering.
+
+    Returns:
+        Render-only text with date slots before each leading sentence.
+        The saved layout and its validated slot vocabulary stay intact.
+    """
+    text = layout["text"]
+    replacements = []
+    for start, end, name in _introduction_ranges(text):
+        position = start + _introduction_start(text[start:end])
+        replacements.append((position, position, _slot(name)))
+    return _replace_regions(text, replacements)
 
 
 def _award_heading(text: str) -> re.Match | None:
@@ -481,6 +591,56 @@ def _award_heading(text: str) -> re.Match | None:
         if (heading := _heading(text, label, 3)) is not None
     ]
     return found[0] if len(found) == 1 else None
+
+
+def _without_cutoff_memos(text: str) -> str:
+    """Remove observation dates from a bounded generated data body.
+
+    Returns:
+        Source without the previous draft's exact inline cutoff notices.
+        Other Memo content and styles remain unchanged.
+    """
+    code = mwparserfromhell.parse(text)
+    for template in code.filter_templates():
+        if not template.name.matches("Memo"):
+            continue
+        if sorted(str(param.name).strip() for param in template.params) != [
+            "1",
+            "2",
+        ]:
+            continue
+        if str(template.get("2").value).strip() != "inline:info":
+            continue
+        if re.fullmatch(
+            r"截至\d{4}年\d{1,2}月\d{1,2}日",
+            str(template.get("1").value).strip(),
+        ):
+            code.remove(template)
+    return str(code)
+
+
+def _without_intro_cutoffs(text: str) -> str:
+    """Remove generated date prefixes only at introduction positions.
+
+    Returns:
+        Prepared source without same-line cutoff prefixes; separate
+        author notes and other Memo content remain unchanged.
+    """
+    replacements = []
+    for start, end, _name in _introduction_ranges(text):
+        prefix_end = start + _introduction_start(text[start:end])
+        prefix = text[start:prefix_end]
+        trimmed = prefix.rstrip(" \t")
+        if trimmed == prefix:
+            continue
+        nodes = mwparserfromhell.parse(trimmed).nodes
+        if nodes and not _without_cutoff_memos(str(nodes[-1])).strip():
+            replacements.append((
+                start + len(trimmed) - len(str(nodes[-1])),
+                prefix_end,
+                "",
+            ))
+    return _replace_regions(text, replacements)
 
 
 def _announcements(  # ruff: ignore[too-many-locals, too-many-return-statements]
@@ -510,7 +670,7 @@ def _announcements(  # ruff: ignore[too-many-locals, too-many-return-statements]
     ):
         return None
     prototypes = _new_pages_prototypes(
-        text[new_pages.end() : homepage.start()],
+        _without_cutoff_memos(text[new_pages.end() : homepage.start()]),
         issue,
     )
     columns = _homepage_slots(text, homepage.end(), awards.start())
@@ -561,8 +721,14 @@ def _announcements(  # ruff: ignore[too-many-locals, too-many-return-statements]
         if newcomer is not None
         else _NEWCOMER_PROTOTYPE
     )
+    award_start = bullets[0].start() if bullets else empty.start()
+    prefix = award_body[:award_start].rstrip()
+    nodes = mwparserfromhell.parse(prefix).nodes
+    # The generated cutoff directly precedes the award data slot.
+    if nodes and not _without_cutoff_memos(str(nodes[-1])).strip():
+        award_start = len(prefix) - len(str(nodes[-1]))
     replacements.append((
-        awards.end() + (bullets[0].start() if bullets else empty.start()),
+        awards.end() + award_start,
         awards.end() + (bullets[-1].end() if bullets else empty.end()),
         _slot("awards")
         + ("\n\n" + _slot("newcomers") if newcomer is None else ""),
@@ -576,6 +742,7 @@ def _announcements(  # ruff: ignore[too-many-locals, too-many-return-statements]
     prepared = _metadata(_replace_regions(text, replacements), issue)
     if prepared is None:
         return None
+    prepared = _without_intro_cutoffs(prepared)
     return complete_announcement_layout({
         "text": prepared,
         "source_issue": issue.value,

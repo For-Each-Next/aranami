@@ -137,6 +137,7 @@ def _newsletter_choices(
     archive: NewsletterDraftArchive,
     automatic: Issue,
     selected: Issue,
+    retained: dict | None = None,
 ) -> list[str]:
     """Expose the year-long feature before its reporting quarter.
 
@@ -149,7 +150,7 @@ def _newsletter_choices(
     annual = Issue.parse(f"{automatic.year + int(automatic.month != 1)}-01")
     if annual.value not in choices and archive.feature_dates(annual):
         choices.append(annual.value)
-    return choices
+    return sorted(set(choices) | set((retained or {}).get("issues", {})))
 
 
 def _newsletter_feature(
@@ -599,16 +600,17 @@ class _PublicViews:
         ] and not parameters.get(
             "seed",
         )
-        automatic_issue = (
-            Issue.upcoming(dt.datetime.now(dt.UTC).date())
+        automatic_issue, retained_newsletter, newsletter_error = (
+            self._newsletter_context(parameters)
             if path == "/newsletter/"
-            else None
+            else (None, None, False)
         )
         key = (
             path,
             query,
             locale,
             automatic_issue.value if automatic_issue is not None else "",
+            newsletter_error,
         )
         identity = self._page_identity()
         if automatic_issue is not None:
@@ -624,7 +626,7 @@ class _PublicViews:
                 parameters,
                 locale,
                 navigation,
-                automatic_issue,
+                (automatic_issue, retained_newsletter, newsletter_error),
             )
         elif path == "/about/":
             response = _html(
@@ -660,6 +662,28 @@ class _PublicViews:
         if not randomized and response.status_code == HTTPStatus.OK:
             self.pages.put(key, identity, response.body.decode())
         return response
+
+    def _newsletter_context(
+        self,
+        parameters: dict[str, list[str]],
+    ) -> tuple[Issue, dict | None, bool]:
+        """Select the default issue from saved publication metadata.
+
+        Returns:
+            The default issue, current facts, and a read-error flag.
+            Explicit reporting dates do not read current observations.
+        """
+        automatic = Issue.upcoming(dt.datetime.now(dt.UTC).date())
+        if {"date", "feature_date"}.intersection(parameters):
+            return automatic, None, False
+        try:
+            retained = read_newsletter_data(self.runtime / OBSERVATIONS_PATH)
+        except OSError, ValueError:
+            return automatic, None, True
+        lifecycle = (retained or {}).get("lifecycle")
+        if lifecycle is not None:
+            automatic = Issue.parse(lifecycle["default_issue"])
+        return automatic, retained, False
 
     def _newsletter_identity(
         self,
@@ -700,37 +724,19 @@ class _PublicViews:
             )
         return archive, observation, feature_dates
 
-    def _newsletter_saved_facts(
-        self,
-        issue: Issue,
-        day: dt.date | None,
-    ) -> dict | None:
-        """Select durable current facts without altering dated archives.
-
-        Returns:
-            Validated facts for an undated exact-issue request.
-        """
-        if day is not None:
-            return None
-        retained = read_newsletter_data(self.runtime / OBSERVATIONS_PATH)
-        return (
-            retained["issues"].get(issue.value)
-            if retained is not None
-            else None
-        )
-
     def _newsletter_page(
         self,
         parameters: dict[str, list[str]],
         locale: str,
         navigation: dict[str, object],
-        automatic_issue: Issue,
+        context: tuple[Issue, dict | None, bool],
     ) -> Response:
         """Render an issue from validated saved facts.
 
         Returns:
             A draft page or a localized invalid-selection response.
         """
+        automatic_issue, retained, read_error = context
         try:
             issue, day = _newsletter_selection(parameters, automatic_issue)
         except ValueError:
@@ -741,9 +747,15 @@ class _PublicViews:
                 locale,
                 HTTPStatus.BAD_REQUEST,
             )
+        if read_error:
+            return _page_error(
+                "newsletter.history.read_error",
+                locale,
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
         archive = NewsletterDraftArchive(self.runtime / DRAFT_ARCHIVE_PATH)
         try:
-            durable_facts = self._newsletter_saved_facts(issue, day)
+            durable_facts = (retained or {}).get("issues", {}).get(issue.value)
             dates = _newsletter_dates(archive, issue)
             if day is None and dates and durable_facts is None:
                 day = dt.date.fromisoformat(dates[-1])
@@ -782,7 +794,12 @@ class _PublicViews:
             generated_at = (feature_history or {}).get(
                 "generated_at",
             ) or generated_at
-            choices = _newsletter_choices(archive, automatic_issue, issue)
+            choices = _newsletter_choices(
+                archive,
+                automatic_issue,
+                issue,
+                retained,
+            )
         except OSError, ValueError:
             return _page_error(
                 "newsletter.history.read_error",

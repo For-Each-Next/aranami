@@ -75,7 +75,7 @@ class AnnualQualityLayoutTests(TestCase):
             summary,
             "較去年10篇減少2篇。",
             "{{Graph:Chart",
-            "誕生條目具體如下：",
+            "新入選或晉級條目如下：",
             "[[:Featured game]]<!-- 0101 -->",
             "本年度高品質條目的題材分布待補充。",
             "作者名單如下：",
@@ -131,7 +131,7 @@ class AnnualQualityLayoutTests(TestCase):
         empty = _quality_section({"quality_changes": []})
         unknown = _quality_section({})
         assert "2026年度，專題共誕生高品質條目0篇。" in empty
-        assert "其中" not in empty.split("誕生條目具體如下：", 1)[0]
+        assert "其中" not in empty.split("新入選或晉級條目如下：", 1)[0]
         assert "2026年度高品質條目的總數及各級內容數量待補充。" in unknown
         assert "高品質條目篇" not in unknown
         assert "]]篇" not in unknown

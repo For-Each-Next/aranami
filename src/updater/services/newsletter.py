@@ -3,7 +3,9 @@
 The page structure follows the October 2026 newsletter (main revision
 94691317; quality revision 94683150). Drafts retain all three months,
 filling their slots with the figures collected so far.
-Quality placeholders follow the initial quality revision 93279502.
+Quality rows and editable image placeholders follow initial revision
+93279502.
+The example announcement follows initial revision 93279496.
 No empty draft is produced without collected data.
 This renderer performs no source reads, publication, or runtime writes.
 """
@@ -20,9 +22,10 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from backend.newsletter.layout import issue_contents
+from backend.newsletter.layout import issue_contents, newsletter_source_banner
 from backend.newsletter.schema import STAT_KEYS
 from backend.newsletter.subpages import (
+    announcement_intro_slots,
     complete_announcement_layout,
 )
 from shared.newsletter import ROOT, Issue
@@ -35,6 +38,10 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 _UNAVAILABLE = "來源資料暫未取得。"
+_ANNOUNCEMENT_PLACEHOLDER = (
+    "* 电子游戏专题已建立{{Age in years, months, weeks and days|2005|6|10}}。"
+    "<small>（M月D日）</small>"
+)
 _NEW_PAGE_GRADES = {
     "FA": ("典範", "典範級", "#9cbdff"),
     "FL": ("特色列表", "特色列表級", "#9cbdff"),
@@ -77,6 +84,11 @@ _QUALITY_SUMMARY_GRADES = (
     ("bplus", "專題乙上級條目", "篇"),
     ("gt", "專題優良話題", "組"),
 )
+_QUALITY_IMAGES = """{{multiple image
+ | direction = vertical | width = 250
+ | image1 = Hubble ultra deep field.jpg  | caption1 = 例圖甲
+ | image2 = Answer to Life.png | caption2 = 例圖乙
+}}"""
 _TEN = 10
 _HUNDRED = 100
 
@@ -144,6 +156,30 @@ def _observation_end(issue: Issue, facts: Mapping[str, object]) -> dt.date:
     )
 
 
+def _quarter_as_of(
+    issue: Issue,
+    facts: Mapping[str, object],
+) -> str:
+    """Mark the inclusive saved cutoff of an incomplete quarterly draft.
+
+    Args:
+        issue: Selected publication issue and reporting quarter.
+        facts: Saved observations with an exclusive cutoff.
+
+    Returns:
+        An inline Memo for a known cutoff inside the quarter, otherwise
+        an empty string without inferring a date for older saved facts.
+    """
+    cutoff = facts.get("observation_end")
+    if cutoff is None or facts.get("complete"):
+        return ""
+    end = dt.date.fromisoformat(str(cutoff))
+    if not issue.start < end < issue.end:
+        return ""
+    day = end - dt.timedelta(days=1)
+    return f"{{{{Memo|截至{day.year}年{day.month}月{day.day}日|inline:info}}}}"
+
+
 def _main(issue: Issue, facts: Mapping[str, object]) -> str:
     """Fill data slots in the preceding issue's original wiki layout.
 
@@ -153,7 +189,7 @@ def _main(issue: Issue, facts: Mapping[str, object]) -> str:
     layout = facts.get("main_layout")
     if not isinstance(layout, dict):
         return _UNAVAILABLE
-    text = issue_contents(layout["text"], issue)
+    text = issue_contents(newsletter_source_banner(layout["text"]), issue)
     observed = facts.get("overview_observed_at")
     through = (
         dt.datetime.fromisoformat(str(observed)).astimezone(dt.UTC).date()
@@ -379,12 +415,69 @@ def _quality(issue: Issue, facts: Mapping[str, object]) -> str:
     if layout is None:
         return _UNAVAILABLE
     return _fill(
-        layout["text"],
+        newsletter_source_banner(layout["text"]),
         {
             **_subpage_values(issue),
-            "quality_summary": _quality_summary(issue, facts),
+            "quality_summary": _QUALITY_IMAGES
+            + "\n\n"
+            + _quality_summary(issue, facts),
             "quality_months": _quality_months(issue, facts, layout),
         },
+    )
+
+
+def _homepage_date_target(
+    row: Mapping,
+    section: str,
+    sources: list[dict],
+) -> str | None:
+    """Select the homepage call page or a retained anniversary revision.
+
+    Args:
+        row: Saved article appearance and its display date.
+        section: Homepage slot selecting the audited call-page route.
+        sources: Retained anniversary titles and exact revision URLs.
+
+    Returns:
+        A local wiki target, or none when the date or exact anniversary
+        evidence is unavailable or conflicts with another saved source.
+    """
+    if row.get("date_kind") == "window_start":
+        return None
+    day = dt.date.fromisoformat(row["date"])
+    if section == "recognized":
+        root = {
+            "fa": "Wikipedia:典范条目/",
+            "fl": "Wikipedia:典范条目/",
+            "ga": "Wikipedia:优良条目/",
+        }.get(row.get("kind"))
+        return f"{root}{day.year}年{day.month}月{day.day}日" if root else None
+    if section == "dyk":
+        return (
+            f"Wikipedia:新条目推荐/供稿/{day.year}年{day.month}月{day.day}日"
+        )
+    if section == "news":
+        return "Template:Itn"
+    label = f"{day.month}月{day.day}日"
+    titles = {
+        "Wikipedia:历史上的今天/" + label,
+        "Wikipedia:歷史上的今天/" + label,
+    }
+    revisions = {
+        match[1]
+        for source in sources
+        if source.get("label") in titles
+        and (
+            match := re.fullmatch(
+                r"https://zh\.wikipedia\.org/w/index\.php\?oldid=([1-9]\d*)",
+                str(source.get("url") or ""),
+            )
+        )
+    }
+    return (
+        "Special:PermanentLink/" + revisions.pop()
+        if len(revisions) == 1
+        else None
     )
 
 
@@ -392,14 +485,16 @@ def _source_homepage_rows(
     rows: object,
     prototype: str,
     *,
-    content_kinds: bool = False,
+    section: str,
+    sources: list[dict] | None = None,
 ) -> str:
     """Fill only the source column's article-list body.
 
     Args:
         rows: Prepared appearances, or none when unavailable.
         prototype: Source bullet with title and date slots.
-        content_kinds: Append each recognized content type to its date.
+        section: Homepage section selecting its call-page link target.
+        sources: Saved anniversary source titles and permanent URLs.
 
     Returns:
         Source-formatted bullets or observed empty/unavailable text.
@@ -407,15 +502,19 @@ def _source_homepage_rows(
     if rows is None:
         return _UNAVAILABLE
     labels = {"fa": "典範條目", "fl": "特色列表", "ga": "優良條目"}
-    lines = []
+    lines, linked = [], set()
     for row in rows:
         date = (
             "期初已在首頁，首次日期不詳"
             if row.get("date_kind") == "window_start"
             else _date_label(row["date"])
         )
-        if content_kinds:
+        if section == "recognized":
             date += labels.get(row.get("kind"), "")
+        target = _homepage_date_target(row, section, sources or [])
+        if target and (section not in {"dyk", "news"} or target not in linked):
+            date = _link(target, date)
+            linked.add(target)
         lines.append(
             _fill(
                 prototype,
@@ -450,7 +549,7 @@ def _recognized_homepage_rows(homepage: Mapping, prototype: str) -> str:
         .sort("date", "title", "kind")
         .to_dicts()
     )
-    body = _source_homepage_rows(rows, prototype, content_kinds=True)
+    body = _source_homepage_rows(rows, prototype, section="recognized")
     if featured is None or good is None:
         return body + "\n" + _UNAVAILABLE if rows else _UNAVAILABLE
     return body
@@ -508,9 +607,11 @@ def _source_new_pages(issue: Issue, facts: Mapping, layout: Mapping) -> str:
         Monthly grade counts and the original pie chart populated from
         observed assessments. Facts retain coverage gaps.
     """
+    hint = _quarter_as_of(issue, facts)
     data = facts.get("new_pages_data")
     if data is None:
-        return str(facts.get("new_pages") or _UNAVAILABLE)
+        text = str(facts.get("new_pages") or _UNAVAILABLE)
+        return hint + " " + text if hint and text != _UNAVAILABLE else text
     count = data["total"]
     value = f"{count if count is not None else data.get('known_count', 0):,}"
     lines = []
@@ -536,7 +637,8 @@ def _source_new_pages(issue: Issue, facts: Mapping, layout: Mapping) -> str:
             "",
         ])
     lines.append(
-        _fill(
+        (hint + " " if hint else "")
+        + _fill(
             layout["new_pages_summary"],
             {
                 "quarter": issue.quarter_label,
@@ -572,15 +674,19 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
     """Fill the actual previous announcements page with collected facts.
 
     Returns:
-        Source formatting with combined homepage recognition.
+        Source formatting with combined homepage recognition and dated
+        hints before incomplete quarterly statistics and lists.
     """
     layout = (facts.get("subpage_layouts") or {}).get("宣告")
     if layout is None:
         return _UNAVAILABLE
     layout = complete_announcement_layout(layout)
+    notices = str(facts.get("announcements") or "")
     values = {
         **_subpage_values(issue),
-        "notices": facts.get("announcements") or "（尚無本期公告）",
+        "notices": _ANNOUNCEMENT_PLACEHOLDER
+        if notices.strip() in {"", "（尚無本期公告）"}
+        else notices,
         "new_pages": _source_new_pages(issue, facts, layout),
         "awards": _source_awards(facts, layout),
         "newcomers": "",
@@ -597,7 +703,13 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
             if kind == "dyk"
             else (facts.get("homepage") or {}).get(kind)
         )
-        values["homepage:" + kind] = _source_homepage_rows(rows, prototype)
+        history = (facts.get("homepage_sources") or {}).get("history") or {}
+        values["homepage:" + kind] = _source_homepage_rows(
+            rows,
+            prototype,
+            section=kind,
+            sources=history.get("sources"),
+        )
     newcomers = facts.get("newcomers")
     if newcomers:
         size = len(newcomers)
@@ -612,7 +724,18 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
                 else str(size),
             },
         )
-    text = _fill(layout["text"], values)
+    hint = _quarter_as_of(issue, facts)
+    for name in (
+        "awards",
+        *("homepage:" + kind for kind in layout["homepage_rows"]),
+    ):
+        values["asof:" + name] = (
+            hint + " " if hint and values[name] != _UNAVAILABLE else ""
+        )
+    text = _fill(
+        newsletter_source_banner(announcement_intro_slots(layout)),
+        values,
+    )
     return re.sub(
         r"\n(?:[ \t]*\n)+(?=\[\[Category:電子遊戲專題簡訊宣告\]\])",
         "\n\n",

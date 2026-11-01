@@ -11,7 +11,10 @@ from pathlib import Path
 
 import mwparserfromhell
 
-from backend.newsletter.layout import prepare_main_layout
+from backend.newsletter.layout import (
+    newsletter_source_banner,
+    prepare_main_layout,
+)
 from backend.newsletter.subpages import prepare_subpage_layout
 from newsletter.fixtures import subpage_layouts
 from shared.newsletter import Issue
@@ -44,6 +47,123 @@ def _render(facts: dict) -> list[dict]:
             **facts,
         },
     )["pages"]
+
+
+class NewsletterAnnouncementHintTests(unittest.TestCase):
+    """Align quarterly cutoff hints with saved observations."""
+
+    def test_empty_notices_use_the_dated_example(self) -> None:
+        """Keep the example date without replacing authored news."""
+        example = (
+            "* 电子游戏专题已建立"
+            "{{Age in years, months, weeks and days|2005|6|10}}。"
+            "<small>（M月D日）</small>"
+        )
+        for value in (None, "", "  ", "（尚無本期公告）"):
+            with self.subTest(value=value):
+                text = _render({"announcements": value})[2]["text"]
+                assert example in text
+                assert "（尚無本期公告）" not in text
+        authored = "* 本期公告。<small>（10月2日）</small>"
+        text = _render({"announcements": authored})[2]["text"]
+        assert authored in text
+        assert example not in text
+
+    @staticmethod
+    def test_partial_announcement_hints_use_the_saved_data_date() -> None:
+        """Date figures while preserving unavailable sources."""
+        hint = "{{Memo|截至2026年10月31日|inline:info}}"
+        text = _render({
+            "observation_end": "2026-11-01",
+            "complete": False,
+            "updated_at": "2030-04-03T12:00:00+00:00",
+            "new_pages_data": {"total": 0, "months": []},
+            "dyk": [],
+            "homepage": {
+                "featured": [],
+                "good": [],
+                "news": None,
+                "history": [],
+            },
+            "awards": [],
+        })[2]["text"]
+        expected_hints = 5
+        assert text.count(hint) == expected_hints
+        assert (
+            hint + " " + "2026年第四季度，專題共新進條目0篇。其中："
+        ) in text
+        assert (hint + " 2026年第四季間，") in text
+        assert "編寫中，截至" not in text
+        assert (
+            hint + " 以下條目曾登上首頁的「新條目推薦」區塊。\n"
+            "{{div col|colwidth=27em}}\n* （無）\n{{div col end}}"
+        ) in text
+        unavailable = text.partition("==== 新聞動態 ====")[2].partition(
+            "==== 歷史上的今天 ====",
+        )[0]
+        assert "來源資料暫未取得。" in unavailable
+        assert "{{Memo|" not in unavailable
+        assert "2030年" not in text
+
+    @staticmethod
+    def test_announcement_hints_require_an_incomplete_known_cutoff() -> None:
+        """Omit hints for completed or undated quarterly facts."""
+        for cutoff in (
+            {},
+            {"observation_end": "2026-10-01"},
+            {"observation_end": "2027-01-01", "complete": False},
+            {"observation_end": "2026-11-01", "complete": True},
+        ):
+            text = _render({
+                **cutoff,
+                "new_pages_data": {"total": 0, "months": []},
+                "dyk": [],
+                "awards": [],
+            })[2]["text"]
+            assert "{{Memo|" not in text
+
+    @staticmethod
+    def test_announcement_hints_refresh_with_reused_source() -> None:
+        """Replace old cutoff hints in the following issue."""
+        observations = {
+            "new_pages_data": {"total": 0, "months": []},
+            "dyk": [],
+            "homepage": {
+                kind: [] for kind in ("featured", "good", "news", "history")
+            },
+            "awards": [],
+        }
+        source = _render({
+            **observations,
+            "observation_end": "2026-11-01",
+        })[2]["text"]
+        layout = prepare_subpage_layout(
+            source,
+            Issue.parse("2027-01"),
+            "announcements",
+        )
+        assert layout is not None
+        following = render_issue(
+            Issue.parse("2027-04"),
+            {
+                **observations,
+                "issue": "2027-04",
+                "available": True,
+                "observation_end": "2027-02-01",
+                "subpage_layouts": {"宣告": layout},
+            },
+        )["pages"][2]["text"]
+        assert "截至2026年10月31日" not in following
+        expected_hints = 6
+        assert (
+            following.count("{{Memo|截至2027年1月31日|inline:info}}")
+            == expected_hints
+        )
+        assert "2027年第一季度，專題共新進條目0篇" in following
+        assert (
+            "{{Memo|截至2027年1月31日|inline:info}} "
+            "2027年第一季度，專題共新進條目0篇"
+        ) in following
 
 
 class NewsletterObservedRenderingTests(unittest.TestCase):
@@ -161,13 +281,10 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         )
         assert old_layout is not None
         assert regenerated_layout is not None
-        assert (
-            regenerated_layout["text"].replace(
-                "專題報導兼訪談：2026年年終回顧",
-                "專題報導：<待定>",
-            )
-            == old_layout["text"]
-        )
+        assert regenerated_layout["text"].replace(
+            "專題報導兼訪談：2026年年終回顧",
+            "專題報導：<待定>",
+        ) == newsletter_source_banner(old_layout["text"])
         assert "第廿九號" in main
         assert "2026年第四季" in main
         assert "13,062篇條目" in main
@@ -359,12 +476,12 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             assert "{{div col|colwidth=27em}}" in text
             assert "{{div col end}}" in text
         assert (
-            "* [[:展示遊戲]]<small>（12月31日優良條目）</small>"
-            in sections["典優內容"]
+            "* [[:展示遊戲]]<small>（[[:Wikipedia:优良条目/2026年12月31日|"
+            "12月31日優良條目]]）</small>" in sections["典優內容"]
         )
         assert (
-            "* [[:額外展示]]<small>（12月31日典範條目）</small>"
-            in sections["典優內容"]
+            "* [[:額外展示]]<small>（[[:Wikipedia:典范条目/2026年12月31日|"
+            "12月31日典範條目]]）</small>" in sections["典優內容"]
         )
         assert "==== 典範內容 ====" not in announcements
         assert "==== 優良條目 ====" not in announcements
@@ -438,7 +555,10 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert (
             "* [[:延續新聞]]<small>（期初已在首頁，首次日期不詳）</small>"
         ) in announcements
-        assert "* [[:新新聞]]<small>（10月8日）</small>" in announcements
+        assert (
+            "* [[:新新聞]]<small>（[[:Template:Itn|10月8日]]）</small>"
+            in announcements
+        )
         assert "* [[:歷史遊戲]]<small>（10月15日）</small>" in announcements
         assert "[[:延續新聞]]<!--" not in announcements
         assert "10月1日" not in announcements
@@ -655,6 +775,11 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         ]
         assert str(chart.get("radius").value).strip() == "60"
         assert str(chart.get("direction").value).strip() == "row-reverse"
+        assert (
+            text.index(str(chart))
+            < text.index("{{Memo|截至2026年10月30日|inline:info}}")
+            < text.index("2026年第四季度，專題共新進條目36篇。其中：")
+        )
         assert sum(row["value"] for row in values) == registered
         assert (
             "* 10月計36篇，其中乙級1篇、丙級4篇、初級2篇、"
@@ -784,9 +909,13 @@ class NewsletterRecognizedHomepageTests(unittest.TestCase):
         assert (
             "以下條目曾登上首頁的「典範條目（特色列表）」和「優良條目」區塊。\n"
             "{{div col|colwidth=27em}}\n"
-            "* [[:任天堂DSi]]<small>（10月13日典範條目）</small>\n"
-            "* [[:任天堂DSi 22]]<small>（10月15日特色列表）</small>\n"
-            "* [[:任天堂DSi 333]]<small>（10月19日優良條目）</small>\n"
+            "* [[:任天堂DSi]]<small>（[[:Wikipedia:典范条目/2026年10月13日|"
+            "10月13日典範條目]]）</small>\n"
+            "* [[:任天堂DSi 22]]<small>（[[:Wikipedia:典范条目/2026年10月15日|"
+            "10月15日特色列表]]）</small>\n"
+            "* [[:任天堂DSi 333]]<small>（"
+            "[[:Wikipedia:优良条目/2026年10月19日|"
+            "10月19日優良條目]]）</small>\n"
             "{{div col end}}"
         ) in text
         assert "==== 典範內容 ====" not in text
@@ -825,12 +954,77 @@ class NewsletterRecognizedHomepageTests(unittest.TestCase):
         assert [
             str(link.title)
             for link in mwparserfromhell.parse(recognized).filter_wikilinks()
+            if not str(link.title).startswith(":Wikipedia:")
         ] == [":A", ":A", ":A", ":B"]
-        assert "[[:A]]<small>（10月10日優良條目）</small>" in recognized
-        assert "[[:A]]<small>（10月15日典範條目）</small>" in recognized
-        assert "[[:A]]<small>（10月15日優良條目）</small>" in recognized
+        for root, date, label in (
+            ("优良条目", "10", "優良條目"),
+            ("典范条目", "15", "典範條目"),
+            ("优良条目", "15", "優良條目"),
+        ):
+            assert (
+                f"[[:A]]<small>（[[:Wikipedia:{root}/2026年10月{date}日|"
+                f"10月{date}日{label}]]）</small>"
+            ) in recognized
         assert recognized.index("10月10日") < recognized.index("10月15日")
         assert recognized.rindex("[[:A]]") < recognized.index("[[:B]]")
+
+
+class NewsletterHomepageDateLinkTests(unittest.TestCase):
+    """Link visible dates to audited homepage display sources."""
+
+    @staticmethod
+    def test_dyk_daily_archive_is_linked_once_per_date() -> None:
+        """Link each daily contribution page once per list."""
+        text = _render({
+            "dyk": [
+                {"title": "首篇遊戲", "date": "2026-10-02"},
+                {"title": "同日遊戲", "date": "2026-10-02"},
+                {"title": "後來遊戲", "date": "2026-10-03"},
+            ],
+        })[2]["text"]
+        first = "[[:Wikipedia:新条目推荐/供稿/2026年10月2日|10月2日]]"
+        following = "[[:Wikipedia:新条目推荐/供稿/2026年10月3日|10月3日]]"
+        assert text.count(first) == 1
+        assert text.count(following) == 1
+        assert "Template:Dyk" not in text
+        assert (f"* [[:首篇遊戲]]<small>（{first}）</small>") in text
+        assert "* [[:同日遊戲]]<small>（10月2日）</small>" in text
+        assert (f"* [[:後來遊戲]]<small>（{following}）</small>") in text
+
+    @staticmethod
+    def test_anniversary_dates_require_one_exact_saved_revision() -> None:
+        """Use saved revisions for unambiguous date evidence."""
+        facts = {
+            "homepage": {
+                "history": [
+                    {"title": "歷史遊戲", "date": "2026-10-15"},
+                    {"title": "另一遊戲", "date": "2026-10-16"},
+                ],
+            },
+            "homepage_sources": {
+                "history": {
+                    "sources": [
+                        {
+                            "label": "Wikipedia:历史上的今天/10月15日",
+                            "url": "https://zh.wikipedia.org/w/index.php?oldid=95123456",
+                        },
+                    ],
+                },
+            },
+        }
+        text = _render(facts)[2]["text"]
+        assert (
+            "* [[:歷史遊戲]]<small>（[[:Special:PermanentLink/95123456|"
+            "10月15日]]）</small>"
+        ) in text
+        assert "* [[:另一遊戲]]<small>（10月16日）</small>" in text
+        facts["homepage_sources"]["history"]["sources"].append({
+            "label": "Wikipedia:歷史上的今天/10月15日",
+            "url": "https://zh.wikipedia.org/w/index.php?oldid=95234567",
+        })
+        conflicting = _render(facts)[2]["text"]
+        assert "* [[:歷史遊戲]]<small>（10月15日）</small>" in conflicting
+        assert "Special:PermanentLink/" not in conflicting
 
 
 class NewsletterQualitySummaryTests(unittest.TestCase):

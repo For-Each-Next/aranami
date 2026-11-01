@@ -2,20 +2,75 @@
 {% block content %}
 <a href="/maintenance/" class="back">{{ t.backlog.back }}</a>
 <form class="maintenance-controls" action="/maintenance/" method="get">
-  <div class="maintenance-row"><label for="maintenance-task">{{ t.backlog.task }}</label><select class="cdx-select" id="maintenance-task" name="task">{% for choice in task_choices %}<option value="{{ choice.value }}"{% if choice.current %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select>
-  <label for="maintenance-query">{{ t.backlog.search }}</label><div class="cdx-text-input"><input class="cdx-text-input__input" id="maintenance-query" name="q" type="search" maxlength="200" value="{{ selection.get('q', '') }}"></div><label class="choice"><input type="checkbox" name="regex" value="1"{% if selection.get('regex') %} checked{% endif %}>{{ t.backlog.regex }}</label></div>
+  <div class="maintenance-row">
+    <div class="field cdx-field maintenance-task-field">
+      <div class="cdx-label"><label class="cdx-label__label" for="maintenance-task"><span class="cdx-label__label__text">{{ t.backlog.task }}</span></label></div>
+      <div class="cdx-field__control"><select class="cdx-select" id="maintenance-task" name="task">{% for choice in task_choices %}<option value="{{ choice.value }}"{% if choice.current %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="field cdx-field maintenance-search-field">
+      <div class="cdx-label"><label class="cdx-label__label" for="maintenance-query"><span class="cdx-label__label__text">{{ t.backlog.search }}</span></label></div>
+      <div class="cdx-field__control"><div class="cdx-text-input"><input class="cdx-text-input__input" id="maintenance-query" name="q" type="search" maxlength="200" value="{{ selection.get('q', '') }}"></div></div>
+    </div>
+    <div class="cdx-checkbox maintenance-regex"><div class="cdx-checkbox__wrapper">
+      <input id="maintenance-regex" class="cdx-checkbox__input" type="checkbox" name="regex" value="1"{% if selection.get('regex') %} checked{% endif %}>
+      <span class="cdx-checkbox__icon"></span>
+      <div class="cdx-checkbox__label cdx-label"><label class="cdx-label__label" for="maintenance-regex"><span class="cdx-label__label__text">{{ t.backlog.regex }}</span></label></div>
+    </div></div>
+  </div>
   {% for name, label in [('quality', t.backlog.sort.class), ('importance', t.backlog.column.importance)] %}
-  <div class="maintenance-row"><fieldset class="assessment-filter"><legend>{{ label }}</legend><input type="hidden" name="{{ name }}_op" value="range"><label for="maintenance-{{ name }}">{{ t.backlog.from }}</label><select class="cdx-select" id="maintenance-{{ name }}" name="{{ name }}"><option value="">{{ t.backlog.unlimited }}</option>{% for choice in assessment_choices[name] %}<option value="{{ choice.value }}"{% if choice.current %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select><label for="maintenance-{{ name }}-to">{{ t.backlog.compare.endpoint }}</label><select class="cdx-select" id="maintenance-{{ name }}-to" name="{{ name }}_to"><option value="">{{ t.backlog.unlimited }}</option>{% for choice in assessment_choices[name] %}<option value="{{ choice.value }}"{% if choice.value == selection.get(name ~ '_to') %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select><span>{{ t.backlog.inclusive }}</span></fieldset>
-  {% if name == 'quality' %}<fieldset class="genre-filter"><legend>{{ t.backlog.genre }}</legend>{% for value in ['all', 'article', 'list'] %}<label class="choice"><input type="radio" name="genre" value="{{ value }}"{% if selection.get('genre', 'all') == value %} checked{% endif %}>{{ t.backlog.genres[value] }}</label>{% endfor %}</fieldset>{% endif %}</div>
+  <div class="maintenance-row">
+    <fieldset class="assessment-filter cdx-field" aria-describedby="maintenance-{{ name }}-help">
+      <legend class="cdx-label"><span class="cdx-label__label"><span class="cdx-label__label__text">{{ label }}</span></span></legend>
+      <input type="hidden" name="{{ name }}_op" value="range">
+      <div class="cdx-field__control assessment-range">
+        <div class="field cdx-field maintenance-range-endpoint">
+          <div class="cdx-label"><label class="cdx-label__label" for="maintenance-{{ name }}"><span class="cdx-label__label__text">{{ t.backlog.from }}</span></label></div>
+          <div class="cdx-field__control"><select class="cdx-select" id="maintenance-{{ name }}" name="{{ name }}"><option value="">{{ t.backlog.unlimited }}</option>{% for choice in assessment_choices[name] %}<option value="{{ choice.value }}"{% if choice.current %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="field cdx-field maintenance-range-endpoint">
+          <div class="cdx-label"><label class="cdx-label__label" for="maintenance-{{ name }}-to"><span class="cdx-label__label__text">{{ t.backlog.compare.endpoint }}</span></label></div>
+          <div class="cdx-field__control"><select class="cdx-select" id="maintenance-{{ name }}-to" name="{{ name }}_to"><option value="">{{ t.backlog.unlimited }}</option>{% for choice in assessment_choices[name] %}<option value="{{ choice.value }}"{% if choice.value == selection.get(name ~ '_to') %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select></div>
+        </div>
+      </div>
+      <div id="maintenance-{{ name }}-help" class="cdx-field__help-text">{{ t.backlog.inclusive }}</div>
+    </fieldset>
+    {% if name == 'quality' %}
+    <fieldset class="genre-filter cdx-field">
+      <legend class="cdx-label"><span class="cdx-label__label"><span class="cdx-label__label__text">{{ t.backlog.genre }}</span></span></legend>
+      <div class="cdx-field__control maintenance-radio-options">
+        {% for value in ['all', 'article', 'list'] %}<div class="cdx-radio"><div class="cdx-radio__wrapper">
+          <input id="maintenance-genre-{{ value }}" class="cdx-radio__input" type="radio" name="genre" value="{{ value }}"{% if selection.get('genre', 'all') == value %} checked{% endif %}>
+          <span class="cdx-radio__icon"></span>
+          <div class="cdx-radio__label cdx-label"><label class="cdx-label__label" for="maintenance-genre-{{ value }}"><span class="cdx-label__label__text">{{ t.backlog.genres[value] }}</span></label></div>
+        </div></div>{% endfor %}
+      </div>
+    </fieldset>
+    {% endif %}
+  </div>
   {% endfor %}
-  <div class="maintenance-row"><label for="maintenance-sort">{{ t.backlog.sort.heading }}</label><select class="cdx-select" id="maintenance-sort" name="sort">{% for choice in sort_choices %}<option value="{{ choice.value }}"{% if choice.current %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select><fieldset class="order-filter"><legend>{{ t.backlog.direction.heading }}</legend>{% for choice in direction_choices %}<label class="choice"><input type="radio" name="order" value="{{ choice.value }}"{% if choice.current %} checked{% endif %}>{{ choice.label }}</label>{% endfor %}</fieldset></div>
+  <div class="maintenance-row">
+    <div class="field cdx-field maintenance-sort-field">
+      <div class="cdx-label"><label class="cdx-label__label" for="maintenance-sort"><span class="cdx-label__label__text">{{ t.backlog.sort.heading }}</span></label></div>
+      <div class="cdx-field__control"><select class="cdx-select" id="maintenance-sort" name="sort">{% for choice in sort_choices %}<option value="{{ choice.value }}"{% if choice.current %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select></div>
+    </div>
+    <fieldset class="order-filter cdx-field">
+      <legend class="cdx-label"><span class="cdx-label__label"><span class="cdx-label__label__text">{{ t.backlog.direction.heading }}</span></span></legend>
+      <div class="cdx-field__control maintenance-radio-options">
+        {% for choice in direction_choices %}<div class="cdx-radio"><div class="cdx-radio__wrapper">
+          <input id="maintenance-order-{{ choice.value }}" class="cdx-radio__input" type="radio" name="order" value="{{ choice.value }}"{% if choice.current %} checked{% endif %}>
+          <span class="cdx-radio__icon"></span>
+          <div class="cdx-radio__label cdx-label"><label class="cdx-label__label" for="maintenance-order-{{ choice.value }}"><span class="cdx-label__label__text">{{ choice.label }}</span></label></div>
+        </div></div>{% endfor %}
+      </div>
+    </fieldset>
+  </div>
   {% if selection.get('seed') %}<input name="seed" type="hidden" value="{{ selection.seed }}">{% endif %}
   <input name="limit" type="hidden" value="{{ selection.get('limit', '10') }}">
-  <div class="form-actions"><button type="submit" class="cdx-button cdx-button--action-progressive cdx-button--weight-primary">{{ t.backlog.apply }}</button><a class="cdx-button" href="{{ clear_url }}">{{ t.backlog['clear'] }}</a></div>
+  <div class="form-actions"><button type="submit" class="cdx-button cdx-button--action-progressive cdx-button--weight-primary">{{ t.backlog.apply }}</button><a class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--action-default cdx-button--weight-normal" href="{{ clear_url }}">{{ t.backlog['clear'] }}</a></div>
 </form>
 {% if cards %}
-<div class="table-scroll" tabindex="0" role="region" aria-label="{{ heading }}">
-<table class="maintenance-table" role="table">
+<div class="cdx-table"><div class="table-scroll cdx-table__table-wrapper" tabindex="0" role="region" aria-label="{{ heading }}">
+<table class="maintenance-table cdx-table__table" role="table">
   <caption class="visually-hidden">{{ heading }}</caption>
   <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">#</th><th scope="col" role="columnheader">{{ t.backlog.sort.title }}</th><th scope="col" role="columnheader">{{ t.backlog.sort.class }}</th><th scope="col" role="columnheader">{{ t.backlog.column.importance }}</th><th scope="col" role="columnheader">{{ t.backlog.column.issues }}</th><th scope="col" role="columnheader">{{ t.backlog.sort.time }}</th></tr></thead>
   <tbody role="rowgroup">{% for card in cards %}<tr role="row">
@@ -26,8 +81,8 @@
     <td role="cell" data-label="{{ t.backlog.sort.time }}">{% if card.month %}{% if card.month.url %}<a href="{{ card.month.url }}">{% endif %}<time datetime="{{ card.month.value }}">{{ card.month.label }}</time>{% if card.month.url %}</a>{% endif %}{% else %}—{% endif %}</td>
   </tr>{% endfor %}</tbody>
 </table>
-</div>
-{% else %}<p class="empty">{{ t.backlog.empty }}</p>{% endif %}
+</div></div>
+{% else %}<div class="cdx-message cdx-message--notice"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#message-notice"></use></svg><div class="cdx-message__content">{{ t.backlog.empty }}</div></div>{% endif %}
 {% include "includes/maintenance_pagination.html" %}
 {% include "includes/source_updated.html" %}
 <p>{{ t.backlog.source }}: {{ source_link }}</p>

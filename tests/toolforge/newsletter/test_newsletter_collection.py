@@ -236,6 +236,14 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
                 "Unassessed",
                 "C",
             ],
+            "pa_importance": [
+                "低",
+                "不适用",
+                "不适用",
+                "不适用",
+                "低",
+                "不适用",
+            ],
         })
         self._collect()
         assert self.newsletter.call_args.kwargs["current_counts"] == {
@@ -253,6 +261,7 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
             "page_namespace": [0, 0, 0, 0, 0, 0],
             "full_title": ["甲", "乙", "丙", "丁", "戊", "己"],
             "pa_class": ["典范", "優良", "丙級", "小作品", "重定向", "消歧义"],
+            "pa_importance": ["低", "低", "低", "低", "不适用", "不适用"],
         })
         self._collect()
         assert self.newsletter.call_args.kwargs["current_counts"] == {
@@ -301,6 +310,7 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
             "page_namespace": [0, 0, 0, 0, 0, 0],
             "full_title": ["FA", "FL", "GA", "Bplus", "B+", "Stub"],
             "pa_class": ["典範", "典表", "优良", "Bplus", "B+", "Stub"],
+            "pa_importance": ["低"] * 6,
         })
         self._collect()
         assert self.newsletter.call_args.kwargs["current_counts"] == {

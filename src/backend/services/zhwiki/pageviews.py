@@ -26,6 +26,7 @@ from backend.support.failure_status import ReportFailureError
 from backend.support.pageviews_cache import (
     HISTORY_DAYS,
     PageviewsCache,
+    read_pageviews_snapshot,
 )
 from backend.support.routine_status import report_progress
 from shared.reports import ReportResult, ReportStore, report_key
@@ -1410,7 +1411,7 @@ def _annual_popularity_rows(
     )
 
 
-def read_annual_popularity(
+def _saved_annual_popularity(
     site: BaseSite,
     year: int,
     through: dt.date,
@@ -1495,6 +1496,105 @@ def read_annual_popularity(
             exc_info=True,
         )
         return None
+
+
+def _cached_annual_popularity(
+    site: BaseSite,
+    year: int,
+    through: dt.date,
+    titles: Sequence[str],
+) -> dict | None:
+    """Recalculate calendar-year views from retained daily observations.
+
+    Args:
+        site: Wiki whose production Parquet supplies observations.
+        year: Calendar year being reviewed.
+        through: Exclusive acquisition cutoff.
+        titles: Current article population selected by the newsletter.
+
+    Returns:
+        Ranked measured articles and nullable project totals through the
+        latest retained date, or none without eligible observations.
+        Truncated coverage and unobserved articles remain unknown.
+    """
+    start = dt.date(year, 1, 1)
+    limit = min(through, dt.date(year + 1, 1, 1))
+    if not titles or limit <= start:
+        return None
+    population = pl.DataFrame(
+        {"page": titles},
+        schema={"page": pl.String},
+    ).unique()
+    data = read_pageviews_snapshot(site.hostname()).join(
+        population,
+        on="page",
+        how="semi",
+    )
+    observed = data.filter(
+        pl.col("date").is_between(start, limit, closed="left"),
+    )
+    last = observed.get_column("date").max()
+    if last is None:
+        return None
+    stop = last + dt.timedelta(days=1)
+    measured = (
+        observed
+        .filter(
+            (pl.col("coverage_start") <= start)
+            & (pl.col("coverage_stop") >= stop),
+        )
+        .group_by("page")
+        .agg(pl.col("pageview").sum().alias("views"))
+        .rename({"page": "title"})
+        .sort("views", "title", descending=[True, False])
+    )
+    if measured.is_empty():
+        return None
+    return {
+        "start": start.isoformat(),
+        "end": last.isoformat(),
+        "article_count": population.height,
+        "total_views": measured["views"].sum()
+        if measured.height == population.height
+        else None,
+        "items": measured.to_dicts(),
+        "provisional": stop != dt.date(year + 1, 1, 1),
+    }
+
+
+def read_annual_popularity(
+    site: BaseSite,
+    year: int,
+    through: dt.date,
+    *,
+    title: str,
+    titles: Sequence[str] | None = None,
+) -> dict | None:
+    """Read annual rankings and recalculate supplied daily observations.
+
+    Args:
+        site: Wiki identifying production observations and report data.
+        year: Calendar year required by the newsletter.
+        through: Exclusive acquisition cutoff.
+        title: Pageviews report destination identifying saved results.
+        titles: Current population for forced Parquet aggregation, or
+            none to read only the saved annual result table.
+
+    Returns:
+        Complete measured rankings and nullable totals at their actual
+        inclusive cutoff. Recalculated data replaces equally dated or
+        older saved results; missing or older daily observations retain
+        validated saved results. No source requests or writes occur.
+    """
+    saved = _saved_annual_popularity(site, year, through, title=title)
+    if titles is None:
+        return saved
+    recalculated = _cached_annual_popularity(site, year, through, titles)
+    if recalculated is None or (
+        saved is not None and saved["end"] > recalculated["end"]
+    ):
+        return saved
+    return recalculated
 
 
 def prepare_report(  # ruff: ignore[too-many-arguments]

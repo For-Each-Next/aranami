@@ -113,6 +113,29 @@ def _write_snapshot(path: Path, frame: pl.DataFrame) -> bool:
     return True
 
 
+def _snapshot_path(project: str) -> Path:
+    """Locate one wiki's disposable daily Pageviews snapshot.
+
+    Returns:
+        Production cache path for the normalized Wikimedia hostname.
+    """
+    identity = sha256(project.strip().lower().encode()).hexdigest()[:16]
+    return Path.cwd() / "cache" / f"pageviews-{identity}-v1.parquet"
+
+
+def read_pageviews_snapshot(project: str) -> pl.DataFrame:
+    """Read validated daily observations without making requests.
+
+    Args:
+        project: Wikimedia hostname identifying cached observations.
+
+    Returns:
+        Daily rows and coverage sentinels, or an empty typed frame when
+        the snapshot is missing or damaged. Absent dates stay absent.
+    """
+    return _read_snapshot(_snapshot_path(project))
+
+
 class PageviewsCache:
     """Stage observations and commit healthy report inputs."""
 
@@ -145,8 +168,7 @@ class PageviewsCache:
             Validated snapshot or an empty cache for missing or damaged
             files. Readers must still obtain fresh report inputs.
         """
-        identity = sha256(project.strip().lower().encode()).hexdigest()[:16]
-        path = Path.cwd() / "cache" / f"pageviews-{identity}-v1.parquet"
+        path = _snapshot_path(project)
         return cls(path, _read_snapshot(path))
 
     def get(self, title: str) -> pl.DataFrame | None:

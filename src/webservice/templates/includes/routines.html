@@ -1,7 +1,7 @@
 <section class="section-flat" id="tool-status" aria-labelledby="tool-status-heading" {% include "includes/clock_attributes.html" %}>
   <h2 id="tool-status-heading">{{ t.reports.panel }}</h2>
-  <p id="live-notice" class="context" role="status" hidden>{{ t.ops.reconnecting }}</p>
-  {% if not routines %}<p class="empty">{{ t.ops.schedule_missing }}</p>{% endif %}
+  <p id="live-notice" class="cdx-message cdx-message--notice cdx-message--inline" role="status" hidden>{{ t.ops.reconnecting }}</p>
+  {% if not routines %}<div class="cdx-message cdx-message--notice"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#message-notice"></use></svg><div class="cdx-message__content">{{ t.ops.schedule_missing }}</div></div>{% endif %}
   <div class="routine-rows">
     {% for routine in routines %}
     <article class="routine-row" id="routine-{{ routine.identifier }}">

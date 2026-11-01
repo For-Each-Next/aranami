@@ -4,6 +4,41 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.9
 
+### 0.8.4 (2026-11-01 14:57 UTC)
+
+Overview: Unified the frontend with Wikimedia Codex and TypeScript, simplified
+public documentation, and kept newsletter drafts current until publication
+with corrected annual traffic, source links, and editable layouts.
+
+- Refreshed started issues daily until recorded publication, retaining
+  delayed drafts across quarter rollovers and freezing closed issues.
+- Selected the earliest unpublished issue from saved publication metadata
+  while keeping retained issues available without live website source reads.
+- Recalculated annual traffic from validated daily Pageviews observations,
+  including same-date corrections, while preserving unknown totals.
+- Linked homepage dates to their call pages and saved anniversary revisions,
+  linking each daily DYK supply archive once per list.
+- Added cutoff-date notices before incomplete introductions, preserving
+  authored notes when reusing drafts for later issues.
+- Restored editable quality images and example announcements, and linked
+  each draft banner to the automatically generated wikitext.
+- Corrected count-scaled new-article pies and simplified annual chart
+  containers while retaining measured rankings and clear list introductions.
+- Relabeled the newsletter website's Chinese feature headings as
+  `專題報導` and `专题报道`.
+- Focused the README on three public web tools and monitored on-wiki reports,
+  removing internal workflows and administrative guidance.
+- Removed the Logs status panel, public storage totals, and About's logs
+  link, preserving footer uptime and the report monitor.
+- Built the frontend with Codex cards, fields, tables, notices, and Vue 3
+  controls, retaining native forms, calendars, dialogs, and readable saved data.
+- Moved browser behavior to strict TypeScript and verified locally built,
+  pinned frontend assets during CI without adding server build dependencies.
+- Consolidated post-0.8.3 work into one release and removed superseded
+  GitHub workflow records, artifacts, and caches.
+- Deployed v0.8.4 to Toolforge and verified the exact source, both services,
+  frontend bundle, public pages, and removals at 2026-11-01 14:57 UTC.
+
 ### 0.8.3 (2026-11-01 11:54 UTC)
 
 Overview: Corrected annual newsletter statistics and credits, refined report

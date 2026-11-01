@@ -16,6 +16,7 @@ from pywikibot.exceptions import NoPageError
 
 from backend.newsletter.collection import collect_source_facts
 from backend.newsletter.newpages import collect_new_pages
+from backend.newsletter.publication import PUBLICATION_PAGE
 from backend.newsletter.schema import valid_newsletter
 from shared.newsletter import ROOT, Issue
 from updater.services.newsletter import render_issue
@@ -63,6 +64,10 @@ class Reader:
         self.calls = []
         self.sources = {}
         self.existing = {
+            PUBLICATION_PAGE: (
+                'return {{num=28, id="2026-10", issue="2026年第三季", '
+                "date={2026,10,nil}}}"
+            ),
             f"{ROOT}/2027-01/宣告": (
                 "== 宣告 ==\n=== 公告 ===\n* Announcement\n"
                 "=== 新進條目 ===\nOld content"
@@ -96,6 +101,11 @@ class Reader:
             page = Mock()
             page.title.return_value = title
             raise NoPageError(page)
+        if title == PUBLICATION_PAGE:
+            self.sources[title] = {
+                "label": title,
+                "url": "https://zh.wikipedia.org/w/index.php?oldid=95363661",
+            }
         return self.existing[title]
 
     def at(self, title: str, before: dt.datetime) -> str:
@@ -418,6 +428,7 @@ class NewsletterDataTests(unittest.TestCase):
             if title != "WikiProject:电子游戏/热门条目"
         } == {
             dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+            dt.datetime(2026, 7, 1, tzinfo=dt.UTC),
             dt.datetime(2026, 10, 1, tzinfo=dt.UTC),
             dt.datetime(2027, 1, 1, tzinfo=dt.UTC),
             dt.datetime(2027, 1, 5, tzinfo=dt.UTC),

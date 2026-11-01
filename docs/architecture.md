@@ -306,17 +306,22 @@ some browsers do not include WebSocket schemes in `connect-src 'self'`.
 Pages work with ordinary links, GET forms, and native controls without
 JavaScript. Every page shares the dashboard's left contents panel on desktop
 and native collapsible contents control on narrow screens.
+Codex supplies frontend components, with strict TypeScript sources and a
+local Vue build committed as static assets. Vue owns only its control hosts;
+live-status reconciliation owns native report controls. Preserve this DOM
+ownership during saved-fragment replacement. See the
+[frontend guide](webservice/frontend.md) for build and lifecycle contracts.
 All displayed dates and times use UTC without repeating its label, including
 table headings, footer uptime, and complete timestamps in hover tooltips.
 Machine-readable timestamps retain their original explicit offsets.
 The dashboard presents reviews and each available highlight group as peer
 second-level sections. `/maintenance/` owns the maintenance catalogue, with
 second-level task groups and existing filtered worklists selected by `task`.
-`/reports/` combines the live report-status panel and the newest hundred saved
+`/reports/` combines the live report-status panel and the newest twenty saved
 invocations across dates, without query controls or pagination. Each task
 opens its stage list with millisecond timestamps and inline wiki page links.
-Raw daily diagnostic downloads remain under `/logs/`, reached from
-About; diagnostics are never translated into narrative event summaries.
+Raw daily diagnostic downloads remain under `/logs/`; diagnostics are never
+translated into narrative event summaries.
 `/api/live` reads saved status only and renders existing live
 regions, never website datasets or logs. `/api/live/ws` pushes the same
 localized snapshot when saved status changes and periodically renews it.

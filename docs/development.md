@@ -8,10 +8,11 @@ runtime commands and [Administration](administration.md) for deployment.
 
 ## Prepare the workspace
 
-Use uv with Python 3.15 support:
+Use uv with Python 3.15 support and Node.js 24 or later:
 
 ```shell
 uv sync --locked
+npm ci --ignore-scripts
 ```
 
 Source runs directly from `src/`; keep `tool.uv.package = false` and the locked
@@ -38,6 +39,15 @@ and saved-data presentation in webservice. `src/shared/config.py` is the single
 schedule/target definition. See [ownership contracts](architecture.md#runtime-and-architecture).
 
 ## Implement and test a change
+
+Edit browser behavior in `frontend/*.ts`, then run `npm run build:web` to
+compile the scripts, bundle Vue/Codex controls, and copy the pinned stylesheet into
+`src/webservice/public_html/`. Commit the generated assets alongside their
+sources. `npm run check:web` type-checks and verifies their exact contents;
+CI runs it before the browser tests. Node.js 24 or later is needed only for
+development. Toolforge serves the prepared assets from its Python runtime.
+See [Frontend components](webservice/frontend.md) for component ownership and
+the native form, dialog, and live-refresh contracts.
 
 Use prepared data, fake wiki objects, temporary directories, and mocked network
 boundaries; local tests stay offline and credential-free. Cover failures as
@@ -68,6 +78,7 @@ PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s 
 PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s tests/integration
 PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s tests/toolforge -p 'test_*.py'
 uv lock --check
+npm run check:web
 uv run ruff check --no-fix .
 uv run ruff format --check .
 uv run python scripts/upload_toolforge.py --dry-run
@@ -84,8 +95,8 @@ accessible interaction. The webservice renders Jinja templates with local CSS
 and native HTML controls. Keep appearance consistent with Codex across the
 dashboard, maintenance, logs, About, and error pages.
 
-The local CSS-only components are pinned to Codex 2.7.0. Keep the upstream
-stylesheet unchanged and retain its GPL-2.0-or-later notice in
+The local CSS-only components are pinned to Codex 2.7.0 through npm. The asset
+build copies its upstream stylesheet unchanged; retain its GPL-2.0-or-later notice in
 `public_html/codex-license.html`. Load `styles.css` first so the local Select
 icon overrides apply before Codex loads, without transient data-URI requests
 blocked by the production content security policy.

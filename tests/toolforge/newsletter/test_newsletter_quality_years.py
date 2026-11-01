@@ -246,7 +246,15 @@ class NewsletterQualityYearTests(TestCase):
             'class="center" style="max-width:100%;overflow-x:auto;'
             'text-align:center"' in text
         )
-        assert '<div style="min-width:800px">' in text
+        container = next(
+            tag
+            for tag in mwparserfromhell.parse(text).filter_tags(
+                recursive=False,
+            )
+            if tag.tag == "div" and chart in tag.contents.filter_templates()
+        )
+        assert chart in container.contents.filter_templates(recursive=False)
+        assert not container.contents.filter_tags(recursive=False)
         for expanded in (
             "<svg",
             "<templatestyles",

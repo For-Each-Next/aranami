@@ -393,7 +393,7 @@ main {
 }
 
 .report-description, .source-updated, .context, .metadata,
-.homepage-note, .empty, .unknown {
+.homepage-note, .unknown {
     color: var(--color-subtle);
     font-size: var(--font-size-small);
 }
@@ -422,10 +422,6 @@ main {
 
 .article-card {
     min-inline-size: 0;
-    padding: 1rem;
-    border: 1px solid var(--border-color-subtle);
-    border-radius: var(--border-radius-base);
-    background: var(--background-color-base);
     overflow-wrap: anywhere;
 }
 
@@ -437,6 +433,23 @@ main {
     display: flex;
     flex-direction: column;
     block-size: 100%;
+}
+
+.article-card-body .cdx-card__text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-self: stretch;
+    min-inline-size: 0;
+    inline-size: 100%;
+}
+
+.article-card-body .cdx-card__text__supporting-text {
+    margin-block-start: auto;
+}
+
+.codex-control {
+    display: contents;
 }
 
 .article-summary {
@@ -537,25 +550,25 @@ main {
 }
 
 .backlog-task {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: .75rem;
     min-inline-size: 0;
-    min-block-size: 3rem;
-    padding: .75rem 1rem;
-    border: 1px solid var(--border-color-subtle);
-    border-radius: var(--border-radius-base);
-    background: var(--background-color-base);
 }
 
-.backlog-task:hover {
-    background: var(--background-color-neutral-subtle);
-    border-color: var(--border-color-base);
+.backlog-task .cdx-card__text {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    min-inline-size: 0;
+    inline-size: 100%;
 }
 
 .backlog-label {
     min-inline-size: 0;
+}
+
+.backlog-task .cdx-card__text__supporting-text {
+    margin-block-start: 0;
 }
 
 .backlog-count {
@@ -685,72 +698,9 @@ main {
     --status-color: var(--color-subtle);
 }
 
-button, input, select {
+:where(button, input, select) {
     max-inline-size: 100%;
-    min-block-size: 2.75rem;
-    padding: .5rem .75rem;
-    border: 1px solid var(--border-color-interactive);
-    border-radius: var(--border-radius-base);
-    color: var(--color-base);
-    background: var(--background-color-base);
     font: inherit;
-    line-height: 1.5;
-}
-
-input, select {
-    min-inline-size: 0;
-    inline-size: 100%;
-}
-
-input:hover, select:hover {
-    border-color: var(--color-base);
-}
-
-input:focus, select:focus {
-    border-color: var(--color-progressive);
-    box-shadow: inset 0 0 0 1px var(--color-progressive);
-}
-
-button {
-    cursor: pointer;
-    background: var(--background-color-neutral-subtle);
-    font-weight: 700;
-    white-space: normal;
-}
-
-button:hover {
-    color: var(--color-emphasized);
-    background: var(--background-color-base);
-    border-color: var(--color-base);
-}
-
-button:active {
-    background: var(--background-color-neutral);
-}
-
-button[type="submit"]:not(.cdx-button) {
-    border-color: var(--color-progressive);
-    color: var(--background-color-base);
-    background: var(--color-progressive);
-}
-
-button[type="submit"]:not(.cdx-button):hover {
-    border-color: var(--color-progressive--hover);
-    background: var(--color-progressive--hover);
-}
-
-button[type="submit"]:not(.cdx-button):active {
-    border-color: var(--color-progressive--active);
-    background: var(--color-progressive--active);
-}
-
-button:not(.cdx-button):disabled,
-input:not(.cdx-text-input__input):disabled,
-select:not(.cdx-select):disabled {
-    cursor: default;
-    color: var(--color-subtle);
-    background: var(--background-color-neutral);
-    border-color: var(--border-color-subtle);
 }
 
 .status-label {
@@ -773,36 +723,6 @@ summary {
 
 summary:hover {
     color: var(--color-emphasized);
-}
-
-.system-details {
-    margin-block: 1.5rem;
-    padding: 1rem;
-    border: 1px solid var(--border-color-subtle);
-    border-radius: var(--border-radius-base);
-    background: var(--background-color-neutral-subtle);
-}
-
-.notice, .empty {
-    padding: .75rem 1rem;
-    border: 1px solid var(--border-color-subtle);
-    border-radius: var(--border-radius-base);
-    background: var(--background-color-neutral-subtle);
-}
-
-.notice {
-    color: var(--color-base);
-}
-
-.notice-error {
-    border-color: var(--color-error);
-    background: var(--background-color-error-subtle);
-}
-
-#live-notice:not([hidden]), #live-server-notice:not([hidden]) {
-    padding: .75rem 1rem;
-    border-inline-start: 3px solid var(--color-warning);
-    background: var(--background-color-neutral-subtle);
 }
 
 .back {
@@ -854,24 +774,7 @@ summary:hover {
     white-space: nowrap;
 }
 
-.choice {
-    display: flex;
-    align-items: center;
-    gap: .5rem;
-    min-block-size: 2.75rem;
-    font-size: var(--font-size-small);
-}
-
-.choice input {
-    inline-size: 1.25rem;
-    min-block-size: 1.25rem;
-    block-size: 1.25rem;
-    margin: 0;
-    padding: 0;
-    accent-color: var(--color-progressive);
-}
-
-.assessment-filter, .order-filter {
+.assessment-filter, .genre-filter, .order-filter {
     padding: 0;
     border: 0;
 }
@@ -910,10 +813,6 @@ summary:hover {
 .field .cdx-select, .field .cdx-text-input {
     inline-size: 100%;
     min-inline-size: 0;
-}
-
-.field .cdx-select, .field .cdx-text-input__input {
-    min-block-size: 2.75rem;
 }
 
 .cdx-select:enabled:not([multiple]) {
@@ -995,14 +894,14 @@ summary:hover {
     overflow-x: auto;
 }
 
-table {
+table:not(.cdx-table__table) {
     inline-size: 100%;
     margin-block: 1rem 1.5rem;
     border-collapse: collapse;
     font-size: var(--font-size-small);
 }
 
-th, td {
+:where(th, td) {
     padding: .75rem;
     border-block-end: 1px solid var(--border-color-subtle);
     text-align: start;
@@ -1010,13 +909,13 @@ th, td {
     overflow-wrap: anywhere;
 }
 
-thead th {
+table:not(.cdx-table__table) thead th {
     background: var(--background-color-neutral-subtle);
     border-block: 1px solid var(--border-color-base);
     font-weight: 700;
 }
 
-tbody tr:hover {
+table:not(.cdx-table__table) tbody tr:hover {
     background: var(--background-color-neutral-subtle);
 }
 
@@ -1405,20 +1304,24 @@ footer nav {
 
 /* Maintenance uses compact labeled rows and native GET controls. */
 .maintenance-controls { display: grid; grid-template-columns: 1fr; gap: 1rem; }
-.maintenance-row, .maintenance-controls .assessment-filter,
-.maintenance-controls .genre-filter, .maintenance-controls .order-filter,
-.pagination .page-size { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
-.maintenance-row > label { font-weight: 700; }
+.maintenance-row, .assessment-range,
+.maintenance-radio-options, .page-size-selection {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: .75rem;
+}
+.maintenance-row > .cdx-field { flex: 1 1 14rem; }
+.assessment-range .field { flex: 1 1 8rem; }
+.maintenance-radio-options { align-items: center; }
+.maintenance-regex { margin-block-end: .25rem; }
+.page-size-selection { align-items: center; gap: .5rem; }
 .maintenance-controls fieldset { min-inline-size: 0; padding: 0; border: 0; margin: 0; }
-.maintenance-controls legend { float: inline-start; font-weight: 700; margin-inline-end: .5rem; }
-.maintenance-controls .cdx-select { inline-size: auto; max-inline-size: 100%; min-inline-size: 5rem; }
-.maintenance-controls .cdx-text-input { flex: 1 1 12rem; }
-.maintenance-controls .choice { white-space: nowrap; }
+.maintenance-controls .cdx-select { inline-size: 100%; max-inline-size: 100%; min-inline-size: 0; }
 .maintenance-controls .form-actions { margin: 0; }
 .pagination .page-size .cdx-select { inline-size: 5rem; }
 @media (max-width: 639px) {
   .maintenance-row { align-items: flex-start; }
   .maintenance-row > .genre-filter { flex-basis: 100%; }
-  .maintenance-controls .assessment-filter { gap: .35rem; }
-  .maintenance-controls .assessment-filter > span { flex-basis: 100%; }
+  .maintenance-controls .assessment-filter { flex-basis: 100%; }
 }

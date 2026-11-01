@@ -34,7 +34,7 @@ class NavigationTests(unittest.TestCase):
     def test_tools_links_live_in_localized_native_disclosure(
         self,
     ) -> None:
-        """Keep newsletter in Tools and log downloads under About."""
+        """Keep newsletter in Tools and omit diagnostic logs."""
         for locale, tools, newsletter, logs in (
             ("en", "Tools", "Newsletter drafts", "Run logs"),
             ("zh-hans", "工具", "简讯草稿", "运行日志"),
@@ -51,10 +51,9 @@ class NavigationTests(unittest.TestCase):
                 assert f"<summary>{tools}</summary>" in details[1]
                 assert f'<a href="/newsletter/">{newsletter}</a>' in details[1]
                 assert 'href="/logs/"' not in navigation
-                assert f'<a href="/logs/">{logs}</a>' in render_about(
-                    None,
-                    locale,
-                )
+                about = render_about(None, locale)
+                assert 'href="/logs/"' not in about
+                assert logs not in about
                 direct = navigation[: details.start()]
                 assert re.findall(r'<a href="([^"]+)"', direct) == [
                     "/",
@@ -84,7 +83,7 @@ class NavigationTests(unittest.TestCase):
 
     @staticmethod
     def test_footer_names_the_project_and_omits_logs() -> None:
-        """Keep log downloads under About and name the project."""
+        """Keep project and About footer links and omit logs."""
         for locale, project in (
             ("en", "Video games WikiProject"),
             ("zh-hans", "电子游戏专题"),
@@ -95,7 +94,7 @@ class NavigationTests(unittest.TestCase):
             assert 'href="/about/"' in footer
             assert 'href="/logs/"' not in footer
             assert f">{project}</a>" in footer
-            assert 'href="/logs/"' in output.split("<footer>", 1)[0]
+            assert 'href="/logs/"' not in output.split("<footer>", 1)[0]
 
 
 if __name__ == "__main__":

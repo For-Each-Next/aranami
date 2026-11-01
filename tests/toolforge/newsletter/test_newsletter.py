@@ -390,6 +390,49 @@ class NewsletterRouteTests(unittest.TestCase):
         assert "高品質條目的總數及各級內容數量待補充。" in response.text
         upcoming.assert_called_once()
 
+    def test_saved_publication_state_keeps_an_overdue_draft_selected(
+        self,
+    ) -> None:
+        """Keep overdue drafts selected using only saved facts."""
+        path = self._save_issue({"overview": {"total": 13025}})
+        retained = json.loads(path.read_text())["newsletter"]
+        retained["lifecycle"] = {
+            "active": ["2027-01"],
+            "default_issue": "2027-01",
+            "source": {
+                "label": "Module:VGNL/data",
+                "url": "https://zh.wikipedia.org/w/index.php?oldid=93292299",
+            },
+            "states": {"2027-01": "draft"},
+        }
+        save_observation(
+            self.runtime / OBSERVATIONS_PATH,
+            retained,
+            valid_newsletter,
+        )
+        before = {
+            saved: saved.read_bytes()
+            for saved in self.runtime.rglob("*")
+            if saved.is_file()
+        }
+        with (
+            patch(
+                "backend.public.Issue.upcoming",
+                return_value=Issue.parse("2027-07"),
+            ),
+            patch("pywikibot.Site") as site,
+            patch("backend.website.collect.collect_dashboard") as collect,
+        ):
+            response = self.client.get("/newsletter/?lang=en")
+        assert response.status_code == HTTPStatus.OK
+        assert '<option value="2027-01" selected>' in response.text
+        assert "13,025篇條目" in response.text
+        assert all(
+            saved.read_bytes() == content for saved, content in before.items()
+        )
+        site.assert_not_called()
+        collect.assert_not_called()
+
     def test_language_links_retain_selected_issue(self) -> None:
         """Keep the selected issue when switching language."""
         output = self.client.get("/newsletter/?issue=2028-04&lang=en").text

@@ -30,7 +30,7 @@ tail -n 100 logs/aranami.YYYY-MM-DD.log
 ```
 
 Choose a UTC date. Logs retain the current date and previous 29 dates.
-The About page links to the [daily-log archive](https://aranami.toolforge.org/logs/)
+Use the [daily-log archive](https://aranami.toolforge.org/logs/)
 for raw diagnostic downloads. The website does not translate diagnostics into
 narrated summaries. Site-report history shows the latest 20 recorded
 invocations with date, task, result, and duration columns. Open a task's dialog

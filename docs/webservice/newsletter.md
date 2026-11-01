@@ -10,20 +10,53 @@ opening the tool never fetches source pages or publishes edits.
 Open **Tools → Newsletter drafts**, or `/newsletter/`. The issue menu selects
 the latest completed issue or the current draft and loads it in place. The
 issue submit button stays visible after loading. Native form submission works
-without JavaScript. The default advances on January 1,
-April 1, July 1, and October 1 at `00:00 UTC`. Daily collection runs at that time
-and retries failures hourly while retaining the previous complete result.
+without JavaScript. The default is the earliest started, unpublished issue in
+the saved publication plan. Other active and retained issues remain selectable.
+Daily collection runs at `00:00 UTC` and retries failures hourly while retaining
+the previous complete result.
+
+An issue updates from the start of its reporting period until
+[`Module:VGNL/data`](https://zh.wikipedia.org/wiki/Module:VGNL/data) records its
+publication day. January's annual feature starts on January 1 of the preceding
+year; ordinary quarterly data starts three months before the issue month.
+Unpublished issues continue refreshing after their reporting period ends,
+without including later events in that period. Published or cancelled issues
+retain their last saved facts. Opening the website never checks the wiki for
+publication changes.
 
 Ordinary issues contain the main overview, quality changes, announcements,
 and blank feature and interview drafts. January has a combined annual feature
 instead of a separate interview. For example, issue `2027-01` reports
 October–December 2026 in its regular pages and all of 2026 in its annual feature.
-All pages use the current newsletter banner. Feature and interview prose stays
+All draft pages use the current newsletter banner, including a link back to
+the tool's automatically generated wikitext. Feature and interview prose stays
 editorial work; the generator never copies a previous author's article.
+
+Quality drafts include the two-image placeholder from the October 2026
+[creation revision 93279502](https://zh.wikipedia.org/w/index.php?oldid=93279502),
+directly below the quality heading. Replace its example images and captions
+before publishing.
 
 Announcements combine homepage featured articles, featured lists, and good
 articles under `典優內容`. Entries show the appearance date and content type in
 chronological order. Homepage lists with no entries use `* （無）`.
+Date annotations link to the featured/good daily call pages, DYK's daily
+`Wikipedia:新条目推荐/供稿/YYYY年M月D日` archives, or the news call template.
+DYK links each daily archive only once per list.
+Anniversary dates use the exact saved source revision; unavailable revision
+evidence leaves the date unlinked.
+Incomplete quarterly introductions start with an inline cutoff-date Memo
+from the saved observation, on the same line before the sentence and outside
+list columns. The new-article summary follows the same format after its pie.
+Hints use only `截至…` and disappear once the quarter is complete. Reusing a
+draft for the next issue replaces these generated dates while keeping authored
+notes. Missing announcements use the October 2026 issue's example project-age
+bullet with an editable `<small>（M月D日）</small>` date.
+The new-article assessment pie uses article counts with `autoscale = true`;
+its legend shows each count in `篇` alongside its computed share. This explicit
+option also corrects older saved layouts: without it,
+[Module:Piechart 91397381](https://zh.wikipedia.org/w/index.php?oldid=91397381)
+treats small totals as percentages.
 
 Use **Copy** to copy the draft, **View newsletter page** to read its destination,
 and **Edit newsletter page** to open the wiki editor. The edit link prefills a
@@ -45,6 +78,9 @@ each available date has its own saved facts. The website generates every page
 from those facts when requested, using the current formatting rules. Formatting
 changes therefore apply to older dates without changing their observations or
 capture timestamps. Missing annual figures use complete placeholder sentences.
+Each background draft update recalculates annual traffic totals and rankings
+from retained daily Pageviews Parquet, including corrections for the same data
+date. Missing traffic remains unknown; opening the page only reads saved facts.
 Partial-year daily growth uses the elapsed days through the displayed
 observation date; completed years use their full calendar length.
 
@@ -125,6 +161,8 @@ current grades are not used as historical evidence.
 
 The annual feature keeps the reference's numerical introductions for quality
 promotions, DYK, article totals and growth, popularity, revisions, and awards.
+When total views are unavailable, it omits count-only popularity prose while
+retaining any measured ranking.
 It uses `Graph:Chart` for annual quality recognitions, cumulative DYK totals, and
 assessment pies for the reviewed year and its predecessor. Charts have no
 companion data tables. Generated parameters use `| key = value`, and chart
@@ -134,9 +172,9 @@ such as `典范级：25`, in regular weight. Grades representing at least 5% sho
 their share to one decimal inside the pie, in regular black text. Smaller
 slices have no percentage label. Legends contain only grades and counts.
 Each pie is at most 400 pixels wide including its legend and padding.
-Both pies share one outer container, with their introduction and date notice
-before it.
-On narrow screens, each chart scrolls inside its own container.
+Both pies sit directly in one wrapping flex container, with one div per chart
+and their introduction and date notice before it. On narrow screens, the
+container scrolls when a single chart cannot fit.
 Historical series
 come from the reference images' description pages, with provenance retained
 by collection. Current observations extend the supported series; missing
@@ -153,7 +191,8 @@ hover details without expanded SVG. The template's default legend follows the
 layer order in its native position. The x-axis labels contain only years. The
 vertical axis starts at zero and reaches at least 50, expanding in multiples of
 ten for larger cohorts.
-Narrow screens scroll within the container.
+The chart sits directly in one centered container, using native responsive
+sizing with horizontal scrolling for remaining overflow.
 Unknown event dates do not receive an
 inferred year, and missing historical observations produce no chart.
 

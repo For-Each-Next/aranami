@@ -1,14 +1,14 @@
 {% if backlog %}
 <div id="backlog">
   {% if backlog.unavailable %}
-    <p class="empty">{{ t.backlog.unavailable }}</p>
+    <div class="cdx-message cdx-message--notice" aria-live="polite"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#message-notice"></use></svg><div class="cdx-message__content">{{ t.backlog.unavailable }}</div></div>
   {% else %}
     {% for section in backlog.sections %}
     <section class="section-flat backlog-section" aria-labelledby="backlog-section-{{ section.key }}">
       <h2 id="backlog-section-{{ section.key }}">{{ section.label }}</h2>
       <ul class="card-grid" role="list">
         {% for task in section.tasks %}
-        <li><a href="{{ task.url }}" class="backlog-task"><span class="backlog-label">{{ task.label }}</span><span class="backlog-count">{{ task.count }}</span></a></li>
+        <li><a href="{{ task.url }}" class="backlog-task cdx-card cdx-card--is-link"><span class="cdx-card__text"><span class="backlog-label cdx-card__text__title">{{ task.label }}</span><span class="backlog-count cdx-card__text__supporting-text">{{ task.count }}</span></span></a></li>
         {% endfor %}
       </ul>
     </section>

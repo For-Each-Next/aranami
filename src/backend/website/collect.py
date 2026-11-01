@@ -992,7 +992,7 @@ def _report_plan(
             if name == "reviews"
             else "zh:all-access:user:top1000:limit12:lookback7:extracts-v3"
             if name == "pageviews"
-            else "quarterly-newsletter-v18:annual-statistics"
+            else "quarterly-newsletter-v20:publication-lifecycle"
             if name == "newsletter"
             else f"days:{days}:extracts-v3:talk-news-v1"
             if name == "news_history"

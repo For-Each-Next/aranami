@@ -31,6 +31,10 @@ from backend.newsletter.layout import (
 from backend.newsletter.newpages import (
     collect_new_pages,
 )
+from backend.newsletter.publication import (
+    read_publication_plan,
+    reporting_start,
+)
 from backend.newsletter.schema import STAT_KEYS, valid_newsletter
 from backend.newsletter.statistics import (
     collect_popularity,
@@ -831,38 +835,38 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
         message = "Current newsletter counts must be bounded observations."
         raise ValueError(message)
     now = now.astimezone(dt.UTC)
-    month = ((now.month - 1) // 3) * 3 + 1
-    current = Issue.parse(f"{now.year:04d}-{month:02d}")
-    issues = tuple(
-        dict.fromkeys((
-            current,
-            Issue.parse(current.next),
-            Issue.parse(f"{now.year + 1:04d}-01"),
-        )),
-    )
+    lifecycle = read_publication_plan(read, now.date())
+    prior = (prior_facts or {}).get("issues", {})
     result = {
+        "lifecycle": lifecycle,
         "issues": {
-            issue.value: _issue_facts(
-                read,
-                issue,
-                now,
-                current_counts,
-                members=members,
-                member_ids=member_ids,
-                article_history=article_history,
-                quality_history=quality_history,
-                today_history_path=today_history_path,
-                overview_at=overview_at,
-                current_assessments=current_assessments,
-                dyk_projects=dyk_projects,
-                assessments_at=assessments_at,
-                prior=(prior_facts or {}).get("issues", {}).get(issue.value),
-                revision_counts=revision_counts,
-                annual_pageviews=annual_pageviews,
-            )
-            for issue in issues
+            key: facts
+            for key, facts in prior.items()
+            if key not in lifecycle["active"]
+            and reporting_start(Issue.parse(key)) <= now.date()
         },
     }
+    result["issues"].update({
+        key: _issue_facts(
+            read,
+            Issue.parse(key),
+            now,
+            current_counts,
+            members=members,
+            member_ids=member_ids,
+            article_history=article_history,
+            quality_history=quality_history,
+            today_history_path=today_history_path,
+            overview_at=overview_at,
+            current_assessments=current_assessments,
+            dyk_projects=dyk_projects,
+            assessments_at=assessments_at,
+            prior=prior.get(key),
+            revision_counts=revision_counts,
+            annual_pageviews=annual_pageviews,
+        )
+        for key in lifecycle["active"]
+    })
     if not valid_newsletter(result):
         message = "Newsletter facts failed bounded snapshot validation."
         raise ValueError(message)

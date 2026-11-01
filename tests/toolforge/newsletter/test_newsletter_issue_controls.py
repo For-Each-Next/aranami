@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 import tempfile
 import unittest
 from html.parser import HTMLParser
@@ -127,7 +128,10 @@ class NewsletterIssueControlsTests(unittest.TestCase):
                 assert len(menu.options) == 2  # ruff: ignore[magic-value-comparison]
                 assert "required" in menu.attributes
                 assert "issue=2027-01" in response.text
-                assert '<label for="newsletter-issue">' in response.text
+                assert re.search(
+                    r'<label\b[^>]*\bfor="newsletter-issue"',
+                    response.text,
+                )
                 assert menu.attributes["id"] == "newsletter-issue"
                 assert 'type="radio"' not in response.text
                 assert "hidden data-newsletter-issue-form" not in response.text

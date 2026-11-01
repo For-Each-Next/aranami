@@ -256,7 +256,9 @@ def _banner(issue: Issue) -> str:
         "| image=[[File:Schedule (cropped).jpg|50px|link=|"
         "class=notpageimage skin-invert-image|編寫中]]\n"
         f"| text=此為草稿，預定於{issue.year}年{issue.month}月出刊，"
-        f"歡迎[[WikiProject talk:電子遊戲/簡訊#{issue.value}|討論]]和編輯。\n"
+        f"歡迎[[WikiProject talk:電子遊戲/簡訊#{issue.value}|討論]]和編輯。"
+        "{{pb}}可於[[toolforge:aranami/newsletter/|此處]]參看"
+        "自動生成的wikitext文字。\n"
         "}}\n\n{{noteTA-lite|G1=電子遊戲}}\n\n"
     )
 
@@ -666,11 +668,8 @@ def _quality_charts(review: Mapping, year: int) -> str:
         counts = [row["counts"][code] for code, _ in observed]
         provisional = provisional or row["provisional"]
         charts.append(
-            '<div style="display:inline-block;max-width:100%;'
-            "overflow-x:auto;"
-            'vertical-align:top;text-align:center">\n'
             f'<div style="width:{_PIE_TOTAL_WIDTH}px;'
-            'position:relative;line-height:0">\n'
+            'position:relative;line-height:0;flex:none">\n'
             "{{Graph:Chart\n"
             f"| type = pie | width = {plot_width:g} | height = {_PIE_HEIGHT}\n"
             f"| title = {row['year']}年條目品質概況\n"
@@ -682,7 +681,7 @@ def _quality_charts(review: Mapping, year: int) -> str:
             + ", ".join(meta[1] for _, meta in observed)
             + "\n| legend = true | showValues = false\n}}"
             + _pie_percent_labels(counts, plot_width)
-            + "\n</div></div>",
+            + "\n</div>",
         )
     if not charts:
         return ""
@@ -692,9 +691,9 @@ def _quality_charts(review: Mapping, year: int) -> str:
             "各年度條目品質分布如下：",
             partial=provisional,
         )
-        + '\n<div class="annual-quality-pies">\n'
-        + "\n".join(charts)
-        + "\n</div>"
+        + '\n<div class="annual-quality-pies" '
+        'style="display:flex;flex-wrap:wrap;overflow-x:auto;'
+        'text-align:center">\n' + "\n".join(charts) + "\n</div>"
     )
 
 
@@ -945,16 +944,13 @@ def _article_report(  # ruff: ignore[too-many-locals]
             "參與統計的條目數待補充。"
         )
     elif type(count) is int:
-        popularity_prose = (
-            f"{period_label}，參與瀏覽量統計的條目共有{count:,}篇。"
-            "總瀏覽量與日均瀏覽量待補充。"
-        )
+        popularity_prose = ""
     else:
         popularity_prose = "本年度瀏覽量統計待補充。"
+    if popularity_prose:
+        parts.append(popularity_prose)
     parts.append(  # ruff: ignore[repeated-append]
-        popularity_prose
-        + "\n\n"
-        + _annual_ranking(
+        _annual_ranking(
             [
                 f"# {_link(row['title'])}：{row['views']:,}次浏览"
                 f"<small>（日均{row['views'] / interval_days:,.0f}次）</small>"
@@ -1117,9 +1113,8 @@ def _quality_history_chart(review: Mapping) -> str:
         _annual_intro(review, "歷年高品質條目入選數量如下：")
         + '\n<div class="center" '
         'style="max-width:100%;overflow-x:auto;text-align:center">\n'
-        '<div style="min-width:800px">\n'
         + "\n".join(parameters)
-        + "\n</div></div>"
+        + "\n</div>"
     )
 
 
@@ -1294,7 +1289,9 @@ def _annual(issue: Issue, review: Mapping) -> str:
     quality_list, author_table = _quality(review)
     if quality_list:
         quality_list = (
-            _annual_intro(review, "誕生條目具體如下：") + "\n" + quality_list
+            _annual_intro(review, "新入選或晉級條目如下：")
+            + "\n"
+            + quality_list
         )
     elif review.get("quality_changes") is not None:
         quality_list = "本年度名單未收錄新增的高品質條目。"

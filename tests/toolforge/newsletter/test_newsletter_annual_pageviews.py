@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import datetime as dt
+from contextlib import chdir
+from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import MagicMock, patch
 
+import polars as pl
+
+from backend.newsletter import refresh
 from backend.newsletter.collection import collect_source_facts
 from backend.newsletter.schema import valid_newsletter
 from backend.newsletter.statistics import collect_popularity
+from backend.support.pageviews_cache import PageviewsCache
 from newsletter.test_newsletter_data import Reader
 from newsletter.test_newsletter_statistics import _popular
 from shared.newsletter import Issue
@@ -31,6 +38,60 @@ def _year_to_date(*, total: int | None = 31000) -> dict:
 
 class AnnualPageviewsTests(TestCase):
     """Select calendar data without relabeling a rolling year."""
+
+    @staticmethod
+    def test_acquisition_uses_the_pageviews_article_population() -> None:
+        """Exclude inapplicable pages from annual traffic counts."""
+        start, stop = dt.date(2026, 1, 1), dt.date(2026, 1, 2)
+        views = 10
+        read = MagicMock()
+        read.site.hostname.return_value = "zh.wikipedia.org"
+        read.site.dbName.return_value = "zhwiki"
+        membership = pl.DataFrame({
+            "page_id": [1, 2, 3],
+            "full_title": ["Game", "Inapplicable", "Talk:Game"],
+            "page_namespace": [0, 0, 1],
+            "pa_class": ["Stub", "NA", "NA"],
+            "pa_importance": ["低", "不适用", "低"],
+        })
+        with TemporaryDirectory() as directory, chdir(directory):
+            cache = PageviewsCache.load("zh.wikipedia.org")
+            cache.replace(
+                "Game",
+                start,
+                stop,
+                pl.DataFrame({"date": [start], "pageview": [views]}),
+            )
+            cache.save(["Game"])
+            with (
+                patch.object(
+                    refresh,
+                    "query_project_intersections",
+                    return_value=pl.DataFrame(
+                        schema={"page_id": pl.Int64, "project": pl.String},
+                    ),
+                ),
+                patch.object(
+                    refresh.collection,
+                    "collect_source_facts",
+                    return_value={},
+                ) as collect,
+            ):
+                refresh.collect_newsletter(
+                    read,
+                    membership,
+                    now=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+                    observations_path=None,
+                    article_history=pl.DataFrame(),
+                    quality_history=pl.DataFrame(),
+                    today_history_path=None,
+                )
+            arguments = collect.call_args.kwargs
+            annual = arguments["annual_pageviews"](2026, stop)
+        assert annual["article_count"] == 1
+        assert annual["total_views"] == views
+        assert annual["items"] == [{"title": "Game", "views": views}]
+        assert arguments["members"] == {"Game", "Inapplicable"}
 
     @staticmethod
     def test_prepared_calendar_year_replaces_rolling_report() -> None:
@@ -76,6 +137,18 @@ class AnnualPageviewsTests(TestCase):
         )
         assert data["annual_popularity"]["end"] == "2026-12-31"
         assert not data["annual_popularity"]["provisional"]
+
+    @staticmethod
+    def test_recalculation_replaces_an_equally_dated_wiki_report() -> None:
+        """Refresh totals while the reporting date stays the same."""
+        prepared = _year_to_date(total=42000)
+        data = collect_popularity(
+            lambda _title, _before: _popular("2026-01-01", "2026-10-30"),
+            Issue(2027, 1),
+            dt.datetime(2026, 11, 1, tzinfo=dt.UTC),
+            annual_pageviews=lambda _year, _through: prepared,
+        )
+        assert data["annual_popularity"] == prepared
 
     @staticmethod
     def test_collection_retains_unknown_totals_without_zeroes() -> None:

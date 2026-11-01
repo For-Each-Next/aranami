@@ -18,6 +18,7 @@ under the component that owns the behavior:
 |---|---|---|
 | `webservice/` | [Newsletter drafts](webservice/newsletter.md) | Select issues and retained dates, copy drafts, and interpret annual data |
 | `webservice/` | [Branding](webservice/branding.md) | Maintain the website's logo, icons, and shared visual style |
+| `webservice/` | [Frontend components](webservice/frontend.md) | Build TypeScript and Codex assets and preserve native forms and live updates |
 | `backend/` | [Newsletter collection](backend/newsletter.md) | Maintain source evidence, caches, daily archives, and history backfills |
 
 Read [repository instructions](../AGENTS.md) before contributing and the

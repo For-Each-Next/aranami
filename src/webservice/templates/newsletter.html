@@ -12,31 +12,37 @@
 <div data-newsletter-content>
 <p>{{ t.newsletter.intro }}</p>
 <form class="newsletter-controls" action="/newsletter/" method="get" data-newsletter-issue-form>
-  <label for="newsletter-issue">{{ t.newsletter.issue }}</label>
-  <select id="newsletter-issue" class="cdx-select" name="issue" required>
-    {% for choice in issue_choices %}<option value="{{ choice.value }}"{% if choice.checked %} selected{% endif %}>{{ choice.value }} ({{ choice.label }})</option>{% endfor %}
-  </select>
-  <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.issue_view }}</button>
+  <div class="field cdx-field newsletter-issue-field">
+    <div class="cdx-label"><label class="cdx-label__label" for="newsletter-issue"><span class="cdx-label__label__text">{{ t.newsletter.issue }}</span></label></div>
+    <div class="cdx-field__control newsletter-issue-selection">
+      <select id="newsletter-issue" class="cdx-select" name="issue" required>
+        {% for choice in issue_choices %}<option value="{{ choice.value }}"{% if choice.checked %} selected{% endif %}>{{ choice.value }} ({{ choice.label }})</option>{% endfor %}
+      </select>
+      <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.issue_view }}</button>
+    </div>
+  </div>
   <input type="hidden" name="lang" value="{{ locale }}">
 </form>
-<p class="notice" role="status" hidden data-newsletter-load-status data-failure="{{ t.newsletter.load_failed }}"></p>
+<p class="cdx-message cdx-message--notice cdx-message--inline" role="status" hidden data-newsletter-load-status data-failure="{{ t.newsletter.load_failed }}"></p>
 <div data-newsletter-result>
 {% if draft_history.dates or draft_history.selected %}
 <form class="newsletter-date-controls" action="/newsletter/" method="get">
-  <label id="newsletter-date-label" for="newsletter-data-date">{{ t.newsletter.history.date }}</label>
-  <div class="newsletter-date-selection">
-    <input id="newsletter-data-date" name="date" type="date" value="{{ draft_history.form_date }}"{% if draft_history.minimum %} min="{{ draft_history.minimum }}" max="{{ draft_history.maximum }}" list="newsletter-saved-dates"{% endif %} required>
-    <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.history.view }}</button>
+  <div class="field cdx-field newsletter-date-field">
+    <div class="cdx-label"><label class="cdx-label__label" id="newsletter-date-label" for="newsletter-data-date"><span class="cdx-label__label__text">{{ t.newsletter.history.date }}</span></label></div>
+    <div class="cdx-field__control newsletter-date-selection">
+      <div class="cdx-text-input"><input class="cdx-text-input__input" id="newsletter-data-date" name="date" type="date" value="{{ draft_history.form_date }}"{% if draft_history.minimum %} min="{{ draft_history.minimum }}" max="{{ draft_history.maximum }}" list="newsletter-saved-dates"{% endif %} required></div>
+      <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.history.view }}</button>
+    </div>
   </div>
   <input type="hidden" name="issue" value="{{ selected_issue }}">
   <input type="hidden" name="lang" value="{{ locale }}">
   {% if draft_history.dates %}<datalist id="newsletter-saved-dates">{% for day in draft_history.dates %}<option value="{{ day }}"></option>{% endfor %}</datalist>{% endif %}
 </form>
 {% else %}<p class="context">{{ t.newsletter.history.unavailable }}</p>{% endif %}
-{% if draft_history.missing %}<p class="notice" role="status">{{ t.newsletter.history.missing }}</p>
+{% if draft_history.missing %}<div class="cdx-message cdx-message--notice" role="status"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#message-notice"></use></svg><div class="cdx-message__content">{{ t.newsletter.history.missing }}</div></div>
 {% elif draft_history.selected and available %}<p class="context newsletter-observation">{{ t.newsletter.history.through }} <time datetime="{{ draft_history.selected }}">{{ draft_history.selected }}</time> · {{ t.newsletter.history.generated }} {% with time=draft_history.generated %}{% include "includes/time.html" %}{% endwith %}</p>
 {% endif %}
-{% if not available and not draft_history.missing %}<p class="notice" role="status">{{ t.newsletter.unavailable }}</p>{% endif %}
+{% if not available and not draft_history.missing %}<div class="cdx-message cdx-message--notice" role="status"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#message-notice"></use></svg><div class="cdx-message__content">{{ t.newsletter.unavailable }}</div></div>{% endif %}
 {% if available %}
 {% for draft in drafts %}
 <section class="newsletter-draft" id="newsletter-page-{{ loop.index }}" aria-labelledby="newsletter-heading-{{ loop.index }}">

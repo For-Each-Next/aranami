@@ -873,12 +873,6 @@ class _Page:
         limit = runtime.get("memory_limit_bytes") if fresh else None
         cpu = runtime.get("cpu_percent") if fresh else None
         cpu_limit = runtime.get("cpu_limit") if fresh else None
-        storage = " / ".join(
-            readable_size(runtime[key])
-            if fresh and runtime.get(key) is not None
-            else unknown
-            for key in ("storage_used_bytes", "storage_total_bytes")
-        )
         used_memory = readable_size(memory) if memory is not None else unknown
         allocated_memory = (
             readable_size(limit) if limit is not None else unknown
@@ -907,7 +901,6 @@ class _Page:
             ("python", runtime.get("python") or unknown, False),
             ("memory", f"{used_memory} / {allocated_memory}", True),
             ("cpu", f"{cpu_use}{separator}{cpu_cores}", True),
-            ("storage", storage, True),
         )
         return [
             {
@@ -1446,14 +1439,14 @@ def render_logs(  # ruff: ignore[too-many-arguments]
     now: dt.datetime | None = None,
     navigation: Record | None = None,
 ) -> str:
-    """Render diagnostic file downloads and saved server observations.
+    """Render diagnostic file downloads with shared footer uptime.
 
     Args:
         data: Validated daily-file listing and selection.
         locale: Negotiated interface language.
-        status: Validated scheduler and resource observations.
+        status: Saved monitor observations for the shared footer.
         config: Current source version and routine definitions.
-        now: Optional clock for deterministic freshness checks.
+        now: Optional clock for deterministic uptime.
         navigation: Request route and language choices.
 
     Returns:

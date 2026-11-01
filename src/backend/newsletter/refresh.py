@@ -205,6 +205,13 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments]
             read_annual_popularity,
             read.site,
             title=TASK_DEFINITIONS["pageviews"].pages["report"],
+            titles=membership
+            .filter(
+                (pl.col("page_namespace") == 0)
+                & (pl.col("pa_importance") != "不适用"),
+            )
+            .get_column("full_title")
+            .to_list(),
         ),
         current_assessments=membership,
         dyk_projects=dyk_projects,

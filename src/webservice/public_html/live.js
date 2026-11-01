@@ -1,17 +1,20 @@
+"use strict";
 /* Receive saved-status pushes and periodically verify them over HTTP. */
 (() => {
     "use strict";
-
     // Native modal dialogs supply focus containment, Escape dismissal, and an
     // inert background. Delegation also covers links refreshed over HTTP.
     const dialogOpeners = new Map();
     document.addEventListener("click", (event) => {
         const control = event.target.closest?.('a[aria-haspopup="dialog"],button[commandfor]');
-        if (!control) return;
+        if (!control)
+            return;
         const link = control.nodeName === "A";
-        if (link && (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button > 0)) return;
+        if (link && (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button > 0))
+            return;
         const dialog = document.getElementById(control.getAttribute(link ? "aria-controls" : "commandfor"));
-        if (dialog?.nodeName !== "DIALOG" || typeof dialog.showModal !== "function") return;
+        if (dialog?.nodeName !== "DIALOG" || typeof dialog.showModal !== "function")
+            return;
         const command = link ? "show-modal" : control.getAttribute("command");
         if (command === "show-modal") {
             event.preventDefault();
@@ -19,7 +22,8 @@
                 dialogOpeners.set(dialog, control);
                 dialog.showModal();
             }
-        } else if (command === "close") {
+        }
+        else if (command === "close") {
             event.preventDefault();
             dialog.close();
         }
@@ -27,66 +31,68 @@
     document.addEventListener("close", (event) => {
         const opener = dialogOpeners.get(event.target);
         dialogOpeners.delete(event.target);
-        if (opener?.isConnected) opener.focus();
+        if (opener?.isConnected)
+            opener.focus();
     }, true);
     document.addEventListener("keydown", (event) => {
-        if (event.key !== "Tab") return;
+        if (event.key !== "Tab")
+            return;
         const dialog = event.target.closest?.("dialog[open]");
-        if (!dialog) return;
-        const controls = [...dialog.querySelectorAll(
-            "a[href],button,input,select,textarea,[tabindex]",
-        )].filter((node) => node.tabIndex >= 0 && !node.disabled && node.getClientRects().length);
+        if (!dialog)
+            return;
+        const controls = [...dialog.querySelectorAll("a[href],button,input,select,textarea,[tabindex]")].filter((node) => node.tabIndex >= 0 && !node.disabled && node.getClientRects().length);
         const first = controls[0];
         const last = controls.at(-1);
         if (!first) {
             event.preventDefault();
-        } else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+        }
+        else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
             event.preventDefault();
             last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
+        }
+        else if (!event.shiftKey && document.activeElement === last) {
             event.preventDefault();
             first.focus();
         }
     });
-
     // Fragment links also work when opened directly or in a new browser tab.
     function openFragmentDialog() {
         const fragment = window.location.hash?.slice(1);
-        if (!fragment) return;
+        if (!fragment)
+            return;
         const dialog = document.getElementById(fragment);
-        if (dialog?.nodeName === "DIALOG" && !dialog.open) dialog.showModal();
+        if (dialog?.nodeName === "DIALOG" && !dialog.open)
+            dialog.showModal();
     }
     window.addEventListener("hashchange", openFragmentDialog);
     openFragmentDialog();
-
     const clockId = ["tool-status", "live-server-status", "live-uptime"]
         .find((id) => document.getElementById(id));
-    if (!clockId || !document.getElementById("live-uptime")) return;
+    if (!clockId || !document.getElementById("live-uptime"))
+        return;
     const regionIds = ["tool-status", "live-uptime", "live-server-status", "server-runtime"]
         .filter((id) => document.getElementById(id));
-
     const interval = 5000;
     const verificationInterval = 30000;
     const requestTimeout = 10000;
     const socketTimeout = 45000;
-    let timer;
-    let pollAt;
+    let timer = null;
+    let pollAt = Infinity;
     let clockTimer;
-    let pending;
+    let pending = null;
     let retry = interval;
     let active = true;
     let refreshAgain = false;
     const lastFailures = new Map();
-    let statusFailure;
+    let statusFailure = null;
     let lastStatusAt = -Infinity;
-    let socket;
+    let socket = null;
     let socketTimer;
     let watchdogTimer;
-    let lastMessageAt;
+    let lastMessageAt = -Infinity;
     let socketHealthy = false;
     let socketRetry = 1000;
     let anchor;
-
     function readClock(root) {
         const serverTime = Date.parse(root.dataset.serverTime);
         const messages = JSON.parse(root.dataset.clockMessages);
@@ -98,17 +104,15 @@
             "time.hours_ago", "time.minutes_ahead", "time.hours_ahead",
             "time.days_ago", "time.days_ahead", "time.soon", "time.just_now",
         ]) {
-            if (typeof messages[key] !== "string") throw new Error("Invalid clock labels");
+            if (typeof messages[key] !== "string")
+                throw new Error("Invalid clock labels");
         }
         return { serverTime, messages, receivedAt: performance.now() };
     }
-
-    const format = (template, values) => template.replace(
-        /\{([a-z]+)\}/g, (match, key) => values[key] ?? match,
-    );
-
+    const format = (template, values) => template.replace(/\{([a-z]+)\}/g, (match, key) => String(values[key] ?? match));
     function updateClocks() {
-        if (!anchor) return;
+        if (!anchor)
+            return;
         // A delayed browser callback advances by actual elapsed time. Changing
         // the computer's wall clock cannot speed up or reverse these timers.
         const now = anchor.serverTime + performance.now() - anchor.receivedAt;
@@ -118,7 +122,7 @@
         if (stale) {
             for (const id of regionIds) {
                 document.getElementById(id).querySelectorAll("[data-schedule-time]").forEach((node) => {
-                    node.textContent = node.dataset.staleText || root.dataset.scheduleStale;
+                    node.textContent = (node.dataset.staleText || root.dataset.scheduleStale);
                     node.removeAttribute("data-schedule-time");
                 });
             }
@@ -128,17 +132,20 @@
         }
         root.querySelectorAll("[data-progress-label]").forEach((node) => {
             const text = stale ? node.dataset.progressFallback : node.dataset.progressLabel;
-            if (node.textContent !== text) node.textContent = text;
+            if (node.textContent !== text)
+                node.textContent = text;
         });
         for (const id of regionIds) {
             const region = document.getElementById(id);
             const nodes = [...region.querySelectorAll("[data-clock]")];
-            if (region.dataset.clock) nodes.push(region);
+            if (region.dataset.clock)
+                nodes.push(region);
             for (const node of nodes) {
                 let text;
                 if (node.dataset.clock === "relative") {
                     const difference = Date.parse(node.dataset.observedAt) - now;
-                    if (!Number.isFinite(difference)) continue;
+                    if (!Number.isFinite(difference))
+                        continue;
                     const minutes = Math.floor(Math.abs(difference) / 60000);
                     const unit = minutes >= 43830 ? "months" : minutes >= 1440 ? "days" : minutes >= 60 ? "hours" : "minutes";
                     const direction = difference > 0 ? "ahead" : "ago";
@@ -146,13 +153,16 @@
                         ? (difference > 0 ? "time.soon" : "time.just_now")
                         : `time.${unit}_${direction}`;
                     const count = unit === "months" ? Math.floor(minutes / 43830) : unit === "days" ? Math.floor(minutes / 1440)
-                            : unit === "hours" ? Math.floor(minutes / 60) : minutes;
+                        : unit === "hours" ? Math.floor(minutes / 60) : minutes;
                     const label = count === 1 && anchor.messages[`${message}_one`] ? `${message}_one` : message;
                     text = format(anchor.messages[label], { count });
-                    if (node.hasAttribute("data-relative-inline")) text = text.slice(1, -1);
-                } else {
+                    if (node.hasAttribute("data-relative-inline"))
+                        text = text.slice(1, -1);
+                }
+                else {
                     const elapsed = (now - Date.parse(node.dataset.startedAt)) / 1000;
-                    if (!Number.isFinite(elapsed)) continue;
+                    if (!Number.isFinite(elapsed))
+                        continue;
                     const seconds = Math.max(0, elapsed);
                     const whole = Math.floor(seconds);
                     if (node.dataset.clock === "uptime") {
@@ -166,13 +176,12 @@
                             : whole >= 60 ? "minutes" : "seconds";
                         const duration = anchor.messages[`duration.${unit}`];
                         const compact = node.dataset.uptimeCompactTemplate && typeof duration === "string";
-                        text = stale ? node.dataset.uptimeUnknown : format(
-                            compact ? node.dataset.uptimeCompactTemplate : node.dataset.uptimeTemplate, {
-                                ...values,
-                                ...(compact ? { duration: format(duration, values) } : {}),
-                            },
-                        );
-                    } else {
+                        text = stale ? node.dataset.uptimeUnknown : format((compact ? node.dataset.uptimeCompactTemplate : node.dataset.uptimeTemplate), {
+                            ...values,
+                            ...(compact ? { duration: format(duration, values) } : {}),
+                        });
+                    }
+                    else {
                         const unit = whole >= 86400 ? "days" : whole >= 3600 ? "hours"
                             : whole >= 60 ? "minutes" : "seconds";
                         const duration = format(anchor.messages[`duration.${unit}`], {
@@ -184,19 +193,19 @@
                         text = format(node.dataset.durationTemplate, { duration });
                     }
                 }
-                if (node.textContent !== text) node.textContent = text;
+                if (node.textContent !== text)
+                    node.textContent = text;
             }
         }
     }
-
     function tick() {
         clearTimeout(clockTimer);
-        if (!active || document.hidden) return;
+        if (!active || document.hidden)
+            return;
         updateClocks();
         updateNotice();
         clockTimer = setTimeout(tick, 1000);
     }
-
     const key = (node) => node.nodeType === Node.ELEMENT_NODE
         ? node.id || node.getAttribute("data-key")
         : null;
@@ -204,38 +213,45 @@
         && left.nodeType === right.nodeType
         && left.nodeName === right.nodeName
         && key(left) === key(right);
-
     // Keep existing elements in place so browser-managed popup/focus state
     // survives each response. Destination rows retain their page identities.
     function reconcile(current, next) {
         if (current.nodeType === Node.TEXT_NODE) {
-            if (current.data !== next.data) current.data = next.data;
+            const currentText = current;
+            const nextText = next;
+            if (currentText.data !== nextText.data)
+                currentText.data = nextText.data;
             return;
         }
-        for (const attribute of [...current.attributes]) {
+        const currentElement = current;
+        const nextElement = next;
+        for (const attribute of [...currentElement.attributes]) {
             // The server describes closed dialogs; preserve the user's modal
             // state while refreshing the observations inside them.
-            if (current.nodeName === "DIALOG" && attribute.name === "open") continue;
-            if (!next.hasAttribute(attribute.name)) {
-                current.removeAttribute(attribute.name);
+            if (current.nodeName === "DIALOG" && attribute.name === "open")
+                continue;
+            if (!nextElement.hasAttribute(attribute.name)) {
+                currentElement.removeAttribute(attribute.name);
             }
         }
-        for (const attribute of next.attributes) {
-            if (current.getAttribute(attribute.name) !== attribute.value) {
-                current.setAttribute(attribute.name, attribute.value);
+        for (const attribute of nextElement.attributes) {
+            if (currentElement.getAttribute(attribute.name) !== attribute.value) {
+                currentElement.setAttribute(attribute.name, attribute.value);
             }
         }
         let cursor = current.firstChild;
         for (const child of next.childNodes) {
             let match = compatible(cursor, child) ? cursor : null;
             if (!match && key(child)) {
-                match = [...current.childNodes].find((node) => compatible(node, child));
+                match = [...current.childNodes].find((node) => compatible(node, child)) || null;
             }
             if (!match) {
                 match = child.cloneNode(true);
                 current.insertBefore(match, cursor);
-            } else {
-                if (match !== cursor) current.insertBefore(match, cursor);
+            }
+            else {
+                if (match !== cursor)
+                    current.insertBefore(match, cursor);
                 reconcile(match, child);
             }
             cursor = match.nextSibling;
@@ -246,26 +262,27 @@
             removed.remove();
         }
     }
-
     function notice(connected, failure) {
         for (const id of ["live-notice", "live-server-notice"]) {
             const label = document.getElementById(id);
-            if (!label) continue;
+            if (!label)
+                continue;
             label.hidden = connected;
-            if (connected) label.removeAttribute("data-live-error");
-            else label.setAttribute("data-live-error", failure);
+            if (connected)
+                label.removeAttribute("data-live-error");
+            else
+                label.setAttribute("data-live-error", failure);
         }
     }
-
     function updateNotice() {
         // Heartbeats keep the socket alive; only a complete applied snapshot
         // establishes fresh status, through either transport.
         const fresh = performance.now() - lastStatusAt < socketTimeout;
         notice(fresh, statusFailure || "stale");
     }
-
     function reportFailure(transport, failure, status) {
-        if (!active || document.hidden) return;
+        if (!active || document.hidden)
+            return;
         statusFailure = failure;
         updateNotice();
         const detail = { transport, failure, ...(status ? { status } : {}) };
@@ -275,14 +292,13 @@
             lastFailures.set(transport, signature);
         }
     }
-
     class StatusError extends Error {
+        failure;
         constructor(failure) {
             super("Invalid live status");
             this.failure = failure;
         }
     }
-
     // Both transports validate the complete snapshot before changing the page.
     // A delayed HTTP response must not overwrite a more recent pushed status.
     function applySnapshot(html) {
@@ -292,25 +308,31 @@
                 throw new Error("Invalid status response");
             }
             const next = new DOMParser().parseFromString(html, "text/html");
-            fragments = regionIds.map((id) => next.getElementById(id));
-            if (fragments.some((fragment) => !fragment)) throw new Error("Incomplete status");
-        } catch {
+            const parsed = regionIds.map((id) => next.getElementById(id));
+            if (parsed.some((fragment) => !fragment))
+                throw new Error("Incomplete status");
+            fragments = parsed;
+        }
+        catch {
             throw new StatusError("response");
         }
         let nextAnchor;
         try {
             nextAnchor = readClock(fragments[regionIds.indexOf(clockId)]);
-        } catch {
+        }
+        catch {
             throw new StatusError("clock");
         }
-        if (anchor && nextAnchor.serverTime < anchor.serverTime) return false;
+        if (anchor && nextAnchor.serverTime < anchor.serverTime)
+            return false;
         try {
             fragments.forEach((fragment, index) => {
                 reconcile(document.getElementById(regionIds[index]), fragment);
             });
             anchor = nextAnchor;
             updateClocks();
-        } catch {
+        }
+        catch {
             throw new StatusError("render");
         }
         lastStatusAt = performance.now();
@@ -318,20 +340,21 @@
         notice(true);
         return true;
     }
-
     function scheduleRefresh(delay, soonerOnly = false) {
-        if (!active || document.hidden || pending) return;
+        if (!active || document.hidden || pending)
+            return;
         const at = performance.now() + delay;
-        if (soonerOnly && timer && pollAt <= at) return;
-        clearTimeout(timer);
+        if (soonerOnly && timer && pollAt <= at)
+            return;
+        clearTimeout(timer ?? undefined);
         pollAt = at;
         timer = setTimeout(refresh, delay);
     }
-
     async function refresh() {
-        clearTimeout(timer);
+        clearTimeout(timer ?? undefined);
         timer = null;
-        if (!active || document.hidden || pending) return;
+        if (!active || document.hidden || pending)
+            return;
         const controller = new AbortController();
         const request = { controller, startedAt: performance.now(), expired: false };
         pending = request;
@@ -358,18 +381,23 @@
                 throw new Error("Status unavailable");
             }
             const html = await response.text();
-            if (!active || document.hidden || controller.signal.aborted) return;
+            if (!active || document.hidden || controller.signal.aborted)
+                return;
             applySnapshot(html);
             retry = interval;
             lastFailures.delete("http");
-        } catch (error) {
+        }
+        catch (error) {
             if (!controller.signal.aborted || request.expired) {
-                if (request.expired) failure = "timeout";
-                else if (error instanceof StatusError) failure = error.failure;
+                if (request.expired)
+                    failure = "timeout";
+                else if (error instanceof StatusError)
+                    failure = error.failure;
                 reportFailure("http", failure, status);
                 retry = Math.min(retry * 2, 30000);
             }
-        } finally {
+        }
+        finally {
             clearTimeout(timeout);
             pending = null;
             if (active && !document.hidden) {
@@ -378,7 +406,6 @@
             refreshAgain = false;
         }
     }
-
     function closeSocket() {
         clearTimeout(watchdogTimer);
         const previous = socket;
@@ -389,38 +416,38 @@
             previous.close();
         }
     }
-
     function reconnectSocket() {
         clearTimeout(socketTimer);
-        if (!active || document.hidden || typeof WebSocket !== "function") return;
+        if (!active || document.hidden || typeof WebSocket !== "function")
+            return;
         const delay = Math.round(Math.min(30000, socketRetry * (0.8 + Math.random() * 0.4)));
         socketRetry = Math.min(socketRetry * 2, 30000);
         socketTimer = setTimeout(connectSocket, delay);
     }
-
     function loseSocket(current, failure) {
-        if (current !== socket) return;
+        if (current !== socket)
+            return;
         closeSocket();
         reportFailure("websocket", failure);
         scheduleRefresh(retry, true);
         reconnectSocket();
     }
-
     function watchSocket(current) {
         clearTimeout(watchdogTimer);
         watchdogTimer = setTimeout(() => loseSocket(current, "timeout"), socketTimeout);
     }
-
     function connectSocket() {
         clearTimeout(socketTimer);
-        if (!active || document.hidden || socket || typeof WebSocket !== "function") return;
+        if (!active || document.hidden || socket || typeof WebSocket !== "function")
+            return;
         const lang = document.documentElement.lang.toLowerCase().replaceAll("_", "-");
         const locale = ["en", "zh", "zh-hans", "zh-hant", "zh-hant-tw", "zh-hant-hk"].includes(lang) ? lang : "en";
         const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
         let current;
         try {
             current = new WebSocket(`${scheme}//${window.location.host}/api/live/ws?lang=${locale}`);
-        } catch {
+        }
+        catch {
             reportFailure("websocket", "connect");
             reconnectSocket();
             return;
@@ -429,15 +456,19 @@
         lastMessageAt = performance.now();
         watchSocket(current);
         current.onmessage = (event) => {
-            if (socket !== current || !active || document.hidden) return;
+            if (socket !== current || !active || document.hidden)
+                return;
             try {
                 if (typeof event.data !== "string" || event.data.length > 8 * 1024 * 1024) {
                     throw new Error("Invalid status frame");
                 }
                 const frame = JSON.parse(event.data);
-                if (!frame || typeof frame !== "object") throw new Error("Invalid status frame");
-                if (frame.type === "status") applySnapshot(frame.html);
-                else if (frame.type !== "heartbeat") throw new Error("Unknown status frame");
+                if (!frame || typeof frame !== "object")
+                    throw new Error("Invalid status frame");
+                if (frame.type === "status")
+                    applySnapshot(frame.html);
+                else if (frame.type !== "heartbeat")
+                    throw new Error("Unknown status frame");
                 lastMessageAt = performance.now();
                 watchSocket(current);
                 if (!socketHealthy) {
@@ -446,25 +477,25 @@
                 }
                 socketRetry = 1000;
                 lastFailures.delete("websocket");
-            } catch (error) {
+            }
+            catch (error) {
                 loseSocket(current, error instanceof StatusError ? error.failure : "protocol");
             }
         };
         current.onerror = () => loseSocket(current, "network");
         current.onclose = () => loseSocket(current, "closed");
     }
-
     function suspend() {
-        clearTimeout(timer);
+        clearTimeout(timer ?? undefined);
         timer = null;
         clearTimeout(clockTimer);
         pending?.controller.abort();
         clearTimeout(socketTimer);
         closeSocket();
     }
-
     function resume() {
-        if (!active || document.hidden) return;
+        if (!active || document.hidden)
+            return;
         tick();
         // Focus/network events can arrive before timers delayed by browser sleep.
         // Retire an overdue request before waiting for its timeout callback.
@@ -472,19 +503,23 @@
             pending.expired = true;
             pending.controller.abort();
         }
-        if (pending?.controller.signal.aborted) refreshAgain = true;
-        else refresh();
+        if (pending?.controller.signal.aborted)
+            refreshAgain = true;
+        else
+            refresh();
         if (socket && performance.now() - lastMessageAt >= socketTimeout) {
             loseSocket(socket, "timeout");
-        } else if (socket && socket.readyState > WebSocket.OPEN) {
+        }
+        else if (socket && socket.readyState > WebSocket.OPEN) {
             loseSocket(socket, "closed");
         }
         connectSocket();
     }
-
     document.addEventListener("visibilitychange", () => {
-        if (document.hidden) suspend();
-        else resume();
+        if (document.hidden)
+            suspend();
+        else
+            resume();
     });
     window.addEventListener("pagehide", () => {
         active = false;
@@ -499,7 +534,8 @@
     try {
         anchor = readClock(document.getElementById(clockId));
         lastStatusAt = performance.now();
-    } catch {
+    }
+    catch {
         // The complete server-rendered page still works without local clocks.
     }
     notice(true);

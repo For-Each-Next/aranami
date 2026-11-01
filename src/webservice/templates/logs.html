@@ -1,13 +1,12 @@
 {% extends "base.html" %}
 {% block contents_links %}
-<ul><li><a href="#log-archive">{{ t.logs.archive }}</a></li><li><a href="#live-server-status">{{ t.server.heading }}</a></li></ul>
+<ul><li><a href="#log-archive">{{ t.logs.archive }}</a></li></ul>
 {% endblock %}
 {% block content %}
 <section class="section-flat" aria-labelledby="log-archive">
 <h2 id="log-archive">{{ t.logs.archive }}</h2>
 {% if selected_download %}<p class="log-toolbar"><a href="{{ selected_download }}" download>{{ t.logs.download }} · {{ selected_date }}</a></p>{% endif %}
-{% if files %}<div class="table-scroll"><table class="logs-table"><thead><tr><th scope="col">{{ t.logs.column_date }}</th><th scope="col">{{ t.logs.column_file }}</th><th scope="col">{{ t.logs.column_size }}</th></tr></thead><tbody>{% for file in files %}<tr><td><a href="{{ file.url }}">{{ file.date }}</a></td><td class="log-download"><a class="filename" href="{{ file.download_url }}" download>{{ file.name }}</a></td><td>{{ file.size_label }}</td></tr>{% endfor %}</tbody></table></div>
-{% else %}<p class="empty">{{ t.logs.empty }}</p>{% endif %}
+{% if files %}<div class="cdx-table"><div class="cdx-table__table-wrapper table-scroll" tabindex="0" role="region" aria-label="{{ t.logs.archive }}"><table class="cdx-table__table logs-table"><caption class="visually-hidden">{{ t.logs.archive }}</caption><thead><tr><th scope="col">{{ t.logs.column_date }}</th><th scope="col">{{ t.logs.column_file }}</th><th scope="col" class="cdx-table__table__cell--align-number">{{ t.logs.column_size }}</th></tr></thead><tbody>{% for file in files %}<tr><td><a href="{{ file.url }}">{{ file.date }}</a></td><td class="log-download"><a class="filename" href="{{ file.download_url }}" download>{{ file.name }}</a></td><td class="cdx-table__table__cell--align-number">{{ file.size_label }}</td></tr>{% endfor %}</tbody></table></div></div>
+{% else %}<div class="cdx-message cdx-message--notice"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#message-notice"></use></svg><div class="cdx-message__content">{{ t.logs.empty }}</div></div>{% endif %}
 </section>
-<section class="system-details" aria-label="{{ t.logs.system_details }}">{% include "includes/server.html" %}</section>
 {% endblock %}

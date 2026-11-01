@@ -38,7 +38,7 @@ async function main() {
     let pendingStartupScripts;
     const server = http.createServer((request, response) => {
         const pathname = new URL(request.url, "http://localhost").pathname;
-        const filename = (["/navigation.js", "/aranami-icon.png", "/aranami-wordmark.png", "/favicon.png", "/live.js", "/newsletter.js", "/styles.css", "/newsletter.css", "/codex.css", "/codex-select.svg", "/codex-select-disabled.svg", "/codex-license.html", "/favicon.svg", "/aranami.svg", "/report-icons.svg"].includes(pathname) || pathname.startsWith("/review-icons/"))
+        const filename = (["/components.js", "/navigation.js", "/aranami-icon.png", "/aranami-wordmark.png", "/favicon.png", "/live.js", "/newsletter.js", "/styles.css", "/newsletter.css", "/codex.css", "/codex-select.svg", "/codex-select-disabled.svg", "/codex-license.html", "/favicon.svg", "/aranami.svg", "/report-icons.svg"].includes(pathname) || pathname.startsWith("/review-icons/"))
             ? path.join(assetRoot, pathname) : path.join(fixtureRoot, pathname);
         if (!filename.startsWith(fixtureRoot + path.sep) && !filename.startsWith(assetRoot + path.sep)) {
             response.writeHead(404).end(); return;
@@ -353,6 +353,7 @@ async function main() {
                 assert.ok(!navigation.errorText, `navigation failed: ${navigation.errorText}`);
                 assert.deepEqual(await evaluate("window.aranamiStartupErrors"), [], "page initialization raised an error");
                 await checkSemantics();
+                assert.equal(await evaluate("document.querySelectorAll('button.cdx-button:not([data-codex-enhanced]):not(#tool-status button):not(#live-server-status button):not(.page-updates button)').length"), 0, "Codex Vue controls were not initialized");
                 await checkContents();
                 const layout = await evaluate(`(() => {
                     const visible = element => { const box = element.getBoundingClientRect(); return box.width > 0 && box.height > 0 && getComputedStyle(element).display !== 'none'; };

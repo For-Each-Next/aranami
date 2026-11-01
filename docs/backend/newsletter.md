@@ -13,6 +13,23 @@ wikitext; webservice owns HTML presentation. The public controller reads saved
 observations without collecting sources, publishing wiki text, or writing
 runtime data. See [Architecture](../architecture.md) for component boundaries.
 
+Daily issue eligibility comes from `Module:VGNL/data` (audited data revision
+93292299 and module revision 92339407). A negative date year means cancelled;
+a missing third date value means draft; a concrete day means published.
+Publication dates never change the reporting interval. Missing future issues
+extend the registry's quarterly sequence as drafts. January's annual review
+becomes eligible on January 1 of the preceding year; other issues begin at
+their quarter start. All eligible drafts refresh daily until publication,
+including delayed issues after quarter rollover. Previously captured published
+or cancelled issues remain frozen and readable.
+
+The publication reader accepts bounded Lua literals without executing code.
+Missing or malformed registry evidence fails the refresh and retains the prior
+successful generation. Saved lifecycle metadata supplies HTTP defaults and
+issue choices; requests never read the wiki. Immutable reporting-date archives
+retain their first capture, while current observations can continue improving
+through publication after the reporting period ends.
+
 ## Data, cache, and archive lifecycle
 
 All paths below are relative to the runtime home unless a configured cache
@@ -277,8 +294,9 @@ Native hover shows each stacked group's value,
 and native chart animation stays enabled. Generated wikitext contains no expanded
 SVG, explicit Graph styles, or custom overlays. This contract was verified
 against `Module:Graph` revision 95346885 and `Module:Graph/SVGRenderer` revision
-95350043. A narrow viewport scrolls only the chart container, preserving native
-axis labels. Missing saved quality history produces no chart.
+95350043. The chart sits directly in one centered container, using native
+responsive sizing with horizontal scrolling for remaining overflow.
+Missing saved quality history produces no chart.
 
 `backend.newsletter.statistics` retains audited quarterly cumulative DYK data from the
 January 2026 feature's second image description and 2025/2024 assessment data
@@ -300,7 +318,8 @@ pixels. Static label positions and radii follow that centered native geometry.
 They never intercept native interaction.
 The template call remains unexpanded, and no
 custom SVG or hover targets are generated.
-Each pie scrolls locally at narrow widths to keep native labels readable.
+Both pies use one wrapping flex container with a single fixed-width div per
+chart. The shared container scrolls when a single pie cannot fit.
 This contract was verified against `Module:Graph` revision 95346885 and
 `Module:Graph/ChartRenderer` revision 95358684. Source provenance and attribution
 remain in the collection contract.
@@ -335,10 +354,15 @@ accumulated provenance. Older
 observations without this field remain valid and keep plain month labels.
 Normal Pageviews collection also saves complete current- and previous-calendar-
 year rankings from its existing fresh histories, without extra article requests.
-Newsletter collection reads these validated durable results for January 1 through
-the latest available completed date. It never reads disposable caches as facts
-or collects traffic during website requests. Absent calendar-year results remain
-unavailable rather than using rolling-year traffic. The introduction names only
+Each newsletter collection also recalculates calendar-year rankings from the
+validated daily Pageviews Parquet for its current article population. It selects
+January 1 through the latest retained completed date before the acquisition
+cutoff. Missing articles and truncated coverage keep project totals unknown;
+explicit observed zeroes remain zero. Equally dated or newer recalculations
+replace the saved annual results; missing or older daily data retains the
+validated durable results. Website requests read saved facts without collecting
+traffic or recalculating. Absent calendar-year results remain unavailable rather
+than using rolling-year traffic. The introduction names only
 the reviewed year, while an inline Memo preserves the actual provisional cutoff.
 Unknown article totals leave the project total unknown, without suppressing
 measured ranking entries. Bounded January 2/3 captures are revisited to find
