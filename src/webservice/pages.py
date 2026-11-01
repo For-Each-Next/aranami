@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from markupsafe import escape
+from markupsafe import Markup, escape
 
 from shared.deployment import project_version, resource_root
 from shared.newsletter import Issue
@@ -83,6 +83,11 @@ _REVIEW_ICONS = {
     "pr": ("peer-review.svg", "Nuvola_apps_kedit.svg"),
     "ppr": ("project-peer-review.svg", "Cvg_peerreview_icon.png"),
     "dykc": ("dyk-candidate.svg", "DYK_candidate.svg"),
+}
+_HIGHLIGHT_ICONS = {
+    "featured": ("featured.svg", "Cscr-featured.svg"),
+    "good": ("good.svg", "Symbol_support_vote.svg"),
+    "dyk": ("dyk.svg", "Symbol_question.svg"),
 }
 _HOUR_SECONDS = 3600
 _DAY_SECONDS = 24 * _HOUR_SECONDS
@@ -173,6 +178,23 @@ def _time(value: object, *, seconds: bool = False) -> Record:
     """
     label = utc_time(value, seconds=seconds)
     return {"value": value, "label": label, "known": label != "—"}
+
+
+def _english_ordinal(value: int) -> str:
+    """Format an English rank with grouped digits and an ordinal suffix.
+
+    Args:
+        value: Observed positive rank.
+
+    Returns:
+        A rank such as ``1st``, ``12th``, or ``1,000th``.
+    """
+    suffix = (
+        "th"
+        if value % 100 in {11, 12, 13}
+        else {1: "st", 2: "nd", 3: "rd"}.get(value % 10, "th")
+    )
+    return f"{value:,}{suffix}"
 
 
 class _Page:
@@ -398,13 +420,42 @@ class _Page:
         self,
         item: Record,
         pageviews: Record | None,
+        section: str,
     ) -> Record:
         """Prepare date, appearance, and popularity observations.
+
+        Args:
+            item: Saved observations, including the appearance kind.
+            pageviews: Observed metadata for the popularity section.
+            section: Source section for DYK or showcase appearances.
 
         Returns:
             An article card preserving each observation's meaning.
         """
         card = self.article(item)
+        appearance = (
+            "dyk"
+            if section == "dyk"
+            else {
+                "fa": "featured",
+                "fl": "featured",
+                "featured": "featured",
+                "ga": "good",
+            }.get(item.get("kind"))
+            if section == "recognized"
+            else None
+        )
+        if appearance:
+            icon, source = _HIGHLIGHT_ICONS[appearance]
+            card["highlight_icon"] = {
+                "url": _asset_url(f"assets/icons/{icon}"),
+                "source": "https://commons.wikimedia.org/wiki/File:" + source,
+                "label": self.text(
+                    "homepage.dyk"
+                    if appearance == "dyk"
+                    else f"appearance.{appearance}",
+                ),
+            }
         if pageviews:
             card.update(
                 rank=item["rank"],
@@ -416,10 +467,17 @@ class _Page:
                 if self.interface.locale == "en"
                 else "\uff1a",
                 pageviews_url=pageviews_url(item, pageviews["date"]),
-                views=self.text("pageviews.views", count=f"{item['views']:,}"),
+                views=self.text(
+                    "pageviews.views_one"
+                    if self.interface.locale == "en" and item["views"] == 1
+                    else "pageviews.views",
+                    count=f"{item['views']:,}",
+                ),
                 site_rank=self.text(
                     "pageviews.site_rank",
-                    rank=f"{item['site_rank']:,}",
+                    rank=_english_ordinal(item["site_rank"])
+                    if self.interface.locale == "en"
+                    else f"{item['site_rank']:,}",
                 )
                 if item.get("site_rank") is not None
                 else None,
@@ -456,12 +514,6 @@ class _Page:
             if date is not None and item.get("date_kind") == "scheduled"
             else "",
             kind=self.text(kind) if kind else None,
-            separator=date is not None
-            and kind is not None
-            and (
-                self.interface.locale == "en"
-                or item.get("kind") in {"news", "history"}
-            ),
             date_note=self.text(note) if note else None,
         )
         return card
@@ -546,7 +598,7 @@ class _Page:
                     else None,
                 })
             card.update(
-                review_icon=_asset_url(f"review-icons/{icon[0]}")
+                review_icon=_asset_url(f"assets/icons/{icon[0]}")
                 if icon
                 else None,
                 review_icon_symbol=None if icon else "history",
@@ -604,7 +656,7 @@ class _Page:
                 if not section["items"]
                 else None,
                 "cards": [
-                    self.article_card(item, views)
+                    self.article_card(item, views, key)
                     for item in section["items"] or []
                 ],
                 "updated": self.source_updated(updated),
@@ -888,10 +940,10 @@ class _Page:
         schedule: Record,
         version: str,
     ) -> list[Record]:
-        """Prepare saved environment and fresh resource observations.
+        """Prepare version details and fresh resource observations.
 
         Returns:
-            Grouped metric rows with unknowns for missing facts.
+            Card values with unknowns for missing resource facts.
         """
         runtime = (status.get("schedule") or {}).get("runtime") or {}
         unknown = self.text("ops.unavailable")
@@ -927,46 +979,22 @@ class _Page:
                 ),
             ),
             (
-                "hardware",
-                (
-                    ("machine", runtime.get("machine") or unknown, False),
-                    ("memory", f"{used_memory} / {allocated_memory}", True),
-                    ("cpu", f"{cpu_use}{separator}{cpu_cores}", True),
-                ),
+                "memory",
+                (("memory", f"{used_memory} / {allocated_memory}", True),),
             ),
             (
-                "system",
-                (
-                    ("os", runtime.get("system") or unknown, False),
-                    (
-                        "os_release",
-                        runtime.get("os_release") or unknown,
-                        False,
-                    ),
-                    ("kernel", runtime.get("kernel") or unknown, False),
-                ),
-            ),
-            (
-                "environment",
-                (
-                    ("python", runtime.get("python") or unknown, False),
-                    (
-                        "python_implementation",
-                        runtime.get("python_implementation") or unknown,
-                        False,
-                    ),
-                    (
-                        "python_compiler",
-                        runtime.get("python_compiler") or unknown,
-                        False,
-                    ),
-                ),
+                "cpu",
+                (("cpu", f"{cpu_use}{separator}{cpu_cores}", True),),
             ),
         )
         return [
             {
                 "key": group,
-                "label": self.text(f"server.group.{group}"),
+                "label": self.text(
+                    "server.group.application"
+                    if group == "application"
+                    else f"server.{group}",
+                ),
                 "rows": [
                     {
                         "label": self.text(f"server.{key}"),
@@ -1377,10 +1405,7 @@ def render_newsletter(  # ruff: ignore[too-many-arguments]
     }
     automatic = value.get("automatic_issue", value["issue"])
     previous = Issue.parse(str(automatic)).previous
-    choices = value.get("issue_choices") or [
-        previous,
-        automatic,
-    ]
+    choices = value.get("issue_choices", [previous, automatic])
     history = value.get("draft_history") or {}
     issue = Issue.parse(str(value["issue"]))
     dates = sorted(history.get("dates") or [])
@@ -1390,6 +1415,7 @@ def render_newsletter(  # ruff: ignore[too-many-arguments]
         available=value["available"],
         locale=page.interface.locale,
         selected_issue=value["issue"],
+        archived_issue=value["issue"] not in choices,
         draft_history={
             "dates": dates,
             "selected": history.get("selected_date"),
@@ -1467,7 +1493,6 @@ def render_about(
             now or dt.datetime.now(dt.UTC),
         ),
     )
-    before_user, after_user = page.text("about.contact").split("{user}")
     context.update(
         introduction=escape(page.text("about.intro")).format(
             name="荒波",
@@ -1480,8 +1505,15 @@ def render_about(
                 page.text("about.project"),
             ),
         ),
-        before_user=before_user,
-        after_user=after_user,
+        contact=escape(page.text("about.contact")).format(
+            source=Markup(
+                '<a href="https://github.com/For-Each-Next/aranami">GitHub</a>',
+            ),
+            user=wiki_link(
+                "https://zh.wikipedia.org/wiki/User_talk:For_Each_..._Next",
+                "For Each ... Next",
+            ),
+        ),
     )
     return _render("about.html", context)
 

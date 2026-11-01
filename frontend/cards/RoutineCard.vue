@@ -16,7 +16,7 @@ import { CdxCard } from "@wikimedia/codex";
 
 <jinja name="description">
 {% set status_icon = {'updated': 'success', 'no_update': 'success', 'failed': 'failed', 'running': 'running', 'queued': 'queued', 'deferred': 'warning', 'unconfirmed': 'warning'}.get(routine.status, 'unknown') %}
-<p class="routine-status" data-status="{{ routine.status }}"><svg class="status-icon" viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" focusable="false"><use href="{{ asset_url('report-icons.svg') }}#status-{{ status_icon }}"></use></svg><span class="status-label"{% if routine.progress %} data-progress-label="{{ routine.state }}" data-progress-fallback="{{ routine.fallback }}"{% endif %}>{{ routine.state }}</span>{{ routine.links.opening }}<a class="status-link" href="#{{ routine.popup_id }}" aria-controls="{{ routine.popup_id }}" aria-haspopup="dialog">{{ t.ops.details_link }}</a>{{ routine.links.closing }}</p>
+<p class="routine-status" data-status="{{ routine.status }}"><svg class="status-icon" viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" focusable="false"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#status-{{ status_icon }}"></use></svg><span class="status-label"{% if routine.progress %} data-progress-label="{{ routine.state }}" data-progress-fallback="{{ routine.fallback }}"{% endif %}>{{ routine.state }}</span>{{ routine.links.opening }}<a class="status-link" href="#{{ routine.popup_id }}" aria-controls="{{ routine.popup_id }}" aria-haspopup="dialog">{{ t.ops.details_link }}</a>{{ routine.links.closing }}</p>
           {% if routine.progress %}<p class="routine-progress context" data-progress-active>{{ routine.progress }}</p>{% endif %}
 </jinja>
 
@@ -28,7 +28,7 @@ import { CdxCard } from "@wikimedia/codex";
 </jinja>
 
 <jinja name="icon">
-<svg class="report-icon cdx-card__icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="{{ asset_url('report-icons.svg') }}#{{ routine.icon }}"></use></svg>
+<svg class="report-icon cdx-card__icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#{{ routine.icon }}"></use></svg>
 </jinja>
 
 <jinja name="after">

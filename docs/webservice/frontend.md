@@ -80,11 +80,16 @@ source/author attribution and the About-page credit.
 
 ## Dashboard cards
 
-Dashboard, report-status, and maintenance cards are authored as actual
-`CdxCard` Vue single-file components in `frontend/cards/`. The local build
-uses Vue's SFC compiler and server renderer to emit three small Jinja files
+Dashboard, report-status, server-status, and maintenance cards are authored
+as actual `CdxCard` Vue single-file components in `frontend/cards/`. The local
+build uses Vue's SFC compiler and server renderer to emit four small card templates
 under `dist/webservice/templates/includes/generated/`. Edit the `.vue`
 sources and rebuild; generated HTML is not an authoring surface.
+
+Authored images live under `src/webservice/public_html/assets/`: `icons/`
+contains interface icons, numbered medals, and their attribution notices;
+`images/` contains the logo and browser artwork. Templates use content-hashed
+asset URLs, and the build preserves this directory structure in the payload.
 
 The report monitor stacks normal outlined cards with space between them.
 Each card's title names the work, its description shows status and progress,
@@ -115,8 +120,19 @@ section's `h2`. Assessment InfoChips follow the title inline, outside the
 heading element, and wrap naturally when needed. The full saved
 introduction and supporting metadata remain readable without JavaScript.
 Reviews show their attributed icon in Codex's leading icon region, with
-the review type retained in its accessible label. Highlight cards
-retain ordered-list semantics and their observed rank or list position.
+the review type retained in its accessible label. Showcase icons use the saved
+featured/good appearance kind, including scheduled appearances; assessment
+chips continue to show the current grade independently. Every DYK card uses
+the same DYK icon. These attributed Commons images link to their source pages.
+Popularity cards show numbered gold, silver, and bronze medals for ranks 1–3
+and matching white medals for 4–6, retaining the ordered list's observed rank values.
+
+Supporting metadata uses semantic lists with CSS middot separators. Review
+cards lead with the review link and a colon; popularity cards lead with their
+observed date and a colon. Showcase cards put the appearance kind before its
+date. Scheduled markers and date-evidence notes stay beside that date.
+Separators follow their preceding item, so wrapping never adds a separator
+prefix to a new line. Missing ranks and dates remain omitted.
 
 Use a neutral card wrapper when article, review, source, and traffic links
 have different destinations. A whole-card link is appropriate for a

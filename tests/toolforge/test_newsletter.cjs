@@ -131,7 +131,17 @@ test("fallback sizing measures wrapped text on expansion and viewport changes", 
 });
 
 function issueFixture() {
-    const issue = {value: "2027-01", handlers: {}, addEventListener(name, handler) { this.handlers[name] = handler; }};
+    function selection(value, choices = ["2026-10", "2027-01", "2027-04"].map(value => ({value}))) {
+        return {
+            value,
+            options: choices.map(choice => ({disabled: false, hidden: false, textContent: choice.value, ...choice})),
+            get selectedOptions() { return this.options.filter(option => option.value === this.value); },
+            replaceChildren(...options) { this.options = options; },
+            handlers: {},
+            addEventListener(name, handler) { this.handlers[name] = handler; },
+        };
+    }
+    const issue = selection("2027-01");
     const submit = {hidden: false};
     const statusText = {textContent: ""};
     const status = {
@@ -170,7 +180,7 @@ function issueFixture() {
             const values = JSON.parse(text);
             return {querySelector(selector) {
                 if (selector === "[data-newsletter-result]") return values.missing ? null : result(values.text);
-                if (selector === "#newsletter-issue") return {value: values.issue};
+                if (selector === "#newsletter-issue") return selection(values.issue, values.choices);
                 return null;
             }};
         }
@@ -215,6 +225,7 @@ test("issue selection reads the new issue and replaces its draft without submiss
 test("failed or mismatched issue loads retain the displayed draft and explain recovery", async () => {
     for (const failure of ["network", "http", "wrong-issue", "missing-result"]) {
         const view = issueFixture();
+        const choices = [...view.issue.options];
         view.issue.value = "2026-10";
         const loaded = view.issue.handlers.change();
         if (failure === "network") view.requests[0].reject(new Error("Offline"));
@@ -222,12 +233,66 @@ test("failed or mismatched issue loads retain the displayed draft and explain re
         await loaded;
         assert.equal(view.result().textContent, "Original draft", failure);
         assert.equal(view.issue.value, "2027-01", failure);
+        assert.deepEqual(view.issue.options, choices, failure);
         assert.equal(view.submit.hidden, false, failure);
         assert.equal(view.result().attrs["aria-busy"], undefined, failure);
         assert.equal(view.status.textContent, "Unable to load this issue", failure);
         assert.equal(view.status.hidden, false, failure);
         assert.equal(view.addresses.length, 0, failure);
     }
+});
+
+test("successful issue loads refresh available choices without replacing the issue control", async () => {
+    const view = issueFixture();
+    const control = view.issue;
+    const change = control.handlers.change;
+    view.issue.value = "2027-04";
+    const loaded = change();
+    view.respond(0, {
+        issue: "2027-04", text: "Upcoming draft",
+        choices: [
+            {value: "2027-04", textContent: "2027-04 (Scheduled)"},
+            {value: "2026-10", textContent: "2026-10 (Unpublished)"},
+        ],
+    });
+    await loaded;
+    assert.equal(view.issue, control);
+    assert.equal(view.issue.handlers.change, change);
+    assert.deepEqual(view.issue.options.map(option => option.value), ["2027-04", "2026-10"]);
+    assert.equal(view.issue.options[0].textContent, "2027-04 (Scheduled)");
+    assert.equal(view.issue.value, "2027-04");
+    assert.equal(view.result().textContent, "Upcoming draft");
+});
+
+test("an issue archived during loading remains readable but cannot be resubmitted", async () => {
+    const view = issueFixture();
+    view.issue.value = "2026-10";
+    const loaded = view.issue.handlers.change();
+    view.respond(0, {
+        issue: "2026-10", text: "Archived draft",
+        choices: [
+            {value: "2026-10", textContent: "2026-10 (Archived issue)", disabled: true, hidden: true},
+            {value: "2027-01"},
+        ],
+    });
+    await loaded;
+    assert.equal(view.issue.value, "2026-10");
+    assert.equal(view.issue.selectedOptions[0].disabled, true);
+    assert.equal(view.issue.selectedOptions[0].hidden, true);
+    assert.equal(view.result().textContent, "Archived draft");
+    assert.equal(view.status.hidden, true);
+    assert.equal(view.addresses.length, 1);
+    let prevented = false;
+    view.form.handlers.submit({preventDefault() { prevented = true; }});
+    await view.issue.handlers.change();
+    assert.equal(prevented, true);
+    assert.equal(view.requests.length, 1, "disabled archive choices must not produce requests");
+    view.issue.value = "2027-01";
+    const next = view.issue.handlers.change();
+    assert.equal(view.requests.length, 2, "available issues remain selectable from an archive");
+    view.respond(1, {issue: "2027-01", text: "Upcoming draft"});
+    await next;
+    assert.equal(view.result().textContent, "Upcoming draft");
 });
 
 test("late issue responses cannot replace a more recent selection", async () => {
@@ -238,12 +303,13 @@ test("late issue responses cannot replace a more recent selection", async () => 
     const latest = view.issue.handlers.change();
     assert.equal(view.requests[0].options.signal.aborted, true);
     assert.equal(view.requests[1].options.signal.aborted, false);
-    view.respond(1, {issue: "2027-04", text: "Latest requested draft"});
+    view.respond(1, {issue: "2027-04", text: "Latest requested draft", choices: [{value: "2027-04"}]});
     await latest;
     view.respond(0, {issue: "2026-10", text: "Obsolete draft"});
     await first;
     assert.equal(view.result().textContent, "Latest requested draft");
     assert.equal(view.issue.value, "2027-04");
+    assert.deepEqual(view.issue.options.map(option => option.value), ["2027-04"]);
     assert.equal(view.addresses.length, 1);
     assert.equal(view.status.hidden, true);
 });

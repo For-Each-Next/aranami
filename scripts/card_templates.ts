@@ -11,6 +11,7 @@ import { renderToString } from "vue/server-renderer";
 const components = {
     ArticleCard: "article_card.html",
     RoutineCard: "routine_card.html",
+    ServerCard: "server_card.html",
     MaintenanceCard: "maintenance_card.html",
     NewsletterDraft: "newsletter_draft.html",
 };

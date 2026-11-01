@@ -4,10 +4,10 @@ Use the horizontal logo in the site header and the standalone wave for browser
 and touch icons. Keep the transparent background and the accessible name
 “Aranami”. The artwork belongs to this CC0-1.0 project.
 
-The built-in ImageGen tool generated the artwork. The header asset is
-`src/webservice/public_html/aranami-wordmark.png`; the standalone icon is
-`src/webservice/public_html/aranami-icon.png`. `favicon.png` is its 32-pixel
-browser variant. The generated images were cropped and reduced for web use.
+The built-in ImageGen tool generated the artwork in
+`src/webservice/public_html/assets/images/`. Use `aranami-wordmark.png` for
+the header, `aranami-icon.png` for the standalone wave, and `favicon.png`
+for its 32-pixel browser variant. The images were cropped and reduced for web use.
 
 The design prompt requested a compact abstract curling ocean wave with an A
 suggested by its negative space, a blue `#3366cc` and navy `#202122` palette,
@@ -24,7 +24,7 @@ controls, and a collapsible contents button on small screens. See
 
 Content-review icons follow Chinese Wikipedia's `Module:PJ:VG/RVW`
 (revision 92100885). Preserve each icon's Commons file-page link and the source
-and license notices in `src/webservice/public_html/review-icons/credits.html`.
+and license notices in `src/webservice/public_html/assets/icons/credits.html`.
 
 Header navigation uses near-black text without underlines, with visible focus
 outlines and current-page markers. The Tools menu opens on mouse hover; clicking

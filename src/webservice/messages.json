@@ -54,11 +54,6 @@
     "zh-hans": "状态",
     "zh-hant": "狀態"
   },
-  "server.python": {
-    "en": "Python",
-    "zh-hans": "Python",
-    "zh-hant": "Python"
-  },
   "server.memory": {
     "en": "Memory",
     "zh-hans": "内存",
@@ -100,9 +95,9 @@
     "zh-hant": "Aranami（{name}，意為「狂瀾」）服務於{wikipedia}之{project}，自動更新站內報告，並彙整內容評審、條目佳作、維護任務與簡訊草稿。"
   },
   "about.contact": {
-    "en": "If you have questions, contact {user}.",
-    "zh-hans": "如有疑问，请联系{user}。",
-    "zh-hant": "如有疑問，請聯絡{user}。"
+    "en": "Source code is available on {source}. If you have questions, contact {user}.",
+    "zh-hans": "源代码见{source}。如有疑问，请联系{user}。",
+    "zh-hant": "原始碼見{source}。如有疑問，請聯絡{user}。"
   },
   "ops.started": {
     "en": "Started",
@@ -400,7 +395,12 @@
     "zh-hant": "熱門條目"
   },
   "pageviews.views": {
-    "en": "Pageviews: {count}",
+    "en": "{count} views",
+    "zh-hans": "日浏览{count}次",
+    "zh-hant": "日瀏覽{count}次"
+  },
+  "pageviews.views_one": {
+    "en": "{count} view",
     "zh-hans": "日浏览{count}次",
     "zh-hant": "日瀏覽{count}次"
   },
@@ -424,18 +424,13 @@
     "zh-hans": "关闭",
     "zh-hant": "關閉"
   },
-  "ops.timing_note": {
-    "en": "Each row shows that report's own execution time, excluding time waiting for earlier reports.",
-    "zh-hans": "下表显示各报告本次执行的独立用时，不包含等待前序报告的时间。",
-    "zh-hant": "下表顯示各報告本次執行的獨立用時，不包含等待前序報告的時間。"
-  },
   "ops.column_status": {
     "en": "Status",
     "zh-hans": "状态",
     "zh-hant": "狀態"
   },
   "pageviews.site_rank": {
-    "en": "Site-wide rank: {rank}",
+    "en": "site-wide ranked {rank}",
     "zh-hans": "全站第{rank}名",
     "zh-hant": "全站第{rank}名"
   },
@@ -1409,11 +1404,6 @@
     "zh-hans": "本期来源数据尚未完成获取。系统会自动获取下一期数据，完成后在此显示生成的维基代码。",
     "zh-hant": "本期來源資料尚未完成取得。系統會自動取得下一期資料，完成後在此顯示產生的維基代碼。"
   },
-  "newsletter.wikitext": {
-    "en": "Wikitext",
-    "zh-hans": "维基文本",
-    "zh-hant": "維基文字"
-  },
   "newsletter.copy": {
     "en": "Copy",
     "zh-hans": "复制",
@@ -1483,6 +1473,11 @@
     "en": "Selected issue",
     "zh-hans": "所选期刊",
     "zh-hant": "所選期刊"
+  },
+  "newsletter.choice.archived": {
+    "en": "Archived issue",
+    "zh-hans": "已归档期刊",
+    "zh-hant": "已封存期刊"
   },
   "about.wikipedia": {
     "en": "Chinese Wikipedia",
@@ -1839,21 +1834,6 @@
     "zh-hans": "Aranami",
     "zh-hant": "Aranami"
   },
-  "server.group.hardware": {
-    "en": "Hardware and resources",
-    "zh-hans": "硬件与资源",
-    "zh-hant": "硬體與資源"
-  },
-  "server.group.system": {
-    "en": "System",
-    "zh-hans": "系统",
-    "zh-hant": "系統"
-  },
-  "server.group.environment": {
-    "en": "Python environment",
-    "zh-hans": "Python环境",
-    "zh-hant": "Python環境"
-  },
   "server.web_version": {
     "en": "Website version",
     "zh-hans": "网站版本",
@@ -1863,40 +1843,5 @@
     "en": "Hub version",
     "zh-hans": "后台版本",
     "zh-hant": "後台版本"
-  },
-  "server.machine": {
-    "en": "Architecture",
-    "zh-hans": "处理器架构",
-    "zh-hant": "處理器架構"
-  },
-  "server.os": {
-    "en": "Operating system",
-    "zh-hans": "操作系统",
-    "zh-hant": "作業系統"
-  },
-  "server.os_release": {
-    "en": "Distribution",
-    "zh-hans": "发行版",
-    "zh-hant": "發行版"
-  },
-  "server.kernel": {
-    "en": "Kernel",
-    "zh-hans": "内核",
-    "zh-hant": "核心"
-  },
-  "server.python_implementation": {
-    "en": "Implementation",
-    "zh-hans": "解释器实现",
-    "zh-hant": "直譯器實作"
-  },
-  "server.python_compiler": {
-    "en": "Compiler",
-    "zh-hans": "编译器",
-    "zh-hant": "編譯器"
-  },
-  "server.resources_note": {
-    "en": "System and Python details describe the hub container. Memory and CPU show its observed usage and allocation; 100% CPU means one fully used core.",
-    "zh-hans": "系统和Python信息来自后台容器。内存与CPU显示实测用量及配额；CPU使用率100%表示占满一个核心。",
-    "zh-hant": "系統與Python資訊來自後台容器。記憶體與CPU顯示實測用量及配額；CPU使用率100%表示占滿一個核心。"
   }
 }

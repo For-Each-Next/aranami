@@ -4,6 +4,31 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.9
 
+### 0.8.7 (2026-11-01 17:13 UTC)
+
+Overview: Clarified dashboard cards and report details, focused server status
+on useful measurements, and improved newsletter issue selection and disclosures.
+
+- Selected showcase icons from saved featured/good appearances, independently
+  of current assessments, and used a consistent DYK icon for new articles.
+- Drew numbered circular medals in gold, silver, bronze, and shared white
+  styles, and aligned card icons to a proportional 22-pixel height.
+- Organized image assets into icons and branding directories, supplied six
+  standalone medals, and redrew the project-review icon with a magnifying lens.
+- Grouped review and popularity metadata with lead labels and CSS middot
+  separators, placing showcase types before dates and using English rank ordinals.
+- Labelled newsletter accordions with destination wiki page titles while
+  preserving their autosized read-only source and exact-copy behavior.
+- Removed duplicated destination lists and timing explanations from report
+  dialogs, retaining their linked results and individual durations in tables.
+- Defaulted newsletter selection to the next unpublished scheduled issue,
+  hid published choices, and retained older unfinished drafts and archive links.
+- Replaced detailed environment groups with normal Aranami, memory, and CPU
+  cards, preserving live usage, allocation, and stale-data handling.
+- Added the GitHub source link and maintainer talk-page contact to About.
+- Deployed v0.8.7 to Toolforge and verified both services, newsletter choices,
+  server cards, and exact cached assets at 2026-11-01 17:13 UTC.
+
 ### 0.8.6 (2026-11-01 16:27 UTC)
 
 Overview: Standardized Codex cards and newsletter source controls, compiled

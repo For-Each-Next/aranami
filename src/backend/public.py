@@ -144,10 +144,10 @@ def _newsletter_choices(
     selected: Issue,
     retained: dict | None = None,
 ) -> list[str]:
-    """Expose the year-long feature before its reporting quarter.
+    """Offer unpublished drafts and an early annual feature.
 
     Returns:
-        Current, previous, selected, and captured annual issue choices.
+        Calendar, retained, and captured choices not known to be closed.
     """
     choices = list(
         dict.fromkeys([automatic.previous, automatic.value, selected.value]),
@@ -155,7 +155,18 @@ def _newsletter_choices(
     annual = Issue.parse(f"{automatic.year + int(automatic.month != 1)}-01")
     if annual.value not in choices and archive.feature_dates(annual):
         choices.append(annual.value)
-    return sorted(set(choices) | set((retained or {}).get("issues", {})))
+    lifecycle = (retained or {}).get("lifecycle") or {}
+    states = lifecycle.get("states", {})
+    candidates = (
+        set(choices)
+        | set((retained or {}).get("issues", {}))
+        | set(lifecycle.get("active", []))
+    )
+    return sorted(
+        choice
+        for choice in candidates
+        if states.get(choice) not in {"published", "cancelled"}
+    )
 
 
 def _newsletter_feature(
@@ -645,22 +656,21 @@ class _PublicViews:
         self,
         parameters: dict[str, list[str]],
     ) -> tuple[Issue, dict | None, bool]:
-        """Select the default issue from saved publication metadata.
+        """Select the next open issue from saved publication states.
 
         Returns:
             The default issue, current facts, and a read-error flag.
-            Explicit reporting dates do not read current observations.
+            Saved dates survive unavailable current metadata.
         """
         automatic = Issue.upcoming(dt.datetime.now(dt.UTC).date())
-        if {"date", "feature_date"}.intersection(parameters):
-            return automatic, None, False
         try:
             retained = read_newsletter_data(self.runtime / OBSERVATIONS_PATH)
         except OSError, ValueError:
-            return automatic, None, True
-        lifecycle = (retained or {}).get("lifecycle")
-        if lifecycle is not None:
-            automatic = Issue.parse(lifecycle["default_issue"])
+            dated = bool({"date", "feature_date"}.intersection(parameters))
+            return automatic, None, not dated
+        states = ((retained or {}).get("lifecycle") or {}).get("states", {})
+        while states.get(automatic.value) in {"published", "cancelled"}:
+            automatic = Issue.parse(automatic.next)
         return automatic, retained, False
 
     def _newsletter_identity(
@@ -675,7 +685,7 @@ class _PublicViews:
             The page handler reports validation and read errors.
         """
         try:
-            issue, day = _newsletter_selection(parameters, automatic_issue)
+            issue, _ = _newsletter_selection(parameters, automatic_issue)
             store = NewsletterDraftArchive(
                 self.runtime / DRAFT_ARCHIVE_PATH,
             )
@@ -685,8 +695,6 @@ class _PublicViews:
             )
         except OSError, ValueError:
             return None
-        if day is not None:
-            return archive, feature_dates
         pointer = self.runtime / OBSERVATIONS_PATH / "current.json"
         try:
             info = pointer.lstat()
@@ -733,7 +741,11 @@ class _PublicViews:
             )
         archive = NewsletterDraftArchive(self.runtime / DRAFT_ARCHIVE_PATH)
         try:
-            durable_facts = (retained or {}).get("issues", {}).get(issue.value)
+            durable_facts = (
+                (retained or {}).get("issues", {}).get(issue.value)
+                if day is None
+                else None
+            )
             dates = _newsletter_dates(archive, issue)
             if day is None and dates and durable_facts is None:
                 day = dt.date.fromisoformat(dates[-1])

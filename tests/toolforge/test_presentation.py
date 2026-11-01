@@ -580,12 +580,24 @@ class ReviewPresentationTests(unittest.TestCase):
                         f'href="https://zh.wikipedia.org/wiki/Talk:Game#Review_{index}">'
                         f"{link_label}</a>" in section
                     )
+                metadata = re.findall(
+                    r'<div class="card-meta review-meta">(.*?)</div>',
+                    section,
+                    re.DOTALL,
+                )
+                assert len(metadata) == 9
+                for index, details in enumerate(metadata):
+                    assert ('<ul class="metadata-items"' in details) == (
+                        index < 2
+                    )
+                    if index >= 2:
+                        assert f"{link_label}</a></span>" in details
                 assert "https://commons.wikimedia.org/wiki/File:" in section
-                assert "/review-icons/featured-candidate.svg" in section
-                assert "/review-icons/peer-review.svg" in section
-                assert "/review-icons/project-peer-review.svg" in section
+                assert "/assets/icons/featured-candidate.svg" in section
+                assert "/assets/icons/peer-review.svg" in section
+                assert "/assets/icons/project-peer-review.svg" in section
                 assert re.search(
-                    r"/report-icons\.svg\?v=[a-f0-9]{64}#history",
+                    r"/assets/icons/report-icons\.svg\?v=[a-f0-9]{64}#history",
                     section,
                 )
                 assert "highlights" not in section
@@ -703,7 +715,7 @@ class ReviewPresentationTests(unittest.TestCase):
                     interface.text("reviews.replied_days", count=1) in output
                 )
                 metadata = re.search(
-                    r'<ul class="[^"]*\breview-meta\b[^"]*"[^>]*>(.*?)</ul>',
+                    r'<div class="card-meta review-meta">(.*?)</div>',
                     output,
                     re.DOTALL,
                 )
@@ -713,22 +725,28 @@ class ReviewPresentationTests(unittest.TestCase):
                     metadata[1],
                     re.DOTALL,
                 )
-                assert len(items) == 4
+                assert len(items) == 3
                 link_label = {
                     "en": "Review",
                     "zh-hans": "评审区",
                     "zh-hant": "評審區",
                 }[locale]
-                assert f"{link_label}</a>" in items[0]
+                lead = re.search(
+                    r'<span class="card-meta-lead">(.*?)</span>',
+                    metadata[1],
+                )[1]
+                punctuation = ": " if locale == "en" else "\uff1a"
+                assert lead.endswith(f"{link_label}</a>{punctuation}")
+                assert '<ul class="metadata-items" role="list">' in metadata[1]
                 assert (
                     interface.text("reviews.started_months", count=8)
-                    in items[1]
+                    in items[0]
                 )
                 assert (
-                    interface.text("reviews.replied_days", count=1) in items[2]
+                    interface.text("reviews.replied_days", count=1) in items[1]
                 )
                 assert (
-                    interface.text("reviews.participants", count=3) in items[3]
+                    interface.text("reviews.participants", count=3) in items[2]
                 )
                 assert " · " not in metadata[1]
                 assert " | " not in metadata[1]
@@ -1318,6 +1336,171 @@ class PresentationTests(unittest.TestCase):
         assert query["end"] == ["2026-10-17"]
         assert query["pages"] == [article["title"]]
         self._assert_popularity_date_prefix()
+        self._assert_popularity_ordinals()
+        self._assert_showcase_metadata_order()
+        self._assert_highlight_icons()
+
+    def _assert_showcase_metadata_order(self) -> None:
+        """Lead showcase metadata with kind and retain date evidence."""
+        snapshot = copy.deepcopy(self.data["snapshot"])
+        snapshot["homepage"]["upcoming"] = []
+        for locale in ("en", "zh-hans", "zh-hant"):
+            interface = Interface(locale)
+            for date_kind in ("observed", "scheduled"):
+                snapshot["homepage"]["featured"] = [
+                    {
+                        **self.data["article"],
+                        "title": "Metadata game",
+                        "date": "2026-10-13",
+                        "date_kind": date_kind,
+                    },
+                ]
+                output = render_dashboard(snapshot, {}, {}, locale, self.now)
+                card = next(
+                    body
+                    for body in re.findall(
+                        r"<article\b[^>]*>(.*?)</article>",
+                        output,
+                        re.DOTALL,
+                    )
+                    if ">Metadata game</a>" in body
+                )
+                metadata = re.search(
+                    r'<ul class="card-meta metadata-items" role="list">'
+                    r"(.*?)</ul>",
+                    card,
+                    re.DOTALL,
+                )[1]
+                items = re.findall(r"<li>(.*?)</li>", metadata, re.DOTALL)
+                assert len(items) == 2
+                assert items[0] == interface.text("appearance.featured")
+                assert (
+                    '<time datetime="2026-10-13">'
+                    f"{interface.date('2026-10-13')}</time>" in items[1]
+                )
+                if date_kind == "scheduled":
+                    assert interface.text("date.scheduled") in items[1]
+                else:
+                    assert interface.text("date.observed") in items[1]
+                    assert 'class="date-note-marker"' in items[1]
+                assert " · " not in metadata
+
+    def _assert_popularity_ordinals(self) -> None:
+        """Show English metric phrases with correct ordinal endings."""
+        snapshot = copy.deepcopy(self.data["snapshot"])
+        item = snapshot["pageviews"]["items"][0]
+        for rank, ordinal in (
+            (1, "1st"),
+            (2, "2nd"),
+            (3, "3rd"),
+            (11, "11th"),
+            (12, "12th"),
+            (13, "13th"),
+            (14, "14th"),
+            (21, "21st"),
+            (111, "111th"),
+            (1000, "1,000th"),
+        ):
+            item["site_rank"] = rank
+            item["views"] = 1 if rank == 1 else 10_110
+            output = render_dashboard(snapshot, {}, {}, "en", self.now)
+            site_rank = re.search(
+                r'<a\b[^>]*class="site-rank"[^>]*>(.*?)</a>',
+                output,
+            )
+            assert site_rank is not None
+            assert site_rank[1] == f"site-wide ranked {ordinal}"
+            views = re.search(
+                r'<a\b[^>]*class="pageviews-number"[^>]*>(.*?)</a>',
+                output,
+            )
+            assert views is not None
+            assert views[1] == ("1 view" if rank == 1 else "10,110 views")
+
+    def _assert_highlight_icons(self) -> None:
+        """Keep appearance icons independent of current assessment."""
+        snapshot = copy.deepcopy(self.data["snapshot"])
+        homepage = snapshot["homepage"]
+        expectations = {
+            "featured": (
+                ("Featured once", "fa", "B", "featured"),
+                ("Featured list once", "fl", "GA", "featured"),
+                ("Unspecified featured once", "ga", "Stub", "featured"),
+            ),
+            "good": (("Good once", "fa", "FA", "good"),),
+            "upcoming": (
+                ("Scheduled featured", "fa", "GA", "featured"),
+                ("Scheduled good", "ga", "FA", "good"),
+            ),
+            "dyk": (
+                ("DYK now featured", "fa", "FA", "dyk"),
+                ("DYK now good", "ga", "GA", "dyk"),
+                ("DYK now B", "dyk", "B", "dyk"),
+            ),
+        }
+        for section, items in expectations.items():
+            homepage[section] = [
+                {
+                    **self.data["article"],
+                    "title": title,
+                    "kind": kind,
+                    "assessment_class": assessment,
+                    "date_kind": "scheduled"
+                    if section == "upcoming"
+                    else "observed",
+                }
+                for title, kind, assessment, _ in items
+            ]
+        original = copy.deepcopy(snapshot)
+        for locale in ("en", "zh-hans", "zh-hant", "zh"):
+            interface = Interface(locale)
+            output = render_dashboard(snapshot, {}, {}, locale, self.now)
+            cards = re.findall(
+                r"<article\b[^>]*>(.*?)</article>",
+                output,
+                re.DOTALL,
+            )
+            for section, items in expectations.items():
+                for title, _, assessment, icon in items:
+                    card = next(
+                        body for body in cards if f">{title}</a>" in body
+                    )
+                    assert f"/assets/icons/{icon}.svg?v=" in card
+                    assert "-candidate.svg" not in card
+                    label = interface.text(
+                        "homepage.dyk"
+                        if section == "dyk"
+                        else f"appearance.{icon}",
+                    )
+                    assert f'alt="{label}"' in card
+                    assert (
+                        '<span class="cdx-info-chip__text">'
+                        f"{interface.text(f'assessment.class.{assessment}')}"
+                        "</span>" in card
+                    )
+                    assert "article-rank" not in card
+            popular = output.split('id="homepage-pageviews"', 1)[1].split(
+                "</section>",
+                1,
+            )[0]
+            for rank in range(1, 7):
+                card = re.search(
+                    rf'<li class="article-card" value="{rank}">(.*?)</li>',
+                    popular,
+                    re.DOTALL,
+                )
+                assert card is not None
+                assert 'class="article-medal cdx-card__icon"' in card[1]
+                assert f"/assets/icons/medal-{rank}.svg?v=" in card[1]
+                assert 'alt="" aria-hidden="true"' in card[1]
+            assert (
+                "article-medal"
+                not in output.split(
+                    'id="homepage-news_history"',
+                    1,
+                )[1].split("</section>", 1)[0]
+            )
+        assert snapshot == original
 
     def _assert_popularity_date_prefix(self) -> None:
         """Keep the observed date visible independently of site rank."""
@@ -1327,8 +1510,8 @@ class PresentationTests(unittest.TestCase):
         for locale, prefix, rank_label in (
             (
                 "en",
-                "October 31, 2026: Pageviews: 10,110",
-                "Site-wide rank: 14",
+                "October 31, 2026: 10,110 views",
+                "site-wide ranked 14th",
             ),
             (
                 "zh-hans",
@@ -1355,7 +1538,7 @@ class PresentationTests(unittest.TestCase):
                         1
                     ].split("</section>", 1)[0]
                     metadata = re.search(
-                        r'<p class="card-meta">(.*?)</p>',
+                        r'<div class="card-meta popularity-meta">(.*?)</div>',
                         section,
                         re.DOTALL,
                     )[1]
@@ -1364,10 +1547,20 @@ class PresentationTests(unittest.TestCase):
                     assert ('class="site-rank"' in metadata) == (
                         rank is not None
                     )
-                    text = unescape(re.sub(r"<[^>]+>", "", metadata))
-                    assert text == prefix + (
-                        f" · {rank_label}" if rank is not None else ""
+                    lead = re.search(
+                        r'<span class="card-meta-lead">(.*?)</span>',
+                        metadata,
+                    )[1]
+                    items = re.findall(r"<li>(.*?)</li>", metadata, re.DOTALL)
+                    text = unescape(re.sub(r"<[^>]+>", "", lead + items[0]))
+                    assert text == prefix
+                    assert len(items) == (2 if rank is not None else 1)
+                    if rank is not None:
+                        assert rank_label in items[1]
+                    assert (
+                        '<ul class="metadata-items" role="list">' in metadata
                     )
+                    assert " · " not in metadata
 
     def test_actual_scheduling_and_uptime(self) -> None:
         """Suppress stale data and retain actual execution times."""
@@ -1983,10 +2176,10 @@ class LiveVisibilityTests(unittest.TestCase):
         assert 'href="#homepage-pageviews"' not in output
         assert 'href="#backlog"' not in output
 
-    def test_about_monitor_uses_saved_environment_and_fresh_usage(
+    def test_about_monitor_keeps_versions_and_fresh_resource_cards(
         self,
     ) -> None:
-        """Refresh saved resource facts and hide stale measurements."""
+        """Keep three native cards without obsolete system details."""
         status = self.data["status"]
         status["schedule"]["runtime"] = {
             "python": "3.15.0",
@@ -2026,33 +2219,75 @@ class LiveVisibilityTests(unittest.TestCase):
                 now=self.now,
             )
             live = self._outputs(locale)[1]
-            for output in (initial, live):
+            stale_now = self.now + dt.timedelta(minutes=3)
+            stale = render_about(
+                self.data["config"],
+                locale,
+                status=status,
+                now=stale_now,
+            )
+            stale_live = render_live_status(
+                status,
+                self.data["config"],
+                locale,
+                stale_now,
+            )
+            for output, fresh in (
+                (initial, True),
+                (live, True),
+                (stale, False),
+                (stale_live, False),
+            ):
                 assert 'id="server-runtime"' in output
-                assert "3.15.0" in output
                 for value in (
+                    "3.15.0",
                     "Linux",
                     "x86_64",
                     "Debian GNU/Linux 13 (trixie)",
                     "6.12.0-example",
                     "CPython",
                     "Clang 20.1.4",
-                    "0.8.5",
-                    self.data["config"]["version"],
                 ):
-                    assert value in output
-                for group in (
-                    "application",
-                    "hardware",
-                    "system",
-                    "environment",
+                    assert value not in output
+                assert "0.8.5" in output
+                assert self.data["config"]["version"] in output
+                for removed in ("hardware", "system", "environment"):
+                    assert f'id="server-group-{removed}"' not in output
+                cards = re.findall(
+                    r'<article\b[^>]*class="([^"]*\bserver-card\b[^"]*)"'
+                    r"[^>]*>(.*?)</article>",
+                    output,
+                    re.DOTALL,
+                )
+                assert len(cards) == 3
+                assert all(
+                    "cdx-card" in classes.split()
+                    and "cdx-card--separation-" not in classes
+                    for classes, _ in cards
+                )
+                for group, label in (
+                    ("application", "server.group.application"),
+                    ("memory", "server.memory"),
+                    ("cpu", "server.cpu"),
                 ):
-                    assert f'id="server-group-{group}"' in output
-                    assert (
-                        Interface(locale).text(f"server.group.{group}")
-                        in output
+                    card = next(
+                        body
+                        for _, body in cards
+                        if f'id="server-group-{group}"' in body
                     )
-                assert memory in output
-                assert cpu in output
+                    assert Interface(locale).text(label) in card
+                    if group != "application":
+                        assert "<table" not in card
+                        assert card.count('class="server-value"') == 1
+                        assert card.count(Interface(locale).text(label)) == 1
+                        assert ("data-schedule-time" in card) == fresh
+                        value = memory if group == "memory" else cpu
+                        assert (value in card) == fresh
+                        if not fresh:
+                            assert (
+                                Interface(locale).text("ops.unavailable")
+                                in card
+                            )
                 assert started in output
                 assert "2026-10-16 08:56:00" in output
                 age = Interface(locale).text("time.days_ago", count=2)[1:-1]
@@ -2065,9 +2300,12 @@ class LiveVisibilityTests(unittest.TestCase):
                     output,
                     re.DOTALL,
                 )
-                assert len(tables) == 4
+                assert len(tables) == 1
                 metrics = "".join(tables)
-                assert metrics.count("<tr>") == 12
+                assert metrics.count("<tr>") == 3
+                assert 'id="server-state"' in metrics
+                assert "0.8.5" in metrics
+                assert self.data["config"]["version"] in metrics
                 assert "TiB" not in metrics
                 for label in (
                     "Storage used / total",
@@ -2075,24 +2313,13 @@ class LiveVisibilityTests(unittest.TestCase):
                     "儲存已用\uff0f總量",
                 ):
                     assert label not in metrics
+                if not fresh:
+                    assert "12.5%" not in output
+                    assert "100.0 MiB" not in output
+                    assert "data-schedule-time" not in output
+                    assert "2026-10-18 12:00:00" in output
             assert re.search(r'src="/live\.js\?v=[a-f0-9]{64}"', initial)
             assert 'id="live-server-status"' in initial
-        stale = render_about(
-            self.data["config"],
-            "en",
-            status=status,
-            now=self.now + dt.timedelta(minutes=3),
-        )
-        assert "12.5%" not in stale
-        assert "100.0 MiB" not in stale
-        assert "3.15.0" in stale
-        assert "Linux" in stale
-        assert "x86_64" in stale
-        assert "Debian GNU/Linux 13 (trixie)" in stale
-        assert "0.8.5" in stale
-        assert "2026-10-16 08:56:00" in stale
-        assert "2026-10-18 12:00:00" in stale
-        assert "data-schedule-time" not in stale
 
     def test_unconfirmed_daily_dates_keep_the_actual_failure_label(
         self,
@@ -2748,8 +2975,12 @@ class ServerPresentationTests(unittest.TestCase):
             assert 'id="live-uptime"' in output
             assert "data-clock-messages" in output
             assert (
+                'href="https://github.com/For-Each-Next/aranami">GitHub</a>'
+                in output
+            )
+            assert (
                 contact + '<a href="https://zh.wikipedia.org/wiki/'
-                'User:For_Each_..._Next">For Each ... Next</a>' in output
+                'User_talk:For_Each_..._Next">For Each ... Next</a>' in output
             )
             for removed in (
                 "discover-heading",
@@ -2784,14 +3015,30 @@ class ServerPresentationTests(unittest.TestCase):
                 now=self.now,
             )
             interface = Interface(locale)
-            for field in ("hub_version", "os_release", "kernel"):
-                assert (
-                    f'<th scope="row">{interface.text(f"server.{field}")}'
-                    f"</th><td>{interface.text('ops.unavailable')}</td>"
-                    in output
-                )
-            assert "&lt;compiler &amp; build&gt;" in output
+            assert (
+                f'<th scope="row">{interface.text("server.hub_version")}'
+                f"</th><td>{interface.text('ops.unavailable')}</td>" in output
+            )
+            for removed in (
+                "3.15.0",
+                "Linux",
+                "x86_64",
+                "&lt;compiler &amp; build&gt;",
+            ):
+                assert removed not in output
             assert "<compiler & build>" not in output
+            status["schedule"]["runtime"]["aranami_version"] = (
+                "<release & build>"
+            )
+            escaped = render_about(
+                self.data["config"],
+                locale,
+                status=status,
+                now=self.now,
+            )
+            assert "&lt;release &amp; build&gt;" in escaped
+            assert "<release & build>" not in escaped
+            del status["schedule"]["runtime"]["aranami_version"]
 
     def test_server_resources_keep_zero_and_unknown_allocation(self) -> None:
         """Combine resources without inventing missing measurements."""

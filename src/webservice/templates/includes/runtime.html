@@ -1,12 +1,5 @@
-<div id="server-runtime" class="server-groups">
+<div id="server-runtime" class="server-cards">
 {% for group in runtime %}
-<section class="server-group" aria-labelledby="server-group-{{ group.key }}">
-<h3 id="server-group-{{ group.key }}">{{ group.label }}</h3>
-<div class="cdx-table"><div class="cdx-table__table-wrapper"><table class="cdx-table__table server-metrics"><caption class="visually-hidden">{{ group.label }}</caption><tbody>
-{% if group.key == 'application' %}<tr><th scope="row">{{ t.server.state }}</th><td><span id="server-state"{% if server.expires %} data-schedule-time{% endif %} data-stale-text="{{ t.server.stale }}">{{ server.state }}</span>{% if server.started %}<span class="server-start">{{ server.opening }}{{ t.server.started }}{% with time=server.started %}{% include "includes/time.html" %}{% endwith %}{{ server.separator }}{% with relative=server.started_relative %}{% include "includes/relative.html" %}{% endwith %}{{ server.closing }}</span>{% endif %}</td></tr>{% endif %}
-{% for row in group.rows %}<tr><th scope="row">{{ row.label }}</th><td{% if row.fresh %} data-schedule-time{% endif %}{% if row.stale %} data-stale-text="{{ row.stale }}"{% endif %}>{{ row.value }}</td></tr>{% endfor %}
-</tbody></table></div></div>
-</section>
+{% include "includes/generated/server_card.html" %}
 {% endfor %}
-<p class="context">{{ t.server.resources_note }}</p>
 </div>

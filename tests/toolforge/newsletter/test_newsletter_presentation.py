@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unittest
 from copy import deepcopy
-from html import unescape
+from html import escape, unescape
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from shared.newsletter import Issue
@@ -112,11 +112,7 @@ class NewsletterPresentationTests(unittest.TestCase):
     def test_selectable_drafts_escape_and_round_trip_wikitext(self) -> None:
         """Keep wiki source intact without creating active HTML."""
         value = _issue()
-        for locale, label in (
-            ("en", "Wikitext"),
-            ("zh-hans", "维基文本"),
-            ("zh-hant", "維基文字"),
-        ):
+        for locale in ("en", "zh-hans", "zh-hant"):
             with self.subTest(locale=locale):
                 output = render_newsletter(value, locale)
                 displays = re.findall(
@@ -143,8 +139,8 @@ class NewsletterPresentationTests(unittest.TestCase):
                     # HTML consumes the textarea's first newline.
                     assert unescape(text.removeprefix("\n")) == page["text"]
                     assert (
-                        f'id="newsletter-code-label-{index}">{label}</span>'
-                        in output
+                        f'id="newsletter-code-label-{index}" lang="zh">'
+                        f"{escape(page['title'])}</span>" in output
                     )
                 accordions = re.findall(
                     r'<details\b([^>]*class="[^"]*newsletter-code[^"]*"[^>]*)>',

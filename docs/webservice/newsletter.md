@@ -8,10 +8,15 @@ opening the tool never fetches source pages or publishes edits.
 ## Prepare an issue
 
 Open **Tools → Newsletter drafts**, or `/newsletter/`. The issue menu selects
-the latest completed issue or the current draft and loads it in place. The
-issue submit button stays visible after loading. Native form submission works
-without JavaScript. The default is the earliest started, unpublished issue in
-the saved publication plan. Other active and retained issues remain selectable.
+an unpublished issue and loads it in place. The issue submit button stays
+visible after loading. Native form submission works without JavaScript.
+The default is the next scheduled quarterly issue: in November 2026 it is
+`2027-01`, while an unpublished `2026-10` remains selectable. Saved publication
+metadata removes published and cancelled issues from the menu; a closed next
+issue advances the default to the following open issue. Earlier unpublished
+drafts and retained annual features remain selectable. Direct issue and dated
+archive links still work. A closed issue opened that way appears as an
+unselectable archive label, while the menu offers unpublished destinations.
 Daily collection runs at `00:00 UTC` and retries failures hourly while retaining
 the previous complete result.
 
@@ -64,8 +69,9 @@ source-linked summary such as `[[toolforge:aranami/newsletter/|2026年10月30日
 using the draft's data date, including the annual feature's own date. Undated
 drafts use `简讯资料`. Both links work without JavaScript and leave copying
 to the separate button.
-Open each **Wikitext** accordion to review its readonly text area before saving
-the draft on Wikipedia. The text area grows to show its wrapped source and
+Each accordion is labelled with its destination wiki page title. Open it to
+review the readonly text area before saving the draft on Wikipedia.
+The text area grows to show its wrapped source and
 supports native selection and copying, including without JavaScript. If the
 clipboard is unavailable, **Copy** opens and selects the source for manual
 copying. The annual feature includes two

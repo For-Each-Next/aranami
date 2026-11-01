@@ -20,7 +20,12 @@ from webservice.pages import (
     render_dashboard,
     render_reports,
 )
-from webservice.presentation import Interface, article_extract, assessment_code
+from webservice.presentation import (
+    Interface,
+    article_extract,
+    assessment_code,
+    title_url,
+)
 
 # Exact HTTP codes and authored labels define these contracts.
 # ruff: file-ignore[magic-value-comparison, import-private-name]
@@ -95,7 +100,7 @@ class InterfaceLocaleTests(unittest.TestCase):
                 )
                 assert page.headers["Content-Language"] == tag
                 assert re.search(
-                    r'href="/report-icons\.svg\?v=[a-f0-9]{64}#language"',
+                    r'href="/assets/icons/report-icons\.svg\?v=[a-f0-9]{64}#language"',
                     page.text,
                 )
                 assert "繁体中文" in page.text
@@ -166,41 +171,80 @@ class AssessmentFallbackTests(unittest.TestCase):
 
     @staticmethod
     def test_report_names_explain_destinations() -> None:
-        """Keep grouped headings compact and page links in dialogs."""
-        output = render_reports(
-            {},
-            "en",
-            config={"routines": routine_configuration()},
-        )
-        for label in (
-            "B-plus reviews",
-            "A-class articles",
-            "Project reviews",
-            "English Wikipedia quality articles",
+        """Link each saved destination once beneath compact headings."""
+        config = {"routines": routine_configuration()}
+        definitions = config["routines"]["routines"]
+        routines = ("assessment_lists", "enwp_key_articles")
+        reports = {
+            title: {
+                "routine": routine,
+                "site": "zhwiki",
+                "title": title,
+                "status": "no_update",
+                "dry": False,
+                "started_at": "2026-10-18T11:59:55Z",
+                "finished_at": "2026-10-18T12:00:00Z",
+                "duration_seconds": 5,
+            }
+            for routine in routines
+            for title in definitions[routine]["pages"].values()
+        }
+        for locale, removed_note in (
+            ("en", "excluding time waiting for earlier reports"),
+            ("zh-hans", "不包含等待前序报告的时间"),
+            ("zh-hant", "不包含等待前序報告的時間"),
         ):
-            assert label in output
-        assert "WikiProject:电子游戏/认证条目/BPAN" in output
-        heading = re.search(
-            r'<h3\b[^>]*\bid="routine-assessment_lists-heading"[^>]*>'
-            r"(.*?)</h3>",
-            output,
-            re.DOTALL,
-        )
-        assert heading is not None
-        assert ">6 pages</a>" in heading[1]
-        assert 'aria-controls="report-details-assessment_lists"' in heading[1]
-        assert "B-plus reviews" not in heading[1]
-        assert "Project reviews" not in heading[1]
-        dialog = re.search(
-            r'<dialog id="report-details-assessment_lists"[^>]*>'
-            r"(.*?)</dialog>",
-            output,
-            re.DOTALL,
-        )
-        assert dialog is not None
-        assert 'class="report-targets"' in dialog[1]
-        assert "B-plus reviews" in dialog[1]
-        assert "Project reviews" in dialog[1]
+            interface = Interface(locale)
+            for saved in ({}, reports):
+                output = render_reports(
+                    {},
+                    locale,
+                    config=config,
+                    status={"reports": {"reports": saved}},
+                )
+                assert "report-targets" not in output
+                assert removed_note not in output
+                for routine in routines:
+                    targets = definitions[routine]["pages"].values()
+                    heading = re.search(
+                        rf'<h3\b[^>]*\bid="routine-{routine}-heading"[^>]*>'
+                        r"(.*?)</h3>",
+                        output,
+                        re.DOTALL,
+                    )
+                    assert heading is not None
+                    count = interface.text(
+                        "ops.page_count",
+                        count=len(targets),
+                    )
+                    assert f">{count}</a>" in heading[1]
+                    assert (
+                        f'aria-controls="report-details-{routine}"'
+                        in heading[1]
+                    )
+                    assert all(title not in heading[1] for title in targets)
+                    dialog = re.search(
+                        rf'<dialog id="report-details-{routine}"[^>]*>'
+                        r"(.*?)</dialog>",
+                        output,
+                        re.DOTALL,
+                    )
+                    assert dialog is not None
+                    if not saved:
+                        assert "<table" not in dialog[1]
+                        assert interface.text("ops.no_record") in dialog[1]
+                        continue
+                    table = re.search(
+                        r"<tbody\b[^>]*>(.*?)</tbody>",
+                        dialog[1],
+                        re.DOTALL,
+                    )
+                    assert table is not None
+                    for title in targets:
+                        link = f'href="{title_url(title)}"'
+                        assert dialog[1].count(link) == 1
+                        assert table[1].count(link) == 1
+                        assert f">{title}</a>" in table[1]
 
     @staticmethod
     def test_fallbacks_and_aliases_in_all_locales() -> None:

@@ -1,4 +1,4 @@
-# <img src="src/webservice/public_html/aranami.svg" width="40" height="40" alt=""> Aranami
+# <img src="src/webservice/public_html/assets/images/aranami.svg" width="40" height="40" alt=""> Aranami
 
 Aranami (荒波, “rough waves”) keeps Wikipedia project reports up to date
 and provides web tools to help readers and editors find articles to improve.

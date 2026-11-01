@@ -26,7 +26,7 @@ from backend.newsletter.archive import (
 )
 from backend.newsletter.layout import prepare_main_layout
 from backend.newsletter.observations import OBSERVATIONS_PATH, save_observation
-from backend.newsletter.schema import valid_newsletter
+from backend.newsletter.schema import read_newsletter_data, valid_newsletter
 from backend.public import create_app
 from backend.website.collect import REPORT_KEYS, validate_dashboard_snapshot
 from newsletter.fixtures import subpage_layouts
@@ -390,10 +390,10 @@ class NewsletterRouteTests(unittest.TestCase):
         assert "高品質條目的總數及各級內容數量待補充。" in response.text
         upcoming.assert_called_once()
 
-    def test_saved_publication_state_keeps_an_overdue_draft_selected(
+    def test_saved_publication_state_keeps_an_overdue_draft_selectable(
         self,
     ) -> None:
-        """Keep overdue drafts selected using only saved facts."""
+        """Retain overdue choices while defaulting to the next issue."""
         path = self._save_issue({"overview": {"total": 13025}})
         retained = json.loads(path.read_text())["newsletter"]
         retained["lifecycle"] = {
@@ -403,7 +403,7 @@ class NewsletterRouteTests(unittest.TestCase):
                 "label": "Module:VGNL/data",
                 "url": "https://zh.wikipedia.org/w/index.php?oldid=93292299",
             },
-            "states": {"2027-01": "draft"},
+            "states": {"2027-01": "draft", "2027-04": "published"},
         }
         save_observation(
             self.runtime / OBSERVATIONS_PATH,
@@ -424,9 +424,15 @@ class NewsletterRouteTests(unittest.TestCase):
             patch("backend.website.collect.collect_dashboard") as collect,
         ):
             response = self.client.get("/newsletter/?lang=en")
+            overdue = self.client.get("/newsletter/?issue=2027-01&lang=en")
         assert response.status_code == HTTPStatus.OK
-        assert '<option value="2027-01" selected>' in response.text
-        assert "13,025篇條目" in response.text
+        assert '<option value="2027-07" selected>' in response.text
+        assert '<option value="2027-01">' in response.text
+        assert '<option value="2027-04"' not in response.text
+        assert "13,025篇條目" not in response.text
+        assert overdue.status_code == HTTPStatus.OK
+        assert '<option value="2027-01" selected>' in overdue.text
+        assert "13,025篇條目" in overdue.text
         assert all(
             saved.read_bytes() == content for saved, content in before.items()
         )
@@ -750,11 +756,15 @@ class NewsletterRouteTests(unittest.TestCase):
         """Render the selected day's facts after newer data is saved."""
         entry = self._archive_issue("2026-10-30", 13100)
         self._save_durable(14000)
-        with patch("backend.public.read_newsletter_data") as read:
+        with patch(
+            "backend.public.read_newsletter_data",
+            wraps=read_newsletter_data,
+        ) as read:
             response = self.client.get(
                 "/newsletter/?issue=2027-01&date=2026-10-30&lang=en",
             )
-        read.assert_not_called()
+        read.assert_called_once_with(self.runtime / OBSERVATIONS_PATH)
+        assert response.status_code == HTTPStatus.OK
         texts = [
             unescape(text.removeprefix("\n"))
             for text in re.findall(

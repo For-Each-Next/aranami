@@ -42,7 +42,7 @@ function initializeNewsletterResult(root: ParentNode = document): void {
     }
 }
 
-// Keep the issue menu stable while replacing only its saved draft and dates.
+// Keep the issue control in place while refreshing its saved choices and draft.
 function initializeIssueForm(): void {
     if (typeof fetch !== "function" || typeof DOMParser !== "function" || typeof AbortController !== "function") return;
     const form = document.querySelector<HTMLFormElement>("[data-newsletter-issue-form]");
@@ -56,6 +56,8 @@ function initializeIssueForm(): void {
     let controller: AbortController | undefined;
 
     async function loadIssue(): Promise<void> {
+        const selected = issue.selectedOptions[0];
+        if (!selected || selected.disabled) return;
         const request = ++requestNumber;
         controller?.abort();
         controller = new AbortController();
@@ -77,13 +79,16 @@ function initializeIssueForm(): void {
             const page = new DOMParser().parseFromString(await response.text(), "text/html");
             if (request !== requestNumber) return;
             const replacement = page.querySelector<HTMLElement>("[data-newsletter-result]");
-            if (!replacement || page.querySelector<HTMLSelectElement>('#newsletter-issue')?.value !== requestedIssue) {
+            const choices = page.querySelector<HTMLSelectElement>('#newsletter-issue');
+            if (!replacement || !choices || choices.value !== requestedIssue) {
                 throw new Error("Invalid newsletter response");
             }
             globalThis.aranamiComponents?.dispose(result);
             result.replaceWith(replacement);
             result = replacement;
             globalThis.aranamiComponents?.enhance(result);
+            issue.replaceChildren(...choices.options);
+            issue.value = requestedIssue;
             for (const selector of [".contents-desktop > ul", ".contents-mobile .page-toc > ul"]) {
                 const links = page.querySelector(selector);
                 if (links) document.querySelector(selector)?.replaceWith(links);

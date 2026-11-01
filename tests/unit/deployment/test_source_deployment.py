@@ -322,9 +322,9 @@ class TestSourcePayload(TestCase):
             name for name in self.payload if Path(name).suffix == ".png"
         }
         assert png_files == {
-            "src/webservice/public_html/aranami-icon.png",
-            "src/webservice/public_html/aranami-wordmark.png",
-            "src/webservice/public_html/favicon.png",
+            "src/webservice/public_html/assets/images/aranami-icon.png",
+            "src/webservice/public_html/assets/images/aranami-wordmark.png",
+            "src/webservice/public_html/assets/images/favicon.png",
         }
         assert all(
             self.payload[name].startswith(b"\x89PNG\r\n\x1a\n")

@@ -134,7 +134,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
         }),
     }, completed ? "No update" : subject);
     const statusSymbol = new Element("use", {
-        id: "status-symbol", href: `/report-icons.svg#status-${completed ? "success" : "running"}`,
+        id: "status-symbol", href: `/assets/icons/report-icons.svg#status-${completed ? "success" : "running"}`,
     });
     const statusIcon = new Element("svg", {
         id: "status-icon", class: "status-icon", "aria-hidden": "true", focusable: "false",
@@ -484,7 +484,7 @@ test("synchronization keeps existing modal dialogs and freezes completed timers"
     assert.equal(page.document.getElementById("status-button"), page.button);
     assert.equal(page.statusLabel.textContent, "No update");
     assert.equal(page.statusLine.getAttribute("data-status"), "no_update");
-    assert.equal(page.statusSymbol.getAttribute("href"), "/report-icons.svg#status-success");
+    assert.equal(page.statusSymbol.getAttribute("href"), "/assets/icons/report-icons.svg#status-success");
     assert.equal(page.button.textContent, "Details…");
     assert.equal(page.statusLabel.hasAttribute("data-progress-label"), false);
     assert.equal(page.statusLabel.hasAttribute("data-progress-fallback"), false);
@@ -507,10 +507,10 @@ test("status icons follow live outcomes without replacing labels or open dialogs
         const next = fixture(index * 5000, true);
         next.statusLine.setAttribute("data-status", state);
         next.statusLabel.textContent = state;
-        next.statusSymbol.setAttribute("href", `/report-icons.svg#status-${icon}`);
+        next.statusSymbol.setAttribute("href", `/assets/icons/report-icons.svg#status-${icon}`);
         await page.respond(next);
         assert.equal(page.statusLine.getAttribute("data-status"), state);
-        assert.equal(page.statusSymbol.getAttribute("href"), `/report-icons.svg#status-${icon}`);
+        assert.equal(page.statusSymbol.getAttribute("href"), `/assets/icons/report-icons.svg#status-${icon}`);
         assert.equal(page.statusLabel.textContent, state);
         assert.equal(page.document.getElementById("status-icon"), page.statusIcon);
         assert.equal(page.document.getElementById("status-label"), page.statusLabel);

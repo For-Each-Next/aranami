@@ -431,13 +431,11 @@ require process replacement.
 Distinguish network, transport, response, clock, and rendering failures in
 bounded browser diagnostics without exposing arbitrary server or error text.
 
-About groups server observations into Aranami, hardware/resources, system,
-and Python environment information. Show the serving application's version
-separately from the saved hub version, state, and startup. Hardware/resource
-rows show architecture, memory use/allocation, and CPU use/allocation; system
-rows show the OS, distribution, and kernel; environment rows show Python's
-version, implementation, and compiler. Missing optional observations remain
-unknown. Filesystem totals stay outside the public panel.
+About shows separate Codex cards for Aranami, memory, and CPU usage. Show the
+serving application's version separately from the saved hub version, state,
+and startup. Resource cards show measured use and allocation; missing optional
+observations remain unknown. Operating-system, interpreter, architecture, and
+filesystem details stay outside the public panel.
 
 Startup is the recorded hub start, not an inferred operating-system boot.
 Retain static facts and startup timestamps when resource samples expire.

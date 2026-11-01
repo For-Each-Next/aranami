@@ -38,7 +38,7 @@ async function main() {
     let pendingStartupScripts;
     const server = http.createServer((request, response) => {
         const pathname = new URL(request.url, "http://localhost").pathname;
-        const filename = (["/components.js", "/navigation.js", "/aranami-icon.png", "/aranami-wordmark.png", "/favicon.png", "/live.js", "/newsletter.js", "/styles.css", "/newsletter.css", "/codex.css", "/codex-select.svg", "/codex-select-disabled.svg", "/codex-license.html", "/favicon.svg", "/aranami.svg", "/report-icons.svg"].includes(pathname) || pathname.startsWith("/review-icons/"))
+        const filename = (["/components.js", "/navigation.js", "/live.js", "/newsletter.js", "/styles.css", "/newsletter.css", "/codex.css", "/codex-license.html"].includes(pathname) || pathname.startsWith("/assets/"))
             ? path.join(assetRoot, pathname) : path.join(fixtureRoot, pathname);
         if (!filename.startsWith(fixtureRoot + path.sep) && !filename.startsWith(assetRoot + path.sep)) {
             response.writeHead(404).end(); return;

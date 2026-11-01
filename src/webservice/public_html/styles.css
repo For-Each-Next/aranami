@@ -484,23 +484,32 @@ main {
     content: counter(list-item);
 }
 
-.review-icon-link {
+.article-card-body.cdx-card .article-medal {
+    display: block;
+    flex: none;
+    inline-size: 1.375rem;
+    block-size: 1.375rem;
+    object-fit: contain;
+}
+
+.review-icon-link, .highlight-icon-link {
     display: inline-flex;
     flex: none;
     align-items: center;
     justify-content: center;
-    inline-size: 1.5rem;
-    block-size: 1.5rem;
+    inline-size: 1.375rem;
+    block-size: 1.375rem;
 }
 
 .review-cards time, .review-participants {
     white-space: nowrap;
 }
 
-.review-icon {
+.review-icon, .highlight-icon {
     display: block;
-    inline-size: 1rem;
-    block-size: 1rem;
+    inline-size: auto;
+    max-inline-size: 1.375rem;
+    block-size: 1.375rem;
     color: var(--color-subtle);
     fill: currentColor;
     object-fit: contain;
@@ -527,30 +536,47 @@ main {
 }
 
 .card-meta {
-    display: block;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .25rem .25em;
     margin: 0;
     color: var(--color-subtle);
     font-size: var(--font-size-small);
 }
 
-.review-meta {
+.card-meta-lead {
+    flex: none;
+}
+
+.metadata-items {
     display: flex;
     flex-wrap: wrap;
     gap: .25rem 0;
+    margin: 0;
     padding-inline-start: 0;
     list-style: none;
 }
 
-.review-meta > li {
-    display: flex;
-    align-items: center;
+.card-meta > .metadata-items {
+    flex: 1 1 min-content;
+    min-inline-size: 0;
 }
 
-.review-meta > li + li::before {
-    content: "";
-    block-size: .875em;
+.card-meta > .metadata-items > li {
+    white-space: nowrap;
+}
+
+.metadata-items > li {
+    display: flex;
+    align-items: baseline;
+    max-inline-size: 100%;
+}
+
+.metadata-items > li:not(:last-child)::after {
+    content: "·";
     margin-inline: .5em;
-    border-inline-start: 1px solid currentColor;
+    flex: none;
 }
 
 .date-note-marker {
@@ -610,8 +636,8 @@ main {
 
 .report-icon {
     flex: none;
-    inline-size: 1.25rem;
-    block-size: 1.25rem;
+    inline-size: 1.375rem;
+    block-size: 1.375rem;
     color: var(--color-subtle);
     fill: currentColor;
 }
@@ -661,21 +687,6 @@ main {
     text-underline-offset: .2em;
 }
 
-.report-targets {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .25rem 1.25rem;
-    margin: 0 0 1rem;
-    padding: 0;
-    list-style: none;
-}
-
-.report-targets a {
-    display: inline-flex;
-    align-items: center;
-    min-block-size: 2.75rem;
-}
-
 .routine-status {
     font-variant-numeric: tabular-nums;
 }
@@ -715,8 +726,8 @@ main {
 
 .status-icon {
     display: inline-block;
-    inline-size: 1.25rem;
-    block-size: 1.25rem;
+    inline-size: 1.375rem;
+    block-size: 1.375rem;
     margin-inline-end: .25rem;
     vertical-align: -.25em;
     fill: currentColor;
@@ -818,24 +829,24 @@ summary:hover {
 }
 
 .cdx-select:enabled:not([multiple]) {
-    background-image: url("/codex-select.svg");
+    background-image: url("/assets/icons/codex-select.svg");
 }
 
 .cdx-select:disabled:not([multiple]) {
-    background-image: url("/codex-select-disabled.svg");
+    background-image: url("/assets/icons/codex-select-disabled.svg");
 }
 
 /* Load local icon sources before Codex's data-URI declarations under CSP. */
 @supports ((mask-image: none) or (-webkit-mask-image: none)) {
     details.cdx-accordion > summary::before {
-        -webkit-mask-image: url("/codex-select.svg");
-        mask-image: url("/codex-select.svg");
+        -webkit-mask-image: url("/assets/icons/codex-select.svg");
+        mask-image: url("/assets/icons/codex-select.svg");
     }
 }
 
 @supports not ((mask-image: none) or (-webkit-mask-image: none)) {
     details.cdx-accordion > summary::before {
-        background-image: url("/codex-select.svg");
+        background-image: url("/assets/icons/codex-select.svg");
     }
 }
 
@@ -955,12 +966,28 @@ caption {
     margin-block-start: 2rem;
 }
 
-.server-groups .server-group {
-    margin-block: 1.5rem;
+.server-cards {
+    display: grid;
+    gap: 1rem;
 }
 
-.server-group h3 {
+.server-card {
+    min-inline-size: 0;
+}
+
+.server-card .cdx-card__text {
+    min-inline-size: 0;
+    inline-size: 100%;
+}
+
+.server-card h3 {
+    margin: 0;
     font-size: var(--font-size-large);
+}
+
+.server-value {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
 }
 
 .server-metrics {
@@ -1238,6 +1265,10 @@ footer nav {
 }
 
 @media (forced-colors: active) {
+    .article-medal {
+        forced-color-adjust: none;
+    }
+
     @supports ((mask-image: none) or (-webkit-mask-image: none)) {
         details.cdx-accordion > summary::before {
             forced-color-adjust: none;

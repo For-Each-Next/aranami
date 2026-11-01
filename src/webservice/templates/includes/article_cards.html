@@ -1,5 +1,5 @@
 {% if section.empty %}
-<div class="cdx-message cdx-message--notice" aria-live="polite"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ section.empty }}</div></div>
+<div class="cdx-message cdx-message--notice" aria-live="polite"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ section.empty }}</div></div>
 {% else %}
 {% if section.is_review %}<ul class="card-grid article-list review-cards" role="list">{% else %}<ol class="card-grid article-list highlights" role="list">{% endif %}
   {% for card in section.cards %}
