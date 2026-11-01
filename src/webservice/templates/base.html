@@ -5,13 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
   <meta name="description" content="{{ t.page.description }}">
-  <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32">
-  <link rel="apple-touch-icon" href="/aranami-icon.png">
-  <link rel="stylesheet" href="/styles.css">
-  <link rel="stylesheet" href="/codex.css">
-  <script src="/components.js" defer></script>
-  {% if live %}<script src="/live.js" defer></script>{% endif %}
-  <script src="/navigation.js" defer></script>
+  <link rel="icon" href="{{ asset_url('favicon.png') }}" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="{{ asset_url('aranami-icon.png') }}">
+  <link rel="stylesheet" href="{{ asset_url('styles.css') }}">
+  <link rel="stylesheet" href="{{ asset_url('codex.css') }}">
+  {% if live %}<script src="{{ asset_url('live.js') }}" defer></script>{% endif %}
+  <script src="{{ asset_url('navigation.js') }}" defer></script>
   {% block assets %}{% endblock %}
   <title>{{ heading }} · Aranami</title>
 </head>
@@ -19,7 +18,7 @@
   <a href="#main" class="skip">{{ t.nav.skip }}</a>
   <header class="masthead">
     <div class="shell header-inner">
-      <a href="/" class="brand"><img src="/aranami-wordmark.png" width="205" height="47" alt="Aranami"></a>
+      <a href="/" class="brand"><img src="{{ asset_url('aranami-wordmark.png') }}" width="205" height="47" alt="Aranami"></a>
       <nav class="global-navigation" aria-label="{{ t.nav.global }}">
         <a href="/"{% if navigation and navigation.path == '/' %} aria-current="page"{% endif %}>{{ t.nav.dashboard }}</a>
         <a href="/maintenance/"{% if navigation and navigation.path == '/maintenance/' %} aria-current="page"{% endif %}>{{ t.nav.backlog }}</a>
@@ -33,7 +32,7 @@
       </nav>
       <nav class="language-switcher" aria-label="{{ t.nav.language }}">
         <details class="navigation-tools language-menu">
-        <summary><svg class="language-icon" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#language"></use></svg>{{ t.nav.language }}</summary>
+        <summary><svg class="language-icon" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('report-icons.svg') }}#language"></use></svg>{{ t.nav.language }}</summary>
         <ul class="navigation-tools-list">
         {% if navigation %}
           {% for language in navigation.languages %}<li><a href="{{ language.url }}" lang="{{ language.tag }}" hreflang="{{ language.tag }}"{% if language.current %} aria-current="true"{% endif %}>{{ language.label }}</a></li>{% endfor %}

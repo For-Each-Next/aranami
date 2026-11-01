@@ -12,6 +12,7 @@ import json
 import operator
 import secrets
 from functools import lru_cache
+from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
@@ -89,6 +90,20 @@ _DAY_SECONDS = 24 * _HOUR_SECONDS
 _MONTH_SECONDS = 365.25 / 12 * _DAY_SECONDS
 
 
+@lru_cache(maxsize=64)
+def _asset_url(name: str) -> str:
+    """Identify an authored source asset by its immutable content.
+
+    Args:
+        name: Relative asset path supplied by a template or renderer.
+
+    Returns:
+        A local URL whose digest permits safe browser caching.
+    """
+    asset = Path(__file__).with_name("public_html") / name
+    return f"/{name}?v={sha256(asset.read_bytes()).hexdigest()}"
+
+
 @lru_cache(maxsize=1)
 def _templates() -> Environment:
     """Load cached presentation templates with HTML autoescaping.
@@ -96,11 +111,13 @@ def _templates() -> Environment:
     Returns:
         A Jinja environment rooted in the source template directory.
     """
-    return Environment(
+    environment = Environment(
         loader=FileSystemLoader(Path(__file__).with_name("templates")),
         autoescape=select_autoescape(["html"]),
         auto_reload=False,
     )
+    environment.globals["asset_url"] = _asset_url
+    return environment
 
 
 def _render(name: str, context: Record) -> str:
@@ -524,7 +541,9 @@ class _Page:
                     else None,
                 })
             card.update(
-                review_icon=f"/review-icons/{icon[0]}" if icon else None,
+                review_icon=_asset_url(f"review-icons/{icon[0]}")
+                if icon
+                else None,
                 review_icon_symbol=None if icon else "history",
                 review_icon_label=review_label,
                 review_icon_source=(
@@ -559,7 +578,6 @@ class _Page:
         for section in homepage_sections(snapshot):
             key = section["key"]
             views = snapshot.get("pageviews") if key == "pageviews" else None
-            description = None
             updated = (
                 snapshot.get("reports", {}).get(key, {}).get("last_success_at")
             )
@@ -573,7 +591,6 @@ class _Page:
                 "description": self.text(f"homepage.{key}_description")
                 if key not in {"pageviews", "recognized", "dyk"}
                 else None,
-                "pageviews_description": description,
                 "empty": self.text("pageviews.unavailable")
                 if key == "pageviews" and views is None
                 else self.text("empty.section")
@@ -857,14 +874,19 @@ class _Page:
                 else "\uff0c",
                 "closing": ")" if self.interface.locale == "en" else "\uff09",
             },
-            "runtime": self.runtime(status, schedule),
+            "runtime": self.runtime(status, schedule, version),
         }
 
-    def runtime(self, status: Record, schedule: Record) -> list[Record]:
+    def runtime(
+        self,
+        status: Record,
+        schedule: Record,
+        version: str,
+    ) -> list[Record]:
         """Prepare saved environment and fresh resource observations.
 
         Returns:
-            Metric rows with explicit unknowns for missing observations.
+            Grouped metric rows with unknowns for missing facts.
         """
         runtime = (status.get("schedule") or {}).get("runtime") or {}
         unknown = self.text("ops.unavailable")
@@ -887,29 +909,70 @@ class _Page:
             else self.text("server.cpu_cores_unknown")
         )
         separator = " " if self.interface.locale == "en" else ""
-        rows = (
+        groups = (
+            (
+                "application",
+                (
+                    ("web_version", version, False),
+                    (
+                        "hub_version",
+                        runtime.get("aranami_version") or unknown,
+                        False,
+                    ),
+                ),
+            ),
+            (
+                "hardware",
+                (
+                    ("machine", runtime.get("machine") or unknown, False),
+                    ("memory", f"{used_memory} / {allocated_memory}", True),
+                    ("cpu", f"{cpu_use}{separator}{cpu_cores}", True),
+                ),
+            ),
+            (
+                "system",
+                (
+                    ("os", runtime.get("system") or unknown, False),
+                    (
+                        "os_release",
+                        runtime.get("os_release") or unknown,
+                        False,
+                    ),
+                    ("kernel", runtime.get("kernel") or unknown, False),
+                ),
+            ),
             (
                 "environment",
-                " · ".join(
-                    value
-                    for key in ("system", "machine")
-                    if (value := runtime.get(key))
-                )
-                or unknown,
-                False,
+                (
+                    ("python", runtime.get("python") or unknown, False),
+                    (
+                        "python_implementation",
+                        runtime.get("python_implementation") or unknown,
+                        False,
+                    ),
+                    (
+                        "python_compiler",
+                        runtime.get("python_compiler") or unknown,
+                        False,
+                    ),
+                ),
             ),
-            ("python", runtime.get("python") or unknown, False),
-            ("memory", f"{used_memory} / {allocated_memory}", True),
-            ("cpu", f"{cpu_use}{separator}{cpu_cores}", True),
         )
         return [
             {
-                "label": self.text(f"server.{key}"),
-                "value": value,
-                "fresh": usage and fresh,
-                "stale": unknown if usage else None,
+                "key": group,
+                "label": self.text(f"server.group.{group}"),
+                "rows": [
+                    {
+                        "label": self.text(f"server.{key}"),
+                        "value": value,
+                        "fresh": usage and fresh,
+                        "stale": unknown if usage else None,
+                    }
+                    for key, value, usage in rows
+                ],
             }
-            for key, value, usage in rows
+            for group, rows in groups
         ]
 
     def worklist_card(
@@ -1201,8 +1264,6 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
             end=portion["offset"] + len(portion["items"]),
             count=f"{len(items):,}",
         ),
-        page_number=portion["page"],
-        page_count=portion["pages"],
         updated=page.source_updated(backlog["observed_at"]),
         sort_choices=[
             {
@@ -1246,11 +1307,6 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
         )
         if portion["page"] < portion["pages"]
         else None,
-        pagination=page.text(
-            "backlog.page",
-            page=portion["page"],
-            pages=portion["pages"],
-        ),
         source_link=wiki_link(selected["source_url"], selected["category"]),
     )
     return _render("maintenance.html", context)
@@ -1345,11 +1401,6 @@ def render_newsletter(  # ruff: ignore[too-many-arguments]
             {
                 "value": choice,
                 "checked": choice == value["issue"],
-                "url": local_url(
-                    "/newsletter/",
-                    issue=choice,
-                    lang=page.interface.locale,
-                ),
                 "label": page.text(
                     "newsletter.choice.current"
                     if choice == automatic

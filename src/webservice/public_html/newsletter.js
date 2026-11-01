@@ -40,6 +40,7 @@ function initializeIssueForm() {
         return;
     const issue = form.querySelector('[name="issue"]');
     const status = document.querySelector("[data-newsletter-load-status]");
+    const statusText = status.querySelector(".cdx-message__content");
     let result = document.querySelector("[data-newsletter-result]");
     let displayedIssue = issue.value;
     let requestNumber = 0;
@@ -94,7 +95,7 @@ function initializeIssueForm() {
             if (request !== requestNumber)
                 return;
             issue.value = displayedIssue;
-            status.textContent = status.dataset.failure;
+            statusText.textContent = status.dataset.failure;
             status.hidden = false;
         }
         finally {

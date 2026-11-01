@@ -59,11 +59,6 @@
     "zh-hans": "Python",
     "zh-hant": "Python"
   },
-  "server.environment": {
-    "en": "System and architecture",
-    "zh-hans": "系统与架构",
-    "zh-hant": "系統與架構"
-  },
   "server.memory": {
     "en": "Memory",
     "zh-hans": "内存",
@@ -399,25 +394,10 @@
     "zh-hans": "重新评级",
     "zh-hant": "重新評級"
   },
-  "homepage.heading": {
-    "en": "Current highlights",
-    "zh-hans": "动态热门",
-    "zh-hant": "動態熱門"
-  },
   "pageviews.heading": {
     "en": "Popular articles",
     "zh-hans": "热门条目",
     "zh-hant": "熱門條目"
-  },
-  "pageviews.description": {
-    "en": "{date}Project articles ranked in the site-wide daily {top}",
-    "zh-hans": "{date}浏览量位居全站{top}的专题条目",
-    "zh-hant": "{date}瀏覽量位居全站{top}的專題條目"
-  },
-  "pageviews.top": {
-    "en": "top 1,000",
-    "zh-hans": "前1,000名",
-    "zh-hant": "前1,000名"
   },
   "pageviews.views": {
     "en": "Daily views: {count}",
@@ -529,11 +509,6 @@
     "zh-hans": "其他标记",
     "zh-hant": "其他標記"
   },
-  "backlog.column.oldest": {
-    "en": "Earliest tagged month",
-    "zh-hans": "最早标记月份",
-    "zh-hant": "最早標記月份"
-  },
   "backlog.sort": {
     "en": "Sort by",
     "zh-hans": "排序方式",
@@ -559,11 +534,6 @@
     "zh-hans": "随机",
     "zh-hant": "隨機"
   },
-  "backlog.sort.reverse": {
-    "en": "Reverse",
-    "zh-hans": "逆序",
-    "zh-hant": "逆序"
-  },
   "backlog.back": {
     "en": "Back to maintenance",
     "zh-hans": "返回条目维护",
@@ -573,11 +543,6 @@
     "en": "No articles currently need maintenance.",
     "zh-hans": "目前没有待维护条目。",
     "zh-hant": "目前沒有待維護條目。"
-  },
-  "backlog.page": {
-    "en": "Page {page} of {pages}",
-    "zh-hans": "第{page}页，共{pages}页",
-    "zh-hant": "第{page}頁，共{pages}頁"
   },
   "backlog.previous": {
     "en": "Previous page",
@@ -593,11 +558,6 @@
     "en": "This maintenance list or page could not be found.",
     "zh-hans": "未找到这个维护列表或分页。",
     "zh-hant": "未找到這個維護列表或分頁。"
-  },
-  "ops.heading": {
-    "en": "On-wiki report updates",
-    "zh-hans": "站内报告更新状态",
-    "zh-hant": "站內報告更新狀態"
   },
   "ops.reconnecting": {
     "en": "Live updates are unavailable. Showing the last received status; retrying automatically.",
@@ -1029,26 +989,6 @@
     "zh-hans": "{days}日{hours}小时{minutes}分{seconds}秒",
     "zh-hant": "{days}日{hours}小時{minutes}分{seconds}秒"
   },
-  "logs.service.hub": {
-    "en": "the data hub",
-    "zh-hans": "数据中枢",
-    "zh-hant": "資料中樞"
-  },
-  "logs.service.scheduler": {
-    "en": "the report scheduler",
-    "zh-hans": "报告调度服务",
-    "zh-hant": "報告排程服務"
-  },
-  "logs.service.website": {
-    "en": "the website data service",
-    "zh-hans": "网站数据服务",
-    "zh-hant": "網站資料服務"
-  },
-  "logs.service.web": {
-    "en": "the web server",
-    "zh-hans": "网页服务",
-    "zh-hant": "網頁服務"
-  },
   "logs.result.updated": {
     "en": "completed successfully",
     "zh-hans": "已完成",
@@ -1089,21 +1029,6 @@
     "zh-hans": "未找到日志。",
     "zh-hant": "未找到日誌。"
   },
-  "logs.query": {
-    "en": "Search event text",
-    "zh-hans": "搜索事件文字",
-    "zh-hant": "搜尋事件文字"
-  },
-  "logs.apply": {
-    "en": "Show logs",
-    "zh-hans": "查看日志",
-    "zh-hant": "查看日誌"
-  },
-  "logs.no_matches": {
-    "en": "No events match these filters.",
-    "zh-hans": "没有符合这些筛选条件的事件。",
-    "zh-hant": "沒有符合這些篩選條件的事件。"
-  },
   "logs.invalid_query": {
     "en": "The log date or filters are invalid.",
     "zh-hans": "日志日期或筛选条件无效。",
@@ -1133,11 +1058,6 @@
     "en": "Size",
     "zh-hans": "大小",
     "zh-hant": "大小"
-  },
-  "logs.truncated": {
-    "en": "Showing up to 100 recent major events. Download the daily log for detailed diagnostics.",
-    "zh-hans": "当前最多显示最近100项主要事件；下载每日日志可查看详细诊断信息。",
-    "zh-hant": "目前最多顯示最近100項主要事件；下載每日日誌可查看詳細診斷資訊。"
   },
   "nav.dashboard": {
     "en": "Dashboard",
@@ -1179,11 +1099,6 @@
     "zh-hans": "任务",
     "zh-hant": "任務"
   },
-  "backlog.all": {
-    "en": "All",
-    "zh-hans": "全部",
-    "zh-hant": "全部"
-  },
   "backlog.apply": {
     "en": "Filter",
     "zh-hans": "筛选",
@@ -1198,11 +1113,6 @@
     "en": "Articles {start}–{end} of {count}",
     "zh-hans": "第{start}–{end}篇，共{count}篇",
     "zh-hant": "第{start}–{end}篇，共{count}篇"
-  },
-  "backlog.goto": {
-    "en": "Go to page",
-    "zh-hans": "转到页码",
-    "zh-hant": "前往頁碼"
   },
   "backlog.go": {
     "en": "Go",
@@ -1219,75 +1129,20 @@
     "zh-hans": "逆序",
     "zh-hant": "逆序"
   },
-  "backlog.direction.oldest": {
-    "en": "Oldest first",
-    "zh-hans": "最早优先",
-    "zh-hant": "最早優先"
-  },
-  "backlog.direction.newest": {
-    "en": "Newest first",
-    "zh-hans": "最新优先",
-    "zh-hant": "最新優先"
-  },
   "backlog.direction": {
     "en": "Order",
     "zh-hans": "顺序",
     "zh-hant": "順序"
-  },
-  "logs.order": {
-    "en": "Event order",
-    "zh-hans": "事件顺序",
-    "zh-hant": "事件順序"
-  },
-  "logs.newest": {
-    "en": "Newest first",
-    "zh-hans": "最新事件优先",
-    "zh-hant": "最新事件優先"
-  },
-  "logs.oldest": {
-    "en": "Oldest first",
-    "zh-hans": "最早事件优先",
-    "zh-hant": "最早事件優先"
   },
   "logs.status": {
     "en": "Result",
     "zh-hans": "结果",
     "zh-hant": "結果"
   },
-  "logs.all": {
-    "en": "All results",
-    "zh-hans": "全部结果",
-    "zh-hant": "全部結果"
-  },
-  "logs.count": {
-    "en": "Matching recent events for {date}: {count}.",
-    "zh-hans": "在{date}最近保存的事件中，有{count}项符合筛选条件。",
-    "zh-hant": "在{date}最近儲存的事件中，有{count}項符合篩選條件。"
-  },
-  "logs.clear": {
-    "en": "Clear filters",
-    "zh-hans": "清除筛选条件",
-    "zh-hant": "清除篩選條件"
-  },
   "logs.duration_label": {
     "en": "Duration",
     "zh-hans": "用时",
     "zh-hant": "用時"
-  },
-  "logs.pagination": {
-    "en": "Page {page} of {pages}",
-    "zh-hans": "第{page}页，共{pages}页",
-    "zh-hant": "第{page}頁，共{pages}頁"
-  },
-  "logs.previous": {
-    "en": "Previous page",
-    "zh-hans": "上一页",
-    "zh-hant": "上一頁"
-  },
-  "logs.next": {
-    "en": "Next page",
-    "zh-hans": "下一页",
-    "zh-hant": "下一頁"
   },
   "logs.archive": {
     "en": "Daily log archive",
@@ -1298,11 +1153,6 @@
     "en": "Task or service",
     "zh-hans": "任务或服务",
     "zh-hant": "任務或服務"
-  },
-  "logs.run_task": {
-    "en": "Report run",
-    "zh-hans": "报告执行",
-    "zh-hant": "報告執行"
   },
   "assessment.description.class.FA": {
     "en": "FA-Class",
@@ -1434,11 +1284,6 @@
     "zh-hans": "未知重要度",
     "zh-hant": "未知重要度"
   },
-  "logs.pagination_label": {
-    "en": "Log event pages",
-    "zh-hans": "日志事件分页",
-    "zh-hant": "日誌事件分頁"
-  },
   "ops.scroll_hint": {
     "en": "Scroll horizontally to view all report fields.",
     "zh-hans": "横向滚动以查看报告的所有字段。",
@@ -1564,16 +1409,6 @@
     "zh-hans": "本期来源数据尚未完成获取。系统会自动获取下一期数据，完成后在此显示生成的维基代码。",
     "zh-hant": "本期來源資料尚未完成取得。系統會自動取得下一期資料，完成後在此顯示產生的維基代碼。"
   },
-  "newsletter.contents": {
-    "en": "Issue pages",
-    "zh-hans": "本期页面",
-    "zh-hant": "本期頁面"
-  },
-  "newsletter.wikicode": {
-    "en": "Wikitext",
-    "zh-hans": "维基代码",
-    "zh-hant": "維基代碼"
-  },
   "newsletter.copy": {
     "en": "Copy",
     "zh-hans": "复制",
@@ -1669,50 +1504,10 @@
     "zh-hans": "正则表达式",
     "zh-hant": "正規表示式"
   },
-  "backlog.compare.heading": {
-    "en": "Comparison",
-    "zh-hans": "比较方式",
-    "zh-hant": "比較方式"
-  },
-  "backlog.compare.eq": {
-    "en": "Equals",
-    "zh-hans": "等于",
-    "zh-hant": "等於"
-  },
-  "backlog.compare.gte": {
-    "en": "At least (≥)",
-    "zh-hans": "至少（≥）",
-    "zh-hant": "至少（≥）"
-  },
-  "backlog.compare.lte": {
-    "en": "At most (≤)",
-    "zh-hans": "至多（≤）",
-    "zh-hant": "至多（≤）"
-  },
-  "backlog.compare.range": {
-    "en": "Between (inclusive)",
-    "zh-hans": "范围（含起止）",
-    "zh-hant": "範圍（含起止）"
-  },
   "backlog.compare.endpoint": {
     "en": "to",
     "zh-hans": "到",
     "zh-hant": "到"
-  },
-  "newsletter.history.calendar": {
-    "en": "Saved data dates",
-    "zh-hans": "已保存的数据日期",
-    "zh-hant": "已儲存的資料日期"
-  },
-  "newsletter.history.previous_month": {
-    "en": "Previous month",
-    "zh-hans": "上个月",
-    "zh-hant": "上個月"
-  },
-  "newsletter.history.next_month": {
-    "en": "Next month",
-    "zh-hans": "下个月",
-    "zh-hant": "下個月"
   },
   "reviews.started_months": {
     "en": "Started {count} months ago",
@@ -1798,21 +1593,6 @@
     "en": "Some intermediate stages were omitted from this bounded history.",
     "zh-hans": "部分中间阶段因记录数量限制而省略。",
     "zh-hant": "部分中間階段因紀錄數量限制而省略。"
-  },
-  "newsletter.feature_history.heading": {
-    "en": "Annual feature history",
-    "zh-hans": "年度专题历史草稿",
-    "zh-hant": "年度專題歷史草稿"
-  },
-  "newsletter.feature_history.description": {
-    "en": "The January feature has its own daily history from January 1 through December 31 of the reviewed year. Other pages use quarterly dates. Only actually captured drafts are available.",
-    "zh-hans": "一月专题单独保存回顾年份 1 月 1 日至 12 月 31 日的每日草稿，其他页面仍使用季度日期。这里只提供实际保存过的草稿。",
-    "zh-hant": "一月專題單獨儲存回顧年份 1 月 1 日至 12 月 31 日的每日草稿，其他頁面仍使用季度日期。這裡只提供實際儲存過的草稿。"
-  },
-  "newsletter.feature_history.date": {
-    "en": "Annual feature data date",
-    "zh-hans": "年度专题数据日期",
-    "zh-hant": "年度專題資料日期"
   },
   "newsletter.choice.annual": {
     "en": "Annual review",
@@ -2048,5 +1828,70 @@
     "en": "WikiProject importance assessment: {grade}",
     "zh-hans": "专题重要度评级：{grade}",
     "zh-hant": "專題重要度評級：{grade}"
+  },
+  "server.group.application": {
+    "en": "Aranami",
+    "zh-hans": "Aranami",
+    "zh-hant": "Aranami"
+  },
+  "server.group.hardware": {
+    "en": "Hardware and resources",
+    "zh-hans": "硬件与资源",
+    "zh-hant": "硬體與資源"
+  },
+  "server.group.system": {
+    "en": "System",
+    "zh-hans": "系统",
+    "zh-hant": "系統"
+  },
+  "server.group.environment": {
+    "en": "Python environment",
+    "zh-hans": "Python环境",
+    "zh-hant": "Python環境"
+  },
+  "server.web_version": {
+    "en": "Website version",
+    "zh-hans": "网站版本",
+    "zh-hant": "網站版本"
+  },
+  "server.hub_version": {
+    "en": "Hub version",
+    "zh-hans": "后台版本",
+    "zh-hant": "後台版本"
+  },
+  "server.machine": {
+    "en": "Architecture",
+    "zh-hans": "处理器架构",
+    "zh-hant": "處理器架構"
+  },
+  "server.os": {
+    "en": "Operating system",
+    "zh-hans": "操作系统",
+    "zh-hant": "作業系統"
+  },
+  "server.os_release": {
+    "en": "Distribution",
+    "zh-hans": "发行版",
+    "zh-hant": "發行版"
+  },
+  "server.kernel": {
+    "en": "Kernel",
+    "zh-hans": "内核",
+    "zh-hant": "核心"
+  },
+  "server.python_implementation": {
+    "en": "Implementation",
+    "zh-hans": "解释器实现",
+    "zh-hant": "直譯器實作"
+  },
+  "server.python_compiler": {
+    "en": "Compiler",
+    "zh-hans": "编译器",
+    "zh-hant": "編譯器"
+  },
+  "server.resources_note": {
+    "en": "System and Python details describe the hub container. Memory and CPU show its observed usage and allocation; 100% CPU means one fully used core.",
+    "zh-hans": "系统和Python信息来自后台容器。内存与CPU显示实测用量及配额；CPU使用率100%表示占满一个核心。",
+    "zh-hant": "系統與Python資訊來自後台容器。記憶體與CPU顯示實測用量及配額；CPU使用率100%表示占滿一個核心。"
   }
 }

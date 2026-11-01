@@ -172,7 +172,7 @@ class PublicWebsiteTests(unittest.TestCase):
         assert status == 200
         assert gzip.decompress(body).startswith(b"<!doctype html>")
         assert headers["Content-Encoding"] == "gzip"
-        assert headers["Cache-Control"] == "no-store"
+        assert headers["Cache-Control"] == "public, max-age=0, must-revalidate"
         assert "default-src 'none'" in headers["Content-Security-Policy"]
         assert "script-src 'self'" in headers["Content-Security-Policy"]
         assert (
@@ -204,6 +204,68 @@ class PublicWebsiteTests(unittest.TestCase):
                 "/fixture.html",
                 encoding="gzip;q=0, *;q=1",
             )[1]
+        )
+
+        self._assert_asset_revalidation()
+
+    def _assert_asset_revalidation(self) -> None:
+        """Reuse bytes and invalidate validators after replacement."""
+        first = self.client.get("/fixture.html")
+        etag = first.headers["ETag"]
+        digest = etag.removeprefix('W/"').removesuffix('"')
+        with patch(
+            "backend.support.asset_cache.read_regular",
+            side_effect=AssertionError("Unchanged assets must reuse bytes"),
+        ):
+            for validator in (
+                etag,
+                etag.removeprefix("W/"),
+                '"other", ' + etag,
+            ):
+                response = self.client.get(
+                    "/fixture.html",
+                    headers={
+                        "If-None-Match": validator,
+                        "Accept-Encoding": "gzip",
+                    },
+                )
+                assert response.status_code == HTTPStatus.NOT_MODIFIED
+                assert response.content == b""
+                assert response.headers["ETag"] == etag
+                assert response.headers["Vary"] == "Accept-Encoding"
+                assert "Content-Length" not in response.headers
+            versioned = self.client.get("/fixture.html?v=" + digest)
+            assert versioned.headers["Cache-Control"] == (
+                "public, max-age=31536000, immutable"
+            )
+            localized = self.client.get(
+                "/fixture.html?v=" + digest + "&lang=zh-hant",
+            )
+            assert "Set-Cookie" not in localized.headers
+        for query in ("v=wrong", "v=" + digest + "&v=" + digest):
+            response = self.client.get("/fixture.html?" + query)
+            assert "immutable" not in response.headers["Cache-Control"]
+        changed = "<!doctype html>" + "b" * 2048
+        (self.assets / "fixture.html").write_text(changed)
+        response = self.client.get(
+            "/fixture.html?v=" + digest,
+            headers={"If-None-Match": etag},
+        )
+        assert response.status_code == HTTPStatus.OK
+        assert response.text == changed
+        assert response.headers["ETag"] != etag
+        assert "immutable" not in response.headers["Cache-Control"]
+        for route in ("/", "/about/", "/api/status"):
+            assert (
+                self.client.get(route).headers["Cache-Control"] == "no-store"
+            )
+        (self.assets / "fixture.html").unlink()
+        (self.assets / "fixture.html").symlink_to(
+            self.runtime / "private.html",
+        )
+        assert (
+            self.client.get("/fixture.html").status_code
+            == HTTPStatus.NOT_FOUND
         )
 
     def test_private_paths_and_symlinks_are_not_assets(self) -> None:
@@ -274,7 +336,10 @@ class PublicWebsiteTests(unittest.TestCase):
                     assert headers["Content-Language"] == "en"
                     assert "Accept-Language" in headers["Vary"]
                     assert b"Aranami" in body
-                    assert b'<script src="/live.js" defer>' in body
+                    assert re.search(
+                        rb'<script src="/live.js\?v=[0-9a-f]{64}" defer>',
+                        body,
+                    )
                     if target == "/about/":
                         assert b'id="server-runtime"' in body
                         assert b'id="live-server-status"' in body

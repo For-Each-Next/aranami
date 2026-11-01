@@ -95,19 +95,9 @@ accessible interaction. The webservice renders Jinja templates with local CSS
 and native HTML controls. Keep appearance consistent with Codex across the
 dashboard, maintenance, logs, About, and error pages.
 
-The local CSS-only components are pinned to Codex 2.7.0 through npm. The asset
-build copies its upstream stylesheet unchanged; retain its GPL-2.0-or-later notice in
-`public_html/codex-license.html`. Load `styles.css` first so the local Select
-icon overrides apply before Codex loads, without transient data-URI requests
-blocked by the production content security policy.
-
-The local report-icon SVG sprite uses Wikimedia Codex icons under CC BY 4.0.
-Preserve its embedded source/author attribution and the About-page credit
-when changing those assets.
-
-Content-review icons follow Chinese Wikipedia's `Module:PJ:VG/RVW`
-(revision 92100885). Preserve each icon's Commons file-page link and the
-source and license notices in `public_html/review-icons/credits.html`.
+Follow [Frontend components](webservice/frontend.md) for Codex component,
+stylesheet, and attribution contracts, and [Branding](webservice/branding.md)
+for logos and icons.
 
 For website changes, verify desktop/narrow layouts, long/escaped text, sorting
 and pagination, observed dates/ranks, all three locales, and missing/stale data.
@@ -164,7 +154,7 @@ repository. Python tests verify the [Pageviews contract](architecture.md#pagevie
 Uploader dry runs validate the exact payload without contacting Toolforge.
 `--archive <new-file.tar>` retains it at a previously nonexistent path; this
 does not authorize deployment. Follow [Administration](administration.md) for
-promotion/recovery and [AGENTS.md](../AGENTS.md) for version/changelog/tag rules.
+promotion/recovery and [AGENTS.md](../AGENTS.md) for version and changelog rules.
 
 Keep documentation in English, led by purpose and expected results. Update the
 guide that owns the behavior, link to it elsewhere, and keep README focused on

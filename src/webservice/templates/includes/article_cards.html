@@ -1,12 +1,16 @@
 {% if section.empty %}
-<div class="cdx-message cdx-message--notice" aria-live="polite"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#message-notice"></use></svg><div class="cdx-message__content">{{ section.empty }}</div></div>
+<div class="cdx-message cdx-message--notice" aria-live="polite"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ section.empty }}</div></div>
 {% else %}
 {% if section.is_review %}<ul class="card-grid article-list review-cards" role="list">{% else %}<ol class="card-grid article-list highlights" role="list">{% endif %}
   {% for card in section.cards %}
   <li class="article-card"{% if card.rank and not section.is_review %} value="{{ card.rank }}"{% endif %}>
-    <div class="article-card-body cdx-card">
+    <article class="article-card-body cdx-card" aria-labelledby="article-{{ 'reviews' if section.is_review else section.key }}-{{ loop.index }}">
       <div class="cdx-card__text">
-      <div class="cdx-card__text__title">{% include "includes/article_summary.html" %}</div>
+      {% if section.is_review %}
+      <p class="card-type"><a class="review-icon-link" href="{{ card.review_icon_source }}" title="{{ card.review_icon_label }}">{% if card.review_icon %}<img class="review-icon" src="{{ card.review_icon }}" width="16" height="16" alt="{{ card.review_icon_label }}">{% else %}<svg class="review-icon" width="16" height="16" viewBox="0 0 20 20" role="img" aria-label="{{ card.review_icon_label }}" focusable="false"><title>{{ card.review_icon_label }}</title><use href="{{ asset_url('report-icons.svg') }}#{{ card.review_icon_symbol }}"></use></svg>{% endif %}</a><span>{{ card.review_icon_label }}</span></p>
+      {% endif %}
+      <h3 class="cdx-card__text__title" id="article-{{ 'reviews' if section.is_review else section.key }}-{{ loop.index }}"><span class="article-summary"><bdi lang="zh">{{ card.link }}</bdi></span></h3>
+      {% include "includes/assessment_chips.html" %}
       {% if card.extract is not none %}
         <div class="cdx-card__text__description"><p class="article-extract"><bdi lang="{{ card.extract_language }}">{{ card.extract }}</bdi></p></div>
       {% endif %}
@@ -24,7 +28,7 @@
       {% endif %}
       </div>
       </div>
-    </div>
+    </article>
   </li>
   {% endfor %}
 {% if section.is_review %}</ul>{% else %}</ol>{% endif %}

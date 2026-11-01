@@ -429,7 +429,7 @@ def select_generation(root: Path) -> None:
         root: Complete immutable source and environment generation.
 
     Raises:
-        ValueError: Existing source still needs the one-time migration.
+        ValueError: Source evidence is invalid or app is not a symlink.
     """
     generation(root)
     selected = root.parent / "app"

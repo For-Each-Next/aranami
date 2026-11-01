@@ -426,6 +426,12 @@ class TestNewPageRecords(TestCase):
     def test_unavailable_creation_metadata_never_invents_a_date(self) -> None:
         """Keep missing identities and unknown creation dates."""
         source = "* [[:Game]]\r\n* [[:Missing game]]\nUnrelated text.\n"
+        original = managed_region(
+            "new-pages",
+            "=== 2026年10月2日 ===\n" + source,
+            {"days": "2"},
+        )
+        missing = dt.date(2026, 10, 3)
         metadata = pl.DataFrame(
             {"full_title": ["Game"], "page_id": [7], "created_at": [None]},
             schema={
@@ -437,18 +443,32 @@ class TestNewPageRecords(TestCase):
         with (
             patch.object(
                 new_pages,
+                "collect_day",
+                return_value=new_pages.DailyRecord(missing),
+            ),
+            patch.object(
+                new_pages,
+                "query_pages_by_wikiproject",
+                return_value=pl.DataFrame(
+                    schema={"full_title": pl.String, "pa_class": pl.String},
+                ),
+            ),
+            patch.object(
+                new_pages,
                 "page_creation_metadata",
                 return_value=metadata,
             ),
             self.assertLogs(new_pages.__name__, level="WARNING") as logs,
         ):
-            updated = rendering.render_lines(
-                new_pages.prepare_identity_lines(
-                    source,
-                    _TitleSite("zh", "wikipedia"),
-                ),
+            prepared = new_pages.prepare_report(
+                original,
+                _TitleSite("zh", "wikipedia"),
+                missing + dt.timedelta(days=1),
+                project="电子游戏",
             )
+            updated = rendering.render_lines(prepared.records[1].lines)
         assert updated == (
+            "=== 2026年10月2日 ===\n"
             "* [[:Game]] <!-- 页面ID 7 · 创建时间 未知 -->\r\n"
             "* [[:Missing game]]\n"
             "Unrelated text.\n"

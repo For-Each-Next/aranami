@@ -559,38 +559,6 @@ def prepare_lines(  # ruff: ignore[too-many-locals]
     return tuple(records)
 
 
-def prepare_identity_lines(text: str, site: BaseSite) -> tuple[LineFacts, ...]:
-    """Read creation facts for unannotated retained source items.
-
-    Returns:
-        Parsed fragments retaining unavailable identities and dates.
-    """
-    lines = prepare_lines(text, {}, site)
-    titles = list(
-        dict.fromkeys(line.title for line in lines if line.needs_identity),
-    )
-    if not titles:
-        return lines
-    metadata = page_creation_metadata(site, titles)
-    identities = {
-        title: (identifier, created_at)
-        for title, identifier, created_at in metadata.select(
-            "full_title",
-            "page_id",
-            "created_at",
-        ).iter_rows()
-    }
-    for title in titles:
-        if title not in identities:
-            _LOGGER.warning("No creation metadata for listed page %s", title)
-    return tuple(
-        replace(line, identity=identities.get(line.title))
-        if line.needs_identity
-        else line
-        for line in lines
-    )
-
-
 def collect_day(site: BaseSite, day: dt.date) -> DailyRecord:
     """Collect creations and redirect conversions for one UTC date.
 

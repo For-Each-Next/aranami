@@ -20,6 +20,8 @@ under the component that owns the behavior:
 | `webservice/` | [Branding](webservice/branding.md) | Maintain the website's logo, icons, and shared visual style |
 | `webservice/` | [Frontend components](webservice/frontend.md) | Build TypeScript and Codex assets and preserve native forms and live updates |
 | `backend/` | [Newsletter collection](backend/newsletter.md) | Maintain source evidence, caches, daily archives, and history backfills |
+| `backend/` | [Saved data and Parquet fields](backend/data-storage.md) | Choose durable data paths and preserve stored schemas and observation semantics |
+| `backend/` | [Assessment fields](backend/assessment-fields.md) | Preserve source labels and their lossless Parquet encoding |
 
 Read [repository instructions](../AGENTS.md) before contributing and the
 [changelog](../CHANGELOG.md) for completed changes. Documentation is in English;

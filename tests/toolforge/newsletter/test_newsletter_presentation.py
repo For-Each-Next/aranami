@@ -135,7 +135,10 @@ class NewsletterPresentationTests(unittest.TestCase):
         assert 'type="radio"' not in output
         assert 'name="issue"' in output
         assert 'value="2027-01"' in output
-        assert 'src="/newsletter.js" defer' in output
+        assert re.search(
+            r'src="/newsletter\.js\?v=[a-f0-9]{64}" defer',
+            output,
+        )
         assert value["period"] not in output
         assert "oldid=123" not in output
         assert output.count("data-newsletter-copy=") == len(displays)
@@ -311,10 +314,11 @@ class NewsletterPresentationTests(unittest.TestCase):
                 assert submit is not None
                 assert "hidden" not in submit[1]
                 assert (
-                    '<p class="cdx-message cdx-message--notice '
+                    '<div class="cdx-message cdx-message--warning '
                     'cdx-message--inline" role="status" hidden '
                     "data-newsletter-load-status" in output
                 )
+                assert '<div class="cdx-message__content"></div>' in output
                 assert "newsletter-code-label" not in output
                 identifiers = set(re.findall(r'\bid="([^"]+)"', output))
                 for reference in re.findall(

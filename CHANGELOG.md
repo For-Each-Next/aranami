@@ -4,6 +4,28 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.9
 
+### 0.8.5 (2026-11-01 15:35 UTC)
+
+Overview: Cleaned obsolete code and documentation, refined the webservice's
+Codex components, reduced repeat loading, and expanded server information.
+
+- Removed retired report/log routing, unused newsletter and presentation
+  helpers, obsolete translations, and superseded interface styles.
+- Grouped server status into Aranami, hardware/resources, system, and Python
+  information, including separate serving-web and observed-hub versions.
+- Recorded bounded OS distribution, kernel, Python implementation, and
+  compiler observations while preserving unknowns and stale-resource handling.
+- Applied consistent semantic Codex cards throughout the dashboard and
+  refined accessible controls, notices, and data presentation across the site.
+- Loaded the Vue/Codex bundle only for maintenance and newsletter controls,
+  avoiding its 220 kB download elsewhere and retaining server-rendered pages.
+- Added content-hash asset URLs, browser reuse, and bounded compressed-byte
+  caching while retaining fresh dynamic pages and validated source boundaries.
+- Corrected outdated report, log, and newsletter guidance, restored README
+  audience links, and consolidated frontend styling and attribution contracts.
+- Deployed v0.8.5 to Toolforge and verified the exact payload, both services,
+  dashboard cards, server details, and asset caching at 2026-11-01 15:35 UTC.
+
 ### 0.8.4 (2026-11-01 14:57 UTC)
 
 Overview: Unified the frontend with Wikimedia Codex and TypeScript, simplified

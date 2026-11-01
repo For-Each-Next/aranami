@@ -148,7 +148,7 @@ Each group label includes its observed article count, including the game total
 and each release-year group. Missing observations leave the count blank.
 
 Current membership in the `虚构角色` project supplies `角色與元素`; `公司` or
-`传记` supplies `公司與人物`; `音樂` supplies `音樂`. Dated games take priority,
+`传记` supplies `公司與人物`; `音乐` supplies `音樂`. Dated games take priority,
 followed by those three subject groups in that order, so each article appears
 once. These current membership observations retain their own collection time
 and do not assert historical project membership. Subjects without a verified

@@ -6,7 +6,7 @@
 </ul>
 {% endblock %}
 {% block content %}
-{% if notice %}<div class="cdx-message cdx-message--notice" role="status"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#message-notice"></use></svg><div class="cdx-message__content">{{ notice }}</div></div>{% endif %}
+{% if notice %}<div class="cdx-message cdx-message--notice" role="status"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ notice }}</div></div>{% endif %}
 {% include "includes/reviews.html" %}
 {% include "includes/highlights.html" %}
 {% endblock %}

@@ -1,7 +1,7 @@
 {% if backlog %}
 <div id="backlog">
   {% if backlog.unavailable %}
-    <div class="cdx-message cdx-message--notice" aria-live="polite"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="/report-icons.svg#message-notice"></use></svg><div class="cdx-message__content">{{ t.backlog.unavailable }}</div></div>
+    <div class="cdx-message cdx-message--notice" aria-live="polite"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ t.backlog.unavailable }}</div></div>
   {% else %}
     {% for section in backlog.sections %}
     <section class="section-flat backlog-section" aria-labelledby="backlog-section-{{ section.key }}">

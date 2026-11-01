@@ -1,6 +1,6 @@
 [project]
 name = "aranami"
-version = "0.8.4"
+version = "0.8.5"
 description = "Toolforge automation for Wikipedia reports and a read-only dashboard."
 readme = "README.md"
 authors = [

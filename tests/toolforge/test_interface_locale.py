@@ -94,7 +94,10 @@ class InterfaceLocaleTests(unittest.TestCase):
                     headers={"Accept-Language": browser},
                 )
                 assert page.headers["Content-Language"] == tag
-                assert 'href="/report-icons.svg#language"' in page.text
+                assert re.search(
+                    r'href="/report-icons\.svg\?v=[a-f0-9]{64}#language"',
+                    page.text,
+                )
                 assert "繁体中文" in page.text
                 language, text = article_extract(
                     {"extract_hant": "裏"},

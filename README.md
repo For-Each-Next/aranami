@@ -52,6 +52,16 @@ wait for other scheduled work. PexBot reports updated within the preceding
 
 See the [change history](CHANGELOG.md) for completed improvements.
 
+## Documentation
+
+- [Terminal usage](docs/usage.md): inspect results, preview reports, and run
+  selected routines on Toolforge.
+- [Administration](docs/administration.md): deploy, operate, and recover services.
+- [Development](docs/development.md): prepare changes and verify them offline.
+- [Architecture](docs/architecture.md): maintain component and data contracts,
+  together with [repository instructions](AGENTS.md) and the scoped
+  [backend](src/backend/AGENTS.md) and [updater](src/updater/AGENTS.md) rules.
+
 ## License
 
 [CC0 1.0 Universal](LICENSE).

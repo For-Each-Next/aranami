@@ -17,9 +17,14 @@ without a badge, extra words, shadows, texture, or fine details. A second
 ImageGen prompt extracted the matching standalone wave, retaining its shape
 and transparency and removing the lettering.
 
-The interface follows the [Wikimedia Codex style guide][codex], with local
-CSS-only components, neutral surfaces, accessible contrast, native controls,
-and a collapsible contents button on small screens.
+The interface follows the [Wikimedia Codex style guide][codex], with locally
+bundled CSS and Vue components, neutral surfaces, accessible contrast, native
+controls, and a collapsible contents button on small screens. See
+[Frontend components](frontend.md) for build and component contracts.
+
+Content-review icons follow Chinese Wikipedia's `Module:PJ:VG/RVW`
+(revision 92100885). Preserve each icon's Commons file-page link and the source
+and license notices in `src/webservice/public_html/review-icons/credits.html`.
 
 Header navigation uses near-black text without underlines, with visible focus
 outlines and current-page markers. The Tools menu opens on mouse hover; clicking

@@ -46,6 +46,7 @@ Inspect backend-owned metadata read-only:
 | `state/routine-status.json` | Routine starts, results, progress, duration, and confirmed saves |
 | `state/schedule-status.json` | Monitor state, actual next executions, and resource observations |
 | `state/report-updates.json` | Per-destination timing, outcome, and confirmed edits |
+| `state/job-history.json` | Retained report invocations and their observed execution stages |
 
 Collected facts are under `reports/data/`; generated reports and saved drafts
 are under `reports/records/`. Daily data uses `YYYYMMDD` folders and current

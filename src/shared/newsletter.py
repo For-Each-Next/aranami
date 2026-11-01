@@ -131,16 +131,3 @@ class Issue:
         if new_section is not None:
             parameters.update(section="new", sectiontitle=new_section)
         return "https://zh.wikipedia.org/w/index.php?" + urlencode(parameters)
-
-    def reflection_url(self) -> str:
-        """Return a comment-preload URL without a forced heading.
-
-        Returns:
-            A new-section editor URL using the verified H3 preload.
-        """
-        return "https://zh.wikipedia.org/w/index.php?" + urlencode({
-            "title": f"{ROOT}/{self.value}/專題",
-            "action": "edit",
-            "section": "new",
-            "preload": f"{ROOT}/preload",
-        })

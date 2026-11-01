@@ -109,7 +109,8 @@ class LogControlsTests(unittest.TestCase):
                 output = response.text
                 listing = self._listing(output)
                 assert listing.count("<tr>") == 20
-                assert len(re.findall(r"<td\b[^>]*>", listing)) == 80
+                assert len(re.findall(r"<td\b[^>]*>", listing)) == 60
+                assert listing.count('<th scope="row">') == 20
                 assert len(re.findall(r'<th\b[^>]*scope="col"', output)) == 4
                 assert re.findall(r'<time datetime="([^"]+)"', listing) == [
                     event["time"] for event in reversed(self.events[-20:])
@@ -141,7 +142,8 @@ class LogControlsTests(unittest.TestCase):
                 assert table is not None
                 archive = table[1]
                 assert len(re.findall(r'<th\b[^>]*scope="col"', archive)) == 3
-                assert archive.count("<td") == 3
+                assert archive.count("<td") == 2
+                assert archive.count('<th scope="row">') == 1
                 assert (
                     '<td class="log-download"><a class="filename" href="'
                     in archive

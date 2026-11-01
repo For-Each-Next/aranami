@@ -59,7 +59,7 @@ Paths below are relative to `/data/project/aranami`:
 | `reports/data/` | Collected facts, current tables, and daily `YYYYMMDD` observations |
 | `reports/records/` | Generated reports, publication metadata, and saved newsletter drafts |
 | `reports/data/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet` | Immutable completed-day page IDs, quality, and importance |
-| `reports/records/newsletter/` | Immutable daily newsletter facts, original draft text, and date catalogs |
+| `reports/records/newsletter/` | Immutable daily newsletter facts, original editorial layouts, and date catalogs |
 | `reports/data/articles/milestones.parquet` | Shared project review and homepage actions, roles, questions, and coverage |
 | `reports/data/articles/history.parquet` | Durable versioned talk snapshots and recorded events |
 | `reports/data/articles/authorship.parquet` | Durable listing-time contributor evidence and token statistics |

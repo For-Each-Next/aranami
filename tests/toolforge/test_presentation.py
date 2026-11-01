@@ -17,6 +17,7 @@ import re
 import sys
 import tempfile
 import unittest
+from hashlib import sha256
 from html import unescape
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -241,6 +242,20 @@ def write_interface_fixtures(destination: Path) -> None:
     """
     fixture = _fixtures()
     fixture["config"]["routines"] = routine_configuration()
+    fixture["status"]["schedule"]["runtime"] = {
+        "python": "3.15.0",
+        "system": "Linux",
+        "machine": "x86_64",
+        "os_release": "Debian GNU/Linux 13 (trixie)",
+        "kernel": "6.12.0-example-amd64",
+        "python_implementation": "CPython",
+        "python_compiler": "CompilerWithLongUnbrokenBuildIdentifier" * 2,
+        "aranami_version": "0.8.5",
+        "memory_bytes": 104_857_600,
+        "memory_limit_bytes": 4_294_967_296,
+        "cpu_percent": 12.5,
+        "cpu_limit": 2,
+    }
     snapshot = fixture["snapshot"]
     maintenance = maintenance_snapshot()
     article = snapshot["pageviews"]["items"][0]
@@ -563,7 +578,10 @@ class ReviewPresentationTests(unittest.TestCase):
                 assert "/review-icons/featured-candidate.svg" in section
                 assert "/review-icons/peer-review.svg" in section
                 assert "/review-icons/project-peer-review.svg" in section
-                assert "/report-icons.svg#history" in section
+                assert re.search(
+                    r"/report-icons\.svg\?v=[a-f0-9]{64}#history",
+                    section,
+                )
                 assert "highlights" not in section
                 review_times = re.findall(
                     r'<time datetime="([^"]+)" title="([^"]+)">([^<]+)</time>',
@@ -1367,7 +1385,7 @@ class PresentationTests(unittest.TestCase):
                 f"{extract} &lt;script&gt;never execute&lt;/script&gt;"
                 " &amp; 中文" in output
             )
-            assert output.count('<script src="/live.js" defer></script>') == 1
+            assert output.count('<script src="/live.js?v=') == 1
             assert "DYK game 6" in output
             assert "DYK game 7" not in output
             assert "News game 7" in output
@@ -1691,7 +1709,7 @@ class PresentationTests(unittest.TestCase):
                 },
                 locale,
             )
-            assert output.count('<script src="/live.js" defer>') == 1
+            assert output.count('<script src="/live.js?v=') == 1
             assert "<script>bad</script>" not in output
             assert "&lt;script&gt;bad&lt;/script&gt;" not in output
             assert 'id="recent-events"' not in output
@@ -1719,12 +1737,30 @@ class PresentationTests(unittest.TestCase):
                 r'<(?:link|script)\b[^>]*(?:href|src)="([^"]+)"',
                 output,
             )
-            assert "/styles.css" in assets
+            assert "/styles.css" in {urlsplit(asset).path for asset in assets}
+            assert "/components.js" not in {
+                urlsplit(asset).path for asset in assets
+            }
             assert all(asset.startswith("/") for asset in assets)
-            assert all(
-                (root / "public_html" / asset.lstrip("/")).is_file()
-                for asset in assets
-            )
+            for asset in assets:
+                parsed = urlsplit(asset)
+                source = root / "public_html" / parsed.path.lstrip("/")
+                assert source.is_file()
+                assert parse_qs(parsed.query) == {
+                    "v": [sha256(source.read_bytes()).hexdigest()],
+                }
+        for output in (
+            render_maintenance(
+                maintenance_snapshot(),
+                {"task": ["references"]},
+                "en",
+            ),
+            render_newsletter(
+                {"issue": "2027-01", "available": False, "pages": []},
+                "en",
+            ),
+        ):
+            assert output.count('<script src="/components.js?v=') == 1
         assert not list(root.rglob("*.php"))
         assert set(root.rglob("*.js")) == {
             root / "public_html" / "components.js",
@@ -1898,6 +1934,11 @@ class LiveVisibilityTests(unittest.TestCase):
             "python": "3.15.0",
             "system": "Linux",
             "machine": "x86_64",
+            "os_release": "Debian GNU/Linux 13 (trixie)",
+            "kernel": "6.12.0-example",
+            "python_implementation": "CPython",
+            "python_compiler": "Clang 20.1.4",
+            "aranami_version": "0.8.5",
             "memory_bytes": 104_857_600,
             "memory_limit_bytes": 4_294_967_296,
             "cpu_percent": 12.5,
@@ -1930,7 +1971,28 @@ class LiveVisibilityTests(unittest.TestCase):
             for output in (initial, live):
                 assert 'id="server-runtime"' in output
                 assert "3.15.0" in output
-                assert "Linux · x86_64" in output
+                for value in (
+                    "Linux",
+                    "x86_64",
+                    "Debian GNU/Linux 13 (trixie)",
+                    "6.12.0-example",
+                    "CPython",
+                    "Clang 20.1.4",
+                    "0.8.5",
+                    self.data["config"]["version"],
+                ):
+                    assert value in output
+                for group in (
+                    "application",
+                    "hardware",
+                    "system",
+                    "environment",
+                ):
+                    assert f'id="server-group-{group}"' in output
+                    assert (
+                        Interface(locale).text(f"server.group.{group}")
+                        in output
+                    )
                 assert memory in output
                 assert cpu in output
                 assert started in output
@@ -1939,21 +2001,23 @@ class LiveVisibilityTests(unittest.TestCase):
                 assert f" {age}" in output
                 assert "data-relative-inline" not in output
                 assert output.count('id="server-runtime"') == 1
-                metrics = re.search(
+                tables = re.findall(
                     r'<table class="[^"]*\bserver-metrics\b[^"]*">'
                     r"(.*?)</table>",
                     output,
+                    re.DOTALL,
                 )
-                assert metrics is not None
-                assert metrics[1].count("<tr>") == 5
-                assert "TiB" not in metrics[1]
+                assert len(tables) == 4
+                metrics = "".join(tables)
+                assert metrics.count("<tr>") == 12
+                assert "TiB" not in metrics
                 for label in (
                     "Storage used / total",
                     "存储已用\uff0f总量",
                     "儲存已用\uff0f總量",
                 ):
-                    assert label not in metrics[1]
-            assert 'src="/live.js"' in initial
+                    assert label not in metrics
+            assert re.search(r'src="/live\.js\?v=[a-f0-9]{64}"', initial)
             assert 'id="live-server-status"' in initial
         stale = render_about(
             self.data["config"],
@@ -1964,7 +2028,10 @@ class LiveVisibilityTests(unittest.TestCase):
         assert "12.5%" not in stale
         assert "100.0 MiB" not in stale
         assert "3.15.0" in stale
-        assert "Linux · x86_64" in stale
+        assert "Linux" in stale
+        assert "x86_64" in stale
+        assert "Debian GNU/Linux 13 (trixie)" in stale
+        assert "0.8.5" in stale
         assert "2026-10-16 08:56:00" in stale
         assert "2026-10-18 12:00:00" in stale
         assert "data-schedule-time" not in stale
@@ -2399,7 +2466,7 @@ class LiveVisibilityTests(unittest.TestCase):
                 assert 'id="live-uptime"' in output
                 assert 'id="tool-status"' not in output
                 assert 'class="routine-row"' not in output
-                assert 'src="/live.js"' in output
+                assert re.search(r'src="/live\.js\?v=[a-f0-9]{64}"', output)
                 assert "0.6.0.dev1" in output
                 assert ('data-clock="uptime"' in output) == (
                     state in {"running", "paused"}
@@ -2621,6 +2688,38 @@ class ServerPresentationTests(unittest.TestCase):
             ):
                 assert removed not in output
 
+    def test_server_details_preserve_unknowns_and_escape_saved_text(
+        self,
+    ) -> None:
+        """Keep older snapshots and saved text safe in every locale."""
+        status = self.data["status"]
+        status["schedule"]["runtime"] = {
+            "python": "3.15.0",
+            "system": "Linux",
+            "machine": "x86_64",
+            "memory_bytes": None,
+            "memory_limit_bytes": None,
+            "cpu_percent": None,
+            "cpu_limit": None,
+            "python_compiler": "<compiler & build>",
+        }
+        for locale in ("en", "zh-hans", "zh-hant"):
+            output = render_about(
+                self.data["config"],
+                locale,
+                status=status,
+                now=self.now,
+            )
+            interface = Interface(locale)
+            for field in ("hub_version", "os_release", "kernel"):
+                assert (
+                    f'<th scope="row">{interface.text(f"server.{field}")}'
+                    f"</th><td>{interface.text('ops.unavailable')}</td>"
+                    in output
+                )
+            assert "&lt;compiler &amp; build&gt;" in output
+            assert "<compiler & build>" not in output
+
     def test_server_resources_keep_zero_and_unknown_allocation(self) -> None:
         """Combine resources without inventing missing measurements."""
         runtime = {
@@ -2750,7 +2849,7 @@ class EventPresentationTests(unittest.TestCase):
             [
                 unescape(re.sub(r"<[^>]+>", "", cell))
                 for cell in re.findall(
-                    r"<td\b[^>]*>(.*?)</td>",
+                    r"<t[dh]\b[^>]*>(.*?)</t[dh]>",
                     row,
                     re.DOTALL,
                 )
@@ -2777,7 +2876,7 @@ class EventPresentationTests(unittest.TestCase):
             for stage in ("started", "database_updated", "saved", "finished"):
                 assert interface.text(f"reports.stage.{stage}") in output
             stages = re.search(
-                r'<ul class="job-stages">(.*?)</ul>',
+                r'<ol class="job-stages">(.*?)</ol>',
                 output,
                 re.DOTALL,
             )
@@ -2795,7 +2894,7 @@ class EventPresentationTests(unittest.TestCase):
             )
             assert "<Long & safe destination>" not in stages[1]
             assert interface.text("reports.intro") in output
-            assert output.count('<script src="/live.js" defer>') == 1
+            assert output.count('<script src="/live.js?v=') == 1
             assert 'id="live-server-status"' not in output
             assert "download=1" not in output
             assert self._rows(output) == [

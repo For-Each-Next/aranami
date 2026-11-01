@@ -61,8 +61,8 @@ already validated generation. A failed setup leaves current services intact.
 After selection, failed restarts retain both generations for explicit recovery;
 do not silently change code beneath a process that may have started. Preserve
 runtime state, reports, caches, credentials, and daily logs. Existing service
-start/stop events describe process replacement, not host reboot, and the Logs
-startup time remains the observed hub start. Log and state formats do not need
+start/stop events describe process replacement, not host reboot, and the footer
+uptime uses the observed hub start. Log and state formats do not need
 to change for this deployment mechanism.
 
 ## Scheduling and observed state
@@ -290,8 +290,8 @@ valid empty sources. Retain at most 10,000 rows and 8 MiB, expiring unused rows 
 days. Missing community sources and incomplete API batches fail the refresh
 and preserve the prior complete report. Source-cache corruption causes a
 rebuild, and cache-write failure does not discard successfully collected facts.
-Review introductions reuse the shared article-extract cache below. Old
-schema-2 dashboards without review fields remain readable during rollout.
+Review introductions reuse the shared article-extract cache below. Saved
+schema-2 dashboards without review fields remain readable.
 
 `backend.public` validates saved dashboard, status, and daily-log inputs through
 their owning readers. FastAPI/Uvicorn serves GET/HEAD and read-only WebSocket
@@ -315,8 +315,12 @@ All displayed dates and times use UTC without repeating its label, including
 table headings, footer uptime, and complete timestamps in hover tooltips.
 Machine-readable timestamps retain their original explicit offsets.
 The dashboard presents reviews and each available highlight group as peer
-second-level sections. `/maintenance/` owns the maintenance catalogue, with
-second-level task groups and existing filtered worklists selected by `task`.
+second-level sections. Each article uses a CSS-only Codex Card with its own
+third-level title, separate assessment chips, full description, and supporting
+metadata. Multiple destinations remain individual links, while single-target
+maintenance categories may use whole-card links. `/maintenance/` owns the
+maintenance catalogue, with second-level task groups and existing filtered
+worklists selected by `task`.
 `/reports/` combines the live report-status panel and the newest twenty saved
 invocations across dates, without query controls or pagination. Each task
 opens its stage list with millisecond timestamps and inline wiki page links.
@@ -416,20 +420,29 @@ stale state/resources expire
 after 120 seconds. Failed refreshes retain prior observations with a notice.
 Bound rendered-view caches to sixty seconds and invalidate on saved-input
 changes; report history, logs, and unseeded random views bypass them. Keep
-responses no-store and source timestamps intact. Source changes require
-process replacement.
+dynamic HTML and API responses no-store and source timestamps intact. Fixed
+assets carry content digests and support conditional ETag requests. Only a
+matching `?v=<sha256>` receives a one-year immutable browser cache lifetime;
+unversioned or mismatched asset URLs must revalidate. Keep the process-local
+asset byte/compression cache bounded to 64 entries and 16 MiB. Source changes
+require process replacement.
 Distinguish network, transport, response, clock, and rendering failures in
 bounded browser diagnostics without exposing arbitrary server or error text.
 
-Server observations include monitor state, observed hub startup,
-system/architecture, Python, memory use/allocation, CPU use/allocation, and
-runtime-filesystem storage use/capacity.
+About groups server observations into Aranami, hardware/resources, system,
+and Python environment information. Show the serving application's version
+separately from the saved hub version, state, and startup. Hardware/resource
+rows show architecture, memory use/allocation, and CPU use/allocation; system
+rows show the OS, distribution, and kernel; environment rows show Python's
+version, implementation, and compiler. Missing optional observations remain
+unknown. Filesystem totals stay outside the public panel.
+
 Startup is the recorded hub start, not an inferred operating-system boot.
 Retain static facts and startup timestamps when resource samples expire.
 Show the sample's actual UTC timestamp through seconds and its relative age;
 relative annotations use whole minutes, hours, or days and refresh with saved
-status fragments as ordinary text. About includes the server-status panel and
-uses its footer as the live uptime clock anchor.
+status fragments as ordinary text. The footer remains the live uptime clock
+anchor, including on the Logs page.
 
 ## Newsletter drafts
 
@@ -503,13 +516,11 @@ source or `site-packages`:
   retention. Record event codes and safe observed fields at their producers;
   never derive these records by parsing diagnostic messages. Bound each line
   and daily file. Logging failure must not change publication outcomes.
-  Site reports read at most 100 recent events and show localized time, task,
-  result, and duration columns, newest first in pages of 25. Chronological
-  ordering, localized text search, and result filtering use this bounded
-  window. Do not restore narrative summaries or per-event disclosures.
-  Missing event files remain empty; historical diagnostics are not
-  backfilled. Raw downloads retain the separate diagnostic log, including
-  tracebacks.
+  The read-only log API exposes bounded event excerpts; the Reports page
+  instead reads invocation history from `state/job-history.json`. Missing
+  event files remain empty; historical diagnostics are not backfilled. The
+  Logs page offers the separate diagnostic archive and raw downloads,
+  including tracebacks.
 - `state/`: authoritative observed metadata, separate from logs and caches.
 - `cache/`: disposable optimization. Deletion must not lose durable state or
   change output for identical inputs. Replace atomically; reject malformed data.

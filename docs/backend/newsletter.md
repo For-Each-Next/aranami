@@ -175,9 +175,10 @@ selection is independent of the quarterly `date` selection.
 ## Source cutoffs and quarterly facts
 
 The independent daily acquisition in `backend.newsletter.collection`
-fetches sources for the current publication quarter and its successor. It prepares the next
-issue while the reporting quarter is still in progress, with an explicit
-exclusive observation cutoff through the latest completed UTC day. Historical
+refreshes every started, unpublished issue selected by the publication plan,
+including delayed drafts from earlier quarters. It uses an explicit exclusive
+observation cutoff through the latest completed UTC day, capped at each
+reporting period's end. Historical
 reads, DYK, quality revisions, awards, curated new pages, and homepage
 appearances use that same cutoff. Quarterly completion is separate from data
 availability. The overview retains content links even when the pages have not
@@ -258,7 +259,7 @@ appearance dates remain unmarked.
 Annual statistics retain the January 2026 reference's numerical prose for
 promotions, DYK, article totals, net/daily growth, pageviews, revisions, and
 award participation. Unknown figures use complete placeholder sentences.
-Partial current figures carry a dated `error` template marker. Comparisons
+Partial current figures carry a dated inline `Memo` notice. Comparisons
 state figures and plain trends. The ACG summary counts scoring editors, first-time
 scorers, and first-time scorers reaching the ten-point first award threshold.
 

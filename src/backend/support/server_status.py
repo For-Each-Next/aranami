@@ -11,7 +11,16 @@ import shutil
 import time
 from pathlib import Path
 
+from shared.deployment import project_version
+
 _TEXT_FIELDS = {"python", "system", "machine"}
+_OPTIONAL_TEXT_FIELDS = {
+    "os_release",
+    "kernel",
+    "python_implementation",
+    "python_compiler",
+    "aranami_version",
+}
 _NUMBER_FIELDS = {
     "memory_bytes",
     "memory_limit_bytes",
@@ -90,6 +99,7 @@ def sample_runtime() -> dict[str, object]:
         if _PREVIOUS_CPU is None or now - _PREVIOUS_CPU[0] >= 1:
             _PREVIOUS_CPU = now, seconds, percent
     return {
+        **_environment(),
         **_storage_usage(),
         "python": platform.python_version(),
         "system": platform.system(),
@@ -98,6 +108,34 @@ def sample_runtime() -> dict[str, object]:
         "memory_limit_bytes": _positive_integer(_read(root / "memory.max")),
         "cpu_percent": percent,
         "cpu_limit": cpu_limit,
+    }
+
+
+def _environment() -> dict[str, str | None]:
+    """Read bounded software identities from the running hub generation.
+
+    Returns:
+        Explicit operating-system, interpreter, and application facts.
+        Missing distribution or source metadata remains unknown.
+    """
+    try:
+        release = platform.freedesktop_os_release()
+    except OSError, UnicodeError:
+        release = {}
+    try:
+        version = project_version()
+    except OSError, ValueError, KeyError, TypeError:
+        version = None
+    values = {
+        "os_release": release.get("PRETTY_NAME") or release.get("NAME"),
+        "kernel": platform.release(),
+        "python_implementation": platform.python_implementation(),
+        "python_compiler": platform.python_compiler(),
+        "aranami_version": version,
+    }
+    return {
+        key: value.strip()[:_MAX_TEXT] or None if value is not None else None
+        for key, value in values.items()
     }
 
 
@@ -134,12 +172,20 @@ def validate_runtime(value: object) -> dict[str, object] | None:
     if (
         not isinstance(value, dict)
         or not set(value) >= _TEXT_FIELDS | _NUMBER_FIELDS
-        or set(value) - (_TEXT_FIELDS | _NUMBER_FIELDS | _STORAGE_FIELDS)
+        or set(value)
+        - (
+            _TEXT_FIELDS
+            | _OPTIONAL_TEXT_FIELDS
+            | _NUMBER_FIELDS
+            | _STORAGE_FIELDS
+        )
     ):
         message = "Invalid server runtime fields."
         raise ValueError(message)
-    for key in _TEXT_FIELDS:
-        text = value[key]
+    for key in _TEXT_FIELDS | _OPTIONAL_TEXT_FIELDS:
+        text = value.get(key)
+        if key in _OPTIONAL_TEXT_FIELDS and text is None:
+            continue
         if not isinstance(text, str) or not text or len(text) > _MAX_TEXT:
             message = "Invalid server environment value."
             raise ValueError(message)

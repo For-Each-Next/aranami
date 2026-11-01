@@ -1,0 +1,1 @@
+{% if card.assessments %}<span class="assessment-chips">{% for assessment in card.assessments %}<span class="assessment-chip cdx-info-chip cdx-info-chip--subtle" data-assessment="{{ assessment.dimension }}" title="{{ assessment.tooltip }}"><span class="cdx-info-chip__text">{{ assessment.label }}</span></span>{% endfor %}</span>{% endif %}

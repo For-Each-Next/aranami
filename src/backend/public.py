@@ -27,8 +27,13 @@ from starlette.websockets import WebSocketState
 lazy import uvicorn
 
 from backend.newsletter.observations import OBSERVATIONS_PATH
+from backend.support.asset_cache import AssetCache
 from backend.support.events import event_extra
-from backend.support.http import encoded_response, read_only_headers
+from backend.support.http import (
+    accepts_gzip,
+    encoded_response,
+    read_only_headers,
+)
 from backend.support.job_history import read_job_history
 from backend.support.logs import open_run_log
 from backend.support.page_cache import PageCache
@@ -43,7 +48,7 @@ from backend.support.public_data import (
 from shared.config import routine_configuration
 from shared.deployment import project_version
 from shared.newsletter import Issue
-from shared.support.files import open_regular, read_json_object, read_regular
+from shared.support.files import open_regular, read_json_object
 lazy from backend.newsletter.archive import (
     DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
     NewsletterDraftArchive,
@@ -314,6 +319,10 @@ async def _content_chunks(content: bytes) -> AsyncIterator[bytes]:
         yield content[offset : offset + _CHUNK_BYTES]
 
 
+class _AssetResponse(Response):
+    """Mark encoded assets with conditional browser caching."""
+
+
 def _response_policy(
     request: Request,
     response: Response,
@@ -323,9 +332,11 @@ def _response_policy(
         response.status_code,
         websocket_origin="wss://aranami.toolforge.org",
     ).items():
+        if name == "Cache-Control" and isinstance(response, _AssetResponse):
+            continue
         response.headers[name] = value
     language = _explicit_language(request)
-    if language is not None:
+    if language is not None and not isinstance(response, _AssetResponse):
         response.set_cookie(
             _LANGUAGE_COOKIE,
             language,
@@ -339,15 +350,19 @@ def _response_policy(
         not isinstance(response, StreamingResponse)
         and "Content-Disposition" not in response.headers
     ):
-        content, headers = encoded_response(
-            response.body,
-            request.headers.get("Accept-Encoding", ""),
-        )
-        response.headers["Content-Length"] = str(len(content))
-        vary = response.headers.get("Vary", "")
-        response.headers["Vary"] = ", ".join(
-            value for value in (vary, "Accept-Encoding") if value
-        )
+        if isinstance(response, _AssetResponse):
+            content, headers = response.body, {}
+        else:
+            content, headers = encoded_response(
+                response.body,
+                request.headers.get("Accept-Encoding", ""),
+            )
+            vary = response.headers.get("Vary", "")
+            response.headers["Vary"] = ", ".join(
+                value for value in (vary, "Accept-Encoding") if value
+            )
+        if response.status_code != HTTPStatus.NOT_MODIFIED:
+            response.headers["Content-Length"] = str(len(content))
         if "Content-Encoding" in headers:
             response.headers["Content-Encoding"] = headers["Content-Encoding"]
         response = StreamingResponse(
@@ -451,44 +466,6 @@ def _navigation(request: Request, locale: str) -> dict[str, object]:
     }
 
 
-def _log_controls(selection: dict[str, list[str]]) -> dict[str, str]:
-    """Remove validated page controls before the fixed log reader runs.
-
-    Returns:
-        Bounded ordering, outcome, and page choices.
-
-    Raises:
-        ValueError: A control is repeated or unsupported.
-    """
-    selection.pop("lang", None)
-    controls = {}
-    for name, default, allowed in (
-        ("order", "desc", {"asc", "desc"}),
-        (
-            "status",
-            "all",
-            {
-                "all",
-                "running",
-                "updated",
-                "no_update",
-                "failed",
-                "deferred",
-                "unconfirmed",
-                "partial",
-                "unknown",
-            },
-        ),
-        ("page", "1", {"1", "2", "3", "4"}),
-    ):
-        values = selection.pop(name, [default])
-        if len(values) != 1 or values[0] not in allowed:
-            message = "Invalid log presentation control."
-            raise ValueError(message)
-        controls[name] = values[0]
-    return controls
-
-
 def _page_error(key: str, locale: str, status: HTTPStatus) -> Response:
     """Return the common localized document for request failures."""
     return _html(pages.render_error(key, locale), locale, status)
@@ -568,6 +545,7 @@ class _PublicViews:
     def __init__(self, runtime: Path, assets: Path) -> None:
         self.runtime = runtime
         self.assets = assets
+        self.asset_cache = AssetCache()
         self.pages = PageCache()
         self.socket_clients = 0
 
@@ -961,8 +939,12 @@ class _PublicViews:
             else _error(HTTPStatus.SERVICE_UNAVAILABLE)
         )
 
-    def asset(self, path: str) -> Response:
-        """Return fixed assets without traversal or listings."""
+    def asset(self, request: Request, path: str) -> Response:
+        """Revalidate cached source assets without directory listings.
+
+        Returns:
+            Negotiated bytes, an unchanged response, or a missing error.
+        """
         relative = Path(path)
         if (
             path.startswith("api/")
@@ -974,12 +956,34 @@ class _PublicViews:
         if any(parent.is_symlink() for parent in location.parents):
             return _error(HTTPStatus.NOT_FOUND)
         try:
-            content = read_regular(location, _MAX_BYTES)
+            asset = self.asset_cache.read(location)
         except OSError, ValueError:
             return _error(HTTPStatus.NOT_FOUND)
-        return Response(
-            content,
+        headers = {
+            "Cache-Control": "public, max-age=31536000, immutable"
+            if request.query_params.getlist("v") == [asset.digest]
+            else "public, max-age=0, must-revalidate",
+            "ETag": asset.etag,
+            "Vary": "Accept-Encoding",
+        }
+        validators = {
+            value.strip().removeprefix("W/")
+            for value in request.headers.get("If-None-Match", "").split(",")
+        }
+        if "*" in validators or asset.etag.removeprefix("W/") in validators:
+            return _AssetResponse(
+                status_code=HTTPStatus.NOT_MODIFIED,
+                headers=headers,
+            )
+        compressed = asset.gzip and accepts_gzip(
+            request.headers.get("Accept-Encoding", ""),
+        )
+        if compressed:
+            headers["Content-Encoding"] = "gzip"
+        return _AssetResponse(
+            asset.compressed if compressed else asset.content,
             media_type=_CONTENT_TYPES[relative.suffix],
+            headers=headers,
         )
 
     def reports(self, request: Request, *, locale: str) -> Response:
@@ -1019,9 +1023,10 @@ class _PublicViews:
                 request.scope.get("query_string", b"").decode("ascii"),
                 keep_blank_values=True,
                 errors="strict",
-                max_num_fields=7 if locale is not None else 3,
+                max_num_fields=4 if locale is not None else 3,
             )
-            controls = _log_controls(selection) if locale is not None else {}
+            if locale is not None:
+                selection.pop("lang", None)
             filename, text, download = log_selection(selection, files)
         except ValueError, UnicodeError:
             return (
@@ -1053,26 +1058,20 @@ class _PublicViews:
             )
         excerpt = (
             {"events": [], "truncated": False}
-            if filename is None
-            or (locale is not None and request.url.path == "/logs/")
+            if filename is None or locale is not None
             else log_excerpt(directory, filename, text)
         )
         value = {
             "files": files,
             "date": log_date(filename) if filename is not None else None,
             "query": text,
-            **controls,
             **excerpt,
         }
         return (
             _json(value)
             if locale is None
             else _html(
-                (
-                    pages.render_reports
-                    if request.url.path == "/reports/"
-                    else pages.render_logs
-                )(
+                pages.render_logs(
                     value,
                     locale,
                     status=saved_status(self.runtime),

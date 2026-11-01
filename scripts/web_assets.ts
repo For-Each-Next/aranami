@@ -26,6 +26,8 @@ try {
         minify: true,
         format: "iife",
         target: "es2022",
+        // Render functions need only Vue's runtime, never its compiler.
+        alias: { vue: "vue/dist/vue.runtime.esm-bundler.js" },
         legalComments: "inline",
         banner: { js: "/*! Includes Wikimedia Codex (GPL-2.0-or-later) and Vue (MIT). See /codex-license.html. */" },
         define: {

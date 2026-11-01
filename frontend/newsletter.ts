@@ -36,6 +36,7 @@ function initializeIssueForm(): void {
     if (!form) return;
     const issue = form.querySelector<HTMLSelectElement>('[name="issue"]')!;
     const status = document.querySelector<HTMLElement>("[data-newsletter-load-status]")!;
+    const statusText = status.querySelector<HTMLElement>(".cdx-message__content")!;
     let result = document.querySelector<HTMLElement>("[data-newsletter-result]")!;
     let displayedIssue = issue.value;
     let requestNumber = 0;
@@ -84,7 +85,7 @@ function initializeIssueForm(): void {
         } catch {
             if (request !== requestNumber) return;
             issue.value = displayedIssue;
-            status.textContent = status.dataset.failure!;
+            statusText.textContent = status.dataset.failure!;
             status.hidden = false;
         } finally {
             if (request === requestNumber) result.removeAttribute("aria-busy");

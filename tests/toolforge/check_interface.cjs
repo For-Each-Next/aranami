@@ -399,7 +399,19 @@ async function main() {
                             assert.equal(card.article, true, "article title link missing");
                         }
                     }
-                    assert.equal(await evaluate("document.querySelectorAll('.page-content h3, #tool-status, #backlog').length"), 0, "dashboard sections should have peer h2 headings");
+                    assert.equal(await evaluate("document.querySelectorAll('#tool-status, #backlog').length"), 0, "dashboard must keep report monitoring and maintenance on their own pages");
+                    const cards = await evaluate(`(() => [...document.querySelectorAll('.article-card-body')].map(card => ({
+                        tag: card.tagName,
+                        heading: card.querySelector('h3')?.id,
+                        label: card.getAttribute('aria-labelledby'),
+                        link: Boolean(card.querySelector('h3 a[href]')),
+                        assessmentsOutsideHeading: !card.querySelector('h3 .assessment-chips')
+                    })))()`);
+                    for (const card of cards) {
+                        assert.equal(card.tag, "ARTICLE", "dashboard card must retain article semantics");
+                        assert.ok(card.heading && card.heading === card.label, "card must be named by its own title");
+                        assert.ok(card.link && card.assessmentsOutsideHeading, "article title and assessment metadata must remain separate");
+                    }
                     if (width === 320 || width === 1440) {
                         await checkTools();
                         await evaluate("document.querySelector('.language-menu summary').focus()");

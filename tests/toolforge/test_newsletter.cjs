@@ -111,7 +111,12 @@ test("draft text remains literal without highlighting or HTML interpretation", (
 function issueFixture() {
     const issue = {value: "2027-01", handlers: {}, addEventListener(name, handler) { this.handlers[name] = handler; }};
     const submit = {hidden: false};
-    const status = {hidden: true, textContent: "", dataset: {failure: "Unable to load this issue"}};
+    const statusText = {textContent: ""};
+    const status = {
+        hidden: true, dataset: {failure: "Unable to load this issue"},
+        querySelector: () => statusText,
+        get textContent() { return statusText.textContent; },
+    };
     const requests = [];
     const addresses = [];
     let current;
