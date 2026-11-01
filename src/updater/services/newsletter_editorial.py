@@ -12,8 +12,8 @@ Only supplied annual facts fill statistics; unknown slots remain blank.
 from __future__ import annotations
 
 import datetime as dt
+import math
 import re
-from html import escape
 from typing import TYPE_CHECKING
 
 import polars as pl
@@ -22,7 +22,6 @@ from backend.website.newsletter_statistics import (
     HISTORICAL_DYK,
     QUALITY_GRADES,
 )
-from backend.website.newsletter_year_review import QUALITY_HISTORY_GRADES
 from shared.newsletter import DYK_PROJECTS, ROOT
 
 if TYPE_CHECKING:
@@ -60,8 +59,10 @@ _ESCAPES = str.maketrans({
     "<": "&lt;",
     ">": "&gt;",
 })
-_QUALITY_CHART_WIDTH = 600
 _MONTHS = 12
+_PIE_TOTAL_WIDTH = 400
+_PIE_HEIGHT = 250
+_PIE_TEXT_PADDING = 6
 _FIRST_BAND_END = 2009
 _SECOND_BAND_END = 2019
 _ICON_GRADES = frozenset({"Bplus", "GA", "A", "FA", "FL"})
@@ -170,10 +171,14 @@ def _invitation(issue: Issue) -> str:
         f"|action=edit&section=new&preload={ROOT}/preload}}}}"
     )
     return (
-        '<center><span class="plainlinks">['
+        "<center>{{Clickable button 2|1=📝&nbsp;新增感想|url="
         + url
-        + ' <span class="mw-ui-button mw-ui-constructive">'
-        + "📝&nbsp;新增感想</span>]</span></center>"
+        + "|class=mw-ui-progressive"
+        + "|style=display:inline-flex;align-items:center;"
+        + "justify-content:center;box-sizing:border-box;min-height:32px;"
+        + "padding:0 11px;border:1px solid transparent;border-radius:2px;"
+        + "background:#36c;color:#fff;font-weight:700;line-height:1.375"
+        + "}}</center>"
     )
 
 
@@ -496,11 +501,52 @@ def _dyk(review: Mapping, year: int) -> str:
     return "\n".join(lines)
 
 
+def _pie_percent_labels(counts: list[int], plot_width: float) -> str:
+    """Place eligible percentages inside the native pie's sectors.
+
+    The native renderer adds a 14-pixel left margin and a title above
+    the plot. Its circle radius follows the smaller plot dimension.
+
+    Args:
+        counts: Positive slice values in native chart order.
+        plot_width: Native plot width excluding the legend and padding.
+
+    Returns:
+        Static black, regular-weight labels for exact shares of at least
+        five percent. Labels never intercept native chart interaction.
+    """
+    total = sum(counts)
+    center_x = _PIE_TEXT_PADDING / 2 + 14 + plot_width / 2
+    center_y = 32 + _PIE_HEIGHT / 2
+    outer_radius = min(plot_width, _PIE_HEIGHT) / 2 - 6
+    angle = -math.pi / 2
+    labels = []
+    for count in counts:
+        sweep = math.tau * count / total
+        midpoint = angle + sweep / 2
+        if count * 20 >= total:
+            # Narrow sectors need a wider arc for regular-width text.
+            radius = outer_radius * ((103 if count * 10 < total else 80) / 119)
+            x = center_x + radius * math.cos(midpoint)
+            y = center_y + radius * math.sin(midpoint)
+            labels.append(
+                '<span class="pie-percentage" '
+                f'style="position:absolute;left:{x:.2f}px;top:{y:.2f}px;'
+                "transform:translate(-50%,-50%);color:#000;"
+                "font-size:11px;font-weight:400;line-height:1.2;"
+                'pointer-events:none">'
+                f"{count / total:.1%}</span>",
+            )
+        angle += sweep
+    return "".join(labels)
+
+
 def _quality_charts(review: Mapping, year: int) -> str:
     """Render the preceding and current year assessment pie charts.
 
     Returns:
-        Available pie charts for the two selected years.
+        Native pies with static inner percentages for grades comprising
+        at least five percent, and grade/count legends without shares.
     """
     records = [
         row
@@ -516,21 +562,32 @@ def _quality_charts(review: Mapping, year: int) -> str:
         ]
         if not observed:
             continue
+        labels = [
+            f"{meta[0]}：{row['counts'][code]}" for code, meta in observed
+        ]
+        legend_width = min(220, max(80, max(map(len, labels)) * 7.5 + 32))
+        plot_width = _PIE_TOTAL_WIDTH - 28 - legend_width - _PIE_TEXT_PADDING
+        counts = [row["counts"][code] for code, _ in observed]
         marker = "（暫定）" if row["provisional"] else ""
         charts.append(
-            "{{Graph:Chart\n|type=pie|width=300|height=250\n"
+            '<div style="display:inline-block;max-width:100%;overflow-x:auto;'
+            'vertical-align:top;text-align:center">\n'
+            f'<div style="width:{_PIE_TOTAL_WIDTH}px;'
+            'position:relative;line-height:0">\n'
+            "{{Graph:Chart\n"
+            f"|type=pie|width={plot_width:g}|height={_PIE_HEIGHT}\n"
             f"|title={row['year']}年條目品質概況{marker}\n"
             "|x="
-            + ",".join(
-                f"{meta[0]}：{row['counts'][code]}" for code, meta in observed
-            )
+            + ",".join(labels)
             + "\n|y1="
-            + ",".join(str(row["counts"][code]) for code, _ in observed)
+            + ",".join(map(str, counts))
             + "\n|colors="
             + ",".join(meta[1] for _, meta in observed)
-            + "\n|legend=true|showValues=false\n}}",
+            + "\n|legend=true|showValues=false\n}}"
+            + _pie_percent_labels(counts, plot_width)
+            + "\n</div></div>",
         )
-    return "\n\n".join(charts)
+    return "\n".join(charts)
 
 
 def _assessment_prose(review: Mapping, year: int) -> str:
@@ -739,99 +796,14 @@ def _awards(review: Mapping) -> str:
     return "\n".join(lines)
 
 
-def _quality_chart_bar(
-    row: Mapping,
-    left: float,
-    width: float,
-    ceiling: int,
-    groups: tuple[tuple[str, str, str], ...],
-) -> tuple[str, str]:
-    """Render an annual stack, its total, and a popup target.
-
-    Returns:
-        SVG geometry and its percentage-positioned HTML overlay.
-        The four groups rise from featured to A, Bplus, then GA.
-    """
-    baseline, plot_height = 235, 210
-    current = float(baseline)
-    bars = []
-    for key, _label, color in groups:
-        height = row[key] / ceiling * plot_height
-        current -= height
-        bars.append(
-            f'<rect x="{left:.2f}" y="{current:.2f}" width="{width:.2f}" '
-            f'height="{height:.2f}" fill="{color}" />',
-        )
-    center = left + width / 2
-    bars.extend((
-        (
-            f'<text x="{center:.2f}" y="{current - 5:.2f}" '
-            f'text-anchor="middle">{row["total"]:,}</text>'
-        ),
-        (
-            f'<text x="{center:.2f}" y="250" text-anchor="middle" '
-            f'font-size="10">{row["year"]}</text>'
-        ),
-    ))
-    details = (
-        [f"{row['year']}年"]
-        + [
-            f"{_GRADES[grade]}（{grade}）：{row[grade]:,}"
-            for grade in QUALITY_HISTORY_GRADES
-        ]
-        + [f"合計：{row['total']:,}"]
-    )
-    label = escape("；".join(details), quote=True)
-    popup = "<br />".join(map(escape, details))
-    edge = (
-        " gr-tip-l"
-        if center < _QUALITY_CHART_WIDTH / 4
-        else " gr-tip-r"
-        if center > _QUALITY_CHART_WIDTH * 3 / 4
-        else ""
-    )
-    overlay = (
-        '<span class="gr-hbar" tabindex="0" '
-        f'title="{label}" aria-label="{label}" '
-        f'style="left:{left / 6:.4f}%;top:{current / 3:.4f}%;'
-        f"width:{width / 6:.4f}%;"
-        f'height:{max(baseline - current, 3) / 3:.4f}%">'
-        f'<span class="gr-tip gr-tip-b{edge}" style="text-align:left">'
-        f"{popup}</span></span>"
-    )
-    return "".join(bars), overlay
-
-
-def _quality_chart_axes(ceiling: int) -> str:
-    """Draw axes and integer grid labels for annual recognitions.
-
-    Returns:
-        Grid, count labels, and axis titles in a 600 by 300 viewport.
-    """
-    lines = []
-    for index in range(5):
-        y = 235 - index / 4 * 210
-        lines.append(
-            f'<line x1="42" y1="{y:.2f}" x2="582" y2="{y:.2f}" '
-            'stroke="#c8ccd1" stroke-width="1" />'
-            f'<text x="37" y="{y + 4:.2f}" text-anchor="end">'
-            f"{ceiling * index / 4:,.0f}</text>",
-        )
-    lines.append(
-        '<text x="42" y="14">入選篇數</text>'
-        '<text x="582" y="264" text-anchor="end">年份</text>',
-    )
-    return "".join(lines)
-
-
 def _quality_history_chart(review: Mapping) -> str:
-    """Render recorded annual additions without using current grades.
+    """Render annual cohorts using native chart parameters.
 
     Returns:
-        Grouped stacks with yearly sum labels and detailed hover popups.
-        Later delisting/demotion never removes an earlier recognition.
+        Centered native parameters with year-only labels and ordered
+        grade groups, without expanded SVG or custom overlays.
     """
-    rows = review.get("quality_years")
+    rows = review.get("quality_year_ends")
     if not rows:
         return ""
     frame = (
@@ -839,7 +811,6 @@ def _quality_history_chart(review: Mapping) -> str:
         .DataFrame(rows)
         .unnest("grades")
         .with_columns(
-            pl.sum_horizontal(*QUALITY_HISTORY_GRADES).alias("total"),
             (pl.col("FA") + pl.col("FL")).alias("featured"),
             (pl.col("A") + pl.col("AL")).alias("a"),
         )
@@ -849,44 +820,33 @@ def _quality_history_chart(review: Mapping) -> str:
         for group in (
             ("featured", "典范级", QUALITY_GRADES["fa"][1]),
             ("a", "甲级", QUALITY_GRADES["a"][1]),
-            ("Bplus", "乙上级", QUALITY_GRADES["bplus"][1]),
             ("GA", "优良级", QUALITY_GRADES["ga"][1]),
+            ("Bplus", "乙上级", QUALITY_GRADES["bplus"][1]),
         )
         if group[0] != "a" or (frame["a"] > 0).any()
     )
-    ceiling = max(1, ((frame["total"].max() + 3) // 4) * 4)
-    step = 540 / frame.height
-    bars, overlays = [], []
-    for index, row in enumerate(frame.iter_rows(named=True)):
-        svg, overlay = _quality_chart_bar(
-            row,
-            42 + (index + 0.15) * step,
-            0.7 * step,
-            ceiling,
-            groups,
-        )
-        bars.append(svg)
-        overlays.append(overlay)
-    legend = "".join(
-        f'<rect x="{70 + index * 125}" y="278" width="12" height="12" '
-        f'fill="{color}" /><text x="{87 + index * 125}" y="288">'
-        f"{label}</text>"
-        for index, (_key, label, color) in enumerate(groups)
-    )
+    labels = frame["year"].cast(pl.String)
+    parameters = [
+        "{{Graph:Chart",
+        "|type=stackedrect|width=600|height=300",
+        "|xType=string|x=" + ",".join(labels),
+    ]
+    for index, (key, label, _color) in enumerate(groups, start=1):
+        values = ",".join(str(value) for value in frame[key])
+        parameters.append(f"|y{index}={values}|y{index}Title={label}")
+    parameters.extend((
+        "|colors=" + ",".join(color for _key, _label, color in groups),
+        "|legend=true|interactive=true|animate=true",
+        "|xAxisAngle=-30|xAxisTitle=年份",
+        "|yAxisTitle=入選篇數|yType=integer|yAxisMin=0|yGrid=true",
+        "}}",
+    ))
     return (
-        '<templatestyles src="Module:Graph/style.css" />'
-        '<div class="center" style="text-align:center">'
-        '<div class="svg-graph" style="width:600px;margin:0 auto">'
-        '{{Graph:Chart|1=<svg xmlns="http://www.w3.org/2000/svg" '
-        'width="600" height="300" viewBox="0 0 600 300">'
-        "<title>歷年新增獲評高品質內容</title>"
-        '<g font-family="sans-serif" font-size="11" fill="#000000">'
-        + _quality_chart_axes(ceiling)
-        + "".join(bars)
-        + legend
-        + '</g></svg>}}<div class="gr-ov">'
-        + "".join(overlays)
-        + "</div></div></div>"
+        '<div class="center" '
+        'style="max-width:100%;overflow-x:auto;text-align:center">\n'
+        '<div style="min-width:800px">\n'
+        + "\n".join(parameters)
+        + "\n</div></div>"
     )
 
 

@@ -665,17 +665,12 @@ class NewsletterRouteTests(unittest.TestCase):
         assert 'type="date" value="2026-12-31"' not in response.text
         assert 'type="date" value="2026-10-30"' in response.text
         assert 'class="context newsletter-observation"' not in response.text
-        summaries = [
-            parse_qs(urlsplit(unescape(href)).query).get("summary", [])
-            for href in re.findall(
-                r'data-newsletter-edit="([^"]+)"',
-                response.text,
-            )
-        ]
-        assert summaries
-        assert all(
-            "December 31, 2026" in str(summary) for summary in summaries
+        destinations = re.findall(
+            r'<a class="cdx-button[^"]*" href="([^"]+)"',
+            response.text,
         )
+        assert destinations
+        assert all(not urlsplit(unescape(url)).query for url in destinations)
         assert "No saved draft is available" not in response.text
         assert all(
             path.read_bytes() == value for path, value in before.items()

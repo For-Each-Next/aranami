@@ -6,7 +6,7 @@ import re
 import unittest
 from copy import deepcopy
 from html import unescape
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import urlsplit
 
 from shared.newsletter import Issue
 from updater.services.newsletter import render_issue
@@ -67,7 +67,7 @@ class NewsletterPresentationTests(unittest.TestCase):
                         f'newsletter-heading-5">{interview}</h2>' in output
                     ) == (issue.month != 1)
                     assert output.count("data-newsletter-copy=") == (
-                        2 * len(issue.draft_suffixes)
+                        len(issue.draft_suffixes)
                     )
 
     @staticmethod
@@ -135,7 +135,7 @@ class NewsletterPresentationTests(unittest.TestCase):
         assert 'src="/newsletter.js" defer' in output
         assert value["period"] not in output
         assert "oldid=123" not in output
-        assert output.count("data-newsletter-copy=") == 2 * len(displays)
+        assert output.count("data-newsletter-copy=") == len(displays)
         assert "newsletter-destination" not in output
         assert "<textarea" not in output
 
@@ -156,14 +156,14 @@ class NewsletterPresentationTests(unittest.TestCase):
                 assert "source-updated" not in output
                 assert "{{模板|標題}}" not in output
 
-    def test_copy_buttons_have_labels_styles_and_safe_edit_destinations(
+    def test_copy_button_and_native_wiki_link_have_independent_actions(
         self,
     ) -> None:
-        """Distinguish copying code from opening its wiki editor."""
-        for locale, copy_label, edit_label in (
-            ("en", "Copy code", "Copy and open newsletter page"),
-            ("zh-hans", "复制代码", "复制并前往简讯页"),
-            ("zh-hant", "複製代碼", "複製並前往簡訊頁"),
+        """Keep copying separate from native view-page navigation."""
+        for locale, copy_label, link_label in (
+            ("en", "Copy", "Go to wiki page"),
+            ("zh-hans", "复制", "前往维基页面"),
+            ("zh-hant", "複製", "前往維基頁面"),
         ):
             with self.subTest(locale=locale):
                 value = _issue()
@@ -175,16 +175,22 @@ class NewsletterPresentationTests(unittest.TestCase):
                     output,
                     re.DOTALL,
                 )
-                assert len(buttons) == 2 * len(value["pages"])
-                for copy, edit, page in zip(
-                    buttons[::2],
-                    buttons[1::2],
+                links = re.findall(
+                    r'<a\b([^>]*class="cdx-button[^"]*"[^>]*)>'
+                    r"(.*?)</a>",
+                    output,
+                    re.DOTALL,
+                )
+                assert len(buttons) == len(links) == len(value["pages"])
+                for copy, link, page in zip(
+                    buttons,
+                    links,
                     value["pages"],
                     strict=True,
                 ):
                     for (attributes, text), label, action, weight in (
                         (copy, copy_label, "default", "normal"),
-                        (edit, edit_label, "progressive", "primary"),
+                        (link, link_label, "progressive", "primary"),
                     ):
                         assert unescape(text).strip() == label
                         classes = re.search(r'class="([^"]+)"', attributes)
@@ -194,43 +200,29 @@ class NewsletterPresentationTests(unittest.TestCase):
                             f"cdx-button--action-{action}",
                             f"cdx-button--weight-{weight}",
                         } <= set(classes[1].split())
-                        assert "hidden" in attributes
-                    assert "data-newsletter-edit=" not in copy[0]
+                    assert "hidden" in copy[0]
+                    assert "hidden" not in link[0]
+                    assert "data-newsletter-copy=" not in link[0]
+                    assert "cdx-button--fake-button--enabled" in link[0]
                     target = re.search(
-                        r'data-newsletter-edit="([^"]+)"',
-                        edit[0],
+                        r'href="([^"]+)"',
+                        link[0],
                     )
                     assert target is not None
                     url = urlsplit(unescape(target[1]))
+                    assert unescape(target[1]) == page["url"]
                     assert url.scheme == "https"
                     assert url.netloc == "zh.wikipedia.org"
-                    assert unquote(url.path.removeprefix("/wiki/")) == (
-                        page["title"].replace(" ", "_")
-                    )
-                    assert parse_qs(url.query) == {
-                        "action": ["edit"],
-                        "summary": [
-                            {
-                                "en": "Updated newsletter draft",
-                                "zh-hans": "更新简讯草稿",
-                                "zh-hant": "更新簡訊草稿",
-                            }[locale],
-                        ],
-                    }
+                    assert not url.query
+                assert "data-newsletter-edit=" not in output
                 assert "newsletter-destination" not in output
                 assert "built-in method" not in unescape(output)
 
-    def test_edit_summary_uses_the_actual_data_date(self) -> None:
-        """Prefer archived data dates over generation timestamps."""
-        for locale, current_summary, archived_summary in (
-            (
-                "en",
-                "Updated through October 15, 2026",
-                "Updated through October 14, 2026",
-            ),
-            ("zh-hans", "更新至2026年10月15日", "更新至2026年10月14日"),
-            ("zh-hant", "更新至2026年10月15日", "更新至2026年10月14日"),
-        ):
+    def test_wiki_page_links_stay_in_view_mode_for_each_data_date(
+        self,
+    ) -> None:
+        """Use view-page destinations for current and saved drafts."""
+        for locale in ("en", "zh-hans", "zh-hant"):
             for archived in (False, True):
                 with self.subTest(locale=locale, archived=archived):
                     value = _issue()
@@ -244,20 +236,15 @@ class NewsletterPresentationTests(unittest.TestCase):
                         }
                     output = render_newsletter(value, locale)
                     targets = re.findall(
-                        r'data-newsletter-edit="([^"]+)"',
+                        r'<a class="cdx-button[^"]*" href="([^"]+)"',
                         output,
                     )
-                    assert len(targets) == len(value["pages"])
-                    for target in targets:
-                        assert "&amp;summary=" in target
-                        assert parse_qs(urlsplit(unescape(target)).query) == {
-                            "action": ["edit"],
-                            "summary": [
-                                archived_summary
-                                if archived
-                                else current_summary,
-                            ],
-                        }
+                    assert [unescape(target) for target in targets] == [
+                        page["url"] for page in value["pages"]
+                    ]
+                    assert all(
+                        not urlsplit(target).query for target in targets
+                    )
 
     def test_issue_menu_preserves_native_submission_fallback(
         self,

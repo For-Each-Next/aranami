@@ -1,7 +1,7 @@
 """Verify newsletter history discovery and revision reuse offline."""
 
 # Fixture counters are exact expectations; unittest is the suite runner.
-# ruff: file-ignore[magic-value-comparison, pytest-unittest-raises-assertion]
+# ruff: file-ignore[magic-value-comparison, pytest-unittest-raises-assertion, too-many-public-methods]
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from backend.support.article_history import load
+from backend.support.article_history import load, read_versions
 from backend.website.article_history import collect_article_history, main
 from shared.sources.dyk import TalkPage
 
@@ -124,6 +124,134 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
             self.collect()
         assert self.preload.call_count == 2
         assert self.parse.call_args.args[-1] == ("Template:ITNtalk",)
+
+    def test_month_rollover_rechecks_unchanged_revision_only_once(
+        self,
+    ) -> None:
+        """Re-read unchanged oldids once after each UTC month ends."""
+        original = self.collect()
+        self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+        with self.assertLogs(_MODULE.rstrip("."), level="INFO") as logs:
+            refreshed = self.collect()
+        assert refreshed["revision_id"].to_list() == [100]
+        assert refreshed["date"].equals(original["date"])
+        assert refreshed["observed_at"].to_list() == [self.now]
+        assert self.preload.call_count == 2
+        assert any("1 month-end rechecks" in line for line in logs.output)
+        assert read_versions(self.path).height == 1
+        self.now += dt.timedelta(days=15)
+        self.collect()
+        assert self.preload.call_count == 2
+
+    def test_month_boundary_uses_utc_instead_of_local_calendar(self) -> None:
+        """Wait for the UTC boundary rather than local November."""
+        self.collect()
+        local = dt.timezone(dt.timedelta(hours=8))
+        self.now = dt.datetime(2026, 11, 1, 7, 59, tzinfo=local)
+        self.collect()
+        self.preload.assert_called_once()
+        self.now = dt.datetime(2026, 11, 1, 8, tzinfo=local)
+        self.collect()
+        assert self.preload.call_count == 2
+        assert load(self.path)["observed_at"].to_list() == [
+            dt.datetime(2026, 11, 1, tzinfo=dt.UTC),
+        ]
+
+    def test_month_recheck_keeps_older_source_revisions(self) -> None:
+        """Advance observation dates without duplicate versions."""
+        self.collect()
+        self.now += dt.timedelta(minutes=1)
+        self.revisions.return_value = pl.DataFrame({
+            "page_id": [10],
+            "page_latest": [101],
+        })
+        self.preload.return_value = [TalkPage(10, 101, "new")]
+        self.collect()
+        self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+        self.collect()
+        assert read_versions(self.path)["revision_id"].sort().to_list() == [
+            100,
+            101,
+        ]
+        assert load(self.path)["observed_at"].to_list() == [self.now]
+
+    def test_failed_month_recheck_does_not_advance_observation(self) -> None:
+        """Keep missing source content due for the next acquisition."""
+        self.collect()
+        original = self.path.read_bytes()
+        self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+        self.preload.return_value = []
+        with self.assertRaisesRegex(ValueError, "preload omitted"):
+            self.collect()
+        assert self.path.read_bytes() == original
+        self.preload.return_value = [TalkPage(10, 100, "old")]
+        self.collect()
+        assert self.preload.call_count == 3
+        assert load(self.path)["observed_at"].to_list() == [self.now]
+
+    def test_month_recheck_requires_its_observation_to_be_retained(
+        self,
+    ) -> None:
+        """Require the monthly observation to survive merging."""
+        self.collect()
+        stale = load(self.path)
+        self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+        self.patch("merge_save", return_value=stale)
+        with self.assertRaisesRegex(ValueError, "superseded"):
+            self.collect()
+        assert load(self.path)["observed_at"].to_list() == [
+            dt.datetime(2026, 10, 31, 12, tzinfo=dt.UTC),
+        ]
+
+    def test_month_recheck_resumes_after_completed_source_batches(
+        self,
+    ) -> None:
+        """Retry unfinished batches while keeping completed pages."""
+        self.members = pl.DataFrame({
+            "page_id": [1, 2, 3],
+            "page_namespace": [0, 0, 0],
+            "full_title": ["First", "Second", "Third"],
+            "talk_page_id": [10, 20, 30],
+        })
+        self.revisions.return_value = pl.DataFrame({
+            "page_id": [10, 20, 30],
+            "page_latest": [110, 120, 130],
+        })
+
+        def read_batch(_site: object, ids: list[int]) -> list[TalkPage]:
+            """Return synthetic pages for one bounded source read.
+
+            Returns:
+                Requested pages with their actual current revisions.
+            """
+            return [
+                TalkPage(page_id, 100 + page_id, "text") for page_id in ids
+            ]
+
+        self.preload.side_effect = read_batch
+        with patch(_MODULE + "_HISTORY_BATCH_SIZE", 2):
+            self.collect()
+            self.preload.reset_mock()
+            self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+            self.preload.side_effect = [
+                read_batch(self.site, [10, 20]),
+                [],
+            ]
+            with self.assertRaisesRegex(ValueError, "preload omitted"):
+                self.collect()
+            saved = load(self.path)
+            assert saved.filter(
+                pl.col("observed_at")
+                == pl.lit(self.now.isoformat()).str.to_datetime(
+                    time_zone="UTC",
+                ),
+            )["talk_page_id"].to_list() == [10, 20]
+            self.preload.reset_mock()
+            self.preload.side_effect = read_batch
+            self.collect()
+            self.preload.assert_called_once_with(self.site, [30])
+        assert read_versions(self.path).height == 3
+        assert load(self.path)["observed_at"].to_list() == [self.now] * 3
 
     def test_fresh_text_keeps_actual_revision_during_replica_lag(self) -> None:
         """Associate events with preloaded content's real revision."""

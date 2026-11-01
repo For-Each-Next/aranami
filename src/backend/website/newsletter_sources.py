@@ -37,7 +37,7 @@ from backend.website.newsletter_year_review import (
     collect_year_new_pages,
     enrich_year_dyk,
     prepare_history,
-    prepare_quality_years,
+    prepare_quality_year_ends,
     prepare_year_dyk_current,
     prepare_year_dyk_quarters,
     prepare_year_history,
@@ -359,6 +359,9 @@ def _year_review(  # ruff: ignore[too-many-arguments]
     provenance: dict,
     revision_counts: Callable[[dt.date, dt.date], pl.DataFrame] | None,
     source_for: Callable[[str], Mapping | None],
+    revision_history: (
+        Callable[[str, dt.date, dt.date], list[dict[str, object]]] | None
+    ) = None,
 ) -> dict:
     """Collect January's preceding calendar year at one source cutoff.
 
@@ -383,7 +386,7 @@ def _year_review(  # ruff: ignore[too-many-arguments]
     for source in history.pop("sources"):
         provenance[source["url"]] = source
     result.update(history)
-    result["quality_years"] = prepare_quality_years(
+    result["quality_year_ends"] = prepare_quality_year_ends(
         quality_history if quality_history is not None else article_history,
         through,
     )
@@ -492,7 +495,13 @@ def _year_review(  # ruff: ignore[too-many-arguments]
     )
     if historical is not None:
         result.update(
-            collect_popularity(historical, issue, now, source_for=source_for),
+            collect_popularity(
+                historical,
+                issue,
+                now,
+                source_for=source_for,
+                revision_history=revision_history,
+            ),
         )
     result["dyk_projects_observed_at"] = (
         now.isoformat(timespec="seconds") if dyk_projects is not None else None
@@ -566,6 +575,23 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
         sources = getattr(read, "sources", {})
         source = sources.get(title) if isinstance(sources, dict) else None
         return source.copy() if isinstance(source, dict) else None
+
+    def historical_revisions(
+        title: str,
+        start: dt.date,
+        end: dt.date,
+    ) -> list[dict[str, object]]:
+        """Retain exact revisions from a bounded publication window.
+
+        Returns:
+            Historical rows with every source revision in provenance.
+        """
+        rows = read.history(title, start, end)
+        for row in rows:
+            revision = row["revision"]
+            url = f"https://zh.wikipedia.org/w/index.php?oldid={revision}"
+            provenance[url] = {"label": title, "url": url}
+        return rows
 
     existing = {
         suffix: _read_optional(
@@ -721,6 +747,9 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
             provenance=provenance,
             revision_counts=revision_counts,
             source_for=source_for,
+            revision_history=historical_revisions
+            if callable(getattr(read, "history", None))
+            else None,
         )
     facts["sources"] = list(provenance.values())
     return facts

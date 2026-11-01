@@ -1,16 +1,10 @@
-"""Verify annual quality recognition counts retain former listings."""
-
-# Chart labels intentionally contain Chinese punctuation.
-# ruff: file-ignore[ambiguous-unicode-character-string]
+"""Verify annual promotion cohorts and native chart parameters."""
 
 from __future__ import annotations
 
 import datetime as dt
 from copy import deepcopy
 from unittest import TestCase
-from xml.etree import (  # ruff: ignore[suspicious-xml-etree-import]
-    ElementTree as ET,
-)
 
 import mwparserfromhell
 import polars as pl
@@ -20,7 +14,7 @@ from backend.website.newsletter import valid_newsletter
 from backend.website.newsletter_sources import collect_source_facts
 from backend.website.newsletter_year_review import (
     QUALITY_HISTORY_GRADES,
-    prepare_quality_years,
+    prepare_quality_year_ends,
 )
 from shared.newsletter import Issue
 from updater.services.newsletter_editorial import render_annual_feature
@@ -63,14 +57,16 @@ def _events() -> pl.DataFrame:
 
 
 class NewsletterQualityYearTests(TestCase):
-    """Count recognitions despite later quality changes."""
+    """Classify annual cohorts independently of current grades."""
 
     @staticmethod
-    def test_historical_counts_ignore_current_grade_and_removals() -> None:
-        """Deduplicate evidence while retaining former awards."""
+    def test_historical_cohorts_keep_promotions_in_their_original_year() -> (
+        None
+    ):
+        """Count each cohort once without carrying earlier articles."""
         events = _events()
         original = events.clone()
-        rows = prepare_quality_years(events, dt.date(2026, 2, 1))
+        rows = prepare_quality_year_ends(events, dt.date(2026, 2, 1))
         assert rows == [
             {
                 "year": 2012,
@@ -83,6 +79,20 @@ class NewsletterQualityYearTests(TestCase):
                     "Bplus": 0,
                 },
             },
+            *(
+                {
+                    "year": year,
+                    "grades": {
+                        "FA": 0,
+                        "FL": 0,
+                        "A": 0,
+                        "AL": 0,
+                        "GA": 0,
+                        "Bplus": 0,
+                    },
+                }
+                for year in range(2013, 2026)
+            ),
             {
                 "year": 2026,
                 "grades": {
@@ -100,12 +110,13 @@ class NewsletterQualityYearTests(TestCase):
     @staticmethod
     def test_unknown_history_dates_and_empty_years_stay_distinct() -> None:
         """Keep missing dates and histories unavailable."""
-        assert prepare_quality_years(None, dt.date(2027, 1, 1)) is None
+        assert prepare_quality_year_ends(None, dt.date(2027, 1, 1)) is None
         assert (
-            prepare_quality_years(_events().clear(), dt.date(2027, 1, 1)) == []
+            prepare_quality_year_ends(_events().clear(), dt.date(2027, 1, 1))
+            == []
         )
         undated = _events().filter(pl.col("date").is_null())
-        assert prepare_quality_years(undated, dt.date(2027, 1, 1)) == []
+        assert prepare_quality_year_ends(undated, dt.date(2027, 1, 1)) == []
 
     @staticmethod
     def test_collector_retains_all_years_and_optional_schema() -> None:
@@ -115,8 +126,11 @@ class NewsletterQualityYearTests(TestCase):
             now=dt.datetime(2026, 2, 1, tzinfo=dt.UTC),
             article_history=_events(),
         )
-        years = result["issues"]["2027-01"]["year_review"]["quality_years"]
-        assert years == prepare_quality_years(_events(), dt.date(2026, 2, 1))
+        years = result["issues"]["2027-01"]["year_review"]["quality_year_ends"]
+        assert years == prepare_quality_year_ends(
+            _events(),
+            dt.date(2026, 2, 1),
+        )
         assert valid_newsletter(result)
         for invalid in (
             [*years, years[0]],
@@ -143,12 +157,13 @@ class NewsletterQualityYearTests(TestCase):
             "unknown",
         ):
             changed = deepcopy(result)
-            changed["issues"]["2027-01"]["year_review"]["quality_years"] = (
-                invalid
-            )
+            changed["issues"]["2027-01"]["year_review"][
+                "quality_year_ends"
+            ] = invalid
             assert not valid_newsletter(changed)
         legacy = deepcopy(result)
-        del legacy["issues"]["2027-01"]["year_review"]["quality_years"]
+        del legacy["issues"]["2027-01"]["year_review"]["quality_year_ends"]
+        legacy["issues"]["2027-01"]["year_review"]["quality_years"] = years
         assert valid_newsletter(legacy)
 
     @staticmethod
@@ -162,18 +177,18 @@ class NewsletterQualityYearTests(TestCase):
         )
         review = result["issues"]["2027-01"]["year_review"]
         assert review["quality_changes"] == []
-        assert review["quality_years"] == prepare_quality_years(
+        assert review["quality_year_ends"] == prepare_quality_year_ends(
             _events(),
             dt.date(2026, 2, 1),
         )
 
     @staticmethod
-    def test_four_group_chart_totals_stack_order_and_hover_details() -> None:
-        """Show four groups, one total, and six-grade popup details."""
+    def test_native_chart_preserves_stack_order_without_expansion() -> None:
+        """Keep grade order and plain years in native parameters."""
         review = {
-            "quality_years": [
+            "quality_year_ends": [
                 {
-                    "year": 2025,
+                    "year": 2026,
                     "grades": {
                         "FA": 1,
                         "FL": 2,
@@ -186,40 +201,48 @@ class NewsletterQualityYearTests(TestCase):
             ],
         }
         text = render_annual_feature(Issue(2027, 1), review)
-        raw = next(
-            template.get("1").value
+        chart = next(
+            template
             for template in mwparserfromhell.parse(text).filter_templates()
-            if template.name.matches("Graph:Chart") and template.has("1")
+            if template.name.matches("Graph:Chart")
+            and template.get("type").value.strip() == "stackedrect"
         )
-        # The parser sees only the generated fixture's own SVG markup.
-        root = ET.fromstring(  # ruff: ignore[suspicious-xml-element-tree-usage]
-            str(raw),
-        )
-        ns = {"svg": "http://www.w3.org/2000/svg"}
-        rectangles = root.findall(".//svg:rect", ns)
-        bar = rectangles[:4]
-        assert [item.attrib["fill"] for item in bar] == [
-            "#9CBDFF",
-            "#66FFFF",
-            "#8CFF66",
-            "#66FF66",
+        assert not chart.has("1")
+        params = {
+            str(p.name).strip(): str(p.value).strip() for p in chart.params
+        }
+        assert params["x"] == "2026"
+        assert params["xAxisTitle"] == "年份"
+        assert [params[f"y{index}"] for index in range(1, 5)] == [
+            "3",
+            "7",
+            "6",
+            "5",
         ]
-        assert [float(item.attrib["y"]) for item in bar] == sorted(
-            (float(item.attrib["y"]) for item in bar),
-            reverse=True,
+        assert [params[f"y{index}Title"] for index in range(1, 5)] == [
+            "典范级",
+            "甲级",
+            "优良级",
+            "乙上级",
+        ]
+        assert params["colors"] == "#9CBDFF,#66FFFF,#66FF66,#8CFF66"
+        assert params["interactive"] == "true"
+        assert params["animate"] == "true"
+        assert params["xType"] == "string"
+        assert params["xAxisAngle"] == "-30"
+        assert (
+            'class="center" style="max-width:100%;overflow-x:auto;'
+            'text-align:center"' in text
         )
-        labels = [item.text for item in root.findall(".//svg:text", ns)]
-        assert labels.count("21") == 1
-        assert "典范级" in labels
-        assert "甲级" in labels
-        assert "乙上级" in labels
-        assert "优良级" in labels
-        assert 'class="gr-hbar" tabindex="0"' in text
-        assert 'class="gr-tip gr-tip-b"' in text
-        assert 'class="center" style="text-align:center"' in text
-        for label in ("FA", "FL", "A", "AL", "GA", "Bplus"):
-            assert f"（{label}）：" in text
-        assert "合計：21" in text
+        assert '<div style="min-width:800px">' in text
+        for expanded in (
+            "<svg",
+            "<templatestyles",
+            "gr-hbar",
+            "gr-tip",
+            "gr-ov",
+        ):
+            assert expanded not in text
 
     @staticmethod
     def test_all_zero_a_group_is_absent_and_missing_history_stays_blank() -> (
@@ -227,7 +250,7 @@ class NewsletterQualityYearTests(TestCase):
     ):
         """Hide an unused A layer without replacing missing history."""
         review = {
-            "quality_years": [
+            "quality_year_ends": [
                 {
                     "year": 2025,
                     "grades": {
@@ -242,7 +265,17 @@ class NewsletterQualityYearTests(TestCase):
             ],
         }
         text = render_annual_feature(Issue(2027, 1), review)
-        assert 'fill="#66FFFF"' not in text
-        assert "甲级</text>" not in text
+        chart = next(
+            template
+            for template in mwparserfromhell.parse(text).filter_templates()
+            if template.name.matches("Graph:Chart")
+            and template.get("type").value.strip() == "stackedrect"
+        )
+        assert str(chart.get("x").value).strip() == "2025"
+        assert str(chart.get("y2").value).strip() == "6"
+        assert str(chart.get("y3").value).strip() == "5"
+        assert not chart.has("y4")
+        assert "#66FFFF" not in str(chart)
+        assert "甲级" not in str(chart)
         missing = render_annual_feature(Issue(2027, 1), {})
-        assert '<svg xmlns="http://www.w3.org/2000/svg"' not in missing
+        assert "type=stackedrect" not in missing

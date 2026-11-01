@@ -322,45 +322,116 @@ def prepare_year_history(
     return prepare_history(events, dt.date(issue.year - 1, 1, 1), through)
 
 
-def prepare_quality_years(
+def prepare_quality_year_ends(
     events: pl.DataFrame | None,
     through: dt.date,
 ) -> list[dict] | None:
-    """Count recorded quality recognitions by original year and grade.
+    """Classify annual quality promotions at each year's boundary.
 
     Args:
-        events: Complete recorded project histories, or unavailable.
-            Earlier additions remain present after delisting/demotion.
-        through: Exclusive observation date in the reviewed year.
+        events: Complete retained milestone histories, or unavailable.
+            Stable IDs keep renamed and redirected subjects distinct.
+        through: Exclusive observation date. Completed years use the
+            following January 1; the open year uses this date.
 
     Returns:
-        Observed years with distinct article counts for FA, FL, A, AL,
-        GA, and Bplus additions. Repeated evidence counts once for each
-        title, year, and grade. Removals never subtract prior additions.
-        Unknown dates have no inferred year. Missing history stays null;
-        an observed history without dated additions is empty.
-        Years without observed additions are not synthesized.
+        Each year's articles with at least one dated quality addition,
+        counted once by their grade at year end or the current cutoff.
+        An upgrade counts in its own year's cohort even when the article
+        held another quality grade before that year. The latest addition
+        selects one grade; higher grades win same-day ties. A subsequent
+        removal of that selected grade clears it without reviving older
+        awards. Removing another grade cannot clear the selected grade.
+        Later years never alter earlier cohorts. Unknown dates have no
+        inferred year. Missing history stays null; an observed history
+        without dated additions is empty. Years without additions have
+        zero counts within the supplied evidence's observed span.
     """
     if events is None:
         return None
-    return (
-        events
+    observed = events.filter(
+        (pl.col("kind") == "quality")
+        & pl.col("grade").is_in(QUALITY_HISTORY_GRADES)
+        & (pl.col("date") < through),
+    )
+    additions = observed.filter(pl.col("action") == "added")
+    if additions.is_empty():
+        return []
+    first_year = additions["date"].min().year
+    last_year = (through - dt.timedelta(days=1)).year
+    boundaries = pl.DataFrame(
+        {"year": range(first_year, last_year + 1)},
+        schema={"year": pl.Int32},
+    ).with_columns(
+        pl.min_horizontal(
+            pl.date(pl.col("year") + 1, 1, 1),
+            pl.lit(through),
+        ).alias("boundary"),
+    )
+    identity = "page_id" if "page_id" in events.columns else "title"
+    expanded = observed.join(boundaries, how="cross").filter(
+        pl.col("date") < pl.col("boundary"),
+    )
+    annual_members = (
+        expanded
         .filter(
-            (pl.col("kind") == "quality")
-            & (pl.col("action") == "added")
-            & pl.col("grade").is_in(QUALITY_HISTORY_GRADES)
-            & (pl.col("date") < through),
+            (pl.col("action") == "added")
+            & (pl.col("date").dt.year() == pl.col("year")),
         )
-        .with_columns(pl.col("date").dt.year().alias("year"))
+        .select("year", identity)
+        .unique()
+    )
+    latest = (
+        expanded
+        .filter(pl.col("action") == "added")
+        .with_columns(
+            pl
+            .col("grade")
+            .replace_strict({
+                "FA": 4,
+                "FL": 4,
+                "A": 3,
+                "AL": 3,
+                "GA": 2,
+                "Bplus": 1,
+            })
+            .alias("priority"),
+        )
+        .sort("date", "priority", "grade")
+        .unique(["year", identity], keep="last")
+        .join(annual_members, on=["year", identity], how="semi")
+        .select("year", identity, "grade", pl.col("date").alias("added"))
+    )
+    removed = (
+        expanded
+        .filter(pl.col("action") == "removed")
+        .group_by("year", identity, "grade")
+        .agg(pl.col("date").max().alias("removed"))
+    )
+    counts = (
+        latest
+        .join(removed, on=["year", identity, "grade"], how="left")
+        .filter(
+            pl.col("removed").is_null()
+            | (pl.col("removed") < pl.col("added")),
+        )
         .group_by("year")
         .agg(
             pl
-            .col("title")
+            .col(identity)
             .filter(pl.col("grade") == grade)
             .n_unique()
-            .alias(grade)
+            .alias(
+                grade,
+            )
             for grade in QUALITY_HISTORY_GRADES
         )
+    )
+    return (
+        boundaries
+        .select("year")
+        .join(counts, on="year", how="left")
+        .with_columns(pl.col(*QUALITY_HISTORY_GRADES).fill_null(0))
         .sort("year")
         .select("year", pl.struct(*QUALITY_HISTORY_GRADES).alias("grades"))
         .to_dicts()

@@ -550,6 +550,20 @@ class EditorialDraftTests(unittest.TestCase):
                 "{{fullurl:WikiProject:電子遊戲/簡訊/2028-01/專題"
                 "|action=edit&section=new&preload=WikiProject:電子遊戲/簡訊/preload}}"
             )
+        buttons = [
+            template
+            for template in mwparserfromhell.parse(text).filter_templates()
+            if str(template.name) == "Clickable button 2"
+        ]
+        assert len(buttons) == expected_buttons
+        for button in buttons:
+            assert str(button.get("1").value) == "📝&nbsp;新增感想"
+            assert str(button.get("url").value) == str(links[0])
+            assert str(button.get("class").value) == "mw-ui-progressive"
+            style = str(button.get("style").value)
+            assert "background:#36c;color:#fff" in style
+            assert "min-height:32px" in style
+        assert "mw-ui-constructive" not in text
         assert "%E9" not in text
         assert text.index(str(links[0])) < text.index("== 專題報導")
         assert text.rindex(str(links[1])) > text.index("==== 榮譽表彰 ====")

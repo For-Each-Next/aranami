@@ -44,7 +44,7 @@
   <pre class="newsletter-text" tabindex="0" aria-labelledby="newsletter-heading-{{ loop.index }}" lang="zh" dir="ltr"><code id="newsletter-text-{{ loop.index }}" data-newsletter-wikitext>{{ draft.text }}</code></pre>
   <div class="newsletter-copy-controls">
     <button type="button" class="cdx-button cdx-button--action-default cdx-button--weight-normal" hidden data-newsletter-copy="newsletter-text-{{ loop.index }}" data-copy-success="{{ t.newsletter.copied }}" data-copy-failure="{{ t.newsletter.copy_fallback }}" aria-describedby="newsletter-copy-status-{{ loop.index }}">{{ t.newsletter['copy'] }}</button>
-    <button type="button" class="cdx-button cdx-button--action-progressive cdx-button--weight-primary" hidden data-newsletter-copy="newsletter-text-{{ loop.index }}" data-newsletter-edit="{{ draft.edit_url }}" data-copy-success="{{ t.newsletter.copied }}" data-copy-failure="{{ t.newsletter.copy_fallback }}" aria-describedby="newsletter-copy-status-{{ loop.index }}">{{ t.newsletter.copy_and_edit }}</button>
+    <a class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--action-progressive cdx-button--weight-primary" href="{{ draft.url }}">{{ t.newsletter.go_to_wiki }}</a>
     <span id="newsletter-copy-status-{{ loop.index }}" role="status" aria-live="polite" data-newsletter-status></span>
   </div>
 </section>

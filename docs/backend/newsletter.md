@@ -41,6 +41,18 @@ Unknown current-assessment dates can be resolved without inventing authorship.
 The atomic milestone merge preserves former quality and removal history.
 Newsletter preparation consumes this saved Parquet evidence only.
 
+Talk-history acquisition normally reuses an unchanged oldid with the current
+parser contract. After each UTC month ends, the first subsequent acquisition
+re-reads each current candidate talk page once, even when its oldid is unchanged.
+The retained `observed_at` timestamp records that month's completed observation;
+later passes in the same month reuse it. No month is added to source identities
+or parser contracts, and individual transcluded template bodies are not tracked.
+Successful batches of at most 200 pages are merged atomically, so interrupted
+acquisition retries only unfinished pages. Failed or missing batches never
+advance their observation dates. Rechecking the same oldid updates its observation
+without duplicating that source version; earlier oldids remain retained.
+Logs report reused pages, month-end rechecks, and saved batch progress.
+
 Normal recognition acquisition also follows verified local main-namespace
 redirects into the project, including section targets and bounded chains.
 Redirect subjects with independent talks retain their own identities,
@@ -184,6 +196,9 @@ Missing data stays blank in copied wikitext; partial annual statistics carry
 a provisional marker and rolling pageview figures state their actual dates.
 Only the two editor-comment invitations use buttons, both with the verified
 reflection preload; introduction and data slots have no invitation buttons.
+The invitations use `Template:Clickable button 2` revision 61200765 and
+`Module:Clickable button 2` revision 61200823, with explicit blue primary
+styling so their appearance does not depend on global Codex resource loading.
 Annual ACG awards include all positive score gains and mark first-year scorers
 with `N`; quarterly awards retain fifth-place ties and the ten-point newcomer
 threshold. Community honors remain blank for editors. Unsupported DYK subject
@@ -212,8 +227,9 @@ Quality and DYK category lists follow milestone dates, earliest first, with
 stable title ties. Editor article lists group FA/FL together, then A/AL, GA,
 and Bplus, and order dates within each grade. Each article with a known date
 ends with an invisible `<!-- 0904 -->`-style MMDD comment for editors.
-Quarterly quality and homepage lists use the same date markers. Unknown first
-appearance dates and carry-in homepage observations remain unmarked.
+Quarterly quality lists use the same date markers. Announcement homepage
+lists keep visible dates without invisible comments. Unknown first
+appearance dates remain unmarked.
 
 Annual statistics retain the January 2026 reference's numerical prose for
 promotions, DYK, article totals, net/daily growth, pageviews, revisions, and
@@ -221,25 +237,34 @@ award participation. Unknown variables remain blank. Partial current figures
 carry a provisional marker. The ACG summary counts scoring editors, first-time
 scorers, and first-time scorers reaching the ten-point first award threshold.
 
-`quality_years` counts recorded quality additions across the full supplied
-milestone history, retaining separate FA, FL, A, AL, GA, and Bplus values.
+`quality_year_ends` selects articles with a recorded quality promotion during
+each year and classifies each once by its grade at that year's boundary,
+retaining separate FA, FL, A, AL, GA, and Bplus values. This is an annual
+promotion cohort, not the project's cumulative high-quality inventory.
 Collection supplies the full saved Parquet inventory separately from the
 current-membership event frame; chart preparation and rendering make no source
 requests. Source acquisition, including Bplus evidence, updates the inventory
 before these saved facts are consumed.
-Repeated evidence counts once per article, year, and grade. Later delisting
-or demotion does not subtract the original recognition. Unknown action dates
-have no inferred year; absent history stays null, and years without observed
-additions are not synthesized. Current assessment grades never replace these
-historical recognition events.
+Repeated evidence counts once per article in each year's cohort. Same-year
+promotions select one year-end grade, so an A article promoted to FA during
+that year is counted as FA. A matching removal before that year's boundary
+excludes the article; later removals do not change earlier years. Unknown
+action dates have no inferred year; absent history
+stays null. Current assessment grades never replace historical evidence.
+Legacy `quality_years` observations remain readable but are not interpreted
+as year-end counts.
 
-The quality chart stacks FA+FL, A+AL, Bplus, and GA from bottom to top, omitting
-the A layer when its entire series is zero. Each yearly bar shows the sum of
-all six grades once. Hover/focus popups retain the six separate counts and sum.
-It uses the supported raw-SVG first argument of `Graph:Chart` and the upstream
-`Module:Graph/style.css` popup classes, with the same geometry supplying SVG
-bars and percentage-positioned HTML targets. Native stacked charts do not
-support yearly sum labels. Missing saved quality history produces no chart.
+The quality chart uses native `Graph:Chart` parameters with `type=stackedrect`.
+It stacks FA+FL, A+AL, GA, and Bplus from bottom to top, omitting the A layer
+when its entire series is zero. The legend follows the same order. Category
+labels contain only years because native stacked charts do not support total
+labels above bars or interpret line-break markup in labels.
+Native hover shows each stacked group's value,
+and native chart animation stays enabled. Generated wikitext contains no expanded
+SVG, explicit Graph styles, or custom overlays. This contract was verified
+against `Module:Graph` revision 95346885 and `Module:Graph/SVGRenderer` revision
+95350043. A narrow viewport scrolls only the chart container, preserving native
+axis-label and legend placement. Missing saved quality history produces no chart.
 
 `newsletter_statistics` retains audited quarterly cumulative DYK data from the
 January 2026 feature's second image description and 2025/2024 assessment data
@@ -249,10 +274,21 @@ series; exact year-end snapshots supply closed-year quality counts. Wikitext use
 verified server-rendered `Graph:Chart` contract for bar, area, and pie charts,
 without companion data tables or source prose. Assessment pies show only the
 reviewed year and its predecessor. Legend entries include each grade and its
-count in regular-weight text. Duplicate numeric slice labels are disabled
-with `showValues=false` because `Module:Graph/SVGRenderer` fixes them in bold.
-This contract was verified against `Module:Graph` revision 95334515 and
-`Module:Graph/SVGRenderer` revision 95338958. Source provenance and attribution
+count in regular-weight text, without percentages. Native value labels stay
+disabled with `showValues=false`: `Module:Graph/ChartRenderer` fixes them in
+bold and applies an unconfigurable 3.5 percent threshold. Only exact shares
+of at least five percent receive a one-decimal static inner label in regular
+black text. Raw counts still determine native slice geometry and colors.
+The complete pie, including its legend and padding, fits a 400-pixel frame.
+The plot width subtracts the native legend width, 28 pixels of native padding,
+and six pixels of text clearance from that budget; its height remains 250
+pixels. Static label positions and radii follow that centered native geometry.
+They never intercept native interaction.
+The template call remains unexpanded, and no
+custom SVG or hover targets are generated.
+Each pie scrolls locally at narrow widths to keep native labels readable.
+This contract was verified against `Module:Graph` revision 95346885 and
+`Module:Graph/ChartRenderer` revision 95358684. Source provenance and attribution
 remain in the collection contract.
 
 `dyk_new_quarters` retains completed quarter ends and cumulative first-time DYK
@@ -272,9 +308,15 @@ verified `Template:Image frame` content, align, width, and caption parameters
 Monthly winners come from historical revisions of the project's popular
 articles page. Only exact calendar-month intervals fill a month slot. Both
 legacy HOT templates and HOT/v2 JSON retain their actual intervals, counts,
-and ranked titles. Each month's optional `revision_id` comes directly from
-the original wiki reader's source URL immediately after that historical read.
-It never comes from a reporting boundary or accumulated provenance. Older
+and ranked titles. Collection examines the first four UTC days after month
+completion, retaining exact revision timestamps and text. This finds reports
+published after midnight even when a later daily report overwrote them that
+same day. The window is clamped to acquisition time; a completed month can
+appear on the following month's first day as soon as its report exists.
+Each month's optional `revision_id` identifies the exact matching historical
+revision. Readers without revision iteration use bounded daily snapshots and
+their immediate source URLs. It never comes from a reporting boundary or
+accumulated provenance. Older
 observations without this field remain valid and keep plain month labels.
 The latest rolling annual report can fill the current
 provisional draft, with its actual start/end printed explicitly. Bounded

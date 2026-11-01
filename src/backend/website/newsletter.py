@@ -363,7 +363,7 @@ def _valid_dyk_quarters(
 
 
 def _valid_quality_years(value: object, year: int) -> bool:
-    """Validate optional annual recognition counts for all six grades.
+    """Validate annual grade counts, including legacy additions.
 
     Returns:
         Whether observed years are ordered, unique, and fully shaped.
@@ -487,6 +487,7 @@ def _valid_annual_statistics(
             return False
     return (
         _valid_quality_years(value.get("quality_years"), year)
+        and _valid_quality_years(value.get("quality_year_ends"), year)
         and _valid_dyk_quarters(
             value.get("dyk_new_quarters"),
             year,

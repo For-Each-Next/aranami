@@ -9,9 +9,11 @@ import datetime as dt
 import json
 from unittest import TestCase
 
+import mwparserfromhell
 import polars as pl
 
 from backend.website.newsletter_statistics import (
+    QUALITY_GRADES,
     collect_popularity,
     parse_popularity,
     quality_statistics,
@@ -46,6 +48,125 @@ def _popular(start: str, end: str, duration: str = "yearly") -> str:
 
 class NewsletterStatisticsTests(TestCase):
     """Keep annual charts and calendar boundaries accurate."""
+
+    @staticmethod
+    def test_pie_percentages_apply_exact_five_percent_boundary() -> None:
+        """Keep raw geometry and omit rounded-up subthreshold shares."""
+        text = render_annual_feature(
+            Issue(2027, 1),
+            {
+                "quality_statistics": [
+                    {
+                        "year": year,
+                        "counts": {
+                            **dict.fromkeys(QUALITY_GRADES, 0),
+                            "fa": 499,
+                            "fl": 500,
+                            "a": 5150,
+                            "ga": 3851,
+                        },
+                        "provisional": year == 2026,
+                    }
+                    for year in (2025, 2026)
+                ],
+            },
+        )
+        pies = [
+            template
+            for template in mwparserfromhell.parse(text).filter_templates()
+            if template.name.matches("Graph:Chart")
+            and template.get("type").value.strip() == "pie"
+        ]
+        assert len(pies) == 2
+        for pie in pies:
+            labels = str(pie.get("x").value).strip().split(",")
+            assert labels == [
+                "典范级：499",
+                "特色列表级：500",
+                "甲级：5150",
+                "优良级：3851",
+            ]
+            assert pie.get("y1").value.strip() == "499,500,5150,3851"
+            assert pie.get("showValues").value.strip() == "false"
+            assert not pie.has("1")
+        assert "<svg" not in text
+        values = [
+            tag
+            for tag in mwparserfromhell.parse(text).filter_tags()
+            if tag.tag == "span"
+            and tag.has("class")
+            and tag.get("class").value == "pie-percentage"
+        ]
+        assert [str(value.contents) for value in values] == [
+            "5.0%",
+            "51.5%",
+            "38.5%",
+            "5.0%",
+            "51.5%",
+            "38.5%",
+        ]
+        for value in values:
+            style = str(value.get("style").value)
+            assert "color:#000" in style
+            assert "font-weight:400" in style
+            assert "pointer-events:none" in style
+        assert "4.99%" not in text
+        assert 'class="gr-ov"' not in text
+
+    @staticmethod
+    def test_zero_pie_counts_do_not_create_percentages() -> None:
+        """Skip empty pies without inventing percentages."""
+        text = render_annual_feature(
+            Issue(2027, 1),
+            {
+                "quality_statistics": [
+                    {
+                        "year": year,
+                        "counts": dict.fromkeys(QUALITY_GRADES, 0),
+                        "provisional": year == 2026,
+                    }
+                    for year in (2025, 2026)
+                ],
+            },
+        )
+        assert "|type=pie" not in text
+
+    @staticmethod
+    def test_pie_width_budget_includes_legend_and_padding() -> None:
+        """Keep the complete native canvas within 400 pixels."""
+        for counts in (
+            {"fa": 1},
+            {"fa": 25, "fl": 11, "ga": 216, "stub": 6006},
+            dict.fromkeys(QUALITY_GRADES, 10_000_000),
+        ):
+            text = render_annual_feature(
+                Issue(2027, 1),
+                {
+                    "quality_statistics": [
+                        {
+                            "year": 2026,
+                            "counts": {
+                                **dict.fromkeys(QUALITY_GRADES, 0),
+                                **counts,
+                            },
+                            "provisional": True,
+                        },
+                    ],
+                },
+            )
+            pie = next(
+                template
+                for template in mwparserfromhell.parse(text).filter_templates()
+                if template.name.matches("Graph:Chart")
+                and template.get("type").value.strip() == "pie"
+            )
+            labels = str(pie.get("x").value).strip().split(",")
+            legend_width = min(220, max(80, max(map(len, labels)) * 7.5 + 32))
+            canvas_width = (
+                float(str(pie.get("width").value)) + legend_width + 28
+            )
+            assert canvas_width <= 400
+            assert 'style="width:400px;position:relative;' in text
 
     @staticmethod
     def test_current_and_legacy_popularity_contracts() -> None:

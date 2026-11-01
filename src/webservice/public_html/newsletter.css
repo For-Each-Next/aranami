@@ -1,4 +1,14 @@
 /* Newsletter code displays follow the shared Codex colors and native controls. */
+.newsletter-controls > select,
+.newsletter-controls > button,
+.newsletter-date-selection > input,
+.newsletter-date-selection > button,
+.newsletter-copy-controls > .cdx-button {
+    block-size: 2rem;
+    min-block-size: 2rem;
+    padding-block: 0;
+}
+
 .newsletter-controls {
     display: flex;
     flex-wrap: wrap;

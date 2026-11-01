@@ -409,13 +409,7 @@ def _source_homepage_rows(rows: object, prototype: str) -> str:
             _fill(
                 prototype,
                 {
-                    "title": _link(row["title"])
-                    + (
-                        f"<!-- {row['date'][5:7]}{row['date'][8:10]} -->"
-                        if row.get("date")
-                        and row.get("date_kind") != "window_start"
-                        else ""
-                    ),
+                    "title": _link(row["title"]),
                     "date": "期初已在首頁，首次日期不詳"
                     if row.get("date_kind") == "window_start"
                     else _date_label(row["date"]),

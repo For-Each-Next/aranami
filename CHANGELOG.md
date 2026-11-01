@@ -4,6 +4,28 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.13 (2026-11-01 07:24 UTC)
+
+Overview: Refined native newsletter charts, historical monthly coverage and
+editing controls, with compact pies and independent copying and navigation.
+
+- Rendered ordered native quality stacks with plain year labels, short grade
+  names, animation and hover, without expanded SVG or custom hover targets.
+- Counted each annual promotion once under its year-end grade, preserving
+  milestone evidence and keeping legacy observations readable.
+- Reused unchanged talk revisions within each UTC month and checkpointed
+  month-end rechecks so interrupted acquisition resumes safely.
+- Limited complete pies to 400 pixels and placed regular black percentages
+  inside slices of at least 5%, retaining plain grade/count legends.
+- Recovered delayed calendar-month winners from bounded revision history,
+  retaining exact permalinks and leaving unpublished reports unavailable.
+- Separated Copy from Go to wiki page and standardized newsletter controls
+  at 32 pixels, including the date input and issue selector.
+- Styled comment invitations as blue primary actions while retaining their
+  section preload links and keyboard focus.
+- Removed invisible announcement date comments while retaining visible dates
+  and date markers in quality and annual article lists.
+
 ### 0.7.12 (2026-11-01 05:39 UTC)
 
 Overview: Expanded historical milestone coverage and annual recognition charts,

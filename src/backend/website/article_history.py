@@ -55,6 +55,7 @@ _PARSER_CONTRACT = (
     "zh-article-history-v6:92259335:83226002:76273693:94343077:88772603:"
     "reviews"
 )
+_HISTORY_BATCH_SIZE = 200
 _LOGGER = logging.getLogger(__name__)
 _FLAT_SCHEMA = {
     key: value
@@ -291,16 +292,26 @@ def _selected_history(
     candidates: pl.DataFrame,
     refreshed: pl.DataFrame,
     contract: str,
+    observed_since: dt.datetime,
 ) -> pl.DataFrame:
     """Require complete selected evidence after concurrent writes.
 
     Returns:
-        Selected snapshots using this parser's contract.
+        Selected snapshots using this parser's contract, observed in
+        the current UTC month.
 
     Raises:
         ValueError: Retained selection has an older source revision.
     """
-    selected = retained.filter(pl.col("contract") == contract)
+    selected = retained.filter(
+        (pl.col("contract") == contract)
+        & (
+            pl.col("observed_at")
+            >= pl.lit(observed_since.isoformat()).str.to_datetime(
+                time_zone="UTC",
+            )
+        ),
+    )
     missing = candidates.join(
         selected.select("page_id", "talk_page_id"),
         on=["page_id", "talk_page_id"],
@@ -327,6 +338,46 @@ def _selected_history(
     return selected
 
 
+def _refresh_batches(  # ruff: ignore[too-many-arguments]
+    site: BaseSite,
+    pending: pl.DataFrame,
+    aliases: tuple[tuple[str, ...], ...],
+    contract: str,
+    now: dt.datetime,
+    *,
+    path: Path | None,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Checkpoint complete batches without advancing failed pages.
+
+    Returns:
+        The selected retained history and this pass's refreshed rows.
+        A failed later batch leaves earlier durable observations intact
+        so a subsequent acquisition can reuse their monthly completion.
+    """
+    completed = []
+    completed_pages = 0
+    retained = pl.DataFrame(schema=SCHEMA)
+    for batch in pending.iter_slices(n_rows=_HISTORY_BATCH_SIZE):
+        refreshed_batch = _refresh(site, batch, aliases, contract, now)
+        if path is not None:
+            retained = merge_save(path, refreshed_batch)
+        completed.append(refreshed_batch)
+        completed_pages += refreshed_batch.height
+        _LOGGER.info(
+            "Newsletter history source batch retained: %d of %d pages.",
+            completed_pages,
+            pending.height,
+        )
+    refreshed = (
+        pl.concat(completed) if completed else pl.DataFrame(schema=SCHEMA)
+    )
+    if path is None:
+        retained = refreshed
+    elif not completed:
+        retained = merge_save(path, refreshed)
+    return retained, refreshed
+
+
 def collect_article_history(
     site: BaseSite,
     membership: pl.DataFrame,
@@ -334,7 +385,7 @@ def collect_article_history(
     now: dt.datetime,
     path: Path | None = None,
 ) -> pl.DataFrame:
-    """Backfill all recorded project milestones, then refresh changes.
+    """Backfill milestones, refresh changes, and recheck each UTC month.
 
     Args:
         site: Configured Chinese Wikipedia read-only source.
@@ -346,6 +397,9 @@ def collect_article_history(
         Supplied history scope's complete recorded events. Unknown dates
         remain null. Removed project members remain retained on disk.
         Use ``history_membership`` to include associated redirects.
+        Unchanged revisions are re-read once after each month ends.
+        Successful source batches checkpoint their observation dates;
+        interrupted monthly acquisition resumes from unfinished pages.
 
     Raises:
         ValueError: Site, clock, identities, or coverage are invalid.
@@ -385,7 +439,7 @@ def collect_article_history(
             "Newsletter history revision query omitted or duplicated pages."
         )
         raise ValueError(message)
-    unchanged = (
+    matching = (
         saved
         .filter(pl.col("contract") == contract)
         .join(revisions, on=["talk_page_id", "revision_id"], how="inner")
@@ -395,19 +449,37 @@ def collect_article_history(
             how="semi",
         )
     )
+    unchanged = matching.filter(
+        pl.col("observed_at")
+        >= pl.datetime(now.year, now.month, 1, time_zone="UTC"),
+    )
     pending = candidates.join(
         unchanged.select("talk_page_id"),
         on="talk_page_id",
         how="anti",
     )
     _LOGGER.info(
-        "Newsletter article histories: %d reused, %d to refresh.",
+        "Newsletter article histories: %d reused, %d to refresh "
+        "(%d month-end rechecks).",
         unchanged.height,
         pending.height,
+        matching.height - unchanged.height,
     )
-    refreshed = _refresh(site, pending, aliases, contract, now)
-    retained = merge_save(path, refreshed) if path is not None else refreshed
-    selected = _selected_history(retained, candidates, refreshed, contract)
+    retained, refreshed = _refresh_batches(
+        site,
+        pending,
+        aliases,
+        contract,
+        now,
+        path=path,
+    )
+    selected = _selected_history(
+        retained,
+        candidates,
+        refreshed,
+        contract,
+        now.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
+    )
     return _flatten(selected, members)
 
 

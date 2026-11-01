@@ -12,6 +12,7 @@ import datetime as dt
 import json
 import re
 from calendar import monthrange
+from operator import itemgetter
 from typing import TYPE_CHECKING
 
 import mwparserfromhell
@@ -133,6 +134,8 @@ HISTORICAL_DYK = (
 )
 _MAX_VIEWS = 2**63 - 1
 _MONTHS = 12
+_MONTH_REPORT_DAYS = 4
+_MAX_MONTH_REVISIONS = 128
 
 
 def quality_statistics(
@@ -304,6 +307,9 @@ def collect_popularity(
     now: dt.datetime,
     *,
     source_for: Callable[[str], Mapping | None] | None = None,
+    revision_history: (
+        Callable[[str, dt.date, dt.date], list[dict[str, object]]] | None
+    ) = None,
 ) -> dict:
     """Read completed months and the latest annual draft ranking.
 
@@ -313,31 +319,109 @@ def collect_popularity(
         now: Actual acquisition time, including January follow-up runs.
         source_for: Read the original reader's metadata immediately
             after each historical read, or none without provenance.
+        revision_history: Read exact revisions during the bounded
+            publication window, including revisions overwritten later
+            the same day. Rows supply text, timestamps, and revision IDs
+            directly from the historical source.
 
     Returns:
         Monthly winners and annual data with their actual intervals.
-        Completed-month reads allow the following day's scheduled report
-        to finish. Missing or differently dated reports remain absent.
+        Completed months allow four UTC days for delayed publication.
+        Exact intervals select calendar months. Future, missing, and
+        differently dated reports remain absent.
     """
     year = issue.year - 1
     months = []
     for month in range(1, _MONTHS + 1):
         start = dt.date(year, month, 1)
         end = dt.date(year, month, monthrange(year, month)[1])
-        boundary = dt.datetime.combine(
-            end + dt.timedelta(days=2),
+        begin = dt.datetime.combine(
+            end + dt.timedelta(days=1),
             dt.time.min,
             dt.UTC,
         )
-        if now < boundary:
+        if now <= begin:
             continue
+        winner = _monthly_winner(
+            read,
+            start,
+            end,
+            now,
+            source_for=source_for,
+            revision_history=revision_history,
+        )
+        if winner is not None:
+            months.append({"month": month, "days": end.day, **winner})
+    annual = _annual_popularity(read, issue, now)
+    return {"monthly_popularity": months, "annual_popularity": annual}
+
+
+def _monthly_winner(  # ruff: ignore[too-many-arguments]
+    read: Callable[[str, dt.datetime], str],
+    start: dt.date,
+    end: dt.date,
+    now: dt.datetime,
+    *,
+    source_for: Callable[[str], Mapping | None] | None,
+    revision_history: (
+        Callable[[str, dt.date, dt.date], list[dict[str, object]]] | None
+    ),
+) -> dict | None:
+    """Find one exact calendar-month report after delayed publication.
+
+    Returns:
+        The first verified winner and its exact revision, or none.
+        Revision timestamps cannot precede month completion or exceed
+        the actual acquisition time. Historical readers without a
+        revision iterator use bounded daily snapshots as a fallback.
+
+    Raises:
+        ValueError: A revision window is oversized or malformed.
+    """
+    first_day = end + dt.timedelta(days=1)
+    stop_day = first_day + dt.timedelta(days=_MONTH_REPORT_DAYS)
+    begin = dt.datetime.combine(first_day, dt.time.min, dt.UTC)
+    stop = min(dt.datetime.combine(stop_day, dt.time.min, dt.UTC), now)
+    if revision_history is not None:
         try:
-            text = read(POPULAR_PAGE, boundary)
-            revision_id = _source_revision(
-                source_for(POPULAR_PAGE) if source_for is not None else None,
-            )
+            rows = revision_history(POPULAR_PAGE, first_day, stop_day)
         except NoPageError:
-            continue
+            return None
+        if len(rows) > _MAX_MONTH_REVISIONS or any(
+            not isinstance(row.get("text"), str)
+            or not isinstance(row.get("timestamp"), dt.datetime)
+            or row["timestamp"].tzinfo is None
+            or type(row.get("revision")) is not int
+            or not 0 < row["revision"] <= _MAX_VIEWS
+            for row in rows
+        ):
+            message = "Invalid bounded monthly report revision history."
+            raise ValueError(message)
+        candidates = [
+            (row["text"], row["revision"])
+            for row in sorted(
+                rows,
+                key=itemgetter("timestamp", "revision"),
+            )
+            if begin <= row["timestamp"] < stop
+        ]
+    else:
+        candidates = []
+        for offset in range(1, _MONTH_REPORT_DAYS + 1):
+            boundary = min(begin + dt.timedelta(days=offset), now)
+            try:
+                text = read(POPULAR_PAGE, boundary)
+            except NoPageError:
+                continue
+            candidates.append((
+                text,
+                _source_revision(
+                    source_for(POPULAR_PAGE)
+                    if source_for is not None
+                    else None,
+                ),
+            ))
+    for text, revision_id in candidates:
         data = parse_popularity(text, "monthly")
         if (
             data
@@ -345,14 +429,11 @@ def collect_popularity(
             and data["end"] == end.isoformat()
             and data["items"]
         ):
-            months.append({
-                "month": month,
-                "days": end.day,
+            return {
                 **data["items"][0],
                 **({"revision_id": revision_id} if revision_id else {}),
-            })
-    annual = _annual_popularity(read, issue, now)
-    return {"monthly_popularity": months, "annual_popularity": annual}
+            }
+    return None
 
 
 def _source_revision(source: Mapping | None) -> int | None:

@@ -265,6 +265,23 @@ async function main() {
             assert.equal(await evaluate("document.querySelector('.language-menu').open"), false, 'hover behavior leaked into language menu');
             await move('h1');
         };
+        const checkNewsletterControlHeights = async () => {
+            const controls = await evaluate(`(() => {
+                const selectors = '.newsletter-controls select, .newsletter-controls button, .newsletter-date-selection input, .newsletter-date-selection button, .newsletter-copy-controls .cdx-button';
+                const expected = 2 * parseFloat(getComputedStyle(document.documentElement).fontSize);
+                return {expected, heights: [...document.querySelectorAll(selectors)].filter(control => control.getBoundingClientRect().height > 0).map(control => ({tag: control.tagName, height: control.getBoundingClientRect().height}))};
+            })()`);
+            assert.ok(controls.heights.length >= 4 && controls.heights.every(control => Math.abs(control.height - controls.expected) < 1), `newsletter controls must share the Codex medium height: ${JSON.stringify(controls)}`);
+        };
+        const checkNewsletterKeyboardActions = async enhanced => {
+            await evaluate("document.querySelector('.newsletter-text').focus()");
+            await press("Tab", 9);
+            if (enhanced) {
+                assert.equal(await evaluate("document.activeElement.matches('[data-newsletter-copy]:focus-visible')"), true, "Copy must be reachable with visible keyboard focus");
+                await press("Tab", 9);
+            }
+            assert.equal(await evaluate("document.activeElement.matches('.newsletter-copy-controls a:focus-visible')"), true, "Go to wiki page must be reachable with visible keyboard focus");
+        };
         let checked = 0;
         matrix: for (const locale of locales) for (const width of widths) for (const surface of surfaces) {
             const label = `${locale}/${surface}/${width}`;
@@ -351,6 +368,7 @@ async function main() {
                     }
                 }
                 if (surface === "newsletter") {
+                    await checkNewsletterControlHeights();
                     const calendar = await evaluate(`(() => {
                         const input = document.querySelector('#newsletter-data-date');
                         const box = input.getBoundingClientRect();
@@ -367,7 +385,7 @@ async function main() {
                     assert.equal(calendar.minimum, "2026-01-01");
                     assert.equal(calendar.maximum, "2026-12-31");
                     assert.equal(calendar.withinViewport, true);
-                    if (width === 320 || width === 1440) {
+                    if ([320, 640, 1440].includes(width)) {
                         const switched = await evaluate(`(async () => {
                             const form = document.querySelector('[data-newsletter-issue-form]');
                             const select = form.querySelector('select[name=issue]');
@@ -377,8 +395,9 @@ async function main() {
                             const source = await (await originalFetch(location.href)).text();
                             let request;
                             let copied;
+                            let writes = 0;
                             const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-                            Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async text => { copied = text; }}});
+                            Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async text => { copied = text; writes++; }}});
                             window.fetch = async (url, options) => {
                                 request = {url: String(url), method: options?.method || 'GET'};
                                 const response = new DOMParser().parseFromString(source, 'text/html');
@@ -398,7 +417,7 @@ async function main() {
                                 }
                                 const draft = document.querySelector('[data-newsletter-wikitext]');
                                 const copy = document.querySelector('[data-newsletter-copy]');
-                                const edit = document.querySelector('[data-newsletter-edit]');
+                                const wiki = document.querySelector('.newsletter-copy-controls a');
                                 copy.click();
                                 await Promise.resolve();
                                 const requested = new URL(request.url, location.href);
@@ -408,9 +427,9 @@ async function main() {
                                     readOnly: request.method === 'GET', noDate: !requested.searchParams.has('date'),
                                     submitHidden: form.querySelector('button[type=submit]').hidden,
                                     calendarReady: document.querySelector('#newsletter-data-date').type === 'date' && !document.querySelector('#newsletter-data-date').hidden,
-                                    copyReady: !copy.hidden && copied === draft.textContent,
-                                    editReady: Boolean(edit && !edit.hidden && edit.dataset.newsletterCopy === copy.dataset.newsletterCopy && new URL(edit.dataset.newsletterEdit).origin === 'https://zh.wikipedia.org' && new URL(edit.dataset.newsletterEdit).searchParams.get('action') === 'edit'),
-                                    buttonWeights: copy.classList.contains('cdx-button--weight-normal') && edit?.classList.contains('cdx-button--weight-primary'),
+                                    copyReady: !copy.hidden && copied === draft.textContent && writes === 1,
+                                    wikiReady: Boolean(wiki && !wiki.hidden && !wiki.hasAttribute('data-newsletter-copy') && new URL(wiki.href).origin === 'https://zh.wikipedia.org' && !new URL(wiki.href).search),
+                                    buttonWeights: copy.classList.contains('cdx-button--weight-normal') && wiki?.classList.contains('cdx-button--weight-primary'),
                                     noDestination: !document.querySelector('.newsletter-destination'),
                                     plainText: draft.children.length === 0};
                             } finally {
@@ -425,9 +444,41 @@ async function main() {
                         assert.ok(switched.readOnly && switched.noDate, "issue selection needs a fresh read-only date scope");
                         assert.equal(switched.submitHidden, true, "enhanced issue selection should not need a submit button");
                         assert.ok(switched.calendarReady && switched.copyReady, "replacement draft controls were not initialized");
-                        assert.ok(switched.editReady && switched.buttonWeights, "replacement drafts need secondary copy and primary copy-and-edit controls");
+                        assert.ok(switched.wikiReady && switched.buttonWeights, "replacement drafts need independent Copy and Go to wiki page actions");
                         assert.equal(switched.noDestination, true, "standalone newsletter destination should be removed");
                         assert.equal(switched.plainText, true, "draft text should not contain syntax highlighting spans");
+                        await checkNewsletterControlHeights();
+                        await checkNewsletterKeyboardActions(true);
+                        await call("Fetch.enable", {patterns: [{urlPattern: "https://zh.wikipedia.org/*", resourceType: "Document", requestStage: "Request"}]}, sessionId);
+                        try {
+                            const navigation = wait("Fetch.requestPaused", sessionId);
+                            const target = await evaluate(`(() => {
+                                window.newsletterNavigationProbe = {writes: 0, clipboard: Object.getOwnPropertyDescriptor(navigator, 'clipboard')};
+                                Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async () => { window.newsletterNavigationProbe.writes++; }}});
+                                const link = document.querySelector('.newsletter-copy-controls a');
+                                link.click();
+                                return link.href;
+                            })()`);
+                            const request = await navigation;
+                            // A 204 response retains the fixture document and avoids an external request.
+                            await call("Fetch.fulfillRequest", {requestId: request.requestId, responseCode: 204}, sessionId);
+                            assert.equal(request.request.url, target, "Go to wiki page did not navigate to its native link destination");
+                            assert.equal(request.request.method, "GET", "wiki navigation must remain read-only");
+                            const writes = await evaluate(`(() => {
+                                const probe = window.newsletterNavigationProbe;
+                                if (probe.clipboard) Object.defineProperty(navigator, 'clipboard', probe.clipboard);
+                                else delete navigator.clipboard;
+                                delete window.newsletterNavigationProbe;
+                                return probe.writes;
+                            })()`);
+                            assert.equal(writes, 0, "Go to wiki page must not write to the clipboard");
+                        } finally {
+                            await call("Fetch.disable", {}, sessionId);
+                        }
+                        await evaluate("document.querySelector('.newsletter-copy-controls').scrollIntoView({block: 'center'})");
+                        await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+                        const actions = await call("Page.captureScreenshot", {format: "png", captureBeyondViewport: false}, sessionId);
+                        fs.writeFileSync(path.join(outputRoot, `${locale}-newsletter-actions-${width}.png`), Buffer.from(actions.data, "base64"));
                     }
                 }
                 if (surface === "backlog") {
@@ -563,10 +614,10 @@ async function main() {
         }
         let withoutJavaScript = 0;
         await call("Emulation.setScriptExecutionDisabled", { value: true }, sessionId);
-        await call("Emulation.setDeviceMetricsOverride", { width: 390, height: 936, deviceScaleFactor: 1, mobile: false }, sessionId);
-        for (const locale of locales) for (const surface of surfaces) {
-            const label = `${locale}/${surface}/no-javascript`;
+        for (const locale of locales) for (const surface of surfaces) for (const width of surface === "newsletter" ? [320, 390, 640, 1440] : [390]) {
+            const label = `${locale}/${surface}/${width}/no-javascript`;
             try {
+                await call("Emulation.setDeviceMetricsOverride", {width, height: 936, deviceScaleFactor: 1, mobile: false}, sessionId);
                 const loaded = wait("Page.loadEventFired", sessionId);
                 await Promise.all([
                     call("Page.navigate", { url: `${base}/${locale}/${surface}.html` }, sessionId),
@@ -602,6 +653,14 @@ async function main() {
                         return visible && closeVisible && getComputedStyle(dialog).display === 'none';
                     })()`);
                     assert.equal(fallback, true, "report details need native fragment access and dismissal without JavaScript");
+                }
+                if (surface === "newsletter") {
+                    await checkNewsletterControlHeights();
+                    if ([320, 640, 1440].includes(width)) await checkNewsletterKeyboardActions(false);
+                    assert.equal(await evaluate(`(() => {
+                        const links = [...document.querySelectorAll('.newsletter-copy-controls a')];
+                        return links.length === document.querySelectorAll('.newsletter-draft').length && links.every(link => link.getBoundingClientRect().height > 0 && !link.hasAttribute('data-newsletter-copy') && new URL(link.href).origin === 'https://zh.wikipedia.org' && !new URL(link.href).search);
+                    })()`), true, "Go to wiki page must remain a visible native view-page link without JavaScript");
                 }
                 withoutJavaScript++;
             } catch (error) {

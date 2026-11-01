@@ -8,7 +8,7 @@ const vm = require("node:vm");
 
 const script = fs.readFileSync(path.resolve(__dirname, "../../src/webservice/public_html/newsletter.js"), "utf8");
 
-function fixture(clipboard, editUrl) {
+function fixture(clipboard) {
     const status = {textContent: ""};
     const display = {
         focused: false,
@@ -31,7 +31,6 @@ function fixture(clipboard, editUrl) {
         parentElement: {querySelector: () => status},
         addEventListener(_type, handler) { this.click = handler; },
     };
-    if (editUrl) button.dataset.newsletterEdit = editUrl;
     const navigated = [];
     vm.runInNewContext(script, {
         document: {
@@ -49,11 +48,13 @@ function fixture(clipboard, editUrl) {
 
 test("copy preserves literal displayed wikitext and announces completion", async () => {
     let copied;
-    const {button, source, display, status, navigated} = fixture({writeText: async value => { copied = value; }});
+    let writes = 0;
+    const {button, source, display, status, navigated} = fixture({writeText: async value => { copied = value; writes++; }});
     assert.equal(button.hidden, false);
     source.textContent = "{{模板|中文}}\n[[Article]]";
     await button.click();
     assert.equal(copied, source.textContent);
+    assert.equal(writes, 1);
     assert.equal(status.textContent, "Copied");
     assert.equal(button.disabled, false);
     assert.equal(display.focused, false);
@@ -61,27 +62,24 @@ test("copy preserves literal displayed wikitext and announces completion", async
 });
 
 test("missing or rejected clipboard selects source text for manual copying", async () => {
-    for (const editUrl of [undefined, "https://zh.wikipedia.org/wiki/WikiProject:电子游戏/简讯/29?action=edit"]) {
-        for (const clipboard of [undefined, {writeText: async () => { throw new Error("Denied"); }}]) {
-            const {button, source, display, selection, status, navigated} = fixture(clipboard, editUrl);
-            await button.click();
-            assert.equal(display.focused, true);
-            assert.equal(selection.source, source);
-            assert.equal(status.textContent, "Select and copy manually");
-            assert.equal(button.disabled, false);
-            assert.deepEqual(navigated, []);
-        }
+    for (const clipboard of [undefined, {writeText: async () => { throw new Error("Denied"); }}]) {
+        const {button, source, display, selection, status, navigated} = fixture(clipboard);
+        await button.click();
+        assert.equal(display.focused, true);
+        assert.equal(selection.source, source);
+        assert.equal(status.textContent, "Select and copy manually");
+        assert.equal(button.disabled, false);
+        assert.deepEqual(navigated, []);
     }
 });
 
-test("copy and open waits for literal clipboard content before navigating to the editor", async () => {
-    const editUrl = "https://zh.wikipedia.org/wiki/WikiProject:%E7%94%B5%E5%AD%90%E6%B8%B8%E6%88%8F/%E7%AE%80%E8%AE%AF/29?action=edit";
+test("copy waits for its clipboard write without navigating", async () => {
     let finishCopy;
     let copied;
     const view = fixture({writeText: value => {
         copied = value;
         return new Promise(resolve => { finishCopy = resolve; });
-    }}, editUrl);
+    }});
     view.source.textContent = "{{模板|中文}}\n[[Target]]\n<source>";
     const complete = view.button.click();
     assert.equal(copied, view.source.textContent);
@@ -89,8 +87,7 @@ test("copy and open waits for literal clipboard content before navigating to the
     assert.deepEqual(view.navigated, []);
     finishCopy();
     await complete;
-    assert.deepEqual(view.navigated, [editUrl]);
-    assert.equal(new URL(view.navigated[0]).searchParams.get("action"), "edit");
+    assert.deepEqual(view.navigated, []);
     assert.equal(view.status.textContent, "Copied");
     assert.equal(view.button.disabled, false);
 });

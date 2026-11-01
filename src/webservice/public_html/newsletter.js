@@ -14,7 +14,6 @@ function initializeNewsletterResult(root = document) {
                 if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
                 await navigator.clipboard.writeText(source.textContent);
                 status.textContent = button.dataset.copySuccess;
-                if (button.dataset.newsletterEdit) location.assign(button.dataset.newsletterEdit);
             } catch {
                 source.parentElement.focus();
                 const range = document.createRange();

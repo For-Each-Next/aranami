@@ -1580,14 +1580,14 @@
     "zh-hant": "維基代碼"
   },
   "newsletter.copy": {
-    "en": "Copy code",
-    "zh-hans": "复制代码",
-    "zh-hant": "複製代碼"
+    "en": "Copy",
+    "zh-hans": "复制",
+    "zh-hant": "複製"
   },
-  "newsletter.copy_and_edit": {
-    "en": "Copy and open newsletter page",
-    "zh-hans": "复制并前往简讯页",
-    "zh-hant": "複製並前往簡訊頁"
+  "newsletter.go_to_wiki": {
+    "en": "Go to wiki page",
+    "zh-hans": "前往维基页面",
+    "zh-hant": "前往維基頁面"
   },
   "newsletter.edit_summary": {
     "en": "Updated through {date}",

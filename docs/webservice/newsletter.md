@@ -20,11 +20,14 @@ October–December 2026 in its regular pages and all of 2026 in its annual featu
 All pages use the current newsletter banner. Feature and interview prose stays
 editorial work; the generator never copies a previous author's article.
 
-Use **Copy code** or **Copy and open newsletter page**, then review and preview
-the wikitext before saving it on Wikipedia. Code blocks also support native
-selection and copying. The annual feature includes two buttons for editors to
-add personal comments, using the newsletter's reflection preload. Introduction
-and data sections have no invitation buttons. Personal prose remains blank.
+Use **Copy** to copy the draft, and **Go to wiki page** to open its destination.
+The navigation link never writes the clipboard and works without JavaScript.
+Review and preview the wikitext before saving it on Wikipedia. Code blocks
+also support native selection and copying. The annual feature includes two
+blue primary buttons for editors to add comments, using the newsletter's
+reflection preload. Introduction and data sections have no invitation
+buttons. Personal prose remains blank. Website buttons, the date input and
+the issue selector use the same 32-pixel Codex medium height.
 
 Use **Data date** to select a retained daily draft. For example, `2026-10-30`
 means data through October 30, normally captured after October 31's update.
@@ -63,8 +66,9 @@ share a rank cell; subsequent ranks include all tied editors. Quality and DYK
 groups follow listing dates. Editor lists group FA/FL together, then A/AL,
 GA, and Bplus, with dates and title ties within each grade.
 Each dated article ends with an invisible MMDD comment such as `<!-- 0904 -->`
-to help edit the copied draft. Quarterly quality and homepage lists use the
-same markers. Unknown first appearance dates have no marker.
+to help edit the copied draft. Quarterly quality lists use the same markers.
+Announcement homepage lists keep visible dates without these comments.
+Unknown first appearance dates have no marker.
 
 Game works in the DYK list use five release-year groups: 2009 and earlier,
 2010–2019, 2020 through the year before the reviewed year, the reviewed year,
@@ -94,17 +98,26 @@ promotions, DYK, article totals and growth, popularity, revisions, and awards.
 It uses `Graph:Chart` for annual quality recognitions, cumulative DYK totals, and
 assessment pies for the reviewed year and its predecessor. Charts have no
 companion data tables. Each assessment legend includes the grade and count,
-such as `典范级：25`, in regular weight; duplicate numeric slice labels are
-disabled. Historical series
+such as `典范级：25`, in regular weight. Grades representing at least 5% show
+their share to one decimal inside the pie, in regular black text. Smaller
+slices have no percentage label. Legends contain only grades and counts.
+Each pie is at most 400 pixels wide including its legend and padding.
+On narrow screens, each chart scrolls inside its own container.
+Historical series
 come from the reference images' description pages, with provenance retained
 by collection. Current observations extend the supported series; missing
 current values never become chart zeroes.
 
-The annual recognition chart counts recorded additions across FA, FL, A, AL,
-GA, and Bplus, including articles later delisted or demoted. Its layers rise
-from FA+FL through A+AL and Bplus to GA; the A layer disappears when all its
-values are zero. Each bar shows one yearly sum. Hover or focus a bar to inspect
-all six grade counts and their total. Unknown event dates do not receive an
+The annual recognition chart selects articles with a promotion during each
+year and counts each once under its grade at that year's end or the current
+observation cutoff. Thus an article promoted from A to FA in the same year
+appears only in FA. Later delisting or demotion does not change earlier years.
+Its layers rise
+from FA+FL through A+AL and GA to Bplus; the A layer disappears when all its
+values are zero. The chart retains native `Graph:Chart` parameters and native
+hover details without expanded SVG. The legend follows the layer order, and
+x-axis labels contain only years. Narrow screens scroll within the container.
+Unknown event dates do not receive an
 inferred year, and missing historical observations produce no chart.
 
 Current-year DYK points use completed quarter ends such as March 31, June 30,

@@ -654,7 +654,16 @@ class NewsletterDataTests(unittest.TestCase):
         """Retain additions and removals even within the same month."""
         reader = Reader()
 
-        reader.history = Mock(side_effect=AssertionError("List history read"))
+        def history(title: str, *_args: object) -> list:
+            """Allow HOT history and reject quality-list history reads.
+
+            Returns:
+                Empty HOT observations for this quality-only fixture.
+            """
+            assert title == "WikiProject:电子游戏/热门条目"
+            return []
+
+        reader.history = Mock(side_effect=history)
         events = pl.DataFrame(
             [
                 ("New", "quality", "GA", "added", dt.date(2026, 10, 5), 11),
@@ -675,7 +684,7 @@ class NewsletterDataTests(unittest.TestCase):
             now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
             article_history=events,
         )["issues"]["2027-01"]
-        reader.history.assert_not_called()
+        reader.history.assert_called()
         changes = facts["quality_changes"]
         assert len(changes) == 2
         assert {
