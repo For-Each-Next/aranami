@@ -1,9 +1,23 @@
 "use strict";
 
+// Native field sizing follows wrapped text; rows keep older browsers usable.
+function sizeNewsletterText(source: HTMLTextAreaElement): void {
+    if (globalThis.CSS?.supports("field-sizing", "content") || !source.closest("details")?.open) return;
+    source.rows = 1;
+    const style = getComputedStyle(source);
+    const lineHeight = parseFloat(style.lineHeight);
+    const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    source.rows = Math.max(4, Math.ceil((source.scrollHeight - padding) / lineHeight));
+}
+
 // Enhance each newly displayed draft without changing its literal source text.
 function initializeNewsletterResult(root: ParentNode = document): void {
+    for (const source of root.querySelectorAll<HTMLTextAreaElement>("[data-newsletter-wikitext]")) {
+        source.closest("details")?.addEventListener("toggle", () => sizeNewsletterText(source));
+        sizeNewsletterText(source);
+    }
     for (const button of root.querySelectorAll<HTMLButtonElement>("[data-newsletter-copy]")) {
-        const source = document.getElementById(button.dataset.newsletterCopy!);
+        const source = document.getElementById(button.dataset.newsletterCopy!) as HTMLTextAreaElement | null;
         const controls = button.closest?.(".newsletter-copy-controls") ?? button.parentElement;
         const status = controls?.querySelector<HTMLElement>("[data-newsletter-status]");
         if (!source || !status) continue;
@@ -12,15 +26,14 @@ function initializeNewsletterResult(root: ParentNode = document): void {
             button.disabled = true;
             try {
                 if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-                await navigator.clipboard.writeText(source.textContent!);
+                await navigator.clipboard.writeText(source.value);
                 status.textContent = button.dataset.copySuccess!;
             } catch {
-                source.parentElement!.focus();
-                const range = document.createRange();
-                range.selectNodeContents(source);
-                const selection = document.getSelection();
-                selection?.removeAllRanges();
-                selection?.addRange(range);
+                const accordion = source.closest("details");
+                if (accordion) accordion.open = true;
+                sizeNewsletterText(source);
+                source.focus();
+                source.select();
                 status.textContent = button.dataset.copyFailure!;
             } finally {
                 button.disabled = false;
@@ -100,3 +113,8 @@ function initializeIssueForm(): void {
 
 initializeNewsletterResult();
 initializeIssueForm();
+globalThis.addEventListener("resize", () => {
+    for (const source of document.querySelectorAll<HTMLTextAreaElement>("[data-newsletter-wikitext]")) {
+        sizeNewsletterText(source);
+    }
+});

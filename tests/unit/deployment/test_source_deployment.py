@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import ast
+import gzip
 import hashlib
 import importlib.util
 import io
@@ -21,6 +22,8 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 from unittest import TestCase
 from unittest.mock import patch
+
+from shared import deployment
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -117,6 +120,30 @@ def _fixture(root: Path, payload: dict[str, bytes]) -> None:
         path.write_bytes(content)
 
 
+def _development_fixture(root: Path, payload: dict[str, bytes]) -> None:
+    """Copy authored build inputs and a verified disposable web tree."""
+    receipt = json.loads((_ROOT / "dist/webservice/build.json").read_bytes())
+    files = {
+        name: data
+        for name, data in payload.items()
+        if not name.startswith((
+            "src/webservice/public_html/",
+            "src/webservice/templates/",
+        ))
+    }
+    files.update({
+        name: (_ROOT / name).read_bytes() for name in receipt["inputs"]
+    })
+    files.update({
+        f"dist/webservice/{name}": (
+            _ROOT / "dist/webservice" / name
+        ).read_bytes()
+        for name in receipt["outputs"]
+    })
+    files["dist/webservice/build.json"] = json.dumps(receipt).encode()
+    _fixture(root, files)
+
+
 def _archive_contents(content: bytes) -> dict[str, bytes]:
     """Read exact bytes from regular-file archive members.
 
@@ -126,7 +153,10 @@ def _archive_contents(content: bytes) -> dict[str, bytes]:
     Returns:
         Exact member filenames and bytes.
     """
-    with tarfile.open(fileobj=io.BytesIO(content)) as archive:
+    with tarfile.open(
+        fileobj=io.BytesIO(gzip.decompress(content)),
+        mode="r:",
+    ) as archive:
         result = {}
         for member in archive.getmembers():
             assert member.isfile()
@@ -416,7 +446,7 @@ class TestSourcePayload(TestCase):
     def test_dry_run_never_resolves_or_starts_ssh(self) -> None:
         """Inspect an archive without remote access."""
         with TemporaryDirectory() as directory:
-            archive = Path(directory) / "source.tar"
+            archive = Path(directory) / "source.tar.gz"
             with (
                 patch.object(
                     sys,
@@ -441,6 +471,24 @@ class TestSourcePayload(TestCase):
             which.assert_not_called()
             remote.assert_not_called()
             assert _archive_contents(archive.read_bytes()) == self.payload
+
+    def test_compressed_archive_is_reproducible_and_extractable(self) -> None:
+        """Keep archive bytes stable and preserve extracted payloads."""
+        with TemporaryDirectory() as directory:
+            first = Path(directory) / "first.tar.gz"
+            second = Path(directory) / "second.tar.gz"
+            for path in (first, second):
+                with path.open("wb") as stream:
+                    self.uploader.write_archive(stream, self.payload)
+            compressed = first.read_bytes()
+            assert compressed == second.read_bytes()
+            assert compressed[:8] == b"\x1f\x8b\x08\x00\x00\x00\x00\x00"
+            assert len(compressed) < len(gzip.decompress(compressed))
+            extracted = Path(directory) / "source"
+            with tarfile.open(first, mode="r:gz") as archive:
+                archive.extractall(extracted, filter="data")
+            assert self.uploader.source_payload(extracted) == self.payload
+            _validator().verify(extracted)
 
     def test_fake_ssh_receives_only_the_exact_staged_archive(self) -> None:
         """Stage exact source bytes through a fake SSH process."""
@@ -486,12 +534,138 @@ class TestSourcePayload(TestCase):
                     "mkdir /data/project/aranami/app-staging-" in arguments[-1]
                 )
                 assert "deploy-source.sh" not in arguments[-1]
+                assert "tar --no-same-owner -xzf - -C" in arguments[-1]
                 assert check is True
                 assert _archive_contents(stdin.read()) == self.payload
 
             remote.side_effect = capture
             self.uploader.main()
         remote.assert_called_once()
+
+
+class TestWebBuildPayload(TestCase):
+    """Require current builds and preserve the deployed source tree."""
+
+    def setUp(self) -> None:
+        """Prepare one reviewed payload and an isolated checkout."""
+        self.uploader = _uploader()
+        self.payload = self.uploader.source_payload()
+        self.root = Path(self.enterContext(TemporaryDirectory())).resolve()
+        _development_fixture(self.root, self.payload)
+
+    def test_build_maps_to_runtime_paths_without_build_dependencies(
+        self,
+    ) -> None:
+        """Upload checked outputs while keeping source paths stable."""
+        assert self.uploader.source_payload(self.root) == self.payload
+        assert not any(name.startswith("dist/") for name in self.payload)
+        assert "package.json" not in self.payload
+        assert not any(name.startswith("frontend/") for name in self.payload)
+        assert not (self.root / "src/webservice/public_html/live.js").exists()
+
+    def test_missing_receipt_and_stale_inputs_are_rejected(self) -> None:
+        """Require new build evidence after authored sources change."""
+        receipt = self.root / "dist/webservice/build.json"
+        original = receipt.read_bytes()
+        receipt.unlink()
+        with self.assertRaisesRegex(ValueError, "Missing regular"):
+            self.uploader.source_payload(self.root)
+        receipt.write_bytes(original)
+        source = self.root / "frontend/live.ts"
+        source.write_text(source.read_text() + "\n// Changed input.\n")
+        with self.assertRaisesRegex(ValueError, "Stale web build"):
+            self.uploader.source_payload(self.root)
+
+    def test_changed_missing_and_unreviewed_outputs_are_rejected(self) -> None:
+        """Check content, completeness, and review independently."""
+        script = self.root / "dist/webservice/public_html/live.js"
+        original = script.read_bytes()
+        script.write_bytes(original + b"\n// Changed output.\n")
+        with self.assertRaisesRegex(ValueError, "Stale web build"):
+            self.uploader.source_payload(self.root)
+        script.unlink()
+        with self.assertRaisesRegex(ValueError, "inventory changed"):
+            self.uploader.source_payload(self.root)
+        script.write_bytes(original)
+        extra = self.root / "dist/webservice/public_html/unreviewed.js"
+        extra.write_bytes(b"'unreviewed';")
+        receipt_path = self.root / "dist/webservice/build.json"
+        receipt = json.loads(receipt_path.read_bytes())
+        receipt["outputs"]["public_html/unreviewed.js"] = hashlib.sha256(
+            extra.read_bytes(),
+        ).hexdigest()
+        receipt_path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(ValueError, "reviewed payload"):
+            self.uploader.source_payload(self.root)
+
+    def test_omitted_inputs_and_linked_build_ancestors_are_rejected(
+        self,
+    ) -> None:
+        """Reject incomplete receipts and linked output directories."""
+        receipt_path = self.root / "dist/webservice/build.json"
+        original = receipt_path.read_bytes()
+        receipt = json.loads(original)
+        del receipt["inputs"]["frontend/live.ts"]
+        receipt_path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(ValueError, "inventory changed"):
+            self.uploader.source_payload(self.root)
+        receipt_path.write_bytes(original)
+        build = self.root / "dist"
+        build.rename(self.root / "linked-build")
+        build.symlink_to(self.root / "linked-build", target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "symlinks"):
+            self.uploader.source_payload(self.root)
+
+    def test_resource_resolution_never_uses_partial_authored_tree(
+        self,
+    ) -> None:
+        """Select dist locally and package resources in deployments."""
+        with patch.object(
+            deployment,
+            "__file__",
+            str(self.root / "src/shared/deployment.py"),
+        ):
+            assert deployment.resource_root("webservice") == (
+                self.root / "dist/webservice"
+            )
+            (self.root / "dist").rename(self.root / "missing-dist")
+            assert not deployment.resource_root("webservice").exists()
+            (self.root / "package.json").unlink()
+            assert deployment.resource_root("webservice") == (
+                self.root / "src/webservice"
+            )
+
+    def test_deployed_pages_render_without_node_or_dist(self) -> None:
+        """Load the archive using only its pinned Python runtime."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            _fixture(root, self.payload)
+            code = (
+                "from shared.deployment import resource_root; "
+                "from webservice.pages import render_about; "
+                "assert resource_root('webservice').name == 'webservice'; "
+                "assert '/styles.css?v=' in render_about(None, 'en')"
+            )
+            result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [
+                    sys.executable,
+                    "-c",
+                    code,
+                ],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "PYTHONPATH": str(root / "src"),
+                    "PYWIKIBOT_NO_USER_CONFIG": "2",
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, result.stderr
+            assert not (root / "dist").exists()
+            assert not (root / "node_modules").exists()
 
 
 class TestSourceImports(TestCase):

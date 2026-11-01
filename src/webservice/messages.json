@@ -400,7 +400,7 @@
     "zh-hant": "熱門條目"
   },
   "pageviews.views": {
-    "en": "Daily views: {count}",
+    "en": "Pageviews: {count}",
     "zh-hans": "日浏览{count}次",
     "zh-hant": "日瀏覽{count}次"
   },
@@ -435,9 +435,9 @@
     "zh-hant": "狀態"
   },
   "pageviews.site_rank": {
-    "en": "{date} · Site-wide rank: {rank}",
-    "zh-hans": "{date}全站第{rank}名",
-    "zh-hant": "{date}全站第{rank}名"
+    "en": "Site-wide rank: {rank}",
+    "zh-hans": "全站第{rank}名",
+    "zh-hant": "全站第{rank}名"
   },
   "pageviews.unavailable": {
     "en": "Daily pageview data is temporarily unavailable.",
@@ -1408,6 +1408,11 @@
     "en": "Source collection for this issue has not completed yet. The next issue is collected automatically; generated wikitext appears here when data is ready.",
     "zh-hans": "本期来源数据尚未完成获取。系统会自动获取下一期数据，完成后在此显示生成的维基代码。",
     "zh-hant": "本期來源資料尚未完成取得。系統會自動取得下一期資料，完成後在此顯示產生的維基代碼。"
+  },
+  "newsletter.wikitext": {
+    "en": "Wikitext",
+    "zh-hans": "维基文本",
+    "zh-hant": "維基文字"
   },
   "newsletter.copy": {
     "en": "Copy",

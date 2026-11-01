@@ -13,7 +13,7 @@ const { once } = require("node:events");
 
 const fixtureRoot = path.resolve(process.argv[2]);
 const outputRoot = path.resolve(process.argv[3]);
-const assetRoot = path.resolve(__dirname, "../../src/webservice/public_html");
+const assetRoot = path.resolve(__dirname, "../../dist/webservice/public_html");
 const chromium = process.env.ARANAMI_CHROMIUM || "/Applications/Chromium.app/Contents/MacOS/Chromium";
 const widths = [320, 390, 600, 601, 639, 640, 641, 768, 943, 944, 1120, 1440, 1680, 1920];
 const locales = ["en", "zh-hans", "zh-hant"];
@@ -126,6 +126,8 @@ async function main() {
         await call("Page.addScriptToEvaluateOnNewDocument", {source: `
             window.aranamiStartupErrors = [];
             addEventListener('error', event => window.aranamiStartupErrors.push(event.message));
+            window.aranamiCspViolations = [];
+            addEventListener('securitypolicyviolation', event => window.aranamiCspViolations.push({directive: event.effectiveDirective, blocked: event.blockedURI}));
         `}, sessionId);
         const evaluate = async expression => {
             const result = await call("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
@@ -142,7 +144,47 @@ async function main() {
             await call("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: virtual, modifiers, ...(key === "Enter" ? { text: "\r" } : {}) }, sessionId);
             await call("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: virtual, modifiers }, sessionId);
         };
+        let accordionForcedColorsChecked = false;
+        const checkAccordionChevron = async () => {
+            const icon = await evaluate(`(() => {
+                const accordion = document.querySelector('details.cdx-accordion');
+                const summary = accordion.querySelector('summary');
+                const opened = accordion.open;
+                const initial = getComputedStyle(summary, '::before').transform;
+                accordion.open = !opened;
+                getComputedStyle(summary, '::before').transform;
+                for (const animation of summary.getAnimations({subtree: true})) animation.finish();
+                const style = getComputedStyle(summary, '::before');
+                const value = {asset: style.maskImage !== 'none' ? style.maskImage : style.backgroundImage,
+                    visible: parseFloat(style.width) > 0 && parseFloat(style.height) > 0,
+                    rotates: style.transform !== initial};
+                accordion.open = opened;
+                getComputedStyle(summary, '::before').transform;
+                for (const animation of summary.getAnimations({subtree: true})) animation.finish();
+                return value;
+            })()`);
+            assert.match(icon.asset, /\/codex-select\.svg["')]/, 'Accordion chevron must use the local SVG');
+            assert.equal(icon.asset.includes('data:'), false, 'Accordion chevron must obey image CSP');
+            assert.ok(icon.visible && icon.rotates, 'Accordion chevron must remain visible and rotate on expansion');
+            if (!accordionForcedColorsChecked) {
+                await call('Emulation.setEmulatedMedia', {features: [{name: 'forced-colors', value: 'active'}]}, sessionId);
+                try {
+                    const forced = await evaluate(`(() => {
+                        const style = getComputedStyle(document.querySelector('details.cdx-accordion > summary'), '::before');
+                        return {asset: style.maskImage, color: style.backgroundColor, adjustment: style.forcedColorAdjust};
+                    })()`);
+                    assert.match(forced.asset, /\/codex-select\.svg["')]/);
+                    assert.notEqual(forced.color, 'rgba(0, 0, 0, 0)', 'Forced-color chevron must retain its system foreground');
+                    assert.equal(forced.adjustment, 'none');
+                    accordionForcedColorsChecked = true;
+                } finally {
+                    await call('Emulation.setEmulatedMedia', {features: []}, sessionId);
+                }
+            }
+        };
         const checkSemantics = async () => {
+            assert.deepEqual(await evaluate('window.aranamiCspViolations || []'), [], 'page violated its content security policy');
+            if (await evaluate("Boolean(document.querySelector('details.cdx-accordion'))")) await checkAccordionChevron();
             const document = await evaluate(`(() => ({
                 main: document.querySelectorAll('main#main').length,
                 titles: document.querySelectorAll('h1').length,
@@ -291,13 +333,32 @@ async function main() {
             assert.ok(controls.heights.length >= 4 && controls.heights.every(control => Math.abs(control.height - controls.expected) < 1), `newsletter controls must share the Codex medium height: ${JSON.stringify(controls)}`);
         };
         const checkNewsletterKeyboardActions = async () => {
-            await evaluate("document.querySelector('.newsletter-text').focus()");
+            await evaluate("document.querySelector('.newsletter-code').open = true; document.querySelector('[data-newsletter-wikitext]').focus()");
             await press("Tab", 9);
             assert.equal(await evaluate("document.activeElement.matches('[data-newsletter-copy]:focus-visible')"), true, "Copy must be reachable with visible keyboard focus");
             await press("Tab", 9);
             assert.equal(await evaluate("document.activeElement.matches('.newsletter-copy-controls a:first-of-type:focus-visible')"), true, "View newsletter page must be reachable with visible keyboard focus");
             await press("Tab", 9);
             assert.equal(await evaluate("document.activeElement.matches('.newsletter-copy-controls a:nth-of-type(2):focus-visible')"), true, "Edit newsletter page must be reachable with visible keyboard focus");
+        };
+        const checkNewsletterAccordion = async () => {
+            const result = await evaluate(`(() => {
+                const draft = document.querySelector('[data-newsletter-wikitext]');
+                const accordion = draft.closest('details');
+                const expected = '\\n{{模板|標題}}\\n' + '長條目名稱'.repeat(100) + '\\n</textarea><script>literal</script>\\n';
+                const closed = !accordion.open;
+                accordion.querySelector('summary').click();
+                const identifiers = [...document.querySelectorAll('[id]')].map(element => element.id);
+                return {closed, opened: accordion.open, literal: draft.value === expected,
+                    readonly: draft.readOnly, native: draft.tagName === 'TEXTAREA',
+                    visible: draft.getBoundingClientRect().height > 0,
+                    fits: draft.scrollHeight <= draft.clientHeight + 1,
+                    safe: draft.children.length === 0 && ![...document.scripts].some(script => script.textContent === 'literal'),
+                    unique: new Set(identifiers).size === identifiers.length};
+            })()`);
+            assert.ok(result.closed && result.opened && result.visible, `native newsletter disclosure failed: ${JSON.stringify(result)}`);
+            assert.ok(result.literal && result.readonly && result.native && result.safe && result.unique, `newsletter source semantics failed: ${JSON.stringify(result)}`);
+            assert.equal(result.fits, true, 'expanded newsletter textarea should autosize to wrapped source');
         };
         const initialControls = `(() => [...document.querySelectorAll('button, input:not([type=hidden]), select, summary, a.cdx-button, .brand img, main h1, .newsletter-text')].map(element => {
             const style = getComputedStyle(element);
@@ -441,6 +502,7 @@ async function main() {
                 }
                 if (surface === "newsletter") {
                     await checkNewsletterControlHeights();
+                    await checkNewsletterAccordion();
                     const calendar = await evaluate(`(() => {
                         const input = document.querySelector('#newsletter-data-date');
                         const box = input.getBoundingClientRect();
@@ -487,11 +549,14 @@ async function main() {
                                 select.value = other.value;
                                 select.dispatchEvent(new Event('change', {bubbles: true}));
                                 const deadline = performance.now() + 5000;
-                                while (!document.querySelector('[data-newsletter-wikitext]')?.textContent.startsWith('Fetched issue ')) {
+                                while (!document.querySelector('[data-newsletter-wikitext]')?.value.startsWith('Fetched issue ')) {
                                     if (performance.now() > deadline) throw new Error('Issue selection did not replace draft content');
                                     await new Promise(resolve => requestAnimationFrame(resolve));
                                 }
                                 const draft = document.querySelector('[data-newsletter-wikitext]');
+                                const accordion = draft.closest('details');
+                                accordion.open = true;
+                                await new Promise(resolve => requestAnimationFrame(resolve));
                                 const copy = document.querySelector('[data-newsletter-copy]');
                                 const [view, edit] = document.querySelector('.newsletter-copy-controls').querySelectorAll('a');
                                 copy.click();
@@ -503,7 +568,8 @@ async function main() {
                                     readOnly: request.method === 'GET', noDate: !requested.searchParams.has('date'),
                                     submitHidden: form.querySelector('button[type=submit]').hidden,
                                     calendarReady: document.querySelector('#newsletter-data-date').type === 'date' && !document.querySelector('#newsletter-data-date').hidden,
-                                    copyReady: !copy.hidden && copied === draft.textContent && writes === 1,
+                                    copyReady: !copy.hidden && copied === draft.value && writes === 1,
+                                    autosized: draft.scrollHeight <= draft.clientHeight + 1,
                                     wikiReady: [view, edit].every(link => link && !link.hidden && !link.hasAttribute('data-newsletter-copy') && new URL(link.href).origin === 'https://zh.wikipedia.org') && !new URL(view.href).search && new URL(edit.href).searchParams.get('action') === 'edit' && new URL(edit.href).searchParams.get('summary').startsWith('[[toolforge:aranami/newsletter/|'),
                                     buttonWeights: copy.classList.contains('cdx-button--weight-normal') && view?.classList.contains('cdx-button--weight-normal') && edit?.classList.contains('cdx-button--weight-primary'),
                                     noDestination: !document.querySelector('.newsletter-destination'),
@@ -520,6 +586,7 @@ async function main() {
                         assert.ok(switched.readOnly && switched.noDate, "issue selection needs a fresh read-only date scope");
                         assert.equal(switched.submitHidden, false, "issue update hid the submit button");
                         assert.ok(switched.calendarReady && switched.copyReady, "replacement draft controls were not initialized");
+                        assert.equal(switched.autosized, true, "replacement draft should autosize after expansion");
                         assert.ok(switched.wikiReady && switched.buttonWeights, "replacement drafts need independent Copy, View, and Edit actions");
                         assert.equal(switched.noDestination, true, "standalone newsletter destination should be removed");
                         assert.equal(switched.plainText, true, "draft text should not contain syntax highlighting spans");
@@ -732,6 +799,7 @@ async function main() {
                 }
                 if (surface === "newsletter") {
                     await checkNewsletterControlHeights();
+                    await checkNewsletterAccordion();
                     if ([320, 640, 1440].includes(width)) await checkNewsletterKeyboardActions(false);
                     assert.equal(await evaluate(`(() => {
                         return [...document.querySelectorAll('.newsletter-copy-controls')].every(controls => {

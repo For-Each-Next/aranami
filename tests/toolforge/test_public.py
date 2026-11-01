@@ -351,12 +351,12 @@ class PublicWebsiteTests(unittest.TestCase):
                         assert b'id="server-runtime"' not in body
                         assert b'href="#live-server-status"' not in body
                         assert b'id="live-uptime"' in body
-                        assert b'class="routine-row"' not in body
+                        assert b'id="routine-' not in body
                         assert b'id="recent-events"' not in body
                     if target == "/reports/":
                         assert b'id="tool-status"' in body
                         assert b'id="recent-events"' in body
-                        assert b'class="routine-row"' in body
+                        assert b'id="routine-' in body
                         assert b'id="live-server-status"' not in body
                     assert b"Enable JavaScript" not in body
             head = self.request("/", "HEAD")

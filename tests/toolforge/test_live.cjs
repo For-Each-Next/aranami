@@ -6,7 +6,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(
-    path.join(__dirname, "../../src/webservice/public_html/live.js"), "utf8",
+    path.join(__dirname, "../../dist/webservice/public_html/live.js"), "utf8",
 );
 const messages = {
     "duration.seconds": "{seconds} sec",
@@ -133,6 +133,15 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
             "data-progress-fallback": "Running",
         }),
     }, completed ? "No update" : subject);
+    const statusSymbol = new Element("use", {
+        id: "status-symbol", href: `/report-icons.svg#status-${completed ? "success" : "running"}`,
+    });
+    const statusIcon = new Element("svg", {
+        id: "status-icon", class: "status-icon", "aria-hidden": "true", focusable: "false",
+    }, "", [statusSymbol]);
+    const statusLine = new Element("P", {
+        id: "status-line", class: "routine-status", "data-status": completed ? "no_update" : "running",
+    }, "", [statusIcon, statusLabel, button]);
     const clock = new Element("SPAN", {
         id: "elapsed",
         ...(completed ? {} : {
@@ -162,7 +171,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
     const root = new Element("SECTION", {
         id: logs ? "live-server-status" : "tool-status", ...clockAttributes,
     }, "", logs ? [server, notice] : [
-        statusLabel, button, clock, popup, schedule, notice, ...(completed ? [] : [progress]),
+        statusLine, clock, popup, schedule, notice, ...(completed ? [] : [progress]),
     ]);
     const uptime = new Element("SPAN", {
         ...clockAttributes,
@@ -185,7 +194,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
             return this.roots.map(search).find(Boolean) ?? null;
         },
     };
-    return { document, button, statusLabel, clock, popup, relative, schedule, server, progress, notice, root, uptime, runtime, memory };
+    return { document, button, statusLabel, statusLine, statusIcon, statusSymbol, clock, popup, relative, schedule, server, progress, notice, root, uptime, runtime, memory };
 }
 
 function browser(logs = false, resources = false, options = {}) {
@@ -474,6 +483,8 @@ test("synchronization keeps existing modal dialogs and freezes completed timers"
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.document.getElementById("status-button"), page.button);
     assert.equal(page.statusLabel.textContent, "No update");
+    assert.equal(page.statusLine.getAttribute("data-status"), "no_update");
+    assert.equal(page.statusSymbol.getAttribute("href"), "/report-icons.svg#status-success");
     assert.equal(page.button.textContent, "Details…");
     assert.equal(page.statusLabel.hasAttribute("data-progress-label"), false);
     assert.equal(page.statusLabel.hasAttribute("data-progress-fallback"), false);
@@ -483,6 +494,31 @@ test("synchronization keeps existing modal dialogs and freezes completed timers"
     page.jump(3000);
     assert.equal(page.clock.textContent, completed);
     assert.equal(page.statusLabel.textContent, "No update");
+});
+
+test("status icons follow live outcomes without replacing labels or open dialogs", async () => {
+    const page = browser();
+    page.popup.open = true;
+    page.document.activeElement = page.button;
+    for (const [index, [state, icon]] of [
+        ["failed", "failed"], ["queued", "queued"], ["deferred", "warning"],
+        ["unconfirmed", "warning"], ["unknown", "unknown"], ["updated", "success"],
+    ].entries()) {
+        const next = fixture(index * 5000, true);
+        next.statusLine.setAttribute("data-status", state);
+        next.statusLabel.textContent = state;
+        next.statusSymbol.setAttribute("href", `/report-icons.svg#status-${icon}`);
+        await page.respond(next);
+        assert.equal(page.statusLine.getAttribute("data-status"), state);
+        assert.equal(page.statusSymbol.getAttribute("href"), `/report-icons.svg#status-${icon}`);
+        assert.equal(page.statusLabel.textContent, state);
+        assert.equal(page.document.getElementById("status-icon"), page.statusIcon);
+        assert.equal(page.document.getElementById("status-label"), page.statusLabel);
+        assert.equal(page.statusIcon.getAttribute("aria-hidden"), "true");
+        assert.equal(page.document.activeElement, page.button);
+        assert.equal(page.popup.open, true);
+        page.jump(5000);
+    }
 });
 
 test("subject labels and phase counts synchronize without replacing buttons", async () => {

@@ -40,12 +40,15 @@ schedule/target definition. See [ownership contracts](architecture.md#runtime-an
 
 ## Implement and test a change
 
-Edit browser behavior in `frontend/*.ts`, then run `npm run build:web` to
-compile the scripts, bundle Vue/Codex controls, and copy the pinned stylesheet into
-`src/webservice/public_html/`. Commit the generated assets alongside their
-sources. `npm run check:web` type-checks and verifies their exact contents;
-CI runs it before the browser tests. Node.js 24 or later is needed only for
-development. Toolforge serves the prepared assets from its Python runtime.
+Edit browser behavior and Vue components under `frontend/`, with authored
+assets and page templates under `src/webservice/`. Run `npm run build:web`
+before Python or browser presentation tests. It assembles the complete
+website in ignored `dist/webservice/`, including compiled scripts, Codex CSS,
+generated component templates, and a source/output hash receipt. Commit the
+authored inputs; generated output stays outside Git.
+`npm run check:web` type-checks and reproduces the build to verify its exact
+contents. CI builds before validation. Node.js 24 or later is needed only
+for development; Toolforge serves the prepared files from Python.
 See [Frontend components](webservice/frontend.md) for component ownership and
 the native form, dialog, and live-refresh contracts.
 
@@ -74,11 +77,12 @@ preserve read-only routes, security headers, bounds, and disabled debugging.
 Before handing off a material change, run the relevant suites and full checks:
 
 ```shell
+npm run build:web
+npm run check:web
 PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s tests/unit
 PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s tests/integration
 PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s tests/toolforge -p 'test_*.py'
 uv lock --check
-npm run check:web
 uv run ruff check --no-fix .
 uv run ruff format --check .
 uv run python scripts/upload_toolforge.py --dry-run
@@ -152,7 +156,8 @@ enabling publication; keep temporary paste/rendering artifacts outside this
 repository. Python tests verify the [Pageviews contract](architecture.md#pageviews).
 
 Uploader dry runs validate the exact payload without contacting Toolforge.
-`--archive <new-file.tar>` retains it at a previously nonexistent path; this
+`--archive <new-file.tar.gz>` retains the reproducible gzip-compressed tar
+at a previously nonexistent path; this
 does not authorize deployment. Follow [Administration](administration.md) for
 promotion/recovery and [AGENTS.md](../AGENTS.md) for version and changelog rules.
 

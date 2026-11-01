@@ -46,7 +46,7 @@ from backend.support.public_data import (
     saved_status,
 )
 from shared.config import routine_configuration
-from shared.deployment import project_version
+from shared.deployment import project_version, resource_root
 from shared.newsletter import Issue
 from shared.support.files import open_regular, read_json_object
 lazy from backend.newsletter.archive import (
@@ -66,7 +66,7 @@ if TYPE_CHECKING:
 
     from starlette.types import ASGIApp, Receive, Scope, Send
 
-_ASSETS = Path(__file__).resolve().parents[1] / "webservice" / "public_html"
+_ASSETS = resource_root("webservice") / "public_html"
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_QUERY_BYTES = 4096
 _MAX_HEADER_BYTES = 64 * 1024

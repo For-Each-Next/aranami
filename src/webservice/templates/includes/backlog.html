@@ -6,9 +6,9 @@
     {% for section in backlog.sections %}
     <section class="section-flat backlog-section" aria-labelledby="backlog-section-{{ section.key }}">
       <h2 id="backlog-section-{{ section.key }}">{{ section.label }}</h2>
-      <ul class="card-grid" role="list">
+      <ul class="card-grid backlog-cards" role="list">
         {% for task in section.tasks %}
-        <li><a href="{{ task.url }}" class="backlog-task cdx-card cdx-card--is-link"><span class="cdx-card__text"><span class="backlog-label cdx-card__text__title">{{ task.label }}</span><span class="backlog-count cdx-card__text__supporting-text">{{ task.count }}</span></span></a></li>
+        <li class="backlog-card">{% include "includes/generated/maintenance_card.html" %}</li>
         {% endfor %}
       </ul>
     </section>

@@ -64,8 +64,11 @@ source-linked summary such as `[[toolforge:aranami/newsletter/|2026年10月30日
 using the draft's data date, including the annual feature's own date. Undated
 drafts use `简讯资料`. Both links work without JavaScript and leave copying
 to the separate button.
-Review and preview the wikitext before saving it on Wikipedia. Code blocks
-also support native selection and copying. The annual feature includes two
+Open each **Wikitext** accordion to review its readonly text area before saving
+the draft on Wikipedia. The text area grows to show its wrapped source and
+supports native selection and copying, including without JavaScript. If the
+clipboard is unavailable, **Copy** opens and selects the source for manual
+copying. The annual feature includes two
 blue primary buttons for editors to add comments, using the newsletter's
 reflection preload. Introduction and data sections have no invitation
 buttons. Personal prose remains blank. Website buttons, the date input and

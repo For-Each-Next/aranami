@@ -5,6 +5,25 @@ import tomllib
 from pathlib import Path
 
 
+def resource_root(component: str) -> Path:
+    """Select built development resources or pinned deployed resources.
+
+    Args:
+        component: Component whose non-Python files are used.
+
+    Returns:
+        The complete component resource tree. Development checkouts use
+        root-level dist; deployments use their package directory.
+        Missing development builds never fall back to authored sources.
+    """
+    root = Path(__file__).resolve().parents[2]
+    return (
+        root
+        / ("dist" if (root / "package.json").exists() else "src")
+        / component
+    )
+
+
 def project_version() -> str:
     """Return the project version without an installed distribution.
 

@@ -9,7 +9,7 @@
     "noEmitOnError": true,
     "forceConsistentCasingInFileNames": true,
     "rootDir": "frontend",
-    "outDir": "src/webservice/public_html",
+    "outDir": "dist/webservice/public_html",
     "newLine": "lf"
   },
   "files": ["frontend/browser.d.ts", "frontend/components.ts", "frontend/live.ts", "frontend/navigation.ts", "frontend/newsletter.ts"]

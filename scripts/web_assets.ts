@@ -1,18 +1,51 @@
-/** Build or verify the committed browser scripts and pinned Codex stylesheet. */
+/** Build or verify the disposable website payload from authored sources. */
+import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildSync } from "esbuild";
+import { buildSync, transformSync } from "esbuild";
+import { buildCardTemplates } from "./card_templates.ts";
 
 const mode = process.argv[2];
-if (mode !== "build" && mode !== "check") {
-    throw new Error("Use web_assets.ts build or check.");
-}
+if (mode !== "build" && mode !== "check") throw new Error("Use web_assets.ts build or check.");
 const root = fileURLToPath(new URL("../", import.meta.url));
+const destination = join(root, "dist/webservice");
 const output = mkdtempSync(join(tmpdir(), "aranami-web-assets-"));
+const staged = join(output, "webservice");
+
+/** Enumerate regular authored files without following links outside a tree. */
+function files(directory: string): string[] {
+    assert.ok(lstatSync(directory).isDirectory(), `Expected a regular build directory: ${directory}`);
+    return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) return files(path);
+        if (!entry.isFile()) throw new Error(`Unsupported build input: ${path}`);
+        return [path];
+    }).sort();
+}
+
+function hashes(paths: string[], base: string): Record<string, string> {
+    return Object.fromEntries(paths.sort().map(path => {
+        assert.ok(lstatSync(path).isFile(), `Expected a regular build file: ${path}`);
+        return [relative(base, path).split("\\").join("/"),
+            createHash("sha256").update(readFileSync(path)).digest("hex")];
+    }));
+}
+
+function inputs(): Record<string, string> {
+    return hashes([
+        ...files(join(root, "frontend")),
+        ...files(join(root, "src/webservice/public_html")),
+        ...files(join(root, "src/webservice/templates")),
+        ...["scripts/web_assets.ts", "scripts/card_templates.ts", "package.json", "package-lock.json", "tsconfig.json"].map(path => join(root, path)),
+    ], root);
+}
+
 try {
+    const sourceHashes = inputs();
     const compiled = spawnSync(process.execPath, [
         join(root, "node_modules/typescript/bin/tsc"),
         "--project", join(root, "tsconfig.json"), "--outDir", output,
@@ -26,7 +59,6 @@ try {
         minify: true,
         format: "iife",
         target: "es2022",
-        // Render functions need only Vue's runtime, never its compiler.
         alias: { vue: "vue/dist/vue.runtime.esm-bundler.js" },
         legalComments: "inline",
         banner: { js: "/*! Includes Wikimedia Codex (GPL-2.0-or-later) and Vue (MIT). See /codex-license.html. */" },
@@ -37,22 +69,38 @@ try {
             __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: "false",
         },
     });
-    const assets = readdirSync(output).filter(name => name.endsWith(".js"))
-        .map(name => ({ name, source: join(output, name) }));
-    assets.push({
-        name: "codex.css",
-        source: join(root, "node_modules/@wikimedia/codex/dist/codex.style.css"),
-    });
-    const stale: string[] = [];
-    for (const { name, source } of assets) {
-        const target = join(root, "src/webservice/public_html", name);
-        if (mode === "build") copyFileSync(source, target);
-        else if (!readFileSync(source).equals(readFileSync(target))) stale.push(name);
+    for (const tree of ["public_html", "templates"]) {
+        cpSync(join(root, "src/webservice", tree), join(staged, tree), { recursive: true });
     }
-    if (stale.length) {
-        throw new Error(`Stale assets: ${stale.join(", ")}. Run npm run build:web.`);
+    const scripts = ["components.js", "live.js", "navigation.js", "newsletter.js"];
+    for (const name of scripts) {
+        const source = readFileSync(join(output, name), "utf8");
+        const code = name === "components.js" ? source : transformSync(source, {
+            loader: "js", target: "es2022", minify: true, legalComments: "inline",
+        }).code;
+        writeFileSync(join(staged, "public_html", name), code);
     }
-    console.log(`${mode === "build" ? "Built" : "Verified"} ${assets.length} browser assets.`);
+    copyFileSync(join(root, "node_modules/@wikimedia/codex/dist/codex.style.css"), join(staged, "public_html/codex.css"));
+    const templates = await buildCardTemplates(root, output);
+    const templateRoot = join(staged, "templates/includes/generated");
+    mkdirSync(templateRoot, { recursive: true });
+    for (const { name, source } of templates) copyFileSync(source, join(templateRoot, name));
+    assert.deepEqual(inputs(), sourceHashes, "Source changed during the build; run npm run build:web again.");
+    const receipt = { schema: 1, inputs: sourceHashes, outputs: hashes(files(staged), staged) };
+    if (mode === "build") {
+        // Replace only disposable website output; leave release archives and
+        // other dist artifacts intact. The receipt is written last.
+        if (existsSync(join(root, "dist"))) assert.ok(lstatSync(join(root, "dist")).isDirectory(), "dist must be a regular directory.");
+        rmSync(destination, { recursive: true, force: true });
+        cpSync(staged, destination, { recursive: true });
+        writeFileSync(join(destination, "build.json"), JSON.stringify(receipt, null, 2) + "\n");
+    } else {
+        const actual = hashes(files(destination).filter(path => path !== join(destination, "build.json")), destination);
+        assert.deepEqual(actual, receipt.outputs, "Website output is stale or modified; run npm run build:web.");
+        assert.deepEqual(JSON.parse(readFileSync(join(destination, "build.json"), "utf8")), receipt,
+            "Website build receipt is stale; run npm run build:web.");
+    }
+    console.log(`${mode === "build" ? "Built" : "Verified"} dist/webservice: ${Object.keys(receipt.outputs).length} files, including ${scripts.length + 1} browser assets and ${templates.length} Codex component templates.`);
 } finally {
     rmSync(output, { recursive: true, force: true });
 }

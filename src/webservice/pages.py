@@ -13,14 +13,13 @@ import operator
 import secrets
 from functools import lru_cache
 from hashlib import sha256
-from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import escape
 
-from shared.deployment import project_version
+from shared.deployment import project_version, resource_root
 from shared.newsletter import Issue
 from webservice.job_history import history_context
 from webservice.presentation import (
@@ -100,7 +99,7 @@ def _asset_url(name: str) -> str:
     Returns:
         A local URL whose digest permits safe browser caching.
     """
-    asset = Path(__file__).with_name("public_html") / name
+    asset = resource_root("webservice") / "public_html" / name
     return f"/{name}?v={sha256(asset.read_bytes()).hexdigest()}"
 
 
@@ -112,7 +111,7 @@ def _templates() -> Environment:
         A Jinja environment rooted in the source template directory.
     """
     environment = Environment(
-        loader=FileSystemLoader(Path(__file__).with_name("templates")),
+        loader=FileSystemLoader(resource_root("webservice") / "templates"),
         autoescape=select_autoescape(["html"]),
         auto_reload=False,
     )
@@ -409,11 +408,17 @@ class _Page:
         if pageviews:
             card.update(
                 rank=item["rank"],
+                date={
+                    "value": pageviews["date"],
+                    "label": self.interface.date(pageviews["date"]),
+                },
+                date_separator=": "
+                if self.interface.locale == "en"
+                else "\uff1a",
                 pageviews_url=pageviews_url(item, pageviews["date"]),
                 views=self.text("pageviews.views", count=f"{item['views']:,}"),
                 site_rank=self.text(
                     "pageviews.site_rank",
-                    date=self.interface.date(pageviews["date"]),
                     rank=f"{item['site_rank']:,}",
                 )
                 if item.get("site_rank") is not None

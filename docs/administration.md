@@ -100,13 +100,21 @@ On the development computer, install the locked environment and finish the
 
 ```shell
 uv sync --locked
+npm ci --ignore-scripts
+npm run build:web
 uv run python scripts/upload_toolforge.py --dry-run
 ```
 
 The dry run validates the exact source payload and generated version/hash
 metadata without contacting Toolforge. It rejects symlinks and missing required
-files, and excludes credentials, runtime data, and tests. Optional
-`--archive <new-file.tar>` writes an inspected payload to a new archive path.
+files, and excludes credentials, runtime data, and tests. Website files come
+from `dist/webservice/`; its build receipt must match all current authored
+inputs and output bytes. Missing, stale, or modified builds require
+`npm run build:web` before upload. The archive retains the established
+`src/webservice/` runtime layout and contains no frontend compiler or Node
+dependencies. Optional
+`--archive <new-file.tar.gz>` writes a reproducible gzip-compressed tar to a
+new archive path. Uploads stream the same compressed format to Toolforge.
 
 Upload without `--dry-run`:
 

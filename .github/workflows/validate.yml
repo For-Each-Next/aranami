@@ -36,9 +36,10 @@ jobs:
       - name: Check lockfile
         run: uv lock --check
 
-      - name: Verify TypeScript and Codex browser assets
+      - name: Build and verify website assets and templates
         run: |
           npm ci --ignore-scripts
+          npm run build:web
           npm run check:web
 
       - name: Install locked dependencies
@@ -83,9 +84,9 @@ jobs:
       - name: Validate source payload
         run: |
           mkdir -p dist
-          uv run --locked python scripts/upload_toolforge.py --dry-run --archive dist/aranami-source.tar
+          uv run --locked python scripts/upload_toolforge.py --dry-run --archive dist/aranami-source.tar.gz
           temporary_payload=$(mktemp -d)
-          tar -xf dist/aranami-source.tar -C "$temporary_payload"
+          tar -xzf dist/aranami-source.tar.gz -C "$temporary_payload"
           uv run --locked python scripts/toolforge/validate-source.py verify "$temporary_payload"
 
       - name: Validate formal release tag
@@ -129,7 +130,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-files
-          path: dist/
+          path: |
+            dist/aranami-source.tar.gz
+            dist/release-notes.md
           if-no-files-found: error
           retention-days: 7
           overwrite: true

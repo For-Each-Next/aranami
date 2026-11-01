@@ -26,7 +26,7 @@ def _issue(*, available: bool = True) -> dict[str, object]:
                 "title": "WikiProject:電子遊戲/簡訊/2027-01" + suffix,
                 "url": "https://zh.wikipedia.org/wiki/Fixture" + suffix,
                 "text": (
-                    "{{模板|標題}}\n</code></pre><script>alert(1)</script>"
+                    "\n{{模板|標題}}\n</textarea><script>alert(1)</script>"
                 ),
                 "label": suffix,
             }
@@ -109,26 +109,51 @@ class NewsletterPresentationTests(unittest.TestCase):
         assert "newsletter-sources" not in output
         assert facts == original
 
-    @staticmethod
-    def test_selectable_drafts_escape_and_round_trip_wikitext() -> None:
+    def test_selectable_drafts_escape_and_round_trip_wikitext(self) -> None:
         """Keep wiki source intact without creating active HTML."""
         value = _issue()
-        output = render_newsletter(value, "en")
-        displays = re.findall(
-            r"<pre\b([^>]*)><code\b[^>]*data-newsletter-wikitext>(.*?)</code></pre>",
-            output,
-            re.DOTALL,
-        )
-        assert len(displays) == len(value["pages"])
-        for (attributes, text), page in zip(
-            displays,
-            value["pages"],
-            strict=True,
+        for locale, label in (
+            ("en", "Wikitext"),
+            ("zh-hans", "维基文本"),
+            ("zh-hant", "維基文字"),
         ):
-            assert 'tabindex="0"' in attributes
-            assert 'aria-labelledby="newsletter-heading-' in attributes
-            assert 'lang="zh"' in attributes
-            assert unescape(text) == page["text"]
+            with self.subTest(locale=locale):
+                output = render_newsletter(value, locale)
+                displays = re.findall(
+                    r"<textarea\b([^>]*)>(.*?)</textarea>",
+                    output,
+                    re.DOTALL,
+                )
+                assert len(displays) == len(value["pages"])
+                for index, ((attributes, text), page) in enumerate(
+                    zip(displays, value["pages"], strict=True),
+                    start=1,
+                ):
+                    assert "readonly" in attributes
+                    classes = re.search(r'class="([^"]+)"', attributes)
+                    assert classes is not None
+                    assert "cdx-text-area__textarea" in classes[1].split()
+                    assert 'lang="zh"' in attributes
+                    assert "data-newsletter-wikitext" in attributes
+                    assert f'id="newsletter-text-{index}"' in attributes
+                    assert (
+                        f'aria-labelledby="newsletter-heading-{index} '
+                        f'newsletter-code-label-{index}"' in attributes
+                    )
+                    # HTML consumes the textarea's first newline.
+                    assert unescape(text.removeprefix("\n")) == page["text"]
+                    assert (
+                        f'id="newsletter-code-label-{index}">{label}</span>'
+                        in output
+                    )
+                accordions = re.findall(
+                    r'<details\b([^>]*class="[^"]*newsletter-code[^"]*"[^>]*)>',
+                    output,
+                )
+                assert len(accordions) == len(displays)
+                assert all(" open" not in item for item in accordions)
+                identifiers = re.findall(r'\bid="([^"]+)"', output)
+                assert len(identifiers) == len(set(identifiers))
         assert "<script>alert(1)</script>" not in output
         assert 'action="/newsletter/" method="get"' in output
         assert '<select id="newsletter-issue"' in output
@@ -143,7 +168,7 @@ class NewsletterPresentationTests(unittest.TestCase):
         assert "oldid=123" not in output
         assert output.count("data-newsletter-copy=") == len(displays)
         assert "newsletter-destination" not in output
-        assert "<textarea" not in output
+        assert "<pre" not in output
 
     def test_missing_data_in_all_locales(self) -> None:
         """Show collection status without empty templates."""
@@ -319,7 +344,7 @@ class NewsletterPresentationTests(unittest.TestCase):
                     "data-newsletter-load-status" in output
                 )
                 assert '<div class="cdx-message__content"></div>' in output
-                assert "newsletter-code-label" not in output
+                assert "newsletter-code-label" in output
                 identifiers = set(re.findall(r'\bid="([^"]+)"', output))
                 for reference in re.findall(
                     r'aria-(?:labelledby|describedby)="([^"]+)"',

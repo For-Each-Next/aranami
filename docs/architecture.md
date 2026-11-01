@@ -307,7 +307,9 @@ Pages work with ordinary links, GET forms, and native controls without
 JavaScript. Every page shares the dashboard's left contents panel on desktop
 and native collapsible contents control on narrow screens.
 Codex supplies frontend components, with strict TypeScript sources and a
-local Vue build committed as static assets. Vue owns only its control hosts;
+local Vue build assembled in ignored `dist/webservice/`. A validated build
+receipt binds authored inputs to the exact uploaded assets and templates.
+Vue owns only its control hosts;
 live-status reconciliation owns native report controls. Preserve this DOM
 ownership during saved-fragment replacement. See the
 [frontend guide](webservice/frontend.md) for build and lifecycle contracts.
@@ -315,8 +317,8 @@ All displayed dates and times use UTC without repeating its label, including
 table headings, footer uptime, and complete timestamps in hover tooltips.
 Machine-readable timestamps retain their original explicit offsets.
 The dashboard presents reviews and each available highlight group as peer
-second-level sections. Each article uses a CSS-only Codex Card with its own
-third-level title, separate assessment chips, full description, and supporting
+second-level sections. Each article uses a locally compiled Codex Card with its own
+third-level title, inline assessment chips, full description, and supporting
 metadata. Multiple destinations remain individual links, while single-target
 maintenance categories may use whole-card links. `/maintenance/` owns the
 maintenance catalogue, with second-level task groups and existing filtered

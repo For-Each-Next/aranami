@@ -28,6 +28,7 @@ from test_maintenance_controls import (
 )
 
 from shared.config import routine_configuration
+from shared.deployment import resource_root
 from webservice.pages import (
     render_about,
     render_dashboard,
@@ -437,7 +438,9 @@ def write_interface_fixtures(destination: Path) -> None:
                             + suffix,
                             "url": "https://zh.wikipedia.org/wiki/Fixture",
                             "label": suffix.lstrip("/") or "主頁",
-                            "text": "{{模板|標題}}\n" + "長條目名稱" * 100,
+                            "text": "\n{{模板|標題}}\r\n"
+                            + "長條目名稱" * 100
+                            + "\n</textarea><script>literal</script>\n",
                         }
                         for suffix in ("", "/特優內容", "/宣告", "/專題")
                     ],
@@ -563,7 +566,10 @@ class ReviewPresentationTests(unittest.TestCase):
                 )
                 assert section.count('class="article-card"') == 9
                 assert 'class="card-grid article-list review-cards"' in section
-                assert section.count('class="review-icon-link"') == 9
+                assert (
+                    section.count('class="review-icon-link cdx-card__icon"')
+                    == 9
+                )
                 assert section.count('class="review-icon"') == 9
                 link_label = {
                     "en": "Review",
@@ -1311,6 +1317,57 @@ class PresentationTests(unittest.TestCase):
         assert query["start"] == ["2026-09-18"]
         assert query["end"] == ["2026-10-17"]
         assert query["pages"] == [article["title"]]
+        self._assert_popularity_date_prefix()
+
+    def _assert_popularity_date_prefix(self) -> None:
+        """Keep the observed date visible independently of site rank."""
+        popularity = self.data["snapshot"]["pageviews"]
+        popularity["date"] = "2026-10-31"
+        popularity["items"][0]["views"] = 10_110
+        for locale, prefix, rank_label in (
+            (
+                "en",
+                "October 31, 2026: Pageviews: 10,110",
+                "Site-wide rank: 14",
+            ),
+            (
+                "zh-hans",
+                "2026年10月31日\uff1a日浏览10,110次",
+                "全站第14名",
+            ),
+            (
+                "zh-hant",
+                "2026年10月31日\uff1a日瀏覽10,110次",
+                "全站第14名",
+            ),
+        ):
+            for rank in (14, None):
+                with self.subTest(locale=locale, rank=rank):
+                    popularity["items"][0]["site_rank"] = rank
+                    output = render_dashboard(
+                        self.data["snapshot"],
+                        self.data["status"],
+                        self.data["config"],
+                        locale,
+                        self.now,
+                    )
+                    section = output.split('id="homepage-pageviews"', 1)[
+                        1
+                    ].split("</section>", 1)[0]
+                    metadata = re.search(
+                        r'<p class="card-meta">(.*?)</p>',
+                        section,
+                        re.DOTALL,
+                    )[1]
+                    assert '<time datetime="2026-10-31">' in metadata
+                    assert 'class="pageviews-number"' in metadata
+                    assert ('class="site-rank"' in metadata) == (
+                        rank is not None
+                    )
+                    text = unescape(re.sub(r"<[^>]+>", "", metadata))
+                    assert text == prefix + (
+                        f" · {rank_label}" if rank is not None else ""
+                    )
 
     def test_actual_scheduling_and_uptime(self) -> None:
         """Suppress stale data and retain actual execution times."""
@@ -1441,7 +1498,7 @@ class PresentationTests(unittest.TestCase):
                 now=self.now,
             )
             line = re.search(
-                r'<li class="routine-status"[^>]*>(.*?)</li>',
+                r'<p class="routine-status"[^>]*>(.*?)</p>',
                 output,
             )
             assert line is not None
@@ -1450,7 +1507,8 @@ class PresentationTests(unittest.TestCase):
                 (" (", ")") if locale == "en" else ("\uff08", "\uff09")
             )
             details = interface.text("ops.details_link")
-            assert line[1].startswith('<span class="status-label">')
+            assert line[1].startswith('<svg class="status-icon"')
+            assert '</svg><span class="status-label">' in line[1]
             assert f"</span>{opening}<a " in line[1]
             assert line[1].endswith(f">{details}</a>{closing}")
             assert "data-clock" not in line[1]
@@ -1725,7 +1783,7 @@ class PresentationTests(unittest.TestCase):
     @staticmethod
     def test_interface_assets_are_self_contained() -> None:
         """Ship local assets without a remote browser dependency."""
-        root = Path(__file__).resolve().parents[2] / "src" / "webservice"
+        root = resource_root("webservice")
         for output in (
             render_dashboard(None, None, None, "en"),
             render_reports({"files": []}, "en"),
@@ -2207,7 +2265,7 @@ class LiveVisibilityTests(unittest.TestCase):
                     card,
                 )
                 line = re.search(
-                    r'<li class="routine-progress context"[^>]*>(.*?)</li>',
+                    r'<p class="routine-progress context"[^>]*>(.*?)</p>',
                     card,
                 )
                 assert status_label is not None
@@ -2243,7 +2301,7 @@ class LiveVisibilityTests(unittest.TestCase):
                 "en",
                 self.now,
             )
-            assert f"data-progress-active>{expected}</li>" in output
+            assert f"data-progress-active>{expected}</p>" in output
             assert ">Updating pageview records</span>" in output
         for current, total, expected in (
             (None, None, "Fetching pageviews"),
@@ -2258,9 +2316,9 @@ class LiveVisibilityTests(unittest.TestCase):
                 "total": total,
             }
             for output in self._outputs("en"):
-                assert f"data-progress-active>{expected}</li>" in output
+                assert f"data-progress-active>{expected}</p>" in output
         event.pop("progress")
-        assert "data-progress-active>Preparing</li>" in render_live_status(
+        assert "data-progress-active>Preparing</p>" in render_live_status(
             status,
             self.data["config"],
             "en",
@@ -2371,7 +2429,7 @@ class LiveVisibilityTests(unittest.TestCase):
             for output in self._outputs(locale):
                 card = self._card(output, "new_pages")
                 assert f">{label}</span>" in card
-                assert f"data-progress-active>{note}</li>" in card
+                assert f"data-progress-active>{note}</p>" in card
 
     def test_progress_requires_fresh_active_observations(self) -> None:
         """Hide progress for completed tasks and stale server state."""
@@ -2465,7 +2523,7 @@ class LiveVisibilityTests(unittest.TestCase):
                 assert 'href="#live-server-status"' not in output
                 assert 'id="live-uptime"' in output
                 assert 'id="tool-status"' not in output
-                assert 'class="routine-row"' not in output
+                assert 'id="routine-' not in output
                 assert re.search(r'src="/live\.js\?v=[a-f0-9]{64}"', output)
                 assert "0.6.0.dev1" in output
                 assert ('data-clock="uptime"' in output) == (
@@ -2512,12 +2570,15 @@ class LiveVisibilityTests(unittest.TestCase):
                 "\uff0835分鐘後\uff09",
             ),
         ):
-            for state in (
-                "running",
-                "updated",
-                "no_update",
-                "failed",
-                "deferred",
+            for state, icon in (
+                ("running", "running"),
+                ("updated", "success"),
+                ("no_update", "success"),
+                ("failed", "failed"),
+                ("deferred", "warning"),
+                ("unconfirmed", "warning"),
+                ("queued", "queued"),
+                ("unknown", "unknown"),
             ):
                 event["status"] = state
                 live = render_live_status(
@@ -2532,6 +2593,18 @@ class LiveVisibilityTests(unittest.TestCase):
                     re.DOTALL,
                 )
                 assert card is not None
+                status_line = re.search(
+                    r'<p class="routine-status"[^>]*>(.*?)</p>',
+                    card[1],
+                    re.DOTALL,
+                )
+                assert status_line is not None
+                assert 'class="status-icon"' in status_line[1]
+                assert 'aria-hidden="true"' in status_line[1]
+                assert 'focusable="false"' in status_line[1]
+                assert f'#status-{icon}"' in status_line[1]
+                assert '<span class="status-label"' in status_line[1]
+                assert 'class="report-icon cdx-card__icon"' in card[1]
                 metadata = re.search(
                     r'<ul class="routine-meta">(.*?)</ul>',
                     card[1],

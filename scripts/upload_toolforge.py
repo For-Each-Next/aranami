@@ -8,6 +8,7 @@ Use ``--dry-run`` to inspect the payload without SSH, and optionally
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import io
 import json
@@ -36,6 +37,20 @@ _SUFFIXES = set(_CONTRACT["suffixes"])
 _SCRIPTS = tuple(_CONTRACT["scripts"])
 _PRIVATE_NAMES = set(_CONTRACT["private_names"])
 _RUNTIME_PARTS = set(_CONTRACT["runtime_parts"])
+_WEB_BUILD = "dist/webservice"
+_WEB_ROOTS = ("public_html", "templates")
+_WEB_INPUT_FILES = (
+    "scripts/web_assets.ts",
+    "scripts/card_templates.ts",
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json",
+)
+_WEB_INPUT_TREES = (
+    "frontend",
+    "src/webservice/public_html",
+    "src/webservice/templates",
+)
 
 
 def _relative_path(name: str) -> PurePosixPath:
@@ -95,11 +110,118 @@ def _read_regular(root: Path, name: str) -> bytes:
     return path.read_bytes()
 
 
-def _actual_sources(root: Path) -> set[str]:
+def _tree_names(root: Path, name: str) -> set[str]:
+    """Inventory a complete build tree without following symlinks.
+
+    Returns:
+        Repository-relative regular filenames, including hidden files.
+
+    Raises:
+        ValueError: The tree is absent or contains unsafe paths.
+    """
+    directory = root
+    for part in _relative_path(name).parts:
+        directory /= part
+        if directory.is_symlink():
+            msg = f"Build symlinks are not allowed: {name}"
+            raise ValueError(msg)
+    if not directory.is_dir():
+        msg = f"Missing build input directory: {name}"
+        raise ValueError(msg)
+    names = set()
+    for path in directory.rglob("*"):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            msg = f"Build paths must be regular and not symlinks: {relative}"
+            raise ValueError(msg)
+        if path.is_file():
+            _relative_path(relative)
+            names.add(relative)
+    return names
+
+
+def _checked_hashes(
+    root: Path,
+    expected: object,
+    names: set[str],
+    *,
+    prefix: str = "",
+) -> dict[str, bytes]:
+    """Require a complete build inventory and exact recorded bytes.
+
+    Returns:
+        Validated file bytes keyed by their receipt paths.
+
+    Raises:
+        ValueError: A build file is omitted, extra, or stale.
+    """
+    if not isinstance(expected, dict) or set(expected) != names:
+        msg = "Web build inventory changed; run npm run build:web."
+        raise ValueError(msg)
+    contents = {}
+    for name in sorted(names):
+        data = _read_regular(root, prefix + name)
+        if hashlib.sha256(data).hexdigest() != expected[name]:
+            msg = f"Stale web build file {name}; run npm run build:web."
+            raise ValueError(msg)
+        contents[name] = data
+    return contents
+
+
+def _built_web(root: Path) -> dict[str, bytes] | None:
+    """Validate development build evidence without invoking build tools.
+
+    Returns:
+        Web resources mapped to unchanged deployment paths, or none for
+        source generations that already contain prepared runtime files.
+
+    Raises:
+        ValueError: The build is missing, unsafe, or no longer current.
+    """
+    if (
+        not (root / "package.json").exists()
+        and not (root / "package.json").is_symlink()
+    ):
+        return None
+    receipt = json.loads(_read_regular(root, f"{_WEB_BUILD}/build.json"))
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) != {"schema", "inputs", "outputs"}
+        or type(receipt["schema"]) is not int
+        or receipt["schema"] != 1
+    ):
+        msg = "Invalid web build receipt; run npm run build:web."
+        raise ValueError(msg)
+    inputs = set(_WEB_INPUT_FILES)
+    for name in _WEB_INPUT_TREES:
+        inputs.update(_tree_names(root, name))
+    _checked_hashes(root, receipt["inputs"], inputs)
+    outputs = {
+        name.removeprefix(f"{_WEB_BUILD}/")
+        for name in _tree_names(root, _WEB_BUILD)
+        if name != f"{_WEB_BUILD}/build.json"
+    }
+    content = _checked_hashes(
+        root,
+        receipt["outputs"],
+        outputs,
+        prefix=f"{_WEB_BUILD}/",
+    )
+    if any(PurePosixPath(name).parts[0] not in _WEB_ROOTS for name in content):
+        msg = "Unexpected web build output outside assets and templates."
+        raise ValueError(msg)
+    return {f"src/webservice/{name}": data for name, data in content.items()}
+
+
+def _actual_sources(
+    root: Path,
+    web: dict[str, bytes] | None = None,
+) -> set[str]:
     """Collect runtime sources and reject source symlinks.
 
     Args:
         root: Repository or isolated fixture root.
+        web: Validated built resources replacing authored web inputs.
 
     Returns:
         Complete source names within the runtime packages.
@@ -107,7 +229,7 @@ def _actual_sources(root: Path) -> set[str]:
     Raises:
         ValueError: A package is missing or contains a symlink.
     """
-    actual = set()
+    actual = set(web or {})
     for package in _PACKAGES:
         _read_regular(root, f"src/{package}/__init__.py")
         for path in sorted((root / "src" / package).rglob("*")):
@@ -117,17 +239,27 @@ def _actual_sources(root: Path) -> set[str]:
             if path.is_symlink():
                 msg = f"Source symlinks are not allowed: {relative}"
                 raise ValueError(msg)
+            if web is not None and any(
+                relative.is_relative_to(f"src/webservice/{name}")
+                for name in _WEB_ROOTS
+            ):
+                continue
             if path.is_file() and path.suffix in _SUFFIXES:
                 actual.add(relative.as_posix())
     return actual
 
 
-def _source_names(root: Path, data: bytes) -> list[str]:
+def _source_names(
+    root: Path,
+    data: bytes,
+    web: dict[str, bytes] | None = None,
+) -> list[str]:
     """Check all application sources against the reviewed file contract.
 
     Args:
         root: Repository or isolated fixture root.
         data: Reviewed versioned source-files manifest bytes.
+        web: Validated built resources replacing authored web inputs.
 
     Returns:
         Sorted complete source filenames.
@@ -158,7 +290,7 @@ def _source_names(root: Path, data: bytes) -> list[str]:
         ):
             msg = f"Unexpected reviewed source path: {name}"
             raise ValueError(msg)
-    actual = _actual_sources(root)
+    actual = _actual_sources(root, web)
     if actual != expected:
         msg = (
             "Source files differ from the reviewed payload: "
@@ -217,11 +349,17 @@ def source_payload(root: Path = ROOT) -> dict[str, bytes]:
     if version_invalid or package_invalid or runtime_invalid or lock_invalid:
         msg = "Expected consistent locked Python 3.15 source metadata."
         raise ValueError(msg)
+    web = _built_web(root)
     for name in _source_names(
         root,
         payload["scripts/toolforge/source-files.json"],
+        web,
     ):
-        payload[name] = _read_regular(root, name)
+        payload[name] = (
+            web[name]
+            if web is not None and name in web
+            else _read_regular(root, name)
+        )
     for name in (
         "src/webservice/pages.py",
         "src/backend/public.py",
@@ -246,7 +384,7 @@ def source_payload(root: Path = ROOT) -> dict[str, bytes]:
 
 
 def write_archive(stream: BinaryIO, payload: Mapping[str, bytes]) -> None:
-    """Write regular-file source archives with fixed modes.
+    """Write reproducible gzip tar archives with fixed file modes.
 
     Args:
         stream: Writable binary archive stream.
@@ -255,11 +393,19 @@ def write_archive(stream: BinaryIO, payload: Mapping[str, bytes]) -> None:
     Raises:
         ValueError: An archive name is unsafe or points to private data.
     """  # ruff: ignore[docstring-extraneous-exception]
-    with tarfile.open(
-        fileobj=stream,
-        mode="w",
-        format=tarfile.USTAR_FORMAT,
-    ) as archive:
+    with (
+        gzip.GzipFile(
+            fileobj=stream,
+            mode="wb",
+            filename="",
+            mtime=0,
+        ) as gzip_stream,
+        tarfile.open(
+            fileobj=gzip_stream,
+            mode="w",
+            format=tarfile.USTAR_FORMAT,
+        ) as archive,
+    ):
         for name, data in sorted(payload.items()):
             _relative_path(name)
             info = tarfile.TarInfo(name)
@@ -312,7 +458,7 @@ def main() -> None:
     staging = f"/data/project/aranami/app-staging-{uuid4().hex}"
     command = (
         f"become aranami sh -c 'umask 027; mkdir {staging} "
-        f"&& tar --no-same-owner -xf - -C {staging}'"
+        f"&& tar --no-same-owner -xzf - -C {staging}'"
     )
     with tempfile.TemporaryFile() as archive:
         write_archive(archive, payload)

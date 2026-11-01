@@ -555,9 +555,10 @@ class NewsletterRouteTests(unittest.TestCase):
                 )
             assert response.status_code == HTTPStatus.OK
             texts = [
-                unescape(text)
+                unescape(text.removeprefix("\n"))
                 for text in re.findall(
-                    r"data-newsletter-wikitext>(.*?)</code>",
+                    r"<textarea\b[^>]*\bdata-newsletter-wikitext\b[^>]*>"
+                    r"(.*?)</textarea>",
                     response.text,
                     re.DOTALL,
                 )
@@ -755,9 +756,10 @@ class NewsletterRouteTests(unittest.TestCase):
             )
         read.assert_not_called()
         texts = [
-            unescape(text)
+            unescape(text.removeprefix("\n"))
             for text in re.findall(
-                r"data-newsletter-wikitext>(.*?)</code>",
+                r"<textarea\b[^>]*\bdata-newsletter-wikitext\b[^>]*>"
+                r"(.*?)</textarea>",
                 response.text,
                 re.DOTALL,
             )

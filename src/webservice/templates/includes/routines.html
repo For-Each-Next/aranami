@@ -4,16 +4,7 @@
   {% if not routines %}<div class="cdx-message cdx-message--notice"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ t.ops.schedule_missing }}</div></div>{% endif %}
   <div class="routine-rows">
     {% for routine in routines %}
-    <article class="routine-row" id="routine-{{ routine.identifier }}">
-      <h3><svg class="report-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="{{ asset_url('report-icons.svg') }}#{{ routine.icon }}"></use></svg><span>{% include "includes/routine_links.html" %}</span></h3>
-      <ul class="routine-meta">
-        <li class="routine-status" data-status="{{ routine.status }}"><span class="status-label"{% if routine.progress %} data-progress-label="{{ routine.state }}" data-progress-fallback="{{ routine.fallback }}"{% endif %}>{{ routine.state }}</span>{{ routine.links.opening }}<a class="status-link" href="#{{ routine.popup_id }}" aria-controls="{{ routine.popup_id }}" aria-haspopup="dialog">{{ t.ops.details_link }}</a>{{ routine.links.closing }}</li>
-        {% if routine.progress %}<li class="routine-progress context" data-progress-active>{{ routine.progress }}</li>{% endif %}
-        <li>{% if routine.running %}{{ t.ops.execution_started }}{% else %}{{ t.ops.execution_finished }}{% endif %}{% with time=routine.observed %}{% include "includes/time.html" %}{% endwith %}{% with relative=routine.relative %}{% include "includes/relative.html" %}{% endwith %}</li>
-        {% if not routine.running %}<li>{{ t.ops.next_run }}<span{% if routine.schedule_expires %} data-schedule-time{% endif %}>{{ routine.next_run }}{% with relative=routine.upcoming %}{% include "includes/relative.html" %}{% endwith %}</span></li>{% endif %}
-      </ul>
-      {% include "includes/report_details.html" %}
-    </article>
+    {% include "includes/generated/routine_card.html" %}
     {% endfor %}
   </div>
 </section>

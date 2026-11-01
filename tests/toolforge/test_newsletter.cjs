@@ -6,20 +6,23 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-const script = fs.readFileSync(path.resolve(__dirname, "../../src/webservice/public_html/newsletter.js"), "utf8");
+const script = fs.readFileSync(path.resolve(__dirname, "../../dist/webservice/public_html/newsletter.js"), "utf8");
 
 function fixture(clipboard) {
     const status = {textContent: ""};
+    const accordion = {open: false, handlers: {}, addEventListener(type, handler) { this.handlers[type] = handler; }};
     const display = {
+        value: "{{Original}}",
+        textContent: "Unrelated initial text",
         focused: false,
+        selected: false,
+        rows: 8,
+        scrollHeight: 432,
+        closest: () => accordion,
         focus() { this.focused = true; },
+        select() { this.selected = true; },
     };
-    const source = {textContent: "{{Original}}", parentElement: display};
-    const selection = {
-        source: null,
-        removeAllRanges() { this.source = null; },
-        addRange(range) { this.source = range.source; },
-    };
+    const source = display;
     const button = {
         hidden: false,
         disabled: false,
@@ -32,18 +35,19 @@ function fixture(clipboard) {
         addEventListener(_type, handler) { this.click = handler; },
     };
     const navigated = [];
+    const handlers = {};
     vm.runInNewContext(script, {
         document: {
             querySelector: () => null,
-            querySelectorAll: selector => selector === "[data-newsletter-copy]" ? [button] : [],
+            querySelectorAll: selector => selector === "[data-newsletter-copy]" ? [button] : [source],
             getElementById: () => source,
-            createRange: () => ({selectNodeContents(value) { this.source = value; }}),
-            getSelection: () => selection,
         },
+        getComputedStyle: () => ({lineHeight: "20px", paddingTop: "16px", paddingBottom: "16px"}),
+        addEventListener(type, handler) { handlers[type] = handler; },
         navigator: {clipboard},
         location: {assign(url) { navigated.push(url); }},
     });
-    return {button, source, display, selection, status, navigated};
+    return {button, source, display, accordion, handlers, status, navigated};
 }
 
 test("copy preserves literal displayed wikitext and announces completion", async () => {
@@ -51,9 +55,9 @@ test("copy preserves literal displayed wikitext and announces completion", async
     let writes = 0;
     const {button, source, display, status, navigated} = fixture({writeText: async value => { copied = value; writes++; }});
     assert.equal(button.hidden, false);
-    source.textContent = "{{模板|中文}}\n[[Article]]";
+    source.value = "\n{{模板|中文}}\n[[Article]]";
     await button.click();
-    assert.equal(copied, source.textContent);
+    assert.equal(copied, source.value);
     assert.equal(writes, 1);
     assert.equal(status.textContent, "Copied");
     assert.equal(button.disabled, false);
@@ -63,10 +67,12 @@ test("copy preserves literal displayed wikitext and announces completion", async
 
 test("missing or rejected clipboard selects source text for manual copying", async () => {
     for (const clipboard of [undefined, {writeText: async () => { throw new Error("Denied"); }}]) {
-        const {button, source, display, selection, status, navigated} = fixture(clipboard);
+        const {button, source, display, accordion, status, navigated} = fixture(clipboard);
         await button.click();
         assert.equal(display.focused, true);
-        assert.equal(selection.source, source);
+        assert.equal(accordion.open, true);
+        assert.equal(source.selected, true);
+        assert.equal(source.rows, 20);
         assert.equal(status.textContent, "Select and copy manually");
         assert.equal(button.disabled, false);
         assert.deepEqual(navigated, []);
@@ -80,9 +86,9 @@ test("copy waits for its clipboard write without navigating", async () => {
         copied = value;
         return new Promise(resolve => { finishCopy = resolve; });
     }});
-    view.source.textContent = "{{模板|中文}}\n[[Target]]\n<source>";
+    view.source.value = "{{模板|中文}}\n[[Target]]\n<source>";
     const complete = view.button.click();
-    assert.equal(copied, view.source.textContent);
+    assert.equal(copied, view.source.value);
     assert.equal(view.button.disabled, true);
     assert.deepEqual(view.navigated, []);
     finishCopy();
@@ -94,7 +100,7 @@ test("copy waits for its clipboard write without navigating", async () => {
 
 test("draft text remains literal without highlighting or HTML interpretation", () => {
     const text = "== 中文 ==\n{{模板|foo=[[條目|label]]}}\n<!-- {{hidden}} -->\n</code><script>alert(1)</script>\n''italic''\n";
-    const display = {textContent: text};
+    const display = {value: text, closest: () => null};
     const created = [];
     vm.runInNewContext(script, {
         document: {
@@ -103,9 +109,25 @@ test("draft text remains literal without highlighting or HTML interpretation", (
             createElement(tag) { created.push(tag); return {}; },
         },
         navigator: {},
+        addEventListener() {},
     });
-    assert.equal(display.textContent, text);
+    assert.equal(display.value, text);
     assert.deepEqual(created, []);
+});
+
+test("fallback sizing measures wrapped text on expansion and viewport changes", () => {
+    const view = fixture({writeText: async () => {}});
+    assert.equal(view.source.rows, 8, "closed drafts retain the native fallback");
+    view.accordion.open = true;
+    view.accordion.handlers.toggle();
+    assert.equal(view.source.rows, 20);
+    view.source.scrollHeight = 232;
+    view.handlers.resize();
+    assert.equal(view.source.rows, 10, "wider layouts can shrink the text area");
+    view.accordion.open = false;
+    view.source.scrollHeight = 0;
+    view.accordion.handlers.toggle();
+    assert.equal(view.source.rows, 10, "hidden content must not replace measured rows");
 });
 
 function issueFixture() {
@@ -155,6 +177,7 @@ function issueFixture() {
     }
     vm.runInNewContext(script, {
         document, URL, URLSearchParams, AbortController,
+        addEventListener() {},
         DOMParser: ResponseParser,
         FormData: class { *[Symbol.iterator]() { yield ["issue", issue.value]; yield ["lang", "zh-hant"]; } },
         location: {href: "https://example.test/newsletter/?issue=2027-01&date=2026-12-31", origin: "https://example.test"},

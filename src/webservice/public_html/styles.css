@@ -24,6 +24,7 @@
     --border-radius-base: 2px;
     --font-family-base: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
     --font-family-serif: "Linux Libertine", Georgia, Times, "Source Serif 4", serif;
+    --font-family-monospace: Menlo, Consolas, "Liberation Mono", "Fira Code", "Courier New", monospace;
     --font-size-small: .875rem;
     --font-size-medium: 1rem;
     --font-size-large: 1.125rem;
@@ -80,7 +81,7 @@ h1, h2, h3, p, dl, ul, ol {
 }
 
 h1, h2 {
-    font-family: var(--font-family-base);
+    font-family: var(--font-family-serif);
     font-weight: 400;
     color: var(--color-emphasized);
 }
@@ -430,11 +431,7 @@ main {
 }
 
 .article-card-body.cdx-card {
-    display: flex;
-    flex-direction: column;
     block-size: 100%;
-    padding: 1.25rem;
-    border-color: var(--border-color-subtle);
 }
 
 .article-card-body:focus-within {
@@ -450,34 +447,20 @@ main {
     inline-size: 100%;
 }
 
-.article-card-body .cdx-card__text__supporting-text {
-    margin-block-start: auto;
-}
-
 .article-card-body .cdx-card__text__title {
-    margin: 0;
     font-size: var(--font-size-large);
     line-height: 1.5;
 }
 
+.article-card-body .cdx-card__text__title h3 {
+    display: inline;
+    margin: 0;
+    font-size: inherit;
+    line-height: inherit;
+}
+
 .article-card .assessment-chips {
-    display: flex;
-    margin-block-start: .5rem;
     font-size: var(--font-size-small);
-}
-
-.highlights .assessment-chips {
-    margin-inline-start: 2rem;
-}
-
-.card-type {
-    display: flex;
-    align-items: center;
-    gap: .375rem;
-    margin-block: 0 .75rem;
-    color: var(--color-subtle);
-    font-size: var(--font-size-small);
-    line-height: 1.5;
 }
 
 .codex-control {
@@ -489,30 +472,16 @@ main {
     font-weight: 700;
 }
 
-.article-card .article-summary {
-    display: block;
-}
-
-.highlights .article-summary {
-    position: relative;
-    padding-inline-start: 2rem;
-}
-
-.highlights .article-summary::before {
-    content: counter(list-item);
-    position: absolute;
-    inset-inline-start: 0;
-    inset-block-start: .0625rem;
+.article-rank {
     min-inline-size: 1.5rem;
-    padding-inline: .25rem;
-    border-radius: var(--border-radius-base);
-    background: var(--background-color-neutral-subtle);
     color: var(--color-subtle);
     font-size: var(--font-size-small);
-    font-weight: 400;
     font-variant-numeric: tabular-nums;
-    line-height: 1.5rem;
     text-align: center;
+}
+
+.article-rank::before {
+    content: counter(list-item);
 }
 
 .review-icon-link {
@@ -552,16 +521,14 @@ main {
 }
 
 .article-extract {
-    margin-block: .75rem 0;
+    margin: 0;
     font-size: var(--font-size-medium);
     line-height: 1.625;
 }
 
 .card-meta {
     display: block;
-    margin-block: 1rem 0;
-    padding-block-start: .75rem;
-    border-block-start: 1px solid var(--border-color-subtle);
+    margin: 0;
     color: var(--color-subtle);
     font-size: var(--font-size-small);
 }
@@ -591,55 +558,54 @@ main {
     text-decoration: none;
 }
 
+.backlog-card {
+    display: flex;
+    min-inline-size: 0;
+}
+
 .backlog-task {
+    flex: 1;
     min-inline-size: 0;
 }
 
 .backlog-task .cdx-card__text {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    gap: .75rem;
     min-inline-size: 0;
     inline-size: 100%;
 }
 
 .backlog-label {
     min-inline-size: 0;
-}
-
-.backlog-task .cdx-card__text__supporting-text {
-    margin-block-start: 0;
+    margin: 0;
+    font-size: var(--font-size-medium);
 }
 
 .backlog-count {
     color: var(--color-subtle);
     font-size: var(--font-size-small);
     font-variant-numeric: tabular-nums;
-    white-space: nowrap;
+}
+
+.routine-rows {
+    display: grid;
+    gap: .75rem;
 }
 
 .routine-row {
-    display: grid;
-    grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr);
-    align-items: center;
-    gap: .5rem 2rem;
     min-inline-size: 0;
-    padding-block: .75rem;
 }
 
-.routine-row h3 {
-    display: flex;
-    align-items: center;
-    gap: .75rem;
+.routine-row .cdx-card__text {
+    flex: 1;
+    min-inline-size: 0;
+}
+
+.routine-row .cdx-card__text__title h3 {
     margin: 0;
     font-size: var(--font-size-medium);
 }
 
-.routine-row h3 span {
-    min-inline-size: 0;
-    overflow-wrap: anywhere;
+.routine-row .routine-status {
+    margin: 0;
 }
 
 .report-icon {
@@ -651,9 +617,8 @@ main {
 }
 
 .routine-meta {
-    display: grid;
-    grid-template-columns: minmax(0, .9fr) minmax(0, 1.5fr);
-    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
     gap: .25rem 1.25rem;
     margin: 0;
     padding: 0;
@@ -664,10 +629,6 @@ main {
 .routine-meta > li {
     min-inline-size: 0;
     overflow-wrap: anywhere;
-}
-
-.routine-meta .routine-status {
-    grid-row: 1 / span 2;
 }
 
 .routine-progress {
@@ -719,7 +680,8 @@ main {
     font-variant-numeric: tabular-nums;
 }
 
-.routine-status[data-status="updated"] {
+.routine-status[data-status="updated"],
+.routine-status[data-status="no_update"] {
     --status-color: var(--color-success);
 }
 
@@ -736,7 +698,8 @@ main {
     --status-color: var(--color-warning);
 }
 
-.routine-status[data-status="unknown"] {
+.routine-status[data-status="unknown"],
+.routine-status[data-status="queued"] {
     --status-color: var(--color-subtle);
 }
 
@@ -745,8 +708,18 @@ main {
     font: inherit;
 }
 
-.status-label {
+.status-label,
+.status-icon {
     color: var(--status-color, var(--color-base));
+}
+
+.status-icon {
+    display: inline-block;
+    inline-size: 1.25rem;
+    block-size: 1.25rem;
+    margin-inline-end: .25rem;
+    vertical-align: -.25em;
+    fill: currentColor;
 }
 
 .status-link {
@@ -850,6 +823,20 @@ summary:hover {
 
 .cdx-select:disabled:not([multiple]) {
     background-image: url("/codex-select-disabled.svg");
+}
+
+/* Load local icon sources before Codex's data-URI declarations under CSP. */
+@supports ((mask-image: none) or (-webkit-mask-image: none)) {
+    details.cdx-accordion > summary::before {
+        -webkit-mask-image: url("/codex-select.svg");
+        mask-image: url("/codex-select.svg");
+    }
+}
+
+@supports not ((mask-image: none) or (-webkit-mask-image: none)) {
+    details.cdx-accordion > summary::before {
+        background-image: url("/codex-select.svg");
+    }
 }
 
 .form-actions, .log-toolbar {
@@ -1220,24 +1207,10 @@ footer nav {
         margin-block: 2rem;
     }
 
-    .routine-rows {
-        border-block-start: 1px solid var(--border-color-subtle);
-    }
-
-    .routine-row {
-        grid-template-columns: minmax(0, 1fr);
-        gap: .25rem;
-        border-block-end: 1px solid var(--border-color-subtle);
-    }
-
     .routine-meta {
+        display: grid;
         grid-template-columns: minmax(0, 1fr);
         gap: .25rem;
-        margin-inline-start: 2rem;
-    }
-
-    .routine-meta .routine-status {
-        grid-row: auto;
     }
 
     .maintenance-controls {
@@ -1265,6 +1238,13 @@ footer nav {
 }
 
 @media (forced-colors: active) {
+    @supports ((mask-image: none) or (-webkit-mask-image: none)) {
+        details.cdx-accordion > summary::before {
+            forced-color-adjust: none;
+            background-color: ButtonText;
+        }
+    }
+
     :where(a, button, input, select, summary, [tabindex]):focus-visible {
         outline-color: Highlight;
     }

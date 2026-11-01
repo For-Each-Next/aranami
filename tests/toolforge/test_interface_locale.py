@@ -181,7 +181,8 @@ class AssessmentFallbackTests(unittest.TestCase):
             assert label in output
         assert "WikiProject:电子游戏/认证条目/BPAN" in output
         heading = re.search(
-            r'id="routine-assessment_lists">\s*<h3>(.*?)</h3>',
+            r'<h3\b[^>]*\bid="routine-assessment_lists-heading"[^>]*>'
+            r"(.*?)</h3>",
             output,
             re.DOTALL,
         )

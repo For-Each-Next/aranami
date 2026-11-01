@@ -4,6 +4,30 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.9
 
+### 0.8.6 (2026-11-01 16:27 UTC)
+
+Overview: Standardized Codex cards and newsletter source controls, compiled
+Vue components locally, and separated authored sources from deployment output.
+
+- Placed quality and importance badges inline after card titles, preserving
+  semantic headings and natural wrapping on narrow screens.
+- Prefixed popularity statistics with their observed date and retained it
+  when a site-wide rank was unavailable.
+- Used outlined cards for on-wiki jobs with work titles, status descriptions,
+  and supporting times, alongside grouped maintenance cards with item counts.
+- Added Codex task-status icons and semantic colors, and aligned headings
+  and newsletter source with the documented platform font stacks.
+- Authored Codex components in Vue files and compiled their semantic markup
+  locally, retaining fast server rendering without Node on Toolforge.
+- Moved generated website output into disposable `dist/webservice`, validating
+  source and output hashes before uploading the complete runtime payload.
+- Collapsed newsletter wikitext in translated Codex accordions with autosized,
+  read-only text areas and preserved exact source copying.
+- Minified browser scripts and compressed source uploads as deterministic
+  tar.gz archives while preserving payload integrity checks.
+- Deployed v0.8.6 to Toolforge and verified both services, the exact payload,
+  status icons, newsletter controls, and asset caching at 2026-11-01 16:27 UTC.
+
 ### 0.8.5 (2026-11-01 15:35 UTC)
 
 Overview: Cleaned obsolete code and documentation, refined the webservice's
