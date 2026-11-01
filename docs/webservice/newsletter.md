@@ -8,8 +8,9 @@ opening the tool never fetches source pages or publishes edits.
 ## Prepare an issue
 
 Open **Tools → Newsletter drafts**, or `/newsletter/`. The issue menu selects
-the latest completed issue or the current draft and loads it in place. A native
-form submission works without JavaScript. The default advances on January 1,
+the latest completed issue or the current draft and loads it in place. The
+issue submit button stays visible after loading. Native form submission works
+without JavaScript. The default advances on January 1,
 April 1, July 1, and October 1 at `00:00 UTC`. Daily collection runs at that time
 and retries failures hourly while retaining the previous complete result.
 
@@ -26,7 +27,7 @@ chronological order. Homepage lists with no entries use `* （無）`.
 
 Use **Copy** to copy the draft, **View newsletter page** to read its destination,
 and **Edit newsletter page** to open the wiki editor. The edit link prefills a
-source-linked summary such as `[[toolforge:aranami/newsletter|2026年10月30日资料]]`
+source-linked summary such as `[[toolforge:aranami/newsletter/|2026年10月30日资料]]`
 using the draft's data date, including the annual feature's own date. Undated
 drafts use `简讯资料`. Both links work without JavaScript and leave copying
 to the separate button.
@@ -43,7 +44,9 @@ The actual capture time is shown separately. Missing dates are unavailable;
 each available date has its own saved facts. The website generates every page
 from those facts when requested, using the current formatting rules. Formatting
 changes therefore apply to older dates without changing their observations or
-capture timestamps. Missing annual figures stay blank.
+capture timestamps. Missing annual figures use complete placeholder sentences.
+Partial-year daily growth uses the elapsed days through the displayed
+observation date; completed years use their full calendar length.
 
 ## January's annual feature
 
@@ -52,18 +55,30 @@ the four data sections retain their original order and level-four headings:
 `內容評審`, `新章推薦`, `条目报告`, and `榮譽表彰`.
 The second label is an intentional correction to the reference. No extra data headings are
 added. Supported quality milestones, credits, DYK lists, article statistics,
-and award gains fill the corresponding slots. Missing observations stay blank;
-partial annual figures carry a provisional marker. Quarterly counts are never
+and award gains fill the corresponding slots. Missing observations use natural
+placeholder sentences. Introductions immediately before partial annual figures
+and lists carry an inline date notice, such as
+`{{Memo|截至2026年10月31日|inline:info}}`. The template's second parameter
+uses the verified `inline:` prefix so following content stays on the same line
+([Memo documentation, revision 93779044](https://zh.wikipedia.org/w/index.php?title=Template:Memo/doc&oldid=93779044)).
+Comparisons state figures and plain
+increases, decreases, or unchanged totals. Quarterly counts are never
 substituted for annual data.
 
-GA/FA/FL credits retain recorded nominators from archived talk-page
-nominations. Explicit non-main-author declarations remain marked `非主編`.
+The quality review leads with annual high-quality totals, grouping FA+FL as
+`典範內容` and A+AL as `甲級內容`, followed by GA and Bplus. Known-zero groups
+are omitted. The comparison and chart precede the distinct grade lists,
+subject-distribution placeholder, and centered author table. Author lists put
+each template parameter and article on its own line, with a plain count summary.
+
+Credits prioritize recorded nominators for every quality grade. Explicit
+non-main-author declarations remain marked `非主編` beside the article.
 Listing-time text attribution is separate: saved WikiWho evidence identifies
 original contributors of the raw wikitext tokens surviving at the selected
-listing revision, with tied leading contributors retained. Different leading
-contributors are annotated; A/AL/Bplus entries and community listings without
-a recorded nominator use these explicitly labeled computed credits. Missing
-authorship stays blank rather than becoming a community main-author claim.
+listing revision, with tied leading contributors retained. When the nominator
+differs from those contributors, a small inline notice after the article names
+them. Listings without a recorded nominator use the saved leading contributors.
+Missing authorship remains unknown, and usernames have no authorship qualifier.
 DYK contributors are retained in the database from explicit author fields in
 supported DYKEntry nominations or archives; annual drafts omit these credits.
 A DYKtalk date alone supplies no contributor identity. Quality category lists
@@ -105,11 +120,15 @@ The annual feature keeps the reference's numerical introductions for quality
 promotions, DYK, article totals and growth, popularity, revisions, and awards.
 It uses `Graph:Chart` for annual quality recognitions, cumulative DYK totals, and
 assessment pies for the reviewed year and its predecessor. Charts have no
-companion data tables. Each assessment legend includes the grade and count,
+companion data tables. Generated parameters use `| key = value`, and chart
+lists separate values with a comma and a space.
+Each assessment legend includes the grade and count,
 such as `典范级：25`, in regular weight. Grades representing at least 5% show
 their share to one decimal inside the pie, in regular black text. Smaller
 slices have no percentage label. Legends contain only grades and counts.
 Each pie is at most 400 pixels wide including its legend and padding.
+Both pies share one outer container, with their introduction and date notice
+before it.
 On narrow screens, each chart scrolls inside its own container.
 Historical series
 come from the reference images' description pages, with provenance retained

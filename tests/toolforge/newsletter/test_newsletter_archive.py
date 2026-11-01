@@ -240,6 +240,7 @@ class NewsletterDraftArchiveTests(TestCase):  # ruff: ignore[too-many-public-met
                 assert selected.status_code == 200
                 assert "Early game" in selected.text
                 assert selected.text.count("data-newsletter-wikitext") == 1
+                assert "data-newsletter-metadata" not in selected.text
                 assert 'name="date" type="date"' in selected.text
                 assert 'name="feature_date"' not in selected.text
             with patch.object(

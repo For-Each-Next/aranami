@@ -218,7 +218,8 @@ class NewsletterQualityYearTests(TestCase):
         params = {
             str(p.name).strip(): str(p.value).strip() for p in chart.params
         }
-        assert params["x"] == "2025,2026"
+        assert params["x"] == "2025, 2026"
+        assert "| xType = string | x = 2025, 2026" in str(chart)
         assert params["xAxisTitle"] == "年份"
         assert [params[f"y{index}"] for index in range(1, 5)] == [
             "0, 3",
@@ -232,7 +233,7 @@ class NewsletterQualityYearTests(TestCase):
             "优良级",
             "乙上级",
         ]
-        assert params["colors"] == "#9CBDFF,#66FFFF,#66FF66,#8CFF66"
+        assert params["colors"] == "#9CBDFF, #66FFFF, #66FF66, #8CFF66"
         assert params["interactive"] == "true"
         assert params["animate"] == "true"
         assert params["xType"] == "string"
@@ -285,4 +286,4 @@ class NewsletterQualityYearTests(TestCase):
         assert "#66FFFF" not in str(chart)
         assert "甲级" not in str(chart)
         missing = render_annual_feature(Issue(2027, 1), {})
-        assert "type=stackedrect" not in missing
+        assert "| type = stackedrect" not in missing

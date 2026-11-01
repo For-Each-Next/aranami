@@ -4,6 +4,32 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.9
 
+### 0.8.2 (2026-11-01 10:28 UTC)
+
+Overview: Refined annual newsletter statistics, contributor credits, navigation
+controls, and readable wikitext.
+
+- Kept the issue submit button visible after JavaScript initialization and
+  issue changes, alongside the data-date controls.
+- Stabilized initial button styling and copy-control layout, and removed
+  obsolete assessment-filter initialization.
+- Spaced chart parameters around pipes and equals signs, and separated all
+  chart list values with a comma and a space.
+- Pointed newsletter edit-summary links to the tool's trailing-slash path.
+- Reorganized annual quality statistics, article lists, subject placeholders,
+  and author tables around the January 2026 reference structure.
+- Grouped featured and A-class content in annual totals, omitted zero-count
+  groups, and linked Bplus counts to `PJ:VG/BPCA`.
+- Used natural missing-data sentences and factual comparisons, with inline
+  Memo date notices in the introductions to incomplete figures and lists.
+- Kept the two annual assessment pies in one container with a shared introduction.
+- Centered author tables and made collapsible article lists easier to edit.
+- Removed the draft JSON panels and their report-data generation code.
+- Prioritized recorded nominators, with differing WikiWho authorship shown
+  beside each affected article.
+- Aligned partial-year daily growth with actual observation dates and kept
+  observed empty rankings distinct from unavailable data.
+
 ### 0.8.1 (2026-11-01 08:57 UTC)
 
 Overview: Simplified newsletter announcements with combined homepage recognition

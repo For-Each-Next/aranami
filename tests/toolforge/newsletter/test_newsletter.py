@@ -387,7 +387,7 @@ class NewsletterRouteTests(unittest.TestCase):
             Issue.parse("2027-01").draft_suffixes,
         )
         assert "13,025篇條目" in response.text
-        assert "待補" not in response.text
+        assert "高品質條目的總數及各級內容數量待補充。" in response.text
         upcoming.assert_called_once()
 
     def test_language_links_retain_selected_issue(self) -> None:
@@ -431,6 +431,7 @@ class NewsletterRouteTests(unittest.TestCase):
         assert response.status_code == HTTPStatus.OK
         assert dangerous not in response.text
         assert "&lt;/code&gt;&lt;/pre&gt;&lt;script&gt;" in response.text
+        assert "<img src=x onerror=alert(1)>" not in response.text
         assert "onerror=alert(1)" not in response.text
         assert "newsletter-sources" not in response.text
         assert path.read_bytes() == original
@@ -692,7 +693,7 @@ class NewsletterRouteTests(unittest.TestCase):
             query = parse_qs(urlsplit(unescape(edit_url)).query)
             assert query["action"] == ["edit"]
             assert query["summary"][0].startswith(
-                "[[toolforge:aranami/newsletter|",
+                "[[toolforge:aranami/newsletter/|",
             )
         assert "No saved draft is available" not in response.text
         assert all(

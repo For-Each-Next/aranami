@@ -71,8 +71,8 @@ class NewsletterPresentationTests(unittest.TestCase):
                     )
 
     @staticmethod
-    def test_evidence_is_retained_without_displaying_sources() -> None:
-        """Keep internal evidence while omitting its UI section."""
+    def test_collection_evidence_is_retained_without_display() -> None:
+        """Keep saved source evidence outside the draft interface."""
         main = {
             "label": "Original source",
             "url": "https://zh.wikipedia.org/w/index.php?oldid=41",
@@ -101,8 +101,11 @@ class NewsletterPresentationTests(unittest.TestCase):
         assert result["data_through"] == "2026-10-15"
         assert render_issue(Issue.parse("2027-01"))["data_through"] is None
         output = render_newsletter(result, "en")
-        for source in (main, news, history):
-            assert source["url"] not in output
+        assert all("metadata" not in page for page in result["pages"])
+        assert "data-newsletter-metadata" not in output
+        assert "oldid=41" not in output
+        assert "oldid=42" not in output
+        assert "oldid=43" not in output
         assert "newsletter-sources" not in output
         assert facts == original
 
@@ -203,7 +206,7 @@ class NewsletterPresentationTests(unittest.TestCase):
                             f"cdx-button--action-{action}",
                             f"cdx-button--weight-{weight}",
                         } <= set(classes[1].split())
-                    assert "hidden" in copy[0]
+                    assert "hidden" not in copy[0]
                     for link in (view, edit):
                         assert "hidden" not in link[0]
                         assert "data-newsletter-copy=" not in link[0]
@@ -223,7 +226,7 @@ class NewsletterPresentationTests(unittest.TestCase):
                             assert parse_qs(url.query) == {
                                 "action": ["edit"],
                                 "summary": [
-                                    "[[toolforge:aranami/newsletter|简讯资料]]",
+                                    "[[toolforge:aranami/newsletter/|简讯资料]]",
                                 ],
                             }
                 assert "data-newsletter-edit=" not in output
@@ -266,7 +269,7 @@ class NewsletterPresentationTests(unittest.TestCase):
                         assert parse_qs(urlsplit(unescape(target)).query) == {
                             "action": ["edit"],
                             "summary": [
-                                f"[[toolforge:aranami/newsletter|{day}资料]]",
+                                f"[[toolforge:aranami/newsletter/|{day}资料]]",
                             ],
                         }
 

@@ -3,7 +3,7 @@
 Annual sections follow the January 2026 feature (revision 91016278).
 The draft banner and noteTA-lite call follow the audited October
 2026 subpages.
-Only supplied annual facts fill statistics; unknown slots remain blank.
+Statistics use supplied annual facts and full missing-data sentences.
 """
 
 # Authored Chinese output deliberately uses full-width punctuation.
@@ -39,6 +39,13 @@ _GRADES = {
     "FT": "典范话题",
     "GT": "优良话题",
 }
+_ANNUAL_QUALITY_GRADES = ("FA", "FL", "A", "AL", "GA", "Bplus")
+_ANNUAL_QUALITY_GROUPS = (
+    (("FA", "FL"), "[[PJ:VG/FA|典範內容]]"),
+    (("A", "AL"), "[[PJ:VG/A|甲級內容]]"),
+    (("GA",), "[[PJ:VG/GA|優良條目]]"),
+    (("Bplus",), "[[PJ:VG/BPCA|乙上級條目]]"),
+)
 _DYK_PROJECT_HEADINGS = {
     "虚构角色": "角色與元素",
     "传记": "公司與人物",
@@ -66,7 +73,16 @@ _PIE_TEXT_PADDING = 6
 _FIRST_BAND_END = 2009
 _SECOND_BAND_END = 2019
 _ICON_GRADES = frozenset({"Bplus", "GA", "A", "FA", "FL"})
-_CREDIT_GRADES = _GRADES
+_CREDIT_GRADES = {
+    "FA": "典範條目",
+    "FL": "特色列表",
+    "A": "甲級條目",
+    "AL": "甲級列表",
+    "GA": "優良條目",
+    "Bplus": "乙上級條目",
+    "FT": "典範話題",
+    "GT": "優良話題",
+}
 _AWARD_THRESHOLD = 10
 _DYK_BASELINE_YEAR = 2025
 
@@ -131,13 +147,96 @@ def _count(value: object) -> str:
     return f"{value:,}" if type(value) is int else ""
 
 
-def _table(headers: tuple[str, ...], rows: list[list[str]]) -> str:
+def _annual_data_through(
+    review: Mapping,
+    *,
+    data_through: str | None = None,
+) -> dt.date | None:
+    """Resolve the inclusive date covered by annual statistics.
+
+    Args:
+        review: Saved annual facts with an exclusive observation cutoff.
+        data_through: Inclusive date for independently dated data.
+
+    Returns:
+        Inclusive data date, or none when no valid date was retained.
+    """
+    try:
+        return (
+            dt.date.fromisoformat(data_through)
+            if data_through is not None
+            else dt.date.fromisoformat(review["observation_end"])
+            - dt.timedelta(days=1)
+        )
+    except KeyError, TypeError, ValueError:
+        return None
+
+
+def _annual_as_of(
+    review: Mapping,
+    *,
+    data_through: str | None = None,
+) -> str:
+    """Mark the inclusive date covered by incomplete annual statistics.
+
+    Args:
+        review: Saved annual facts with an exclusive observation cutoff.
+        data_through: Inclusive date for independently dated data.
+
+    Returns:
+        An inline Memo date marker, or a missing-date sentence.
+    """
+    day = _annual_data_through(review, data_through=data_through)
+    if day is None:
+        return "{{Memo|統計截至日期待補。|inline:info}}"
+    return f"{{{{Memo|截至{day.year}年{day.month}月{day.day}日|inline:info}}}}"
+
+
+def _annual_intro(
+    review: Mapping,
+    sentence: str,
+    *,
+    partial: bool | None = None,
+    data_through: str | None = None,
+) -> str:
+    """Keep a figure or list's coverage date in its introduction.
+
+    Args:
+        review: Saved annual facts with the shared observation cutoff.
+        sentence: Prose immediately preceding the figure or list.
+        partial: Override the annual observation's incomplete status.
+        data_through: Inclusive date for independently dated data.
+
+    Returns:
+        The introduction with an inline coverage mark when needed.
+    """
+    incomplete = not review.get("complete") if partial is None else partial
+    return sentence + (
+        _annual_as_of(review, data_through=data_through) if incomplete else ""
+    )
+
+
+def _table(
+    headers: tuple[str, ...],
+    rows: list[list[str]],
+    *,
+    style: str = "",
+) -> str:
     """Render already escaped cells as a simple sortable data table.
+
+    Args:
+        headers: Column labels ready for wikitext rendering.
+        rows: Escaped cell values in display order.
+        style: Trusted inline CSS for this generated table.
 
     Returns:
         Complete table wikitext.
     """
-    lines = ['{| class="wikitable sortable"', "! " + " !! ".join(headers)]
+    attributes = f' style="{style}"' if style else ""
+    lines = [
+        '{| class="wikitable sortable"' + attributes,
+        "! " + " !! ".join(headers),
+    ]
     for cells in rows:
         lines.extend(("|-", "| " + " || ".join(cells)))
     lines.append("|}")
@@ -182,11 +281,12 @@ def _invitation(issue: Issue) -> str:
     )
 
 
-def _quality(review: Mapping) -> str:
-    """Render quality category lists and the reference editor table.
+def _quality(review: Mapping) -> tuple[str, str]:
+    """Render separate quality lists and author-credit table.
 
     Returns:
-        Promotions in listing-date order, omitting empty groups.
+        Promotions in listing-date order and the author-credit table.
+        Empty article groups are omitted.
     """
     changes = review.get("quality_changes")
     frame = (
@@ -234,26 +334,21 @@ def _quality(review: Mapping) -> str:
                 ),
             ),
         )
-    return "\n".join(lines) + "\n\n" + _credits(frame)
+    return "\n".join(lines), _credits(frame)
 
 
 def _credits(changes: pl.DataFrame) -> str:
-    """Render nominators without guessing main authorship.
+    """Credit nominators and explain retained authorship per article.
 
     Returns:
-        The reference table with explicit non-author labels.
+        The reference table with nominators preferred over computed
+        authors, retaining tied author fallbacks and explicit notices.
     """
     contributions = (
         changes
         .with_columns(
-            (
-                pl.col("grade").is_in(["A", "AL", "Bplus"])
-                | pl.col("nominator").is_null()
-            ).alias("computed_credit"),
-        )
-        .with_columns(
             pl
-            .when(pl.col("computed_credit"))
+            .when(pl.col("nominator").is_null())
             .then(pl.col("authors"))
             .otherwise(pl.concat_list("nominator"))
             .alias("editor"),
@@ -274,7 +369,6 @@ def _credits(changes: pl.DataFrame) -> str:
                 "main_author",
                 "authors",
                 "nominator",
-                "computed_credit",
             ],
             keep="first",
             maintain_order=True,
@@ -293,7 +387,6 @@ def _credits(changes: pl.DataFrame) -> str:
             .sort_by("grade_order", "date", "title", nulls_last=True)
             .alias("articles"),
             pl.col("title").n_unique().alias("count"),
-            pl.col("computed_credit").all(),
             *(
                 pl
                 .col("title")
@@ -329,12 +422,8 @@ def _credits(changes: pl.DataFrame) -> str:
             if article["main_author"] is False:
                 text += "（非主編）"
             authors = article["authors"]
-            if (
-                not row["computed_credit"]
-                and authors
-                and article["nominator"] not in authors
-            ):
-                text += "（主要文字貢獻者：" + _users(authors) + "）"
+            if authors and article["nominator"] not in authors:
+                text += "{{small|主要文字貢獻者為" + _users(authors) + "。}}"
             articles.append(text)
             dates.append(article["date"])
         editor = (
@@ -342,29 +431,24 @@ def _credits(changes: pl.DataFrame) -> str:
             if row["editor"]
             else ""
         )
-        if row["computed_credit"] and row["editor"]:
-            editor += "（主要文字貢獻者）"
-        summary = (
-            "{{hlist-comma|"
-            + "|".join(
-                f"{row[grade]}篇{label}"
-                for grade, label in _CREDIT_GRADES.items()
-                if row[grade]
-            )
-            + "}}"
+        summary = "、".join(
+            f"{row[grade]}篇{label}"
+            for grade, label in _CREDIT_GRADES.items()
+            if row[grade]
         )
-        listing = (
-            "{{collapsible list|titlestyle=font-weight: normal;"
-            f"|title={summary}"
-            + "".join(
-                f"|{number}={text}"
+        listing = "\n".join([
+            "{{collapsible list",
+            "| titlestyle = font-weight: normal;",
+            f"| title = {summary}",
+            *(
+                f"| {number} = {text}"
                 for number, text in enumerate(
                     _dated_articles(articles, dates),
                     1,
                 )
-            )
-            + "}}"
-        )
+            ),
+            "}}",
+        ])
         cells = [editor, listing]
         if row["rank"] != previous_rank:
             rank = str(row["rank"])
@@ -373,7 +457,15 @@ def _credits(changes: pl.DataFrame) -> str:
             cells.insert(0, rank)
         rows.append(cells)
         previous_rank = row["rank"]
-    return _table(("#", "编者", "主编条目"), rows) + (
+    return _table(
+        ("#", "編者", "條目"),
+        rows,
+        style=(
+            "margin-left: auto; margin-right: auto; "
+            "min-width: max(80%, 255px); "
+            "width: 864px; max-width: 100%;"
+        ),
+    ) + (
         "\n注：名單依照總條目數排序；總數相同的，"
         "再先後按照典範、優良、乙上級內容數排列。"
     )
@@ -395,6 +487,10 @@ def _dyk(review: Mapping, year: int) -> str:
         Five game era bands, verified subject groups, and unknowns.
     """
     records = review.get("dyk")
+    if records is None:
+        return "本年度新條目推薦名單待補充。"
+    if not records:
+        return "* （無）"
     frame = (
         pl
         .DataFrame(
@@ -459,7 +555,7 @@ def _dyk(review: Mapping, year: int) -> str:
         .select(pl.col("title").list.len().sum())
         .item()
     )
-    count = _count(game_count) if records is not None else ""
+    count = _count(game_count)
     lines = [f"* '''遊戲作品（{count}）'''："]
     labels = [
         *(("**", band, band) for band in bands[:-1]),
@@ -494,9 +590,8 @@ def _dyk(review: Mapping, year: int) -> str:
             if row
             else ""
         )
-        count = (
-            str(len(row["title"]) if row else 0) if records is not None else ""
-        )
+        count = str(len(row["title"]) if row else 0)
+        text = text or "（無）"
         lines.append(f"{marker} '''{label}（{count}）'''：{text}")
     return "\n".join(lines)
 
@@ -545,8 +640,8 @@ def _quality_charts(review: Mapping, year: int) -> str:
     """Render the preceding and current year assessment pie charts.
 
     Returns:
-        Native pies with static inner percentages for grades comprising
-        at least five percent, and grade/count legends without shares.
+        Paired native pies with their coverage date in one introduction.
+        Inner percentages and legends retain native chart behavior.
     """
     records = [
         row
@@ -554,6 +649,7 @@ def _quality_charts(review: Mapping, year: int) -> str:
         if row["year"] in {year - 1, year}
     ]
     charts = []
+    provisional = False
     for row in records:
         observed = [
             (code, meta)
@@ -568,33 +664,45 @@ def _quality_charts(review: Mapping, year: int) -> str:
         legend_width = min(220, max(80, max(map(len, labels)) * 7.5 + 32))
         plot_width = _PIE_TOTAL_WIDTH - 28 - legend_width - _PIE_TEXT_PADDING
         counts = [row["counts"][code] for code, _ in observed]
-        marker = "（暫定）" if row["provisional"] else ""
+        provisional = provisional or row["provisional"]
         charts.append(
-            '<div style="display:inline-block;max-width:100%;overflow-x:auto;'
+            '<div style="display:inline-block;max-width:100%;'
+            "overflow-x:auto;"
             'vertical-align:top;text-align:center">\n'
             f'<div style="width:{_PIE_TOTAL_WIDTH}px;'
             'position:relative;line-height:0">\n'
             "{{Graph:Chart\n"
-            f"|type=pie|width={plot_width:g}|height={_PIE_HEIGHT}\n"
-            f"|title={row['year']}年條目品質概況{marker}\n"
-            "|x="
-            + ",".join(labels)
-            + "\n|y1="
+            f"| type = pie | width = {plot_width:g} | height = {_PIE_HEIGHT}\n"
+            f"| title = {row['year']}年條目品質概況\n"
+            "| x = "
+            + ", ".join(labels)
+            + "\n| y1 = "
             + ", ".join(map(str, counts))
-            + "\n|colors="
-            + ",".join(meta[1] for _, meta in observed)
-            + "\n|legend=true|showValues=false\n}}"
+            + "\n| colors = "
+            + ", ".join(meta[1] for _, meta in observed)
+            + "\n| legend = true | showValues = false\n}}"
             + _pie_percent_labels(counts, plot_width)
             + "\n</div></div>",
         )
-    return "\n".join(charts)
+    if not charts:
+        return ""
+    return (
+        _annual_intro(
+            review,
+            "各年度條目品質分布如下：",
+            partial=provisional,
+        )
+        + '\n<div class="annual-quality-pies">\n'
+        + "\n".join(charts)
+        + "\n</div>"
+    )
 
 
 def _assessment_prose(review: Mapping, year: int) -> str:
     """Keep the reference's year-end grade share comparisons.
 
     Returns:
-        Stub, Start, C, and B statistics with blank unknown variables.
+        Observed grade shares and complete missing-data sentences.
     """
     records = review.get("quality_statistics") or []
     current = next(
@@ -616,28 +724,152 @@ def _assessment_prose(review: Mapping, year: int) -> str:
             return None
         return sum(counts[key] for key in grades) / sum(counts.values()) * 100
 
-    def comparison(grades: tuple[str, ...]) -> str:
-        """Format one signed year-on-year percentage-point comparison.
+    def comparison(label: str, grades: tuple[str, ...]) -> str:
+        """Describe observed shares and year-on-year direction.
 
         Returns:
-            Share and change, preserving missing values as blanks.
+            A complete share sentence without invented comparisons.
         """
         after, before = share(current, grades), share(previous, grades)
-        percentage = f"{after:.1f}" if after is not None else ""
-        change = (
-            f"{after - before:+.1f}"
-            if after is not None and before is not None
-            else ""
-        )
-        return f"占比{percentage}%，較去年變動{change}個百分點"
+        if after is None:
+            return f"{label}占比資料待補充。"
+        sentence = f"{label}占比{after:.1f}%"
+        if before is None:
+            return sentence + "，去年占比資料待補充。"
+        change = round(after - before, 1)
+        if change == 0:
+            return sentence + "，與去年持平。"
+        direction = "上升" if change > 0 else "下降"
+        return sentence + f"，較去年{direction}{abs(change):.1f}個百分點。"
 
     b_now = sum(current[key] for key in ("b", "bl")) if current else None
     b_before = sum(previous[key] for key in ("b", "bl")) if previous else None
+    b_sentence = (
+        f"乙級內容今年共有{_count(b_now)}篇"
+        if b_now is not None
+        else "乙級內容今年的數量待補充"
+    )
+    b_sentence += (
+        f"，去年為{_count(b_before)}篇。"
+        if b_before is not None
+        else "，去年數量待補充。"
+    )
     return (
-        "條目質量方面，小作品级内容" + comparison(("stub", "sl")) + "。"
-        "初级内容" + comparison(("start", "list")) + "，"
-        "丙级内容" + comparison(("c", "cl")) + "。"
-        f"乙級內容今年达到{_count(b_now)}篇，去年为{_count(b_before)}篇。"
+        "條目質量方面，"
+        + comparison("小作品級內容", ("stub", "sl"))
+        + comparison("初級內容", ("start", "list"))
+        + comparison("丙級內容", ("c", "cl"))
+        + b_sentence
+    )
+
+
+def _article_growth_prose(
+    review: Mapping,
+    year: int,
+    current: int | None,
+    previous: int | None,
+) -> str:
+    """Describe observed article totals and their year-on-year change.
+
+    Args:
+        review: Saved annual observations and actual collection dates.
+        year: Calendar year being reviewed.
+        current: Observed article total, or none when unavailable.
+        previous: Previous year-end total, or none when unavailable.
+
+    Returns:
+        Natural growth prose with explicit missing-data sentences.
+    """
+    delta = (
+        current - previous
+        if type(current) is int and type(previous) is int
+        else None
+    )
+    start = dt.date(year, 1, 1)
+    year_days = (dt.date(year + 1, 1, 1) - start).days
+    data_through = (
+        str(review["overview_observed_at"])[:10]
+        if review.get("overview_observed_at")
+        else None
+    )
+    boundary = _annual_data_through(review, data_through=data_through)
+    elapsed_days = (
+        min(year_days, max(0, (boundary - start).days + 1))
+        if boundary is not None
+        else 0
+    )
+    days = year_days if review.get("complete") else elapsed_days or None
+    marker = (
+        _annual_as_of(
+            review,
+            data_through=data_through,
+        )
+        if not review.get("complete")
+        else ""
+    )
+    timing = f"截至{year}年年末" if review.get("complete") else "本年度統計中"
+    if current is None:
+        introduction = "本年度條目總數與增長統計待補充。"
+        if previous is not None:
+            introduction += f"去年年末共有{_count(previous)}篇條目。"
+    elif previous is None:
+        introduction = (
+            f"{timing}，電子遊戲專題共有{_count(current)}篇條目。"
+            "去年年末的條目總數與本年度增長統計待補充。"
+        )
+    elif delta == 0:
+        introduction = (
+            f"{timing}，電子遊戲專題共有{_count(current)}篇條目，"
+            f"與去年年末的{_count(previous)}篇持平"
+            + (
+                "，日均淨增長為0.00篇。"
+                if days is not None
+                else "。日均增長統計待補充。"
+            )
+        )
+    else:
+        direction = "增長" if delta > 0 else "減少"
+        introduction = (
+            f"{timing}，電子遊戲專題共有{_count(current)}篇條目，"
+            f"較去年年末的{_count(previous)}篇淨{direction}"
+            f"{_count(abs(delta))}篇"
+            + (
+                f"，日均淨{direction}{abs(delta) / days:.2f}篇。"
+                if days is not None
+                else "。日均增長統計待補充。"
+            )
+        )
+    return introduction + marker
+
+
+def _annual_ranking(
+    rows: list[str] | None,
+    *,
+    introduction: str,
+    missing: str,
+    empty: str,
+    marker: str = "",
+) -> str:
+    """Render rankings while preserving unavailable observations.
+
+    Args:
+        rows: Rendered ranking entries, or none when unavailable.
+        introduction: Prose introducing an observed nonempty ranking.
+        missing: Complete sentence for unavailable observations.
+        empty: Complete sentence for an observed empty ranking.
+        marker: Inline coverage mark attached to the list introduction.
+
+    Returns:
+        Ranking columns or the corresponding missing-data sentence.
+    """
+    if rows is None:
+        return missing
+    return (
+        (introduction if rows else empty)
+        + marker
+        + "\n{{div col|colwidth=25em}}\n"
+        + ("\n".join(rows) if rows else "* （無）")
+        + "\n{{div col end}}"
     )
 
 
@@ -649,7 +881,7 @@ def _article_report(  # ruff: ignore[too-many-locals]
 
     Returns:
         Formula, quality charts, monthly winners, and two top-25 lists.
-        Provisional observations retain their measured date intervals.
+        Incomplete observations retain their measured date intervals.
     """
     current = (review.get("overview") or {}).get("total")
     previous = (review.get("previous_overview") or {}).get("total")
@@ -658,25 +890,14 @@ def _article_report(  # ruff: ignore[too-many-locals]
         baseline = next((r for r in records if r["year"] == year - 1), None)
         if baseline:
             previous = sum(baseline["counts"].values())
-    delta = (
-        current - previous
-        if type(current) is int and type(previous) is int
-        else None
-    )
     days = (dt.date(year + 1, 1, 1) - dt.date(year, 1, 1)).days
-    daily = f"{delta / days:.2f}" if delta is not None else ""
-    marker = "〈暫定〉" if not review.get("complete") else ""
     parts = [
-        (
-            f"截至{year}年年末，電子遊戲專題共有{_count(current)}篇條目，"
-            f"較去年年末的{_count(previous)}篇淨增長{_count(delta)}篇，"
-            f"日均新增條目{daily}篇。{marker}"
-        ),
+        _article_growth_prose(review, year, current, previous),
         _assessment_prose(review, year),
         _quality_charts(review, year),
-        (
-            f"接下来揭示{year}年的热门条目。先列出各月浏览量最高的内容，"
-            "因每月天数不同，故只括注日均浏览量："
+        _annual_intro(
+            review,
+            f"以下列出{year}年各月日均瀏覽量最高的條目：",
         ),
     ]
     months = {r["month"]: r for r in review.get("monthly_popularity") or []}
@@ -687,7 +908,7 @@ def _article_report(  # ruff: ignore[too-many-locals]
             _link(row["title"])
             + f"<small>（日均{row['views'] / row['days']:,.0f}次浏览）</small>"
             if row
-            else ""
+            else "本月資料待補充。"
         )
         label = f"{month}月"
         if row and row.get("revision_id"):
@@ -702,6 +923,11 @@ def _article_report(  # ruff: ignore[too-many-locals]
         + "\n{{div col end}}",
     )
     popularity = review.get("annual_popularity")
+    period_label = (
+        "在統計期間內"
+        if popularity and popularity.get("provisional")
+        else f"{year}年"
+    )
     count = popularity.get("article_count") if popularity else current
     total = popularity.get("total_views") if popularity else None
     interval_days = (
@@ -713,38 +939,68 @@ def _article_report(  # ruff: ignore[too-many-locals]
         if popularity
         else days
     )
-    article_wan = f"{count / 10000:.2f}" if type(count) is int else ""
-    total_wan = f"{total / 10000:,.0f}" if type(total) is int else ""
-    daily_wan = (
-        f"{total / interval_days / 10000:.1f}" if type(total) is int else ""
-    )
-    provisional = (
-        f"〈暫定：{popularity['start']}至{popularity['end']}〉"
-        if popularity and popularity.get("provisional")
-        else ""
+    if type(count) is int and type(total) is int:
+        popularity_prose = (
+            f"{period_label}，专题{count / 10000:.2f}万篇条目的总浏览量为"
+            f"{total / 10000:,.0f}万，"
+            f"日均总浏览量为{total / interval_days / 10000:.1f}万。"
+        )
+    elif type(total) is int:
+        popularity_prose = (
+            f"{period_label}，專題總瀏覽量為{total / 10000:,.0f}萬，"
+            f"日均總瀏覽量為{total / interval_days / 10000:.1f}萬。"
+            "參與統計的條目數待補充。"
+        )
+    elif type(count) is int:
+        popularity_prose = (
+            f"{period_label}，參與瀏覽量統計的條目共有{count:,}篇。"
+            "總瀏覽量與日均瀏覽量待補充。"
+        )
+    else:
+        popularity_prose = "本年度瀏覽量統計待補充。"
+    ranking_period = (
+        f"{popularity['start']}至{popularity['end']}統計期間內"
+        if popularity
+        else "本年度"
     )
     parts.append(  # ruff: ignore[repeated-append]
-        f"{year}年，专题{article_wan}万篇条目的总浏览量为{total_wan}万，"
-        f"日均总浏览量为{daily_wan}万。{provisional}"
-        f"下方摘录{year}年度浏览量榜单前25名，前200名可参见"
-        "[[WikiProject:电子游戏/热门条目#年瀏覽量|热门条目页]]：\n"
-        "{{div col|colwidth=25em}}\n"
-        + "\n".join(
-            f"# {_link(row['title'])}：{row['views']:,}次浏览"
-            f"<small>（日均{row['views'] / interval_days:,.0f}次）</small>"
-            for row in (popularity or {}).get("items", [])[:25]
-        )
-        + "\n{{div col end}}",
+        popularity_prose
+        + "\n\n"
+        + _annual_ranking(
+            [
+                f"# {_link(row['title'])}：{row['views']:,}次浏览"
+                f"<small>（日均{row['views'] / interval_days:,.0f}次）</small>"
+                for row in popularity["items"][:25]
+            ]
+            if popularity is not None
+            else None,
+            introduction=(
+                f"以下列出{ranking_period}瀏覽量最多的條目，至多25篇；"
+                "前200名可參見"
+                "[[WikiProject:电子游戏/热门条目#年瀏覽量|熱門條目頁]]："
+            ),
+            missing="本年度瀏覽量排行待補充。",
+            empty="本年度沒有可列出的瀏覽量排行紀錄。",
+            marker=(
+                _annual_as_of(review, data_through=popularity["end"])
+                if popularity and popularity.get("provisional")
+                else ""
+            ),
+        ),
     )
     parts.append(
-        "以修订次数统计，则以下列25篇条目为最。"
-        + ("〈暫定〉" if not review.get("complete") else "")
-        + "\n{{div col|colwidth=25em}}\n"
-        + "\n".join(
-            f"# {_link(row['title'])}：{row['revisions']:,}笔修订"
-            for row in (review.get("revision_ranking") or [])[:25]
-        )
-        + "\n{{div col end}}",
+        _annual_ranking(
+            [
+                f"# {_link(row['title'])}：{row['revisions']:,}笔修订"
+                for row in review["revision_ranking"][:25]
+            ]
+            if review.get("revision_ranking") is not None
+            else None,
+            introduction="以修訂次數統計，以下列出本年度排名前25名的條目：",
+            missing="本年度修訂次數排行待補充。",
+            empty="本年度沒有可列出的修訂次數紀錄。",
+            marker=_annual_as_of(review) if not review.get("complete") else "",
+        ),
     )
     return "\n\n".join(part for part in parts if part)
 
@@ -757,41 +1013,58 @@ def _awards(review: Mapping) -> str:
     """
     newcomers = set(review.get("newcomers") or [])
     awards = review.get("awards")
-    count = str(len(awards)) if awards is not None else ""
-    new_count = (
-        str(len(newcomers)) if review.get("newcomers") is not None else ""
-    )
-    first_awards = (
-        str(
-            sum(
+    if awards is None:
+        summary = "本年度ACG專題獎得分統計待補充。"
+    else:
+        summary = f"年内共有{len(awards)}名编辑获得ACG专题奖得分。"
+        if awards and review.get("newcomers") is None:
+            summary += "首次得分者與首次獲獎人數待補充。"
+        elif awards:
+            first_awards = sum(
                 row["total"] >= _AWARD_THRESHOLD
                 for row in awards
                 if row["user"] in newcomers
-            ),
-        )
-        if awards is not None and review.get("newcomers") is not None
-        else ""
-    )
+            )
+            summary += (
+                f"其中{len(newcomers)}名編者首次得分，"
+                f"{first_awards}名首次達到10分。"
+            )
     lines = [
         "社群表彰：",
+        "本年度社群表彰資料待補充。",
         "",
-        (
-            f"年内共有{count}名编辑获得ACG专题奖得分，其中{new_count}名参与者首次得分，"
-            f"之中又有{first_awards}人达到10分、正式获得荣誉。"
-        ),
+        summary,
         "",
-        "完整得分名单列于下方，本年度首次得分者以绿色「N」字附注。",
-        "",
-        "ACG專題獎年度得分：",
-        "{{div col|colwidth=25em}}",
     ]
+    if awards:
+        lines.extend((
+            "年度得分名單如下，本年度首次得分者以綠色「N」字標記。",
+            "",
+        ))
+    lines.extend((
+        _annual_intro(review, "ACG專題獎年度得分名單如下："),
+        "{{div col|colwidth=25em}}",
+    ))
     for row in review.get("awards") or []:
         marker = " {{color|green|N}}" if row["user"] in newcomers else ""
+        gained = (
+            f"共得{_count(row['gained'])}分"
+            if type(row.get("gained")) is int
+            else "本年度得分待補充。"
+        )
+        total = (
+            f"<small>（累計分數{_count(row['total'])}分）</small>"
+            if type(row.get("total")) is int
+            else "；累計分數待補充。"
+        )
         lines.append(
             f"# {_link('User:' + row['user'], row['user'])}："
-            f"共得{_count(row.get('gained'))}分"
-            f"<small>（累計分數{_count(row.get('total'))}分）</small>{marker}",
+            + gained
+            + total
+            + marker,
         )
+    if not awards:
+        lines.append("年度得分名單待補充。" if awards is None else "* （無）")
     lines.append("{{div col end}}")
     return "\n".join(lines)
 
@@ -828,21 +1101,25 @@ def _quality_history_chart(review: Mapping) -> str:
     labels = frame["year"].cast(pl.String)
     parameters = [
         "{{Graph:Chart",
-        "|type=stackedrect|width=600|height=300",
-        "|xType=string|x=" + ",".join(labels),
+        "| type = stackedrect | width = 600 | height = 300",
+        "| xType = string | x = " + ", ".join(labels),
     ]
     for index, (key, label, _color) in enumerate(groups, start=1):
         values = ", ".join(str(value) for value in frame[key])
-        parameters.append(f"|y{index}={values}|y{index}Title={label}")
+        parameters.append(f"| y{index} = {values} | y{index}Title = {label}")
     parameters.extend((
-        "|colors=" + ",".join(color for _key, _label, color in groups),
-        "|legend=true|interactive=true|animate=true",
-        "|xAxisAngle=-30|xAxisTitle=年份",
-        "|yAxisTitle=入選篇數|yType=integer|yAxisMin=0|yGrid=true",
+        "| colors = " + ", ".join(color for _key, _label, color in groups),
+        "| legend = true | interactive = true | animate = true",
+        "| xAxisAngle = -30 | xAxisTitle = 年份",
+        (
+            "| yAxisTitle = 入選篇數 | yType = integer "
+            "| yAxisMin = 0 | yGrid = true"
+        ),
         "}}",
     ))
     return (
-        '<div class="center" '
+        _annual_intro(review, "歷年高品質條目入選數量如下：")
+        + '\n<div class="center" '
         'style="max-width:100%;overflow-x:auto;text-align:center">\n'
         '<div style="min-width:800px">\n'
         + "\n".join(parameters)
@@ -873,72 +1150,140 @@ def _milestone_charts(review: Mapping, year: int) -> tuple[str, str]:
             ))
     dyk = [(day, count) for day, count in dyk if day[:4] <= str(year)]
     chart = (
-        "{{Graph:Chart|type=area|width=400|height=250|xType=date|x="
-        + ",".join(day for day, _ in dyk)
-        + "|y1="
+        "{{Graph:Chart | type = area | width = 400 | height = 250 "
+        "| xType = date | x = "
+        + ", ".join(day for day, _ in dyk)
+        + " | y1 = "
         + ", ".join(str(count) for _, count in dyk)
-        + "|colors=#b4bbff|xAxisTitle=日期|yAxisTitle=條目數}}"
+        + " | colors = #b4bbff | xAxisTitle = 日期 | yAxisTitle = 條目數 }}"
     )
     return quality, (
-        "{{Image frame\n|align=right|width=400\n|content="
+        _annual_intro(
+            review,
+            "歷年新條目推薦累計數量如下：",
+            partial=(
+                not review.get("complete")
+                or bool(dyk and dyk[-1][0] < f"{year}-12-31")
+            ),
+            data_through=dyk[-1][0] if dyk else None,
+        )
+        + "\n{{Image frame\n| align = right | width = 400\n| content = "
         + chart
-        + "\n|caption=電子遊戲專題累計新條目推薦數量\n}}"
+        + "\n| caption = 電子遊戲專題累計新條目推薦數量\n}}"
     )
 
 
 def _quality_summary(review: Mapping, year: int) -> str:
-    """Keep the annual reference's numerical quality introduction.
+    """Summarize annual quality cohorts and their measured change.
 
     Returns:
-        Observed promotion counts with blank unavailable variables.
+        Linked positive quality groups or full-sentence placeholders.
+        Comparisons require both yearly totals to be observed.
     """
+    history = review.get("quality_year_ends")
+    counts = next(
+        (row["grades"] for row in history or [] if row["year"] == year),
+        None,
+    )
+    previous = next(
+        (
+            sum(row["grades"].values())
+            for row in history or []
+            if row["year"] == year - 1
+        ),
+        None,
+    )
+    if history == []:
+        counts = dict.fromkeys(_ANNUAL_QUALITY_GRADES, 0)
+        previous = 0
+    total = sum(counts.values()) if counts is not None else None
     changes = review.get("quality_changes")
-    groups = {
-        grade: len({
-            row["title"]
-            for row in changes or []
-            if row["grade"] == grade and row["action"] == "added"
-        })
-        for grade in _GRADES
-    }
-    counts = {
-        grade: str(value) if changes is not None else ""
-        for grade, value in groups.items()
-    }
-    total = (
-        str(
-            len({
-                row["title"]
-                for row in changes or []
-                if row["action"] == "added"
-                and row["grade"] not in {"GT", "FT"}
-            }),
+    if history is None and changes is not None:
+        observation = (
+            pl
+            .from_dicts(
+                changes,
+                schema={
+                    "title": pl.String,
+                    "grade": pl.String,
+                    "action": pl.String,
+                },
+            )
+            .filter(
+                (pl.col("action") == "added")
+                & pl.col("grade").is_in(_ANNUAL_QUALITY_GRADES),
+            )
+            .select(
+                pl.col("title").n_unique().alias("total"),
+                *(
+                    pl
+                    .col("title")
+                    .filter(pl.col("grade") == grade)
+                    .n_unique()
+                    .alias(grade)
+                    for grade in _ANNUAL_QUALITY_GRADES
+                ),
+            )
+            .row(0, named=True)
         )
-        if changes is not None
-        else ""
-    )
-    return (
-        f"{year}年度，專題共誕生典範條目{counts['FA']}篇、特色列表{counts['FL']}篇、"
-        f"優良條目{counts['GA']}篇。\n\n"
-        f"包括社群評選和内部評審在內，專題{year}年新增高品質條目{total}篇，"
-        f"形成{counts['GT']}組優良話題，具體如下："
-    )
+        total = observation.pop("total")
+        counts = observation
+    if counts is None:
+        summary = f"{year}年度高品質條目的總數及各級內容數量待補充。"
+    else:
+        groups = (
+            (sum(counts[grade] for grade in grades), label)
+            for grades, label in _ANNUAL_QUALITY_GROUPS
+        )
+        details = "、".join(
+            label + _count(count) + "篇" for count, label in groups if count
+        )
+        summary = f"{year}年度，專題共誕生高品質條目{_count(total)}篇"
+        summary += ("，其中" + details if details else "") + "。"
+    if not review.get("complete"):
+        summary += _annual_as_of(review)
+    if total is None or previous is None:
+        return summary
+    difference = total - previous
+    if difference:
+        direction = "增加" if difference > 0 else "減少"
+        comparison = (
+            f"較去年{_count(previous)}篇{direction}"
+            f"{_count(abs(difference))}篇。"
+        )
+    else:
+        comparison = f"與去年{_count(previous)}篇持平。"
+    return summary + "\n\n" + comparison
 
 
 def _dyk_summary(review: Mapping, year: int) -> str:
     """Keep the annual reference's numerical DYK introduction.
 
     Returns:
-        Distinct annual DYK counts and supported subject percentages.
+        Distinct annual DYK counts without invented prior observations.
     """
     rows = review.get("dyk")
-    total = len({row["title"] for row in rows or []})
-    count = str(total) if rows is not None else ""
-    previous = _count(review.get("previous_dyk_count"))
-    return (
-        "[[WikiProject:电子游戏/认证条目/DYK|新條目推薦]]方面，"
-        f"{year}年有{count}篇条目登上首页展示，去年为{previous}篇。\n\n"
-        "本年新條目推薦名單恭錄如下："
+    summary = "[[WikiProject:电子游戏/认证条目/DYK|新條目推薦]]方面，"
+    if rows is None:
+        summary += f"{year}年的首頁展示統計待補充。"
+    else:
+        count = (
+            pl
+            .from_dicts(rows, schema={"title": pl.String})
+            .select(pl.col("title").n_unique())
+            .item()
+        )
+        summary += f"{year}年有{count}篇条目登上首页展示。"
+    previous = review.get("previous_dyk_count")
+    summary += (
+        f"去年共有{_count(previous)}篇條目登上首頁展示。"
+        if type(previous) is int
+        else "去年的首頁展示統計待補充。"
+    )
+    return summary + (
+        "\n\n" + _annual_intro(review, "本年度新條目推薦名單如下：")
+        if rows is not None
+        else ""
     )
 
 
@@ -950,20 +1295,35 @@ def _annual(issue: Issue, review: Mapping) -> str:
     """
     year = issue.year - 1
     quality_chart, dyk_chart = _milestone_charts(review, year)
+    quality_list, author_table = _quality(review)
+    if quality_list:
+        quality_list = (
+            _annual_intro(review, "誕生條目具體如下：") + "\n" + quality_list
+        )
+    elif review.get("quality_changes") is not None:
+        quality_list = "本年度名單未收錄新增的高品質條目。"
+    else:
+        quality_list = "本年度高品質條目的具體名單待補充。"
+    quality_section = "\n\n".join(
+        part
+        for part in (
+            _quality_summary(review, year),
+            quality_chart,
+            quality_list,
+            "本年度高品質條目的題材分布待補充。",
+            _annual_intro(review, "作者名單如下：") + "\n" + author_table,
+        )
+        if part
+    )
     sections = [
         _invitation(issue),
         (
             f"== 專題報導兼訪談：{year}年年終回顧 ==\n"
             "{{WikiProject:電子遊戲/簡訊/年终回顾导航模板}}\n"
-            ": {{small|数据总结：[[User:Example|Example]]}}"
+            ": {{small|資料整理者待補。}}"
         ),
         "=== 引言 ===",
-        "==== 內容評審 ====\n\n"
-        + _quality_summary(review, year)
-        + "\n\n"
-        + quality_chart
-        + "\n\n"
-        + _quality(review),
+        "==== 內容評審 ====\n\n" + quality_section,
         "==== 新章推薦 ====\n\n"
         + dyk_chart
         + "\n\n"

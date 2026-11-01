@@ -198,8 +198,8 @@ quarterly counts relabeled as annual. Its structure follows the January 2026
 feature at revision 91016278: the introduction contains exactly four ordered
 level-four data sections, `內容評審`, `新章推薦`, `条目报告`, and `榮譽表彰`.
 The `新章推薦` label is an intentional correction to the reference.
-Missing data stays blank in copied wikitext; partial annual statistics carry
-a provisional marker and rolling pageview figures state their actual dates.
+Missing annual data uses complete placeholder sentences; partial statistics
+carry prominent dated markers, and rolling pageview figures state their dates.
 Only the two editor-comment invitations use buttons, both with the verified
 reflection preload; introduction and data slots have no invitation buttons.
 The invitations use `Template:Clickable button 2` revision 61200765 and
@@ -239,8 +239,9 @@ appearance dates remain unmarked.
 
 Annual statistics retain the January 2026 reference's numerical prose for
 promotions, DYK, article totals, net/daily growth, pageviews, revisions, and
-award participation. Unknown variables remain blank. Partial current figures
-carry a provisional marker. The ACG summary counts scoring editors, first-time
+award participation. Unknown figures use complete placeholder sentences.
+Partial current figures carry a dated `error` template marker. Comparisons
+state figures and plain trends. The ACG summary counts scoring editors, first-time
 scorers, and first-time scorers reaching the ten-point first award threshold.
 
 `quality_year_ends` selects articles with a recorded quality promotion during

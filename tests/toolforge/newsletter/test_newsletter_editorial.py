@@ -13,6 +13,19 @@ from shared.newsletter import Issue
 from updater.services.newsletter_editorial import render_editorial
 
 
+def _credit_lists(text: str) -> list[mwparserfromhell.nodes.Template]:
+    """Read the generated collapsible author-credit lists.
+
+    Returns:
+        Author lists in their displayed ranking order.
+    """
+    return [
+        template
+        for template in mwparserfromhell.parse(text).filter_templates()
+        if template.name.matches("collapsible list")
+    ]
+
+
 class EditorialDraftTests(unittest.TestCase):
     """Separate empty editorial slots from measured annual facts."""
 
@@ -49,7 +62,12 @@ class EditorialDraftTests(unittest.TestCase):
         )["專題"]
         for label in labels.values():
             assert f"'''{label}（1）'''" in text
-            assert f"1篇{label}" in text
+        title = str(_credit_lists(text)[0].get("title").value).strip()
+        assert title == (
+            "1篇典範條目、1篇特色列表、1篇甲級條目、1篇甲級列表、"
+            "1篇優良條目、1篇乙上級條目、1篇典範話題、1篇優良話題"
+        )
+        assert not mwparserfromhell.parse(title).filter_templates()
 
     @staticmethod
     def test_quality_order_counts_and_reference_credit_summary() -> None:
@@ -87,9 +105,20 @@ class EditorialDraftTests(unittest.TestCase):
             < text.index("User:Amy")
             < text.index("User:Aaron")
         )
-        assert "{{hlist-comma|2篇典范条目}}" in text
-        assert "{{hlist-comma|2篇优良条目}}" in text
-        assert "{{hlist-comma|2篇乙上级条目}}" in text
+        lists = _credit_lists(text)
+        assert [str(row.get("title").value).strip() for row in lists] == [
+            "2篇典範條目",
+            "2篇優良條目",
+            "2篇乙上級條目",
+        ]
+        assert all(
+            str(row).startswith(
+                "{{collapsible list\n| titlestyle = font-weight: normal;\n"
+                "| title = ",
+            )
+            for row in lists
+        )
+        assert "{{hlist-comma" not in text
         assert (
             "注：名單依照總條目數排序；總數相同的，再先後按照典範、優良、乙上級內容數排列。"
             in text
@@ -183,12 +212,25 @@ class EditorialDraftTests(unittest.TestCase):
             Issue.parse("2027-01"),
             {"year_review": {"quality_changes": changes}},
         )["專題"]
+        listing = _credit_lists(text)[0]
+        assert str(listing.get("title").value).strip() == (
+            "2篇典範條目、2篇優良條目"
+        )
+        assert [
+            str(listing.get(str(number)).value).strip()
+            for number in range(1, 5)
+        ] == [
+            "{{icon|FA}}&thinsp;[[:ATie]]<!-- 0201 -->",
+            "{{icon|FA}}&thinsp;[[:ALate]]<!-- 1201 -->",
+            "{{icon|GA}}&thinsp;[[:ZEarly]]<!-- 0101 -->",
+            "{{icon|GA}}&thinsp;[[:BTie]]<!-- 0201 -->",
+        ]
         assert (
-            "|1={{icon|FA}}&thinsp;[[:ATie]]<!-- 0201 -->"
-            "|2={{icon|FA}}&thinsp;[[:ALate]]<!-- 1201 -->"
-            "|3={{icon|GA}}&thinsp;[[:ZEarly]]<!-- 0101 -->"
-            "|4={{icon|GA}}&thinsp;[[:BTie]]<!-- 0201 -->"
-        ) in text
+            "\n| 1 = {{icon|FA}}&thinsp;[[:ATie]]<!-- 0201 -->\n"
+            "| 2 = {{icon|FA}}&thinsp;[[:ALate]]<!-- 1201 -->\n"
+            "| 3 = {{icon|GA}}&thinsp;[[:ZEarly]]<!-- 0101 -->\n"
+            "| 4 = {{icon|GA}}&thinsp;[[:BTie]]<!-- 0201 -->\n}}"
+        ) in str(listing)
         assert "<!-- 0301 -->" not in text
         assert "月 -->" not in text
 
@@ -266,7 +308,7 @@ class EditorialDraftTests(unittest.TestCase):
         assert "{{WikiProject:電子遊戲/簡訊/年终回顾导航模板}}" in text
         assert (
             "{{WikiProject:電子遊戲/簡訊/年终回顾导航模板}}\n"
-            ": {{small|数据总结：[[User:Example|Example]]}}"
+            ": {{small|資料整理者待補。}}"
         ) in text
         assert "=== 引言 ===\n\n==== 內容評審 ====" in text
         for unwanted in (
@@ -286,12 +328,13 @@ class EditorialDraftTests(unittest.TestCase):
             "新進條目",
         ):
             assert unwanted not in text
-        assert "* 12月：\n" in text
-        assert "年度浏览量榜单前25名" in text
-        assert "以修订次数统计，则以下列25篇条目为最。" in text
-        assert "截至2026年年末，電子遊戲專題共有篇條目" in text
+        assert "* 12月：本月資料待補充。\n" in text
+        assert "本年度瀏覽量統計待補充。" in text
+        assert "本年度修訂次數排行待補充。" in text
+        assert "本年度條目總數與增長統計待補充。" in text
+        assert "共有篇條目" not in text
         assert "社群表彰：" in text
-        assert "ACG專題獎年度得分：" in text
+        assert "ACG專題獎年度得分名單如下：" in text
         assert "{{Graph:Chart" in text
         expected_categories = 2
         assert text.count("[[Category:") == expected_categories
@@ -336,9 +379,9 @@ class EditorialDraftTests(unittest.TestCase):
             Issue.parse("2027-01"),
             {"year_review": {"quality_changes": changes}},
         )["專題"]
-        assert "! # !! 编者 !! 主编条目" in text
+        assert "! # !! 編者 !! 條目" in text
         assert "{{icon|GA}}&thinsp;[[:遊戲1]]（非主編）" in text
-        assert "[[:User:Editor2|Editor2]]" not in text
+        assert "[[:User:Editor2|Editor2]]" in text
         assert "{{icon|Bplus}}&thinsp;[[:遊戲2]]" in text
         assert " ||  || {{collapsible list" in text
         assert "{{icon|GA}}&thinsp;[[:遊戲3]]" in text
@@ -392,7 +435,7 @@ class EditorialDraftTests(unittest.TestCase):
             "開發與業界",
             "其他",
         ):
-            assert f"* '''{label}（0）'''：\n" in text
+            assert f"* '''{label}（0）'''：（無）\n" in text
 
     @staticmethod
     def test_dyk_project_membership_groups_subjects_once() -> None:
@@ -455,8 +498,8 @@ class EditorialDraftTests(unittest.TestCase):
             "* '''待分類（2）'''：[[:Unavailable]]<!-- 0201 -->、"
             "[[:Unmatched]]<!-- 0201 -->\n"
         ) in text
-        assert "* '''開發與業界（0）'''：\n" in text
-        assert "* '''其他（0）'''：\n" in text
+        assert "* '''開發與業界（0）'''：（無）\n" in text
+        assert "* '''其他（0）'''：（無）\n" in text
         for row in records:
             assert text.count(f"[[:{row['title']}]]") == 1
 
@@ -526,12 +569,10 @@ class EditorialDraftTests(unittest.TestCase):
                 },
             },
         )["專題"]
-        assert (
-            "共有0篇條目，較去年年末的0篇淨增長0篇，日均新增條目0.00篇" in text
-        )
+        assert "共有0篇條目，與去年年末的0篇持平。日均增長統計待補充。" in text
         assert "987" not in text
-        assert "* 1月：\n" in text
-        assert "|type=pie" not in text
+        assert "* 1月：本月資料待補充。\n" in text
+        assert "| type = pie" not in text
 
     @staticmethod
     def test_invitation_links_use_selected_issue_and_comment_preload() -> None:
@@ -587,7 +628,8 @@ class EditorialDraftTests(unittest.TestCase):
         assert "{{bad}}" not in text
         assert "[[Category:Injected]]" not in text
         assert "共得0分" in text
-        assert "累計分數分" in text
+        assert "累計分數待補充。" in text
+        assert "累計分數分" not in text
 
     @staticmethod
     def test_quality_authors_remain_distinct_from_nomination_roles() -> None:
@@ -617,17 +659,24 @@ class EditorialDraftTests(unittest.TestCase):
             {"year_review": {"quality_changes": changes}},
         )["專題"]
         assert "[[:User:Nom|Nom]]" in text
-        assert "主要文字貢獻者：[[:User:Writer|Writer]]" in text
-        assert "[[:User:AuthorA|AuthorA]]（主要文字貢獻者）" in text
-        assert "[[:User:AuthorB|AuthorB]]（主要文字貢獻者）" in text
-        assert "[[:User:Reviewer|Reviewer]]" not in text
+        assert "{{small|主要文字貢獻者為[[:User:Writer|Writer]]。}}" in text
+        assert "[[:User:AuthorA|AuthorA]]（主要文字貢獻者）" not in text
+        assert "[[:User:AuthorB|AuthorB]]（主要文字貢獻者）" not in text
+        assert "[[:User:Reviewer|Reviewer]]" in text
+        assert (
+            "[[:Internal]]{{small|主要文字貢獻者為"
+            "[[:User:AuthorA|AuthorA]]、[[:User:AuthorB|AuthorB]]。}}"
+        ) in text
         assert "{{icon|A}}&thinsp;[[:List]]" in text
         assert "{{icon|AL}}" not in text
         assert "{{icon|GA}}&thinsp;[[:Community]]（非主編）" not in text
         assert "{{icon|FA}}&thinsp;[[:Explicit]]（非主編）" in text
         assert text.count("{{icon|GA}}&thinsp;[[:Community]]") == 1
         assert "'''优良条目（1）'''" in text
-        assert "|title={{hlist-comma|1篇甲级条目|1篇甲级列表}}" in text
+        assert "1篇甲級條目、1篇乙上級條目" in [
+            str(listing.get("title").value).strip()
+            for listing in _credit_lists(text)
+        ]
 
     @staticmethod
     def test_dyk_contributors_are_retained_only_in_data() -> None:
@@ -662,13 +711,20 @@ class EditorialDraftTests(unittest.TestCase):
 
     @staticmethod
     def test_dyk_counts_distinguish_missing_and_observed_empty() -> None:
-        """Leave unknown counts blank and display observed zeros."""
+        """Distinguish missing observations from an empty DYK list."""
         issue = Issue.parse("2027-01")
         missing = render_editorial(issue, {})["專題"]
         empty = render_editorial(issue, {"year_review": {"dyk": []}})["專題"]
-        for label in ("遊戲作品", "2009年及以前", "角色與元素"):
-            assert f"'''{label}（）'''" in missing
-            assert f"'''{label}（0）'''" in empty
+        missing_section = missing.partition("==== 新章推薦 ====")[2].partition(
+            "==== 条目报告 ====",
+        )[0]
+        empty_section = empty.partition("==== 新章推薦 ====")[2].partition(
+            "==== 条目报告 ====",
+        )[0]
+        assert "本年度新條目推薦名單待補充。" in missing_section
+        assert "* （無）" not in missing_section
+        assert "* （無）" in empty_section
+        assert "本年度新條目推薦名單待補充。" not in empty_section
 
     @staticmethod
     def test_article_ampersands_remain_literal_wikitext() -> None:
@@ -683,3 +739,99 @@ class EditorialDraftTests(unittest.TestCase):
         )["專題"]
         assert "[[:N&B積木]]" in text
         assert "N&amp;B" not in text
+
+
+class AuthorCreditRoleTests(unittest.TestCase):
+    """Keep recorded nomination credit distinct from text authorship."""
+
+    @staticmethod
+    def _credit_table(
+        grade: str,
+        nominator: str | None,
+        authors: list[str] | None,
+    ) -> str:
+        """Render one article's author-credit table in isolation.
+
+        Returns:
+            The annual author table without other article lists.
+        """
+        text = render_editorial(
+            Issue(2027, 1),
+            {
+                "year_review": {
+                    "quality_changes": [
+                        {
+                            "date": "2026-01-02",
+                            "title": "Subject",
+                            "grade": grade,
+                            "action": "added",
+                            "nominator": nominator,
+                            "authors": authors,
+                        },
+                    ],
+                },
+            },
+        )["專題"]
+        return str(
+            next(
+                tag
+                for tag in mwparserfromhell.parse(text).filter_tags()
+                if tag.tag == "table"
+            ),
+        )
+
+    def test_recorded_nominator_wins_for_every_quality_grade(self) -> None:
+        """Put differing-writer notices beside their article."""
+        observations = (
+            ("same", ["Nom"]),
+            ("different", ["Writer"]),
+            ("tied", ["Writer", "Nom"]),
+            ("unknown", None),
+        )
+        for grade in ("FA", "FL", "A", "AL", "GA", "Bplus"):
+            for case, authors in observations:
+                with self.subTest(grade=grade, case=case):
+                    table = self._credit_table(grade, "Nom", authors)
+                    owner = next(
+                        line
+                        for line in table.splitlines()
+                        if " || {{collapsible list" in line
+                    )
+                    assert "[[:User:Nom|Nom]]" in owner
+                    assert "主要文字貢獻者" not in owner
+                    article = str(_credit_lists(table)[0].get("1").value)
+                    if case == "different":
+                        assert (
+                            "[[:Subject]]{{small|主要文字貢獻者為"
+                            "[[:User:Writer|Writer]]。}}"
+                        ) in article
+                    else:
+                        assert "主要文字貢獻者" not in article
+                    assert "<!-- 0102 -->" in article
+
+    def test_missing_nominator_falls_back_to_all_tied_top_authors(
+        self,
+    ) -> None:
+        """Retain saved author ties without inventing unknown names."""
+        authors = ["WriterA", "WriterB"]
+        table = self._credit_table("A", None, authors)
+        owners = [
+            line
+            for line in table.splitlines()
+            if " || {{collapsible list" in line
+        ]
+        assert len(owners) == len(authors)
+        for author in authors:
+            assert any(
+                f"[[:User:{author}|{author}]]" in owner for owner in owners
+            )
+        assert all("主要文字貢獻者" not in owner for owner in owners)
+        for listing in _credit_lists(table):
+            article = str(listing.get("1").value)
+            assert (
+                "[[:Subject]]{{small|主要文字貢獻者為"
+                "[[:User:WriterA|WriterA]]、[[:User:WriterB|WriterB]]。}}"
+            ) in article
+        unknown = self._credit_table("GA", None, None)
+        assert "User:" not in unknown
+        assert "主要文字貢獻者" not in unknown

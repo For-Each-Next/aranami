@@ -6,7 +6,6 @@ function initializeNewsletterResult(root = document) {
         const source = document.getElementById(button.dataset.newsletterCopy);
         const status = button.parentElement.querySelector("[data-newsletter-status]");
         if (!source || !status) continue;
-        button.hidden = false;
         button.addEventListener("click", async () => {
             status.textContent = "";
             button.disabled = true;
@@ -35,13 +34,11 @@ function initializeIssueForm() {
     const form = document.querySelector("[data-newsletter-issue-form]");
     if (!form) return;
     const issue = form.querySelector('[name="issue"]');
-    const submit = form.querySelector('button[type="submit"]');
     const status = document.querySelector("[data-newsletter-load-status]");
     let result = document.querySelector("[data-newsletter-result]");
     let displayedIssue = issue.value;
     let requestNumber = 0;
     let controller;
-    submit.hidden = true;
 
     async function loadIssue() {
         const request = ++requestNumber;

@@ -21,7 +21,7 @@ function fixture(clipboard) {
         addRange(range) { this.source = range.source; },
     };
     const button = {
-        hidden: true,
+        hidden: false,
         disabled: false,
         dataset: {
             newsletterCopy: "draft",
@@ -164,7 +164,7 @@ function issueFixture() {
 
 test("issue selection reads the new issue and replaces its draft without submission", async () => {
     const view = issueFixture();
-    assert.equal(view.submit.hidden, true);
+    assert.equal(view.submit.hidden, false);
     view.issue.value = "2026-10";
     const loaded = view.issue.handlers.change();
     assert.equal(view.requests.length, 1);
@@ -179,6 +179,7 @@ test("issue selection reads the new issue and replaces its draft without submiss
     assert.equal(view.result().textContent, "Previous issue draft");
     assert.equal(view.result().attrs["aria-busy"], undefined);
     assert.equal(view.issue.value, "2026-10");
+    assert.equal(view.submit.hidden, false);
     assert.equal(view.status.hidden, true);
     assert.equal(view.addresses.length, 1);
 });
@@ -193,6 +194,7 @@ test("failed or mismatched issue loads retain the displayed draft and explain re
         await loaded;
         assert.equal(view.result().textContent, "Original draft", failure);
         assert.equal(view.issue.value, "2027-01", failure);
+        assert.equal(view.submit.hidden, false, failure);
         assert.equal(view.result().attrs["aria-busy"], undefined, failure);
         assert.equal(view.status.textContent, "Unable to load this issue", failure);
         assert.equal(view.status.hidden, false, failure);

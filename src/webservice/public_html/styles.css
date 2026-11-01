@@ -728,18 +728,18 @@ button:active {
     background: var(--background-color-neutral);
 }
 
-button[type="submit"] {
+button[type="submit"]:not(.cdx-button) {
     border-color: var(--color-progressive);
     color: var(--background-color-base);
     background: var(--color-progressive);
 }
 
-button[type="submit"]:hover {
+button[type="submit"]:not(.cdx-button):hover {
     border-color: var(--color-progressive--hover);
     background: var(--color-progressive--hover);
 }
 
-button[type="submit"]:active {
+button[type="submit"]:not(.cdx-button):active {
     border-color: var(--color-progressive--active);
     background: var(--color-progressive--active);
 }

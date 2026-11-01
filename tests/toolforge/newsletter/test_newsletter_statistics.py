@@ -46,6 +46,80 @@ def _popular(start: str, end: str, duration: str = "yearly") -> str:
     )
 
 
+def _preceding_introduction(
+    code: mwparserfromhell.wikicode.Wikicode,
+    node: mwparserfromhell.nodes.Node,
+) -> str:
+    """Read the paragraph immediately preceding a displayed block.
+
+    Returns:
+        Introduction prose without the following list or figure.
+    """
+    position = next(
+        index
+        for index, candidate in enumerate(code.nodes)
+        if candidate is node
+    )
+    prefix = "".join(map(str, code.nodes[:position]))
+    return prefix.rstrip().rsplit("\n\n", 1)[-1]
+
+
+def _partial_annual_review() -> dict:
+    """Prepare all annual figures and lists with distinct cutoff dates.
+
+    Returns:
+        Partial observations whose DYK chart ends before the report.
+    """
+    return {
+        "complete": False,
+        "observation_end": "2026-11-01",
+        "quality_statistics": [
+            {
+                "year": year,
+                "counts": {**dict.fromkeys(QUALITY_GRADES, 0), "fa": 10},
+                "provisional": year == 2026,
+            }
+            for year in (2025, 2026)
+        ],
+        "quality_year_ends": [
+            {
+                "year": year,
+                "grades": {
+                    **dict.fromkeys(("FA", "FL", "A", "AL", "GA", "Bplus"), 0),
+                    "FA": 1,
+                },
+            }
+            for year in (2025, 2026)
+        ],
+        "quality_changes": [
+            {
+                "title": "Quality",
+                "date": "2026-03-01",
+                "grade": "FA",
+                "action": "added",
+                "nominator": "Editor",
+                "authors": ["Editor"],
+            },
+        ],
+        "dyk": [{"title": "DYK", "date": "2026-03-01"}],
+        "dyk_new_quarters": [{"date": "2026-09-30", "count": 1}],
+        "monthly_popularity": [
+            {"month": 1, "days": 31, "title": "Monthly", "views": 31000},
+        ],
+        "annual_popularity": {
+            "start": "2025-11-01",
+            "end": "2026-10-31",
+            "items": [{"title": "Popular", "views": 31000}],
+            "article_count": 1,
+            "total_views": 31000,
+            "provisional": True,
+        },
+        "revision_ranking": [{"title": "Revised", "revisions": 123}],
+        "awards": [{"user": "Editor", "gained": 12, "total": 12}],
+        "newcomers": ["Editor"],
+    }
+
+
 class NewsletterStatisticsTests(TestCase):
     """Keep annual charts and calendar boundaries accurate."""
 
@@ -79,7 +153,7 @@ class NewsletterStatisticsTests(TestCase):
         ]
         assert len(pies) == 2
         for pie in pies:
-            labels = str(pie.get("x").value).strip().split(",")
+            labels = str(pie.get("x").value).strip().split(", ")
             assert labels == [
                 "典范级：499",
                 "特色列表级：500",
@@ -129,7 +203,7 @@ class NewsletterStatisticsTests(TestCase):
                 ],
             },
         )
-        assert "|type=pie" not in text
+        assert "| type = pie" not in text
 
     @staticmethod
     def test_pie_width_budget_includes_legend_and_padding() -> None:
@@ -160,7 +234,7 @@ class NewsletterStatisticsTests(TestCase):
                 if template.name.matches("Graph:Chart")
                 and template.get("type").value.strip() == "pie"
             )
-            labels = str(pie.get("x").value).strip().split(",")
+            labels = str(pie.get("x").value).strip().split(", ")
             legend_width = min(220, max(80, max(map(len, labels)) * 7.5 + 32))
             canvas_width = (
                 float(str(pie.get("width").value)) + legend_width + 28
@@ -297,34 +371,215 @@ class NewsletterStatisticsTests(TestCase):
                 "newcomers": ["New"],
             },
         )
-        assert "較去年年末的12,497篇淨增長503篇，日均新增條目1.38篇" in text
-        assert "暫定：2025-11-01至2026-10-31" in text
+        assert "較去年年末的12,497篇淨增長503篇，日均淨增長1.65篇" in text
+        assert "{{Memo|截至2026年10月31日|inline:info}}" in text
+        assert "2025-11-01至2026-10-31統計期間內瀏覽量最多的條目" in text
+        assert "暫定" not in text
         assert "# [[:Game]]：123笔修订" in text
-        assert (
-            "年内共有1名编辑获得ACG专题奖得分，其中1名参与者首次得分" in text
-        )
-        assert "之中又有1人达到10分、正式获得荣誉" in text
+        assert "年内共有1名编辑获得ACG专题奖得分。其中1名編者首次得分" in text
+        assert "1名首次達到10分。" in text
         assert "{{Graph:Chart" in text
-        assert "|type=pie" in text
+        assert "| type = pie" in text
         assert '<svg xmlns="http://www.w3.org/2000/svg"' not in text
-        assert "|type=area" in text
+        assert "| type = area" in text
         assert "歷年資料來源" not in text
         assert "! 年份 !! 新增优良条目" not in text
         assert "! 日期 !! 累计新条目推荐" not in text
         chart = next(
-            line for line in text.splitlines() if "|type=area" in line
+            template
+            for template in mwparserfromhell.parse(text).filter_templates()
+            if template.name.matches("Graph:Chart")
+            and template.get("type").value.strip() == "area"
         )
-        assert "2025-12-31,2026-03-31,2026-06-30,2026-09-30|y1=" in chart
-        assert "2026-10-31" not in chart
-        assert "1323, 1360, 1380, 1400, 1420|colors=" in chart
+        dates = str(chart.get("x").value).strip().split(", ")
+        assert dates[-4:] == [
+            "2025-12-31",
+            "2026-03-31",
+            "2026-06-30",
+            "2026-09-30",
+        ]
+        assert "2026-10-31" not in dates
+        assert (
+            str(chart.get("y1").value)
+            .strip()
+            .endswith(
+                "1323, 1360, 1380, 1400, 1420",
+            )
+        )
         assert "! 品質 !!" not in text
         assert "2024年條目品質概況" not in text
         assert "2025年條目品質概況" in text
         assert "2026年條目品質概況" in text
-        assert "|x=典范级：25" in text
-        assert "|legend=true|showValues=false" in text
+        assert "| x = 典范级：25" in text
+        assert "| legend = true | showValues = false" in text
         assert "总浏览量为3,660万" in text
         assert "[[:Special:PermaLink/123456789#月瀏覽量|1月]]" in text
         assert "* 2月：" in text
-        assert "{{Image frame\n|align=right|width=400\n|content=" in text
-        assert "|type=area|width=400" in chart
+        assert (
+            "{{Image frame\n| align = right | width = 400\n| content = "
+            in text
+        )
+        assert "| type = area | width = 400" in str(chart)
+
+
+class AnnualFigureIntroductionTests(TestCase):
+    """Keep notices in the prose before annual lists and figures."""
+
+    @staticmethod
+    def test_pie_pair_shares_one_container_without_internal_notices() -> None:
+        """Keep both native pies together after one inline notice."""
+        code = mwparserfromhell.parse(
+            render_annual_feature(Issue(2027, 1), _partial_annual_review()),
+        )
+        group = next(
+            tag
+            for tag in code.filter_tags(recursive=False)
+            if tag.tag == "div"
+            and tag.has("class")
+            and tag.get("class").value == "annual-quality-pies"
+        )
+        children = [
+            tag
+            for tag in group.contents.filter_tags(recursive=False)
+            if tag.tag == "div"
+        ]
+        assert len(children) == 2
+        for child in children:
+            charts = [
+                template
+                for template in child.contents.filter_templates()
+                if template.name.matches("Graph:Chart")
+            ]
+            assert len(charts) == 1
+            assert charts[0].get("type").value.strip() == "pie"
+        assert not any(
+            template.name.matches("Memo") or template.name.matches("error")
+            for template in group.contents.filter_templates()
+        )
+        introduction = _preceding_introduction(code, group)
+        assert "各年度條目品質分布如下：" in introduction
+        notices = mwparserfromhell.parse(introduction).filter_templates()
+        assert len(notices) == 1
+        assert notices[0].name.matches("Memo")
+        assert notices[0].get("1").value == "截至2026年10月31日"
+        assert notices[0].get("2").value == "inline:info"
+
+    def test_each_block_has_its_notice_in_the_immediate_introduction(
+        self,
+    ) -> None:
+        """Date each block before it using that observation's cutoff."""
+        text = render_annual_feature(Issue(2027, 1), _partial_annual_review())
+        sections = {
+            name: mwparserfromhell.parse(
+                text.partition(f"==== {name} ====")[2].partition(
+                    "==== ",
+                )[0],
+            )
+            for name in ("內容評審", "新章推薦", "条目报告", "榮譽表彰")
+        }
+        quality = sections["內容評審"]
+        dyk = sections["新章推薦"]
+        articles = sections["条目报告"]
+        awards = sections["榮譽表彰"]
+        quality_blocks = quality.filter_tags(recursive=False)
+        columns = [
+            template
+            for template in articles.filter_templates(recursive=False)
+            if template.name.matches("div col")
+        ]
+        blocks = (
+            (
+                quality,
+                next(tag for tag in quality_blocks if tag.tag == "div"),
+                "歷年高品質條目入選數量如下：",
+                "2026年10月31日",
+            ),
+            (
+                quality,
+                next(tag for tag in quality_blocks if tag.tag == "li"),
+                "誕生條目具體如下：",
+                "2026年10月31日",
+            ),
+            (
+                quality,
+                next(tag for tag in quality_blocks if tag.tag == "table"),
+                "作者名單如下：",
+                "2026年10月31日",
+            ),
+            (
+                dyk,
+                next(
+                    template
+                    for template in dyk.filter_templates(recursive=False)
+                    if template.name.matches("Image frame")
+                ),
+                "歷年新條目推薦累計數量如下：",
+                "2026年9月30日",
+            ),
+            (
+                dyk,
+                next(
+                    tag
+                    for tag in dyk.filter_tags(recursive=False)
+                    if tag.tag == "li"
+                ),
+                "本年度新條目推薦名單如下：",
+                "2026年10月31日",
+            ),
+            (
+                articles,
+                columns[0],
+                "以下列出2026年各月日均瀏覽量最高的條目：",
+                "2026年10月31日",
+            ),
+            (
+                articles,
+                columns[1],
+                "以下列出2025-11-01至2026-10-31統計期間內瀏覽量最多的條目",
+                "2026年10月31日",
+            ),
+            (
+                articles,
+                columns[2],
+                "以修訂次數統計，以下列出本年度排名前25名的條目：",
+                "2026年10月31日",
+            ),
+            (
+                awards,
+                next(
+                    template
+                    for template in awards.filter_templates(recursive=False)
+                    if template.name.matches("div col")
+                ),
+                "ACG專題獎年度得分",
+                "2026年10月31日",
+            ),
+        )
+        for code, node, sentence, date in blocks:
+            with self.subTest(introduction=sentence):
+                introduction = _preceding_introduction(code, node)
+                assert sentence in introduction
+                notices = [
+                    template
+                    for template in mwparserfromhell.parse(
+                        introduction,
+                    ).filter_templates()
+                    if template.name.matches("Memo")
+                ]
+                assert notices
+                assert any(
+                    date in str(notice.get("1").value) for notice in notices
+                )
+                assert all(
+                    notice.get("2").value == "inline:info"
+                    for notice in notices
+                )
+        popularity_intro = _preceding_introduction(articles, columns[1])
+        assert "2025-11-01至2026-10-31統計期間內" in popularity_intro
+        revision_tail = str(articles).partition("[[:Revised]]")[2]
+        assert not any(
+            template.name.matches("Memo")
+            for template in mwparserfromhell.parse(
+                revision_tail,
+            ).filter_templates()
+        )

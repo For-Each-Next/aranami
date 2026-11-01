@@ -67,18 +67,4 @@
     document.addEventListener("focusin", (event) => {
         for (const menu of menus) if (!menu.contains(event.target)) close(menu);
     });
-    for (const field of document.querySelectorAll(".assessment-filter")) {
-        const [operation, grade, endpoint] = field.querySelectorAll("select");
-        const endpointLabel = field.querySelector(`label[for="${endpoint.id}"]`);
-        const update = () => {
-            const isRange = operation.value === "range";
-            endpoint.hidden = !isRange;
-            endpoint.disabled = !isRange;
-            endpoint.required = isRange;
-            endpointLabel.hidden = !isRange;
-            grade.required = operation.value !== "eq";
-        };
-        operation.addEventListener("change", update);
-        update();
-    }
 })();

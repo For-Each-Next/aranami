@@ -35,6 +35,7 @@ async function bounded(operation, label, milliseconds = 10000) {
 }
 
 async function main() {
+    let pendingStartupScripts;
     const server = http.createServer((request, response) => {
         const pathname = new URL(request.url, "http://localhost").pathname;
         const filename = (["/navigation.js", "/aranami-icon.png", "/aranami-wordmark.png", "/favicon.png", "/live.js", "/newsletter.js", "/styles.css", "/newsletter.css", "/codex.css", "/codex-select.svg", "/codex-select-disabled.svg", "/codex-license.html", "/favicon.svg", "/aranami.svg", "/report-icons.svg"].includes(pathname) || pathname.startsWith("/review-icons/"))
@@ -45,7 +46,9 @@ async function main() {
         try {
             response.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
             response.setHeader("Content-Type", ({ ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" })[path.extname(filename)] || "text/plain");
-            response.end(fs.readFileSync(filename));
+            const send = () => response.end(fs.readFileSync(filename));
+            if (pendingStartupScripts && pathname.endsWith(".js")) pendingStartupScripts.push(send);
+            else send();
         } catch { response.writeHead(404).end(); }
     });
     server.listen(0, "127.0.0.1");
@@ -118,6 +121,12 @@ async function main() {
         const { targetId } = await call("Target.createTarget", { url: "about:blank" });
         const { sessionId } = await call("Target.attachToTarget", { targetId, flatten: true });
         await call("Page.enable", {}, sessionId);
+        await call("Network.enable", {}, sessionId);
+        await call("Network.setCacheDisabled", {cacheDisabled: true}, sessionId);
+        await call("Page.addScriptToEvaluateOnNewDocument", {source: `
+            window.aranamiStartupErrors = [];
+            addEventListener('error', event => window.aranamiStartupErrors.push(event.message));
+        `}, sessionId);
         const evaluate = async expression => {
             const result = await call("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
             if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
@@ -281,17 +290,56 @@ async function main() {
             })()`);
             assert.ok(controls.heights.length >= 4 && controls.heights.every(control => Math.abs(control.height - controls.expected) < 1), `newsletter controls must share the Codex medium height: ${JSON.stringify(controls)}`);
         };
-        const checkNewsletterKeyboardActions = async enhanced => {
+        const checkNewsletterKeyboardActions = async () => {
             await evaluate("document.querySelector('.newsletter-text').focus()");
             await press("Tab", 9);
-            if (enhanced) {
-                assert.equal(await evaluate("document.activeElement.matches('[data-newsletter-copy]:focus-visible')"), true, "Copy must be reachable with visible keyboard focus");
-                await press("Tab", 9);
-            }
+            assert.equal(await evaluate("document.activeElement.matches('[data-newsletter-copy]:focus-visible')"), true, "Copy must be reachable with visible keyboard focus");
+            await press("Tab", 9);
             assert.equal(await evaluate("document.activeElement.matches('.newsletter-copy-controls a:first-of-type:focus-visible')"), true, "View newsletter page must be reachable with visible keyboard focus");
             await press("Tab", 9);
             assert.equal(await evaluate("document.activeElement.matches('.newsletter-copy-controls a:nth-of-type(2):focus-visible')"), true, "Edit newsletter page must be reachable with visible keyboard focus");
         };
+        const initialControls = `(() => [...document.querySelectorAll('button, input:not([type=hidden]), select, summary, a.cdx-button, .brand img, main h1, .newsletter-text')].map(element => {
+            const style = getComputedStyle(element);
+            const box = element.getBoundingClientRect();
+            return {tag: element.tagName, id: element.id, hidden: element.hidden,
+                background: style.backgroundColor, color: style.color,
+                border: style.borderColor, font: style.font,
+                display: style.display, visibility: style.visibility,
+                geometry: [box.x, box.y, box.width, box.height].map(value => Math.round(value * 100) / 100)};
+        }))()`;
+        let stableInitializations = 0;
+        for (const locale of locales) for (const width of [320, 1440]) for (const surface of surfaces) {
+            const label = `${locale}/${surface}/${width}/initial-paint`;
+            try {
+                await call("Emulation.setDeviceMetricsOverride", {width, height: 936, deviceScaleFactor: 1, mobile: false}, sessionId);
+                pendingStartupScripts = [];
+                const loaded = wait("Page.loadEventFired", sessionId);
+                await call("Page.navigate", {url: `${base}/${locale}/${surface}.html`}, sessionId);
+                await evaluate(`new Promise(resolve => {
+                    const ready = () => {
+                        if (document.readyState !== 'loading' && document.querySelector('main') && [...document.querySelectorAll('link[rel=stylesheet]')].every(link => link.sheet)) resolve();
+                        else setTimeout(ready, 10);
+                    };
+                    ready();
+                })`);
+                const before = await evaluate(initialControls);
+                const scripts = pendingStartupScripts;
+                pendingStartupScripts = undefined;
+                for (const send of scripts) send();
+                await loaded;
+                const after = await evaluate(initialControls);
+                assert.deepEqual(after, before, "initialization changed control visibility, colors, typography, or layout");
+                assert.deepEqual(await evaluate("window.aranamiStartupErrors"), [], "page initialization raised an error");
+                stableInitializations++;
+            } catch (error) {
+                const scripts = pendingStartupScripts || [];
+                pendingStartupScripts = undefined;
+                for (const send of scripts) send();
+                failures.push({label, error: error.message});
+                console.error(`${label}: ${error.message}`);
+            }
+        }
         let checked = 0;
         matrix: for (const locale of locales) for (const width of widths) for (const surface of surfaces) {
             const label = `${locale}/${surface}/${width}`;
@@ -303,6 +351,7 @@ async function main() {
                     loaded,
                 ]);
                 assert.ok(!navigation.errorText, `navigation failed: ${navigation.errorText}`);
+                assert.deepEqual(await evaluate("window.aranamiStartupErrors"), [], "page initialization raised an error");
                 await checkSemantics();
                 await checkContents();
                 const layout = await evaluate(`(() => {
@@ -383,6 +432,8 @@ async function main() {
                         const input = document.querySelector('#newsletter-data-date');
                         const box = input.getBoundingClientRect();
                         return {type: input.type, visible: !input.hidden,
+                            metadataAbsent: !document.querySelector('[data-newsletter-metadata]'),
+                            issueSubmitHidden: document.querySelector('[data-newsletter-issue-form] button[type=submit]').hidden,
                             count: document.querySelectorAll('input[name="date"]').length,
                             duplicate: !!document.querySelector('[name="feature_date"]'),
                             minimum: input.min, maximum: input.max,
@@ -390,6 +441,8 @@ async function main() {
                     })()`);
                     assert.equal(calendar.type, "date");
                     assert.equal(calendar.visible, true);
+                    assert.equal(calendar.metadataAbsent, true, "removed draft metadata is still displayed");
+                    assert.equal(calendar.issueSubmitHidden, false, "issue submit button disappeared after initialization");
                     assert.equal(calendar.count, 1);
                     assert.equal(calendar.duplicate, false);
                     assert.equal(calendar.minimum, "2026-01-01");
@@ -438,7 +491,7 @@ async function main() {
                                     submitHidden: form.querySelector('button[type=submit]').hidden,
                                     calendarReady: document.querySelector('#newsletter-data-date').type === 'date' && !document.querySelector('#newsletter-data-date').hidden,
                                     copyReady: !copy.hidden && copied === draft.textContent && writes === 1,
-                                    wikiReady: [view, edit].every(link => link && !link.hidden && !link.hasAttribute('data-newsletter-copy') && new URL(link.href).origin === 'https://zh.wikipedia.org') && !new URL(view.href).search && new URL(edit.href).searchParams.get('action') === 'edit' && new URL(edit.href).searchParams.get('summary').startsWith('[[toolforge:aranami/newsletter|'),
+                                    wikiReady: [view, edit].every(link => link && !link.hidden && !link.hasAttribute('data-newsletter-copy') && new URL(link.href).origin === 'https://zh.wikipedia.org') && !new URL(view.href).search && new URL(edit.href).searchParams.get('action') === 'edit' && new URL(edit.href).searchParams.get('summary').startsWith('[[toolforge:aranami/newsletter/|'),
                                     buttonWeights: copy.classList.contains('cdx-button--weight-normal') && view?.classList.contains('cdx-button--weight-normal') && edit?.classList.contains('cdx-button--weight-primary'),
                                     noDestination: !document.querySelector('.newsletter-destination'),
                                     plainText: draft.children.length === 0};
@@ -452,7 +505,7 @@ async function main() {
                         assert.equal(switched.stableSelect, true, "issue update lost selector or keyboard focus");
                         assert.equal(switched.requestedIssue, switched.selectedIssue, "wrong issue requested");
                         assert.ok(switched.readOnly && switched.noDate, "issue selection needs a fresh read-only date scope");
-                        assert.equal(switched.submitHidden, true, "enhanced issue selection should not need a submit button");
+                        assert.equal(switched.submitHidden, false, "issue update hid the submit button");
                         assert.ok(switched.calendarReady && switched.copyReady, "replacement draft controls were not initialized");
                         assert.ok(switched.wikiReady && switched.buttonWeights, "replacement drafts need independent Copy, View, and Edit actions");
                         assert.equal(switched.noDestination, true, "standalone newsletter destination should be removed");
@@ -671,7 +724,7 @@ async function main() {
                         return [...document.querySelectorAll('.newsletter-copy-controls')].every(controls => {
                             const links = [...controls.querySelectorAll('a')];
                             const [view, edit] = links.map(link => new URL(link.href));
-                            return links.length === 2 && links.every(link => link.getBoundingClientRect().height > 0 && !link.hasAttribute('data-newsletter-copy') && new URL(link.href).origin === 'https://zh.wikipedia.org') && !view.search && edit.searchParams.get('action') === 'edit' && edit.searchParams.get('summary').startsWith('[[toolforge:aranami/newsletter|');
+                            return links.length === 2 && links.every(link => link.getBoundingClientRect().height > 0 && !link.hasAttribute('data-newsletter-copy') && new URL(link.href).origin === 'https://zh.wikipedia.org') && !view.search && edit.searchParams.get('action') === 'edit' && edit.searchParams.get('summary').startsWith('[[toolforge:aranami/newsletter/|');
                         });
                     })()`), true, "View and Edit must remain visible native links without JavaScript");
                 }
@@ -681,7 +734,7 @@ async function main() {
                 console.error(`${label}: ${error.message}`);
             }
         }
-        const result = { browser: browserVersion, inputCapabilities, checked, withoutJavaScript, widths, locales, surfaces, failures };
+        const result = { browser: browserVersion, inputCapabilities, stableInitializations, checked, withoutJavaScript, widths, locales, surfaces, failures };
         fs.writeFileSync(path.join(outputRoot, "results.json"), JSON.stringify(result, null, 2));
         console.log(JSON.stringify(result, null, 2));
         assert.equal(failures.length, 0, "responsive interface checks failed");

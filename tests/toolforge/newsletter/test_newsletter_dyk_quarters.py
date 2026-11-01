@@ -8,6 +8,7 @@ import datetime as dt
 from copy import deepcopy
 from unittest import TestCase
 
+import mwparserfromhell
 import polars as pl
 
 from backend.newsletter.annual import (
@@ -244,14 +245,16 @@ class NewsletterDykCurrentTests(TestCase):
                 "dyk_current": prepare_year_dyk_current(_events(), issue, day),
             }
             text = render_annual_feature(issue, review)
-            chart = text.split("|type=area", 1)[1].split("}}", 1)[0]
-            dates = chart.split("|x=", 1)[1].split("|", 1)[0].split(",")
+            chart = next(
+                template
+                for template in mwparserfromhell.parse(text).filter_templates()
+                if template.name.matches("Graph:Chart")
+                and template.get("type").value.strip() == "area"
+            )
+            dates = str(chart.get("x").value).strip().split(", ")
             counts = [
                 int(value)
-                for value in chart
-                .split("|y1=", 1)[1]
-                .split("|", 1)[0]
-                .split(",")
+                for value in str(chart.get("y1").value).strip().split(", ")
             ]
             assert [
                 value for value in dates if value.startswith("2026-")
@@ -293,8 +296,13 @@ class NewsletterDykCurrentTests(TestCase):
             Issue(2028, 1),
             {"dyk_current": {"date": "2027-11-01", "count": 12}},
         )
-        chart = text.split("|type=area", 1)[1].split("}}", 1)[0]
-        assert "2027-11-01" not in chart
+        chart = next(
+            template
+            for template in mwparserfromhell.parse(text).filter_templates()
+            if template.name.matches("Graph:Chart")
+            and template.get("type").value.strip() == "area"
+        )
+        assert "2027-11-01" not in str(chart.get("x").value)
         legacy = render_annual_feature(
             Issue(2027, 1),
             {"dyk_new_quarters": [{"date": "2026-03-31", "count": 1}]},

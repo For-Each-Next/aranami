@@ -1505,9 +1505,9 @@
     "zh-hant": "電子遊戲專題簡訊草稿"
   },
   "newsletter.intro": {
-    "en": "Review the collected statistics and complete the feature and interview templates before copying the drafts to Wikipedia. January includes a year-in-review feature; unavailable data stays blank.",
-    "zh-hans": "检查已获取的统计数据并填写专题和访谈模板后，将草稿复制到维基百科。1月号提供年终回顾专题，未取得的数据留空。",
-    "zh-hant": "檢查已取得的統計資料並填寫專題和訪談模板後，將草稿複製到維基百科。1月號提供年終回顧專題，未取得的資料留空。"
+    "en": "Review the collected statistics and complete the feature and interview templates before copying the drafts to Wikipedia. January includes a year-in-review feature.",
+    "zh-hans": "检查已获取的统计数据并填写专题和访谈模板后，将草稿复制到维基百科。1月号提供年终回顾专题。",
+    "zh-hant": "檢查已取得的統計資料並填寫專題和訪談模板後，將草稿複製到維基百科。1月號提供年終回顧專題。"
   },
   "newsletter.issue": {
     "en": "Issue",

@@ -1274,7 +1274,7 @@ def _newsletter_edit_url(title: str, data_through: str | None) -> str:
     label = f"{day.year}年{day.month}月{day.day}日资料" if day else "简讯资料"
     query = urlencode({
         "action": "edit",
-        "summary": f"[[toolforge:aranami/newsletter|{label}]]",
+        "summary": f"[[toolforge:aranami/newsletter/|{label}]]",
     })
     return f"{title_url(title)}?{query}"
 

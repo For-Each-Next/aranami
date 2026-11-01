@@ -571,7 +571,7 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "* 10月計12篇" in pages[2]["text"]
         assert "* 11月計0篇。" in pages[2]["text"]
         assert "* 12月計0篇。" in pages[2]["text"]
-        assert "待補" not in "\n".join(page["text"] for page in pages)
+        assert "待補" not in "\n".join(page["text"] for page in pages[:3])
 
     @staticmethod
     def test_register_figures_omit_collection_diagnostics() -> None:
