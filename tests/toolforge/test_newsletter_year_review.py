@@ -390,7 +390,7 @@ class TestYearReview(TestCase):
         assert valid_newsletter(result)
         facts = result["issues"]["2027-01"]
         text = render_editorial(Issue.parse("2027-01"), facts)["專題"]
-        assert "** '''2009年及以前（1）'''：<!-- 9月 -->[[:Older]]\n" in text
+        assert "** '''2009年及以前（1）'''：[[:Older]]<!-- 0930 -->\n" in text
         assert "* '''待分類（1）'''：[[:Older]]" not in text
         assert (
             "Older",

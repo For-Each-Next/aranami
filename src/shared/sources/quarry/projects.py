@@ -26,6 +26,8 @@ if TYPE_CHECKING:
     from pywikibot.site import BaseSite
 
 _BATCH_SIZE = 500
+_MAX_REDIRECT_DEPTH = 8
+_MAX_HISTORY_REDIRECTS = 100_000
 _PAGE_SCHEMA = {
     "page_id": pl.Int64,
     "page_namespace": pl.Int64,
@@ -85,6 +87,160 @@ def query_pages_by_wikiproject(
         lambda: _project_membership(database, project_name),
     )
     return _with_titles(site, frame)
+
+
+def query_history_redirects(
+    site: BaseSite,
+    membership: pl.DataFrame,
+) -> pl.DataFrame:
+    """Read article redirects associated with current project pages.
+
+    Follow inbound local main-namespace redirects, including section
+    targets and bounded chains. Keep each redirect's own subject and
+    talk identity so earlier recognition does not merge into its target.
+    Traverse intermediates without talks, but return only sources with
+    an existing talk page that can supply retained history.
+
+    Args:
+        site: Wiki whose read-only replica supplies redirect metadata.
+        membership: Complete current project page identities.
+
+    Returns:
+        Additional redirect subjects with ordinary membership columns
+        and unknown assessments. Current members are not repeated.
+
+    Raises:
+        ValueError: Redirect discovery exceeds its completeness bounds.
+    """
+    found = pl.DataFrame(schema=_PAGE_SCHEMA)
+    frontier = (
+        membership
+        .filter(pl.col("page_namespace") == 0)
+        .select(
+            "page_id",
+        )
+        .unique()
+    )
+    seen = frontier
+    for depth in range(_MAX_REDIRECT_DEPTH + 1):
+        if frontier.is_empty():
+            return _with_titles(
+                site,
+                found.filter(pl.col("talk_page_id").is_not_null()),
+            )
+        selected = _history_redirect_rows(
+            site.dbName(),
+            frontier.get_column("page_id").to_list(),
+        ).join(seen, on="page_id", how="anti")
+        if selected.is_empty():
+            return _with_titles(
+                site,
+                found.filter(pl.col("talk_page_id").is_not_null()),
+            )
+        if depth == _MAX_REDIRECT_DEPTH:
+            message = (
+                "Article history redirect chains exceed their depth bound."
+            )
+            raise ValueError(message)
+        found = pl.concat([found, selected]).unique("page_id")
+        if found.height > _MAX_HISTORY_REDIRECTS:
+            message = "Article history redirect scope exceeds its row bound."
+            raise ValueError(message)
+        frontier = selected.select("page_id")
+        seen = pl.concat([seen, frontier]).unique()
+    message = "Article history redirect chains exceed their depth bound."
+    raise ValueError(message)
+
+
+def _history_redirect_rows(
+    database: str,
+    target_ids: list[int],
+) -> pl.DataFrame:
+    """Read one bounded inbound redirect layer with nullable talks.
+
+    Returns:
+        Typed subject/talk metadata for local main-namespace redirects.
+
+    Raises:
+        ValueError: One redirect layer exceeds its row bound.
+    """
+    schema = {
+        name: dtype
+        for name, dtype in _PAGE_SCHEMA.items()
+        if name not in {"pa_class", "pa_importance"}
+    }
+    if not target_ids:
+        return pl.DataFrame(schema=_PAGE_SCHEMA)
+    page = tables.Page.__table__
+    target, source, talk = (
+        page.alias("redirect_target"),
+        page.alias("redirect_subject"),
+        page.alias("redirect_talk"),
+    )
+    redirect = tables.Redirect.__table__
+    statement = (
+        select(
+            source.c.page_id,
+            source.c.page_namespace,
+            source.c.page_title,
+            source.c.page_latest.label("page_revision"),
+            source.c.page_len.label("page_length"),
+            source.c.page_is_redirect,
+            talk.c.page_id.label("talk_page_id"),
+            talk.c.page_latest.label("talk_revision"),
+        )
+        .select_from(target)
+        .join(
+            redirect,
+            and_(
+                redirect.c.rd_namespace == target.c.page_namespace,
+                redirect.c.rd_title == target.c.page_title,
+            ),
+        )
+        .join(source, source.c.page_id == redirect.c.rd_from)
+        .outerjoin(
+            talk,
+            and_(
+                talk.c.page_namespace == 1,
+                talk.c.page_title == source.c.page_title,
+            ),
+        )
+        .where(
+            target.c.page_namespace == 0,
+            source.c.page_namespace == 0,
+            source.c.page_is_redirect == 1,
+            redirect.c.rd_interwiki.is_(None)
+            | redirect.c.rd_interwiki.in_([""]),
+        )
+        .order_by(source.c.page_id)
+    )
+    frames = []
+    rows = 0
+    for batch in batched(target_ids, _BATCH_SIZE, strict=False):
+        observed = (
+            _replica(database)
+            .query(
+                statement.where(target.c.page_id.in_(batch)).limit(
+                    _MAX_HISTORY_REDIRECTS + 1 - rows,
+                ),
+                schema_overrides=schema,
+            )
+            .collect()
+        )
+        rows += observed.height
+        if rows > _MAX_HISTORY_REDIRECTS:
+            message = "Article history redirect scope exceeds its row bound."
+            raise ValueError(message)
+        frames.append(observed)
+    return (
+        pl
+        .concat(frames)
+        .with_columns(
+            pl.lit(None, dtype=pl.String).alias("pa_class"),
+            pl.lit(None, dtype=pl.String).alias("pa_importance"),
+        )
+        .select(*_PAGE_SCHEMA)
+    )
 
 
 def query_project_assessments(

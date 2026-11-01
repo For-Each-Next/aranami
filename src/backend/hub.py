@@ -21,6 +21,7 @@ from threading import Event
 from time import monotonic
 from typing import TYPE_CHECKING
 
+import polars as pl
 import pywikibot
 
 from backend import monitor
@@ -38,6 +39,7 @@ from backend.website.article_authorship import enrich_authorship
 from backend.website.article_history import (
     DEFAULT_PATH,
     collect_article_history,
+    history_membership,
 )
 from backend.website.article_milestones import enrich_milestones
 from backend.website.collect import (
@@ -47,6 +49,7 @@ from backend.website.collect import (
     report_intervals,
     save_snapshot,
 )
+from backend.website.quality_register import collect_quality_register
 from shared.deployment import project_version
 from shared.sources.cycle import source_cycle
 from shared.sources.quarry.projects import query_pages_by_wikiproject
@@ -175,17 +178,25 @@ def refresh_article_history() -> None:
     with source_cycle():
         site = pywikibot.Site("zh", "wikipedia")
         membership = query_pages_by_wikiproject(site, "电子游戏")
+        history_members = history_membership(site, membership)
         reconcile_scope(
-            membership,
+            history_members,
             MILESTONES_PATH.parent,
             observed_at=dt.datetime.now(dt.UTC),
         )
         events = collect_article_history(
             site,
-            membership,
+            history_members,
             now=dt.datetime.now(dt.UTC),
             path=DEFAULT_PATH,
         )
+        registered = collect_quality_register(
+            site,
+            history_members,
+            path=MILESTONES_PATH,
+            observed_at=dt.datetime.now(dt.UTC),
+        )
+        events = pl.concat([events, registered], how="diagonal_relaxed")
         events = enrich_authorship(events, site, max_requests=10)
         enrich_milestones(events, site, max_requests=10)
         sync_current_assessments(

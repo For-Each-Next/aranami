@@ -18,7 +18,10 @@ from backend.website.newsletter_layout import valid_main_layout
 from backend.website.newsletter_newpages import valid_new_pages
 from backend.website.newsletter_statistics import QUALITY_GRADES
 from backend.website.newsletter_subpage_layout import valid_subpage_layouts
-from backend.website.newsletter_year_review import year_quarters
+from backend.website.newsletter_year_review import (
+    QUALITY_HISTORY_GRADES,
+    year_quarters,
+)
 from shared.newsletter import DYK_PROJECTS, SUFFIXES, Issue
 
 if TYPE_CHECKING:
@@ -162,7 +165,7 @@ def _quality_row(
     return (
         (start or issue.start) <= day < through
         and isinstance(value.get("grade"), str)
-        and value["grade"] in {"FA", "FL", "GA", "A", "Bplus"}
+        and value["grade"] in {"FA", "FL", "GA", "A", "AL", "Bplus"}
         and isinstance(value.get("action"), str)
         and value["action"] in {"added", "removed"}
         and _identities(value.get("authors"))
@@ -359,6 +362,35 @@ def _valid_dyk_quarters(
     )
 
 
+def _valid_quality_years(value: object, year: int) -> bool:
+    """Validate optional annual recognition counts for all six grades.
+
+    Returns:
+        Whether observed years are ordered, unique, and fully shaped.
+    """
+    if value is None:
+        return True
+    return (
+        isinstance(value, list)
+        and len(value) <= _MAX_STATISTIC_YEARS
+        and all(
+            isinstance(row, dict)
+            and set(row) == {"year", "grades"}
+            and type(row["year"]) is int
+            and _EARLIEST_STATISTIC_YEAR <= row["year"] <= year
+            and isinstance(row["grades"], dict)
+            and set(row["grades"]) == set(QUALITY_HISTORY_GRADES)
+            and all(
+                type(count) is int and 0 <= count <= _MAX_COUNT
+                for count in row["grades"].values()
+            )
+            for row in value
+        )
+        and [row["year"] for row in value]
+        == sorted({row["year"] for row in value})
+    )
+
+
 def _valid_annual_statistics(
     value: dict,
     year: int,
@@ -453,13 +485,53 @@ def _valid_annual_statistics(
             return False
         if not valid:
             return False
-    return _valid_dyk_quarters(
-        value.get("dyk_new_quarters"),
-        year,
-        through,
-    ) and all(
-        value.get(key) is None or count(value[key])
-        for key in ("dyk_new_count", "previous_dyk_count")
+    return (
+        _valid_quality_years(value.get("quality_years"), year)
+        and _valid_dyk_quarters(
+            value.get("dyk_new_quarters"),
+            year,
+            through,
+        )
+        and all(
+            value.get(key) is None or count(value[key])
+            for key in ("dyk_new_count", "previous_dyk_count")
+        )
+    )
+
+
+def _valid_dyk_current(
+    value: object,
+    year: int,
+    stamp: dt.datetime,
+    quarters: list[dict] | None,
+) -> bool:
+    """Validate the latest observed DYK point against quarter totals.
+
+    Returns:
+        Whether the optional point has the capped UTC observation date
+        and a bounded count consistent with any completed quarters.
+    """
+    if value is None:
+        return True
+    day = min(stamp.astimezone(dt.UTC).date(), dt.date(year, 12, 31))
+    return (
+        isinstance(value, dict)
+        and set(value) == {"date", "count"}
+        and value["date"] == day.isoformat()
+        and day.year == year
+        and type(value["count"]) is int
+        and 0 <= value["count"] <= _MAX_COUNT
+        and (
+            not quarters
+            or (
+                value["date"] >= quarters[-1]["date"]
+                and value["count"] >= quarters[-1]["count"]
+                and (
+                    value["date"] != quarters[-1]["date"]
+                    or value["count"] == quarters[-1]["count"]
+                )
+            )
+        )
     )
 
 
@@ -523,6 +595,12 @@ def _valid_year_review(
         and type(value.get("complete")) is bool
         and value["complete"] == (through == issue.end)
         and _valid_annual_statistics(value, start.year, through)
+        and _valid_dyk_current(
+            value.get("dyk_current"),
+            start.year,
+            stamp,
+            value.get("dyk_new_quarters"),
+        )
         and _counts(value.get("overview"))
         and _counts(value.get("previous_overview"))
         and _valid_observation_stamp(

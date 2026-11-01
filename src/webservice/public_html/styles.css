@@ -335,6 +335,10 @@ img, svg {
     gap: .125rem;
 }
 
+.page-toc ul, .page-toc li {
+    display: block;
+}
+
 .page-toc ul {
     margin: 0;
     padding: 0;
@@ -1022,6 +1026,10 @@ caption {
     font-weight: 700;
 }
 
+.maintenance-table {
+    min-inline-size: 40rem;
+}
+
 .maintenance-table th[scope="col"], .maintenance-table td {
     overflow-wrap: normal;
 }
@@ -1230,12 +1238,7 @@ footer nav {
         font-size: 1.125rem;
     }
 
-    .page-toc > ul {
-        display: block;
-    }
-
     .page-toc ul ul {
-        display: block;
         padding-inline-start: .75rem;
         border-inline-start: 1px solid var(--border-color-subtle);
     }
@@ -1274,7 +1277,7 @@ footer nav {
         gap: .25rem .75rem;
     }
 
-    .navigation-tools {
+    .masthead .navigation-tools {
         position: static;
     }
 
@@ -1337,61 +1340,6 @@ footer nav {
         max-inline-size: calc(100vw - 1rem);
         max-block-size: calc(100dvh - 1rem);
         padding: 1rem;
-    }
-
-    .page-updates table, .maintenance-table {
-        display: block;
-        min-inline-size: 0;
-    }
-
-    .maintenance-table caption {
-        display: block;
-        inline-size: 100%;
-    }
-
-    .page-updates th:first-child {
-        inline-size: auto;
-    }
-
-    .page-updates thead, .maintenance-table thead {
-        position: absolute;
-        inline-size: 1px;
-        block-size: 1px;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
-    }
-
-    .page-updates tbody, .maintenance-table tbody {
-        display: block;
-    }
-
-    .page-updates tr, .maintenance-table tr {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        padding-block: .75rem;
-        border-block-end: 1px solid var(--border-color-subtle);
-    }
-
-    .page-updates th, .page-updates td, .page-updates time,
-    .maintenance-table th, .maintenance-table td {
-        display: block;
-        min-inline-size: 0;
-        padding: .25rem;
-        border: 0;
-        white-space: normal;
-    }
-
-    .page-updates td::before, .maintenance-table td[data-label]::before {
-        content: attr(data-label);
-        display: block;
-        color: var(--color-subtle);
-        font-size: var(--font-size-small);
-        font-weight: 700;
-    }
-
-    .table-hint {
-        display: none;
     }
 }
 

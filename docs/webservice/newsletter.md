@@ -62,8 +62,9 @@ titles show each editor's grade breakdown. Editors tied on all four counts
 share a rank cell; subsequent ranks include all tied editors. Quality and DYK
 groups follow listing dates. Editor lists group FA/FL together, then A/AL,
 GA, and Bplus, with dates and title ties within each grade.
-Invisible comments such as `<!-- 1月 -->` mark the first article in each month
-to help editors work on the copied draft.
+Each dated article ends with an invisible MMDD comment such as `<!-- 0904 -->`
+to help edit the copied draft. Quarterly quality and homepage lists use the
+same markers. Unknown first appearance dates have no marker.
 
 Game works in the DYK list use five release-year groups: 2009 and earlier,
 2010–2019, 2020 through the year before the reviewed year, the reviewed year,
@@ -90,18 +91,28 @@ current grades are not used as historical evidence.
 
 The annual feature keeps the reference's numerical introductions for quality
 promotions, DYK, article totals and growth, popularity, revisions, and awards.
-It uses `Graph:Chart` for annual GA additions, cumulative DYK totals, and
+It uses `Graph:Chart` for annual quality recognitions, cumulative DYK totals, and
 assessment pies for the reviewed year and its predecessor. Charts have no
 companion data tables. Each assessment legend includes the grade and count,
-such as `典范级：25`, and numeric slice labels are black. Historical series
+such as `典范级：25`, in regular weight; duplicate numeric slice labels are
+disabled. Historical series
 come from the reference images' description pages, with provenance retained
 by collection. Current observations extend the supported series; missing
 current values never become chart zeroes.
 
+The annual recognition chart counts recorded additions across FA, FL, A, AL,
+GA, and Bplus, including articles later delisted or demoted. Its layers rise
+from FA+FL through A+AL and Bplus to GA; the A layer disappears when all its
+values are zero. Each bar shows one yearly sum. Hover or focus a bar to inspect
+all six grade counts and their total. Unknown event dates do not receive an
+inferred year, and missing historical observations produce no chart.
+
 Current-year DYK points use completed quarter ends such as March 31, June 30,
 and September 30. Each point counts distinct articles making their first DYK
-appearance since January 1, added to the historical baseline. Repeated displays,
-earlier-year subjects, and incomplete quarters do not add points or counts.
+appearance since January 1, added to the historical baseline. A separate
+current-day point includes milestones already observed today, capped at
+December 31. Repeated displays and earlier-year subjects do not increase
+counts, and the year-end point appears only once.
 The DYK trend floats on the right in a captioned image frame.
 
 Monthly pageview winners come from exact calendar-month reports in the popular

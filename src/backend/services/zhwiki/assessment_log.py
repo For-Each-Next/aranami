@@ -449,6 +449,32 @@ def _history(
     )
 
 
+def latest_report_date(
+    text: str,
+    *,
+    through: dt.date,
+) -> dt.date | None:
+    """Read the latest completed dated report in a managed log.
+
+    Args:
+        text: Existing or proposed complete destination wikitext.
+        through: Latest completed UTC day supported by the source data.
+
+    Returns:
+        The latest valid retained report date through the source day,
+        or none for an initial baseline without any dated report.
+
+    Raises:
+        ValueError: Managed markers or dated report bodies are invalid.
+    """
+    body = region_content(text, "assessment-log")
+    if body is None:
+        message = "Missing managed-region markers for 'assessment-log'."
+        raise ValueError(message)
+    _, days, _, _ = _history(body, dt.date.min)
+    return max((day for day in days if day <= through), default=None)
+
+
 def _digest(body: str) -> str:
     """Identify the exact managed text associated with a snapshot.
 

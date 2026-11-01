@@ -4,6 +4,29 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.12 (2026-11-01 05:39 UTC)
+
+Overview: Expanded historical milestone coverage and annual recognition charts,
+refined daily trend observations and draft date markers, and corrected dated
+assessment-log status and narrow-screen layouts.
+
+- Counted all six quality grades from saved milestone Parquet, preserving
+  earlier recognitions after later delisting or demotion.
+- Centered stacked annual charts with grouped grade colors, yearly totals
+  and keyboard-accessible hover details for each underlying grade.
+- Collected redirected article histories and explicit Bplus register dates
+  into the milestone inventory with original identities and source evidence.
+- Appended the observed current day to completed-quarter DYK points while
+  keeping the final year-end point unique.
+- Replaced month boundary comments with MMDD suffixes on dated draft items
+  and added the requested annual data-summary attribution placeholder.
+- Kept pie counts in regular-weight grade/count legends and removed the
+  module's duplicate bold slice labels.
+- Confirmed assessment-log report dates only after saved or verified
+  unchanged dated sections, matching the new-page status presentation.
+- Kept contents menus vertical at every width and anchored narrow dropdowns
+  correctly, with locally scrollable maintenance tables below 640 pixels.
+
 ### 0.7.11 (2026-11-01 04:51 UTC)
 
 Overview: Rebuilt newsletter drafts around shared evidence, independent daily

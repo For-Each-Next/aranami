@@ -30,6 +30,24 @@ the next collection rebuilds them without losing retained report evidence.
 | `backups/report-layout/` | Original legacy evidence after validated layout migration | Durable recovery copies, not active stores |
 | `reports/records/newsletter/` | Independent daily JSON facts and date catalogs | Durable history: deleting it loses retained date selections |
 
+Hourly milestone acquisition supplements recorded talk-page history with the
+dated Bplus register at `WikiProject:电子游戏/乙上级条目` (row contract verified
+against revision 91951615). Only explicit promotion dates in its current section
+become events, with the source title, revision, and permalink retained. Present
+quality grades do not filter these observations. Later register absence never
+removes a promotion or invents a withdrawal. Conflicting known dates require
+review; a later promotion needs an explicitly recorded intervening removal.
+Unknown current-assessment dates can be resolved without inventing authorship.
+The atomic milestone merge preserves former quality and removal history.
+Newsletter preparation consumes this saved Parquet evidence only.
+
+Normal recognition acquisition also follows verified local main-namespace
+redirects into the project, including section targets and bounded chains.
+Redirect subjects with independent talks retain their own identities,
+source revisions and historical recognitions. This positive association keeps
+their evidence in scope; present assessments still come only from current
+project members. Failed or incomplete discovery never advances removal clocks.
+
 The revision-text cache avoids downloading unchanged source bodies. Every
 lookup first selects historical revision metadata at the requested cutoff and
 matches its fresh SHA-1 against the cached text. Hidden or unavailable content
@@ -192,8 +210,10 @@ collection time separately from historical article metadata. Backfills retain
 these observations; existing daily draft archives remain unchanged.
 Quality and DYK category lists follow milestone dates, earliest first, with
 stable title ties. Editor article lists group FA/FL together, then A/AL, GA,
-and Bplus, and order dates within each grade. Month boundaries carry invisible
-`<!-- 1月 -->`-style comments for editors.
+and Bplus, and order dates within each grade. Each article with a known date
+ends with an invisible `<!-- 0904 -->`-style MMDD comment for editors.
+Quarterly quality and homepage lists use the same date markers. Unknown first
+appearance dates and carry-in homepage observations remain unmarked.
 
 Annual statistics retain the January 2026 reference's numerical prose for
 promotions, DYK, article totals, net/daily growth, pageviews, revisions, and
@@ -201,28 +221,51 @@ award participation. Unknown variables remain blank. Partial current figures
 carry a provisional marker. The ACG summary counts scoring editors, first-time
 scorers, and first-time scorers reaching the ten-point first award threshold.
 
-`newsletter_statistics` contains audited historical data from the January
-2026 feature's three image descriptions, credited to SuperGrey and other
-contributors under CC BY-SA 4.0. Graph 1 supplies annual GA additions from
-2008–2025; Graph 2 supplies quarterly cumulative DYK counts from 2006–2025;
-Graph 3 and its January 2025 predecessor supply 2025/2024 assessment counts.
-Current prepared milestones extend supported series; an exact year-end
-assessment snapshot supplies closed-year quality counts. Wikitext uses the
+`quality_years` counts recorded quality additions across the full supplied
+milestone history, retaining separate FA, FL, A, AL, GA, and Bplus values.
+Collection supplies the full saved Parquet inventory separately from the
+current-membership event frame; chart preparation and rendering make no source
+requests. Source acquisition, including Bplus evidence, updates the inventory
+before these saved facts are consumed.
+Repeated evidence counts once per article, year, and grade. Later delisting
+or demotion does not subtract the original recognition. Unknown action dates
+have no inferred year; absent history stays null, and years without observed
+additions are not synthesized. Current assessment grades never replace these
+historical recognition events.
+
+The quality chart stacks FA+FL, A+AL, Bplus, and GA from bottom to top, omitting
+the A layer when its entire series is zero. Each yearly bar shows the sum of
+all six grades once. Hover/focus popups retain the six separate counts and sum.
+It uses the supported raw-SVG first argument of `Graph:Chart` and the upstream
+`Module:Graph/style.css` popup classes, with the same geometry supplying SVG
+bars and percentage-positioned HTML targets. Native stacked charts do not
+support yearly sum labels. Missing saved quality history produces no chart.
+
+`newsletter_statistics` retains audited quarterly cumulative DYK data from the
+January 2026 feature's second image description and 2025/2024 assessment data
+from its third image and January 2025 predecessor, credited to SuperGrey and
+other contributors under CC BY-SA 4.0. Current milestones extend supported
+series; exact year-end snapshots supply closed-year quality counts. Wikitext uses the
 verified server-rendered `Graph:Chart` contract for bar, area, and pie charts,
 without companion data tables or source prose. Assessment pies show only the
 reviewed year and its predecessor. Legend entries include each grade and its
-count; numeric slice labels use black text through
-`showValues=fontcolor:#000000`, verified against `Module:Graph` revision
-95334515 and `Module:Graph/SVGRenderer` revision 95338958. Source provenance
-and attribution remain in the collection contract.
+count in regular-weight text. Duplicate numeric slice labels are disabled
+with `showValues=false` because `Module:Graph/SVGRenderer` fixes them in bold.
+This contract was verified against `Module:Graph` revision 95334515 and
+`Module:Graph/SVGRenderer` revision 95338958. Source provenance and attribution
+remain in the collection contract.
 
 `dyk_new_quarters` retains completed quarter ends and cumulative first-time DYK
 article counts since the reviewed year's January 1. Select each title's earliest
 recorded DYK date before counting; repeat appearances and earlier-year subjects
 do not increase these counts. Quarter ends must precede the exclusive observation
 date. Missing histories remain null; observed empty histories retain zeroes.
-The DYK chart adds each supported quarterly count to its historical baseline,
-without adding an incomplete observation-day point. The trend chart uses the
+`dyk_current` separately retains the latest inclusive UTC observation date and
+cumulative first-time count, capped at December 31. It includes milestones
+already observed that day. Missing history stays null; earlier saved facts may
+omit this field. The DYK chart adds supported quarter counts to its historical
+baseline, then appends the current point when its date is later. December 31
+appears once, including after the fourth quarter is complete. The chart uses the
 verified `Template:Image frame` content, align, width, and caption parameters
 (revision 86263920) to float a 400-pixel thumbnail on the right.
 

@@ -37,6 +37,8 @@ from backend.website.newsletter_year_review import (
     collect_year_new_pages,
     enrich_year_dyk,
     prepare_history,
+    prepare_quality_years,
+    prepare_year_dyk_current,
     prepare_year_dyk_quarters,
     prepare_year_history,
 )
@@ -344,6 +346,7 @@ def _year_review(  # ruff: ignore[too-many-arguments]
     through: dt.date,
     *,
     article_history: pl.DataFrame | None,
+    quality_history: pl.DataFrame | None,
     current_counts: Mapping[str, int] | None,
     current_assessments: pl.DataFrame | None,
     dyk_projects: pl.DataFrame | None,
@@ -380,10 +383,19 @@ def _year_review(  # ruff: ignore[too-many-arguments]
     for source in history.pop("sources"):
         provenance[source["url"]] = source
     result.update(history)
+    result["quality_years"] = prepare_quality_years(
+        quality_history if quality_history is not None else article_history,
+        through,
+    )
     result["dyk_new_quarters"] = prepare_year_dyk_quarters(
         article_history,
         issue,
         through,
+    )
+    result["dyk_current"] = prepare_year_dyk_current(
+        article_history,
+        issue,
+        now.date(),
     )
     result["previous_dyk_count"] = None
     if article_history is not None:
@@ -497,6 +509,7 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
     members: set[str] | None,
     member_ids: set[int] | None,
     article_history: pl.DataFrame | None,
+    quality_history: pl.DataFrame | None,
     today_history_path: Path | None,
     overview_at: (
         Callable[[dt.date], tuple[Mapping[str, int | None], str] | None] | None
@@ -699,6 +712,7 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
             now,
             max(dt.date(issue.year - 1, 1, 1), min(issue.end, now.date())),
             article_history=article_history,
+            quality_history=quality_history,
             current_counts=current_counts,
             current_assessments=current_assessments,
             dyk_projects=dyk_projects,
@@ -720,6 +734,7 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
     members: set[str] | None = None,
     member_ids: set[int] | None = None,
     article_history: pl.DataFrame | None = None,
+    quality_history: pl.DataFrame | None = None,
     today_history_path: Path | None = None,
     overview_at: (
         Callable[[dt.date], tuple[Mapping[str, int | None], str] | None] | None
@@ -743,6 +758,9 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
         member_ids: Project article IDs for anniversary scope joins.
         article_history: Events recorded on project talk pages.
             Complete snapshots supply DYK and quality events directly.
+        quality_history: Full Parquet-backed milestone inventory for
+            annual recognition counts, including former project members.
+            Defaults to supplied article_history for existing callers.
         today_history_path: Separate wiki-wide daily-source archive.
         overview_at: Read retained database counts for an exclusive UTC
             date boundary with their actual observation timestamp.
@@ -798,6 +816,7 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
                 members=members,
                 member_ids=member_ids,
                 article_history=article_history,
+                quality_history=quality_history,
                 today_history_path=today_history_path,
                 overview_at=overview_at,
                 current_assessments=current_assessments,

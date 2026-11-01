@@ -185,7 +185,7 @@ class NewsletterStatisticsTests(TestCase):
         assert "之中又有1人达到10分、正式获得荣誉" in text
         assert "{{Graph:Chart" in text
         assert "|type=pie" in text
-        assert "|type=rect" in text
+        assert '<svg xmlns="http://www.w3.org/2000/svg"' not in text
         assert "|type=area" in text
         assert "歷年資料來源" not in text
         assert "! 年份 !! 新增优良条目" not in text
@@ -201,7 +201,7 @@ class NewsletterStatisticsTests(TestCase):
         assert "2025年條目品質概況" in text
         assert "2026年條目品質概況" in text
         assert "|x=典范级：25" in text
-        assert "|showValues=fontcolor:#000000" in text
+        assert "|legend=true|showValues=false" in text
         assert "总浏览量为3,660万" in text
         assert "[[:Special:PermaLink/123456789#月瀏覽量|1月]]" in text
         assert "* 2月：" in text

@@ -49,6 +49,7 @@ _DYK_SCHEMA = {
     "is_game": pl.Boolean,
     "release_year": pl.Int32,
 }
+QUALITY_HISTORY_GRADES = ("FA", "FL", "A", "AL", "GA", "Bplus")
 
 
 def _game_release(text: str) -> tuple[bool | None, int | None]:
@@ -321,6 +322,51 @@ def prepare_year_history(
     return prepare_history(events, dt.date(issue.year - 1, 1, 1), through)
 
 
+def prepare_quality_years(
+    events: pl.DataFrame | None,
+    through: dt.date,
+) -> list[dict] | None:
+    """Count recorded quality recognitions by original year and grade.
+
+    Args:
+        events: Complete recorded project histories, or unavailable.
+            Earlier additions remain present after delisting/demotion.
+        through: Exclusive observation date in the reviewed year.
+
+    Returns:
+        Observed years with distinct article counts for FA, FL, A, AL,
+        GA, and Bplus additions. Repeated evidence counts once for each
+        title, year, and grade. Removals never subtract prior additions.
+        Unknown dates have no inferred year. Missing history stays null;
+        an observed history without dated additions is empty.
+        Years without observed additions are not synthesized.
+    """
+    if events is None:
+        return None
+    return (
+        events
+        .filter(
+            (pl.col("kind") == "quality")
+            & (pl.col("action") == "added")
+            & pl.col("grade").is_in(QUALITY_HISTORY_GRADES)
+            & (pl.col("date") < through),
+        )
+        .with_columns(pl.col("date").dt.year().alias("year"))
+        .group_by("year")
+        .agg(
+            pl
+            .col("title")
+            .filter(pl.col("grade") == grade)
+            .n_unique()
+            .alias(grade)
+            for grade in QUALITY_HISTORY_GRADES
+        )
+        .sort("year")
+        .select("year", pl.struct(*QUALITY_HISTORY_GRADES).alias("grades"))
+        .to_dicts()
+    )
+
+
 def prepare_year_dyk_quarters(
     events: pl.DataFrame | None,
     issue: Issue,
@@ -365,6 +411,38 @@ def prepare_year_dyk_quarters(
         .sort("date")
         .to_dicts()
     )
+
+
+def prepare_year_dyk_current(
+    events: pl.DataFrame | None,
+    issue: Issue,
+    observed_on: dt.date,
+) -> dict | None:
+    """Count first-time DYK articles through the observed UTC date.
+
+    Args:
+        events: Complete recorded project histories, or unavailable.
+        issue: January issue following the reviewed calendar year.
+        observed_on: Inclusive UTC date of the source observation.
+
+    Returns:
+        The observation date and cumulative distinct first-time count,
+        capped at December 31. Missing history or an observation before
+        the reviewed year returns null; observed empty history is zero.
+    """
+    start = dt.date(issue.year - 1, 1, 1)
+    day = min(observed_on, issue.end - dt.timedelta(days=1))
+    if events is None or day < start:
+        return None
+    count = (
+        events
+        .filter(pl.col("kind") == "dyk")
+        .group_by("title")
+        .agg(pl.col("date").min())
+        .filter(pl.col("date").is_between(start, day))
+        .height
+    )
+    return {"date": day.isoformat(), "count": count}
 
 
 def prepare_history(

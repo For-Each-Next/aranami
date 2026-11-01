@@ -254,14 +254,19 @@ def _quality_months(issue: Issue, facts: Mapping, layout: Mapping) -> str:
             pl.col("date").str.slice(0, 7).alias("month"),
             pl.col("grade").str.to_lowercase(),
         )
+        .unique(
+            ["month", "grade", "action", "title"],
+            keep="first",
+            maintain_order=True,
+        )
         .group_by("month", "grade", "action", maintain_order=True)
-        .agg(pl.col("title").unique(maintain_order=True).alias("titles"))
+        .agg(pl.struct("title", "date").alias("articles"))
     )
     result = []
     for month in range(issue.start.month, issue.start.month + 3):
         lines = []
         titles = {
-            (row["grade"], row["action"]): row["titles"]
+            (row["grade"], row["action"]): row["articles"]
             for row in grouped.filter(
                 pl.col("month") == f"{issue.start.year}-{month:02}",
             ).iter_rows(named=True)
@@ -282,8 +287,9 @@ def _quality_months(issue: Issue, facts: Mapping, layout: Mapping) -> str:
                         "icon": icon,
                         "label": label,
                         "titles": "、".join(
-                            _link(title)
-                            for title in titles.get((grade, action), [])
+                            _link(row["title"])
+                            + f"<!-- {row['date'][5:7]}{row['date'][8:10]} -->"
+                            for row in titles.get((grade, action), [])
                         )
                         or "（無）",
                     },
@@ -403,7 +409,13 @@ def _source_homepage_rows(rows: object, prototype: str) -> str:
             _fill(
                 prototype,
                 {
-                    "title": _link(row["title"]),
+                    "title": _link(row["title"])
+                    + (
+                        f"<!-- {row['date'][5:7]}{row['date'][8:10]} -->"
+                        if row.get("date")
+                        and row.get("date_kind") != "window_start"
+                        else ""
+                    ),
                     "date": "期初已在首頁，首次日期不詳"
                     if row.get("date_kind") == "window_start"
                     else _date_label(row["date"]),

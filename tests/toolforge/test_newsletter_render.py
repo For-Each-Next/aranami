@@ -72,6 +72,8 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             "quality_source": "article_history",
             "history_undated": {"quality": 2},
         })[1]["text"]
+        for row in changes:
+            assert f"[[:{row['title']}]]<!-- 1002 -->" in text
         assert (
             "新增典範條目1篇、特色列表0篇、甲級條目1篇、優良條目0篇、"
             "專題乙上級條目0篇、專題優良話題0組，"
@@ -362,7 +364,7 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             assert "{{div col|colwidth=27em}}" in text
             assert "{{div col end}}" in text
         assert (
-            "* [[:展示遊戲]]<small>（12月31日）</small>"
+            "* [[:展示遊戲]]<!-- 1231 --><small>（12月31日）</small>"
             in sections["優良條目"]
         )
         assert "==== 典範內容 ====" in announcements
@@ -430,8 +432,15 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert (
             "* [[:延續新聞]]<small>（期初已在首頁，首次日期不詳）</small>"
         ) in announcements
-        assert "* [[:新新聞]]<small>（10月8日）</small>" in announcements
-        assert ("* [[:歷史遊戲]]<small>（10月15日）</small>") in announcements
+        assert (
+            "* [[:新新聞]]<!-- 1008 --><small>（10月8日）</small>"
+            in announcements
+        )
+        assert (
+            "* [[:歷史遊戲]]<!-- 1015 --><small>（10月15日）</small>"
+            in announcements
+        )
+        assert "[[:延續新聞]]<!--" not in announcements
         assert "10月1日" not in announcements
         assert "==== 典範內容 ====" in announcements
 

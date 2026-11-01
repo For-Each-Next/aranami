@@ -14,6 +14,7 @@
   <div class="form-actions"><button type="submit" class="cdx-button cdx-button--action-progressive cdx-button--weight-primary">{{ t.backlog.apply }}</button><a class="cdx-button" href="{{ clear_url }}">{{ t.backlog['clear'] }}</a></div>
 </form>
 {% if cards %}
+<div class="table-scroll" tabindex="0" role="region" aria-label="{{ heading }}">
 <table class="maintenance-table" role="table">
   <caption class="visually-hidden">{{ heading }}</caption>
   <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">#</th><th scope="col" role="columnheader">{{ t.backlog.sort.title }}</th><th scope="col" role="columnheader">{{ t.backlog.sort.class }}</th><th scope="col" role="columnheader">{{ t.backlog.column.importance }}</th><th scope="col" role="columnheader">{{ t.backlog.column.issues }}</th><th scope="col" role="columnheader">{{ t.backlog.sort.time }}</th></tr></thead>
@@ -25,6 +26,7 @@
     <td role="cell" data-label="{{ t.backlog.sort.time }}">{% if card.month %}{% if card.month.url %}<a href="{{ card.month.url }}">{% endif %}<time datetime="{{ card.month.value }}">{{ card.month.label }}</time>{% if card.month.url %}</a>{% endif %}{% else %}—{% endif %}</td>
   </tr>{% endfor %}</tbody>
 </table>
+</div>
 {% else %}<p class="empty">{{ t.backlog.empty }}</p>{% endif %}
 {% include "includes/maintenance_pagination.html" %}
 {% include "includes/source_updated.html" %}

@@ -39,6 +39,7 @@ from backend.support.article_history import (
 from shared.sources.dyk import read_talk_pages
 from shared.sources.quarry.projects import (
     latest_revisions,
+    query_history_redirects,
     query_pages_by_wikiproject,
     query_tags,
 )
@@ -60,6 +61,31 @@ _FLAT_SCHEMA = {
     for key, value in SCHEMA.items()
     if key not in {"events", "contract"}
 } | EVENT_SCHEMA
+
+
+def history_membership(
+    site: BaseSite,
+    membership: pl.DataFrame,
+) -> pl.DataFrame:
+    """Include retired redirect articles in observed history scope.
+
+    Redirect subjects keep their own page and talk IDs. Their historical
+    recognition therefore stays distinct from their current target's
+    recognition, while a verified project association keeps them active.
+
+    Args:
+        site: Wiki whose replica supplies redirect associations.
+        membership: Complete current project membership observation.
+
+    Returns:
+        Current members plus local mainspace redirects with talk pages.
+    """
+    redirects = query_history_redirects(site, membership)
+    return pl.concat([membership, redirects], how="diagonal_relaxed").unique(
+        "page_id",
+        keep="first",
+        maintain_order=True,
+    )
 
 
 def prepared_news(
@@ -117,7 +143,16 @@ def _project_members(membership: pl.DataFrame) -> pl.DataFrame:
             (pl.col("page_namespace") == 0)
             & pl.col("talk_page_id").is_not_null(),
         )
-        .select("page_id", pl.col("full_title").alias("title"), "talk_page_id")
+        .select(
+            "page_id",
+            pl.col("full_title").alias("title"),
+            "talk_page_id",
+            (
+                (pl.col("page_is_redirect") == 1).fill_null(value=False)
+                if "page_is_redirect" in membership.columns
+                else pl.lit(value=False)
+            ).alias("redirect_source"),
+        )
         .unique()
     )
     if members.get_column("talk_page_id").n_unique() != members.height:
@@ -135,7 +170,7 @@ def _candidates(
     """Select history-bearing articles and previously saved sources.
 
     Returns:
-        Current project identities selected through replica metadata.
+        Current and retired redirect identities with independent talks.
     """
     tags = [("history", "talk", "cat", title) for title in CATEGORY_CANDIDATES]
     tags.extend(
@@ -153,7 +188,11 @@ def _candidates(
     )
     return (
         pl
-        .concat([tagged.select(members.columns), retained])
+        .concat([
+            tagged.select(members.columns),
+            retained,
+            members.filter(pl.col("redirect_source")),
+        ])
         .unique()
         .sort("talk_page_id")
     )
@@ -304,8 +343,9 @@ def collect_article_history(
         path: Durable Parquet destination, or none for in-memory use.
 
     Returns:
-        Current project members' complete recorded events. Unknown dates
+        Supplied history scope's complete recorded events. Unknown dates
         remain null. Removed project members remain retained on disk.
+        Use ``history_membership`` to include associated redirects.
 
     Raises:
         ValueError: Site, clock, identities, or coverage are invalid.
@@ -386,7 +426,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     site = pywikibot.Site("zh", "wikipedia")
     events = collect_article_history(
         site,
-        query_pages_by_wikiproject(site, "电子游戏"),
+        history_membership(
+            site,
+            query_pages_by_wikiproject(site, "电子游戏"),
+        ),
         now=dt.datetime.now(dt.UTC),
         path=options.output,
     )

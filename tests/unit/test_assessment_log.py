@@ -1119,6 +1119,90 @@ class TestAssessmentLogJob(_AssessmentLogFixture):
         assert capture.call_args.kwargs["dry"] is False
         prepare.assert_not_called()
 
+    def test_unchanged_log_confirms_its_actual_existing_report_date(
+        self,
+    ) -> None:
+        """Retain the last dated report rather than the attempt date."""
+        text = _TEXT.replace(
+            '<!-- aranami end="assessment-log" -->',
+            "=== 2026年10月23日 ===\n\n無變更\n\n"
+            '<!-- aranami end="assessment-log" -->',
+        )
+        prepared = self._prepare(_members((1, "Existing", "B", "High")), text)
+        context = JobContext(self.site, _NOW.date(), dry=False)
+        with (
+            patch.object(job, "get_snapshot"),
+            patch.object(job, "read_pages", return_value=[Mock(text=text)]),
+            patch.object(job, "prepare_data", return_value=prepared),
+            patch("updater.jobs._execution.pywikibot.Page") as page,
+        ):
+            job.run(title=_TITLE, context=context)
+        page.assert_not_called()
+        assert context.routine_results()[0]["status"] == "no_update"
+        assert context.tasks[0].report_date == dt.date(2026, 10, 23)
+
+    def test_undated_baseline_does_not_claim_a_completed_report(self) -> None:
+        """Keep initial membership capture separate from a dated log."""
+        prepared = self._prepare(_members((1, "Existing", "B", "High")))
+        context = JobContext(self.site, _NOW.date(), dry=False)
+        with (
+            patch.object(job, "get_snapshot"),
+            patch.object(job, "read_pages", return_value=[Mock(text=_TEXT)]),
+            patch.object(job, "prepare_data", return_value=prepared),
+        ):
+            job.run(title=_TITLE, context=context)
+        assert context.routine_results()[0]["status"] == "no_update"
+        assert context.tasks[0].report_date is None
+
+    def test_successful_save_confirms_new_daily_report(self) -> None:
+        """Advance the date only after the new section is saved."""
+        old = _members((1, "Existing", "C", "High"))
+        self._retain(self._prepare(old), _TEXT, 1)
+        prepared = self._prepare(_members((1, "Existing", "B", "High")))
+        context = JobContext(
+            self.site,
+            _NOW.date(),
+            dry=False,
+            started_at=_NOW + dt.timedelta(seconds=10),
+        )
+        with (
+            patch.object(job, "get_snapshot"),
+            patch.object(job, "read_pages", return_value=[Mock(text=_TEXT)]),
+            patch.object(job, "prepare_data", return_value=prepared),
+            patch(
+                "updater.jobs._execution.pywikibot.Page",
+                return_value=Mock(text=_TEXT),
+            ) as page,
+        ):
+            job.run(title=_TITLE, context=context)
+        page.return_value.save.assert_called_once()
+        assert context.routine_results()[0]["status"] == "updated"
+        assert context.tasks[0].report_date == dt.date(2026, 10, 24)
+
+    def test_failed_save_does_not_confirm_a_proposed_report_date(self) -> None:
+        """Keep unconfirmed daily sections out of successful status."""
+        old = _members((1, "Existing", "C", "High"))
+        self._retain(self._prepare(old), _TEXT, 1)
+        prepared = self._prepare(_members((1, "Existing", "B", "High")))
+        context = JobContext(
+            self.site,
+            _NOW.date(),
+            dry=False,
+            started_at=_NOW + dt.timedelta(seconds=10),
+        )
+        page = Mock(text=_TEXT)
+        page.save.side_effect = OSError("save response lost")
+        with (
+            patch.object(job, "get_snapshot"),
+            patch.object(job, "read_pages", return_value=[Mock(text=_TEXT)]),
+            patch.object(job, "prepare_data", return_value=prepared),
+            patch("updater.jobs._execution.pywikibot.Page", return_value=page),
+            self.assertRaises(OSError),
+        ):
+            job.run(title=_TITLE, context=context)
+        assert context.tasks[0].report_date is None
+        assert context.routine_results()[0]["status"] == "failed"
+
     def test_failed_durable_write_prevents_wiki_publication(self) -> None:
         """Retain the prior baseline when proposal storage fails."""
         old = _members((1, "Former", "B", "High"))
@@ -1182,6 +1266,7 @@ class TestAssessmentLogJob(_AssessmentLogFixture):
         assert context.edits[0].summary.endswith(
             "([[toolforge:Aranami|Aranami]])",
         )
+        assert context.tasks[0].report_date is None
 
 
 class TestCompactAssessmentLog(_AssessmentLogFixture):

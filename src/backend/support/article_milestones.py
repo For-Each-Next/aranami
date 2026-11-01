@@ -558,15 +558,19 @@ def merge_save(path: Path, refreshed: pl.DataFrame) -> pl.DataFrame:
         return merged
 
 
-def sync_events(events: pl.DataFrame, path: Path) -> pl.DataFrame:
-    """Retain supplied recognition events without date windows.
+def prepare_events(
+    events: pl.DataFrame,
+    *,
+    previous: pl.DataFrame | None = None,
+) -> pl.DataFrame:
+    """Prepare observed recognition events for one atomic durable merge.
 
     Args:
         events: All-time events with optional computed authors.
-        path: Durable recognition destination.
+        previous: Validated inventory used to preserve lookup progress.
 
     Returns:
-        Complete durable inventory, including earlier retained events.
+        Complete event rows with stable identities and honest coverage.
     """
     selected = identities(
         events.filter(
@@ -579,7 +583,9 @@ def sync_events(events: pl.DataFrame, path: Path) -> pl.DataFrame:
             ]),
         ),
     )
-    previous = load(path).select(
+    previous = (
+        previous if previous is not None else pl.DataFrame(schema=SCHEMA)
+    ).select(
         "event_id",
         pl.col("revision_id").alias("_previous_revision"),
     )
@@ -640,7 +646,20 @@ def sync_events(events: pl.DataFrame, path: Path) -> pl.DataFrame:
             .alias("sources"),
         )
     )
-    return merge_save(path, _coverage(selected))
+    return _coverage(selected)
+
+
+def sync_events(events: pl.DataFrame, path: Path) -> pl.DataFrame:
+    """Retain supplied recognition events without date windows.
+
+    Args:
+        events: All-time events with optional computed authors.
+        path: Durable recognition destination.
+
+    Returns:
+        Complete durable inventory, including earlier retained events.
+    """
+    return merge_save(path, prepare_events(events, previous=load(path)))
 
 
 def sync_current_assessments(

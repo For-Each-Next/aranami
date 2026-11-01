@@ -84,6 +84,11 @@ class TestHubDispatch(TestCase):
             ) as query,
             patch.object(
                 hub,
+                "history_membership",
+                side_effect=lambda _site, observed: observed,
+            ) as history_scope,
+            patch.object(
+                hub,
                 "collect_article_history",
                 side_effect=collect,
             ) as archive,
@@ -93,6 +98,11 @@ class TestHubDispatch(TestCase):
                 side_effect=lambda events, _site, **_options: events,
             ) as authorship,
             patch.object(hub, "enrich_milestones") as recognition,
+            patch.object(
+                hub,
+                "collect_quality_register",
+                return_value=pl.DataFrame(schema={"kind": pl.String}),
+            ) as register,
             patch.object(hub, "sync_current_assessments") as assessments,
             patch.object(hub, "reconcile_scope") as scope,
             patch.object(hub, "refresh_newsletter") as newsletter,
@@ -107,8 +117,15 @@ class TestHubDispatch(TestCase):
             query.call_args_list == [call(site.return_value, "电子游戏")] * 2
         )
         assert archive.call_count == 2  # ruff: ignore[magic-value-comparison]
+        assert history_scope.call_count == 2  # ruff: ignore[magic-value-comparison]
         assert authorship.call_count == recognition.call_count == 2  # ruff: ignore[magic-value-comparison]
         assert assessments.call_count == 2  # ruff: ignore[magic-value-comparison]
+        assert register.call_count == 2  # ruff: ignore[magic-value-comparison]
+        assert register.call_args.args == (site.return_value, members)
+        assert register.call_args.kwargs == {
+            "path": hub.MILESTONES_PATH,
+            "observed_at": stamp,
+        }
         assert authorship.call_args.kwargs == {"max_requests": 10}
         assert recognition.call_args.kwargs == {"max_requests": 10}
         assert assessments.call_args.args[0].equals(members)

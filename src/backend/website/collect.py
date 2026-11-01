@@ -1395,7 +1395,7 @@ def _report_plan(
             if name == "reviews"
             else "zh:all-access:user:top1000:limit12:lookback7:extracts-v3"
             if name == "pageviews"
-            else "quarterly-newsletter-v15:annual-statistics"
+            else "quarterly-newsletter-v16:annual-statistics"
             if name == "newsletter"
             else f"days:{days}:extracts-v3:talk-news-v1"
             if name == "news_history"
@@ -1598,6 +1598,7 @@ def _retained_events(
     cache: dict[str, pl.DataFrame],
     *,
     path: Path | None,
+    all_members: bool = False,
 ) -> pl.DataFrame:
     """Read shared milestone data once within a dashboard pass.
 
@@ -1605,23 +1606,26 @@ def _retained_events(
         membership: Complete current project membership.
         cache: Shared results belonging to this dashboard invocation.
         path: Required canonical milestones file.
+        all_members: Keep the full saved inventory for historical
+            recognition counts instead of scoping to current members.
 
     Returns:
-        Complete saved events scoped to current project membership.
+        Saved events with the selected membership scope.
 
     Raises:
         RuntimeError: No canonical milestone path was supplied.
     """
-    if "events" not in cache:
+    key = "quality_events" if all_members else "events"
+    if key not in cache:
         if path is None:
             message = "Shared article milestone data is unavailable."
             raise RuntimeError(message)
-        cache["events"] = article_milestones.read_events(
+        cache[key] = article_milestones.read_events(
             path,
-            membership,
+            None if all_members else membership,
             required=True,
         )
-    return cache["events"]
+    return cache[key]
 
 
 def _collect_report(  # ruff: ignore[too-many-arguments]
@@ -1720,6 +1724,12 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
                     ].to_list(),
                 ),
                 article_history=events,
+                quality_history=_retained_events(
+                    membership,
+                    article_history_cache,
+                    path=milestones_path,
+                    all_members=True,
+                ),
                 today_history_path=today_history_path,
             )
             data = newsletter.read_newsletter_data(observations)

@@ -13,15 +13,16 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from html import escape
 from typing import TYPE_CHECKING
 
 import polars as pl
 
 from backend.website.newsletter_statistics import (
     HISTORICAL_DYK,
-    HISTORICAL_GA,
     QUALITY_GRADES,
 )
+from backend.website.newsletter_year_review import QUALITY_HISTORY_GRADES
 from shared.newsletter import DYK_PROJECTS, ROOT
 
 if TYPE_CHECKING:
@@ -59,6 +60,7 @@ _ESCAPES = str.maketrans({
     "<": "&lt;",
     ">": "&gt;",
 })
+_QUALITY_CHART_WIDTH = 600
 _MONTHS = 12
 _FIRST_BAND_END = 2009
 _SECOND_BAND_END = 2019
@@ -99,30 +101,23 @@ def _article(title: str, grade: str | None = None) -> str:
     return icon + _link(title)
 
 
-def _month_comments(
+def _dated_articles(
     articles: Iterable[str],
     dates: Iterable[str | None],
 ) -> list[str]:
-    """Mark the first article in each month for manual draft editing.
+    """Append known article listing dates for manual draft editing.
 
     Args:
         articles: Rendered articles in listing-date order.
         dates: Corresponding ISO listing dates, with missing dates null.
 
     Returns:
-        Articles with invisible month comments at observed boundaries.
+        Articles followed by MMDD comments; unknown dates stay unmarked.
     """
     result = []
-    previous = None
     for article, date in zip(articles, dates, strict=True):
-        month = int(date[5:7]) if date else None
-        comment = (
-            f"<!-- {month}月 -->"
-            if month is not None and month != previous
-            else ""
-        )
-        result.append(comment + article)
-        previous = month
+        comment = f"<!-- {date[5:7]}{date[8:10]} -->" if date else ""
+        result.append(article + comment)
     return result
 
 
@@ -228,7 +223,7 @@ def _quality(review: Mapping) -> str:
         lines.append(
             f"* {{{{icon|{icon_grade}}}}}&thinsp;'''{label}（{count}）'''："
             + "、".join(
-                _month_comments(
+                _dated_articles(
                     map(_link, titles),
                     groups[grade]["date"],
                 ),
@@ -359,7 +354,7 @@ def _credits(changes: pl.DataFrame) -> str:
             + "".join(
                 f"|{number}={text}"
                 for number, text in enumerate(
-                    _month_comments(articles, dates),
+                    _dated_articles(articles, dates),
                     1,
                 )
             )
@@ -481,7 +476,7 @@ def _dyk(review: Mapping, year: int) -> str:
         row = by_band.get(key)
         text = (
             "、".join(
-                _month_comments(
+                _dated_articles(
                     map(
                         _article,
                         row["title"],
@@ -533,7 +528,7 @@ def _quality_charts(review: Mapping, year: int) -> str:
             + ",".join(str(row["counts"][code]) for code, _ in observed)
             + "\n|colors="
             + ",".join(meta[1] for _, meta in observed)
-            + "\n|legend=true|showValues=fontcolor:#000000\n}}",
+            + "\n|legend=true|showValues=false\n}}",
         )
     return "\n\n".join(charts)
 
@@ -744,29 +739,164 @@ def _awards(review: Mapping) -> str:
     return "\n".join(lines)
 
 
+def _quality_chart_bar(
+    row: Mapping,
+    left: float,
+    width: float,
+    ceiling: int,
+    groups: tuple[tuple[str, str, str], ...],
+) -> tuple[str, str]:
+    """Render an annual stack, its total, and a popup target.
+
+    Returns:
+        SVG geometry and its percentage-positioned HTML overlay.
+        The four groups rise from featured to A, Bplus, then GA.
+    """
+    baseline, plot_height = 235, 210
+    current = float(baseline)
+    bars = []
+    for key, _label, color in groups:
+        height = row[key] / ceiling * plot_height
+        current -= height
+        bars.append(
+            f'<rect x="{left:.2f}" y="{current:.2f}" width="{width:.2f}" '
+            f'height="{height:.2f}" fill="{color}" />',
+        )
+    center = left + width / 2
+    bars.extend((
+        (
+            f'<text x="{center:.2f}" y="{current - 5:.2f}" '
+            f'text-anchor="middle">{row["total"]:,}</text>'
+        ),
+        (
+            f'<text x="{center:.2f}" y="250" text-anchor="middle" '
+            f'font-size="10">{row["year"]}</text>'
+        ),
+    ))
+    details = (
+        [f"{row['year']}年"]
+        + [
+            f"{_GRADES[grade]}（{grade}）：{row[grade]:,}"
+            for grade in QUALITY_HISTORY_GRADES
+        ]
+        + [f"合計：{row['total']:,}"]
+    )
+    label = escape("；".join(details), quote=True)
+    popup = "<br />".join(map(escape, details))
+    edge = (
+        " gr-tip-l"
+        if center < _QUALITY_CHART_WIDTH / 4
+        else " gr-tip-r"
+        if center > _QUALITY_CHART_WIDTH * 3 / 4
+        else ""
+    )
+    overlay = (
+        '<span class="gr-hbar" tabindex="0" '
+        f'title="{label}" aria-label="{label}" '
+        f'style="left:{left / 6:.4f}%;top:{current / 3:.4f}%;'
+        f"width:{width / 6:.4f}%;"
+        f'height:{max(baseline - current, 3) / 3:.4f}%">'
+        f'<span class="gr-tip gr-tip-b{edge}" style="text-align:left">'
+        f"{popup}</span></span>"
+    )
+    return "".join(bars), overlay
+
+
+def _quality_chart_axes(ceiling: int) -> str:
+    """Draw axes and integer grid labels for annual recognitions.
+
+    Returns:
+        Grid, count labels, and axis titles in a 600 by 300 viewport.
+    """
+    lines = []
+    for index in range(5):
+        y = 235 - index / 4 * 210
+        lines.append(
+            f'<line x1="42" y1="{y:.2f}" x2="582" y2="{y:.2f}" '
+            'stroke="#c8ccd1" stroke-width="1" />'
+            f'<text x="37" y="{y + 4:.2f}" text-anchor="end">'
+            f"{ceiling * index / 4:,.0f}</text>",
+        )
+    lines.append(
+        '<text x="42" y="14">入選篇數</text>'
+        '<text x="582" y="264" text-anchor="end">年份</text>',
+    )
+    return "".join(lines)
+
+
+def _quality_history_chart(review: Mapping) -> str:
+    """Render recorded annual additions without using current grades.
+
+    Returns:
+        Grouped stacks with yearly sum labels and detailed hover popups.
+        Later delisting/demotion never removes an earlier recognition.
+    """
+    rows = review.get("quality_years")
+    if not rows:
+        return ""
+    frame = (
+        pl
+        .DataFrame(rows)
+        .unnest("grades")
+        .with_columns(
+            pl.sum_horizontal(*QUALITY_HISTORY_GRADES).alias("total"),
+            (pl.col("FA") + pl.col("FL")).alias("featured"),
+            (pl.col("A") + pl.col("AL")).alias("a"),
+        )
+    )
+    groups = tuple(
+        group
+        for group in (
+            ("featured", "典范级", QUALITY_GRADES["fa"][1]),
+            ("a", "甲级", QUALITY_GRADES["a"][1]),
+            ("Bplus", "乙上级", QUALITY_GRADES["bplus"][1]),
+            ("GA", "优良级", QUALITY_GRADES["ga"][1]),
+        )
+        if group[0] != "a" or (frame["a"] > 0).any()
+    )
+    ceiling = max(1, ((frame["total"].max() + 3) // 4) * 4)
+    step = 540 / frame.height
+    bars, overlays = [], []
+    for index, row in enumerate(frame.iter_rows(named=True)):
+        svg, overlay = _quality_chart_bar(
+            row,
+            42 + (index + 0.15) * step,
+            0.7 * step,
+            ceiling,
+            groups,
+        )
+        bars.append(svg)
+        overlays.append(overlay)
+    legend = "".join(
+        f'<rect x="{70 + index * 125}" y="278" width="12" height="12" '
+        f'fill="{color}" /><text x="{87 + index * 125}" y="288">'
+        f"{label}</text>"
+        for index, (_key, label, color) in enumerate(groups)
+    )
+    return (
+        '<templatestyles src="Module:Graph/style.css" />'
+        '<div class="center" style="text-align:center">'
+        '<div class="svg-graph" style="width:600px;margin:0 auto">'
+        '{{Graph:Chart|1=<svg xmlns="http://www.w3.org/2000/svg" '
+        'width="600" height="300" viewBox="0 0 600 300">'
+        "<title>歷年新增獲評高品質內容</title>"
+        '<g font-family="sans-serif" font-size="11" fill="#000000">'
+        + _quality_chart_axes(ceiling)
+        + "".join(bars)
+        + legend
+        + '</g></svg>}}<div class="gr-ov">'
+        + "".join(overlays)
+        + "</div></div></div>"
+    )
+
+
 def _milestone_charts(review: Mapping, year: int) -> tuple[str, str]:
     """Extend audited GA and DYK charts with observed annual milestones.
 
     Returns:
-        Annual GA additions and quarter-end cumulative DYK charts.
+        Annual quality additions and quarterly/current cumulative DYK.
     """
-    changes = review.get("quality_changes")
-    ga = {past: count for past, count in HISTORICAL_GA.items() if past < year}
-    if changes is not None:
-        ga[year] = len({
-            row["title"]
-            for row in changes
-            if row["grade"] == "GA" and row["action"] == "added"
-        })
-    ga_rows = [(key, value) for key, value in ga.items() if key <= year]
-    quality = (
-        "{{Graph:Chart|type=rect|width=600|height=250|x="
-        + ",".join(str(key) for key, _ in ga_rows)
-        + "|y1="
-        + ",".join(str(value) for _, value in ga_rows)
-        + "|colors=#66ff66|xAxisTitle=年份|yAxisTitle=條目數"
-        "|showValues=true}}"
-    )
+    quality = _quality_history_chart(review)
     dyk = [
         (day, count) for day, count in HISTORICAL_DYK if day[:4] < str(year)
     ]
@@ -775,6 +905,12 @@ def _milestone_charts(review: Mapping, year: int) -> tuple[str, str]:
             (row["date"], HISTORICAL_DYK[-1][1] + row["count"])
             for row in review.get("dyk_new_quarters") or []
         )
+        current = review.get("dyk_current")
+        if current is not None and (not dyk or current["date"] > dyk[-1][0]):
+            dyk.append((
+                current["date"],
+                HISTORICAL_DYK[-1][1] + current["count"],
+            ))
     dyk = [(day, count) for day, count in dyk if day[:4] <= str(year)]
     chart = (
         "{{Graph:Chart|type=area|width=400|height=250|xType=date|x="
@@ -858,7 +994,8 @@ def _annual(issue: Issue, review: Mapping) -> str:
         _invitation(issue),
         (
             f"== 專題報導兼訪談：{year}年年終回顧 ==\n"
-            "{{WikiProject:電子遊戲/簡訊/年终回顾导航模板}}"
+            "{{WikiProject:電子遊戲/簡訊/年终回顾导航模板}}\n"
+            ": {{small|数据总结：[[User:Example|Example]]}}"
         ),
         "=== 引言 ===",
         "==== 內容評審 ====\n\n"

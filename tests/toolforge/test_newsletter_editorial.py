@@ -150,18 +150,18 @@ class EditorialDraftTests(unittest.TestCase):
         )["專題"]
         for grade, label in (("FA", "典范条目"), ("GA", "优良条目")):
             expected = "、".join(
-                f"{comment}[[:{grade}-{title}]]"
+                f"[[:{grade}-{title}]]{comment}"
                 for comment, title in (
-                    ("<!-- 1月 -->", "ZEarly"),
-                    ("<!-- 2月 -->", "ATie"),
-                    ("", "BTie"),
-                    ("<!-- 12月 -->", "ALate"),
+                    ("<!-- 0101 -->", "ZEarly"),
+                    ("<!-- 0201 -->", "ATie"),
+                    ("<!-- 0201 -->", "BTie"),
+                    ("<!-- 1201 -->", "ALate"),
                 )
             )
             assert f"'''{label}（4）'''：{expected}\n" in text
 
     @staticmethod
-    def test_editor_articles_follow_dates_with_month_comments() -> None:
+    def test_editor_articles_follow_grades_with_date_comments() -> None:
         """Order editor credits by grade and listing date."""
         changes = [
             {
@@ -184,12 +184,13 @@ class EditorialDraftTests(unittest.TestCase):
             {"year_review": {"quality_changes": changes}},
         )["專題"]
         assert (
-            "|1=<!-- 2月 -->{{icon|FA}}&thinsp;[[:ATie]]"
-            "|2=<!-- 12月 -->{{icon|FA}}&thinsp;[[:ALate]]"
-            "|3=<!-- 1月 -->{{icon|GA}}&thinsp;[[:ZEarly]]"
-            "|4=<!-- 2月 -->{{icon|GA}}&thinsp;[[:BTie]]"
+            "|1={{icon|FA}}&thinsp;[[:ATie]]<!-- 0201 -->"
+            "|2={{icon|FA}}&thinsp;[[:ALate]]<!-- 1201 -->"
+            "|3={{icon|GA}}&thinsp;[[:ZEarly]]<!-- 0101 -->"
+            "|4={{icon|GA}}&thinsp;[[:BTie]]<!-- 0201 -->"
         ) in text
-        assert "<!-- 3月 -->" not in text
+        assert "<!-- 0301 -->" not in text
+        assert "月 -->" not in text
 
     @staticmethod
     def test_ordinary_issues_have_two_empty_editorial_pages() -> None:
@@ -199,6 +200,50 @@ class EditorialDraftTests(unittest.TestCase):
         assert "專題報導：待定" in pages["專題"]
         assert "訪談：待定" in pages["訪談"]
         assert "2027年4月" in pages["訪談"]
+
+    @staticmethod
+    def test_each_known_date_has_suffix_and_unknowns_stay_unmarked() -> None:
+        """Mark known dates individually and leave unknowns unmarked."""
+        text = render_editorial(
+            Issue.parse("2027-01"),
+            {
+                "year_review": {
+                    "quality_changes": [
+                        {
+                            "title": title,
+                            "date": date,
+                            "grade": "FA",
+                            "action": "added",
+                            "nominator": "Editor",
+                        }
+                        for title, date in (
+                            ("First quality", "2026-09-04"),
+                            ("Second quality", "2026-09-04"),
+                            ("Undated quality", None),
+                        )
+                    ],
+                    "dyk": [
+                        {"title": title, "date": date}
+                        for title, date in (
+                            ("First DYK", "2026-09-04"),
+                            ("Second DYK", "2026-09-04"),
+                            ("Undated DYK", None),
+                        )
+                    ],
+                },
+            },
+        )["專題"]
+        for title in (
+            "First quality",
+            "Second quality",
+            "First DYK",
+            "Second DYK",
+        ):
+            assert f"[[:{title}]]<!-- 0904 -->" in text
+        for title in ("Undated quality", "Undated DYK"):
+            assert f"[[:{title}]]" in text
+            assert f"[[:{title}]]<!--" not in text
+        assert "月 -->" not in text
 
     @staticmethod
     def test_empty_january_preserves_exact_reference_sections() -> None:
@@ -219,6 +264,10 @@ class EditorialDraftTests(unittest.TestCase):
             (4, "榮譽表彰"),
         ]
         assert "{{WikiProject:電子遊戲/簡訊/年终回顾导航模板}}" in text
+        assert (
+            "{{WikiProject:電子遊戲/簡訊/年终回顾导航模板}}\n"
+            ": {{small|数据总结：[[User:Example|Example]]}}"
+        ) in text
         assert "=== 引言 ===\n\n==== 內容評審 ====" in text
         for unwanted in (
             "999,999",
@@ -323,12 +372,12 @@ class EditorialDraftTests(unittest.TestCase):
             {"year_review": {"dyk": records}},
         )["專題"]
         assert "* '''遊戲作品（5）'''：" in text
-        assert "** '''2020年—2026年（1）'''：<!-- 2月 -->[[:近期]]" in text
+        assert "** '''2020年—2026年（1）'''：[[:近期]]<!-- 0201 -->" in text
         assert (
-            "** '''2027年（1）'''：<!-- 2月 -->{{icon|FA}}&thinsp;[[:當年]]"
+            "** '''2027年（1）'''：{{icon|FA}}&thinsp;[[:當年]]<!-- 0201 -->"
         ) in text
         assert "{{icon|Bplus}}&thinsp;[[:早期]]" in text
-        assert "** '''其他（1）'''：<!-- 2月 -->[[:未來]]\n" in text
+        assert "** '''其他（1）'''：[[:未來]]<!-- 0201 -->\n" in text
         pending = text.split("* '''待分類（3）'''：", 1)[1]
         assert "[[:年份不詳]]" in pending
         assert "[[:未來]]" not in pending
@@ -387,24 +436,24 @@ class EditorialDraftTests(unittest.TestCase):
             {"year_review": {"dyk": records}},
         )["專題"]
         assert (
-            "** '''2009年及以前（1）'''：<!-- 2月 -->"
-            "{{icon|GA}}&thinsp;[[:Game]]\n"
+            "** '''2009年及以前（1）'''："
+            "{{icon|GA}}&thinsp;[[:Game]]<!-- 0201 -->\n"
         ) in text
         assert (
-            "* '''角色與元素（2）'''：<!-- 2月 -->"
-            "{{icon|Bplus}}&thinsp;[[:Character]]、"
-            "[[:Undated]]\n"
+            "* '''角色與元素（2）'''："
+            "{{icon|Bplus}}&thinsp;[[:Character]]<!-- 0201 -->、"
+            "[[:Undated]]<!-- 0201 -->\n"
         ) in text
         assert (
-            "* '''公司與人物（3）'''：<!-- 2月 -->[[:Biography]]、"
-            "[[:Company]]、[[:Musician]]\n"
+            "* '''公司與人物（3）'''：[[:Biography]]<!-- 0201 -->、"
+            "[[:Company]]<!-- 0201 -->、[[:Musician]]<!-- 0201 -->\n"
         ) in text
         assert (
-            "* '''音樂（1）'''：<!-- 2月 -->{{icon|FA}}&thinsp;[[:Music]]\n"
+            "* '''音樂（1）'''：{{icon|FA}}&thinsp;[[:Music]]<!-- 0201 -->\n"
         ) in text
         assert (
-            "* '''待分類（2）'''：<!-- 2月 -->[[:Unavailable]]、"
-            "[[:Unmatched]]\n"
+            "* '''待分類（2）'''：[[:Unavailable]]<!-- 0201 -->、"
+            "[[:Unmatched]]<!-- 0201 -->\n"
         ) in text
         assert "* '''開發與業界（0）'''：\n" in text
         assert "* '''其他（0）'''：\n" in text
@@ -447,16 +496,16 @@ class EditorialDraftTests(unittest.TestCase):
         )["專題"]
         for label, prefix, _projects in groups:
             expected = "、".join(
-                f"{comment}[[:{prefix}-{title}]]"
+                f"[[:{prefix}-{title}]]{comment}"
                 for comment, title in (
-                    ("<!-- 1月 -->", "ZEarly"),
-                    ("<!-- 2月 -->", "ATie"),
-                    ("", "BTie"),
-                    ("<!-- 12月 -->", "ALate"),
+                    ("<!-- 0101 -->", "ZEarly"),
+                    ("<!-- 0201 -->", "ATie"),
+                    ("<!-- 0201 -->", "BTie"),
+                    ("<!-- 1201 -->", "ALate"),
                 )
             )
             assert f"'''{label}（4）'''：{expected}\n" in text
-        assert "<!-- 3月 -->" not in text
+        assert "<!-- 0301 -->" not in text
 
     @staticmethod
     def test_counts_preserve_observed_zero_and_ignore_newpage_data() -> None:
@@ -594,7 +643,7 @@ class EditorialDraftTests(unittest.TestCase):
         assert "[[:Empty]]（" not in text
         assert "UnclassifiedWriter" not in text
         assert (
-            "* '''待分類（1）'''：<!-- 1月 -->{{icon|GA}}&thinsp;[[:Unknown]]"
+            "* '''待分類（1）'''：{{icon|GA}}&thinsp;[[:Unknown]]<!-- 0101 -->"
         ) in text
 
     @staticmethod

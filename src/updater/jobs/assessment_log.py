@@ -6,7 +6,10 @@ import datetime as dt
 from typing import TYPE_CHECKING
 
 from backend.services.project_assessments import get_snapshot
-from backend.services.zhwiki.assessment_log import prepare_data
+from backend.services.zhwiki.assessment_log import (
+    latest_report_date,
+    prepare_data,
+)
 from shared.config import TASK_DEFINITIONS
 from shared.reports import report_key
 from shared.sources.wiki import read_pages
@@ -53,12 +56,16 @@ def run(
                 dry=active.dry,
             )
             text = update_text(original_text, data)
+            publication_date = latest_report_date(
+                text,
+                through=data.report_date,
+            )
             summary = EditSummary.daily(data.report_date).append(
                 "Published pending assessment changes."
                 if data.pending
                 else f"Recorded {data.changes.height:,} assessment changes.",
             )
-            active.publish(
+            confirmed = active.publish(
                 ProposedEdit(
                     site=active.site,
                     title=title,
@@ -74,3 +81,5 @@ def run(
                     result=data.result,
                 ),
             )
+            if confirmed:
+                active.confirm_report_date(publication_date)

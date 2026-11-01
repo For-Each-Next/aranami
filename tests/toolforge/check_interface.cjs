@@ -15,7 +15,7 @@ const fixtureRoot = path.resolve(process.argv[2]);
 const outputRoot = path.resolve(process.argv[3]);
 const assetRoot = path.resolve(__dirname, "../../src/webservice/public_html");
 const chromium = process.env.ARANAMI_CHROMIUM || "/Applications/Chromium.app/Contents/MacOS/Chromium";
-const widths = [320, 390, 600, 601, 639, 640, 768, 943, 944, 1120, 1440, 1680, 1920];
+const widths = [320, 390, 600, 601, 639, 640, 641, 768, 943, 944, 1120, 1440, 1680, 1920];
 const locales = ["en", "zh-hans", "zh-hant"];
 const surfaces = ["home", "backlog", "maintenance", "reports", "logs", "about", "error", "newsletter"];
 const failures = [];
@@ -150,6 +150,14 @@ async function main() {
             }
         };
         const checkContents = async () => {
+            const checkVertical = async selector => {
+                const lists = await evaluate(`(() => [...document.querySelectorAll('${selector} ul')].map(list => {
+                    const items = [...list.children].filter(item => item.tagName === 'LI');
+                    const boxes = items.map(item => item.getBoundingClientRect());
+                    return {display: getComputedStyle(list).display, items: items.every(item => getComputedStyle(item).display === 'block'), vertical: boxes.every((box, index) => index === 0 || box.top >= boxes[index - 1].bottom - 1)};
+                }))()`);
+                assert.ok(lists.length > 0 && lists.every(list => list.display === 'block' && list.items && list.vertical), "contents entries must flow vertically at every width");
+            };
             const navigation = await evaluate(`(() => {
                 const desktop = document.querySelector('.contents-desktop');
                 const mobile = document.querySelector('.contents-mobile');
@@ -157,14 +165,31 @@ async function main() {
                 return {desktop: visible(desktop), mobile: visible(mobile), open: mobile.open};
             })()`);
             assert.notEqual(navigation.desktop, navigation.mobile, "exactly one contents navigation should be visible");
+            if (navigation.desktop) await checkVertical('.contents-desktop');
             if (navigation.mobile) {
                 assert.equal(navigation.open, false, "mobile contents should start collapsed");
                 const opened = await evaluate(`(() => {
                     const disclosure = document.querySelector('.contents-mobile');
                     disclosure.querySelector('summary').click();
-                    return disclosure.open && [...disclosure.querySelectorAll('a')].every(link => link.getBoundingClientRect().height > 0);
+                    const summary = disclosure.querySelector('summary').getBoundingClientRect();
+                    const menu = disclosure.querySelector('nav').getBoundingClientRect();
+                    return {
+                        visible: disclosure.open && [...disclosure.querySelectorAll('a')].every(link => link.getBoundingClientRect().height > 0),
+                        anchored: menu.top >= summary.bottom && menu.top <= summary.bottom + 16,
+                        onScreen: menu.top < innerHeight && menu.left >= 0 && menu.right <= innerWidth
+                    };
                 })()`);
-                assert.equal(opened, true, "native mobile contents did not reveal links");
+                assert.equal(opened.visible, true, "native mobile contents did not reveal links");
+                assert.equal(opened.anchored, true, "mobile contents menu must stay below its button");
+                assert.equal(opened.onScreen, true, "mobile contents menu must stay within the viewport");
+                await checkVertical('.contents-mobile');
+                if ([320, 639, 641].includes(await evaluate('innerWidth')) && await evaluate("Boolean(document.querySelector('.review-cards'))")) {
+                    const width = await evaluate('innerWidth');
+                    const locale = await evaluate('document.documentElement.lang.toLowerCase()');
+                    await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+                    const shot = await call("Page.captureScreenshot", {format: "png", captureBeyondViewport: false}, sessionId);
+                    fs.writeFileSync(path.join(outputRoot, `${locale}-contents-${width}.png`), Buffer.from(shot.data, 'base64'));
+                }
                 const closed = await evaluate(`(() => {
                     const disclosure = document.querySelector('.contents-mobile');
                     disclosure.querySelector('summary').click();
@@ -261,6 +286,23 @@ async function main() {
                         overflow: [...document.querySelectorAll('main *')].filter(element => visible(element) && element.getBoundingClientRect().right > innerWidth + 1).slice(0, 8).map(element => ({ tag: element.tagName, class: element.className, right: element.getBoundingClientRect().right })) };
                 })()`);
                 assert.ok(layout.page <= layout.viewport + 1, JSON.stringify(layout));
+                if (surface === "maintenance") {
+                    const table = await evaluate(`(() => {
+                        const table = document.querySelector('.maintenance-table');
+                        const scroll = table.closest('.table-scroll');
+                        const headers = [...table.querySelectorAll('thead th')];
+                        const cells = [...table.querySelector('tbody tr').children];
+                        const aligned = headers.length === cells.length && headers.every((header, index) => Math.abs(header.getBoundingClientRect().left - cells[index].getBoundingClientRect().left) < 1);
+                        const before = scroll.scrollLeft;
+                        scroll.scrollLeft = 60;
+                        const scrollable = scroll.scrollWidth <= scroll.clientWidth || scroll.scrollLeft > before;
+                        scroll.scrollLeft = 0;
+                        return {display: getComputedStyle(table).display, headers: headers.every(header => header.getBoundingClientRect().height > 0), aligned, scrollable, contained: scroll.getBoundingClientRect().right <= innerWidth};
+                    })()`);
+                    assert.equal(table.display, "table", "worklist must retain table layout below 640 pixels");
+                    assert.ok(table.headers && table.aligned, "worklist headers and cells lost column alignment");
+                    assert.ok(table.scrollable && table.contained, "wide worklist must scroll locally within the viewport");
+                }
                 if (surface === "logs") {
                     assert.ok(layout.downloads.length >= 2, "selected-day and archive downloads missing");
                     assert.ok(layout.downloads.every(Boolean), "hidden log download");
@@ -434,6 +476,7 @@ async function main() {
                     assert.equal(await evaluate("document.querySelectorAll('.page-content h2').length"), 2, "site reports needs status and run history sections");
                     const opened = await evaluate(`(() => { const dialog = document.querySelector('dialog:has(.table-scroll)'); const button = document.querySelector('a[aria-haspopup="dialog"][aria-controls="' + dialog?.id + '"]'); if (!button) return false; button.focus(); button.click(); return document.querySelector('dialog[open]')?.contains(document.activeElement); })()`);
                     assert.equal(opened, true, "dialog initial focus");
+                    assert.equal(await evaluate("getComputedStyle(document.querySelector('dialog[open] table')).display"), "table", "report details must retain table columns at narrow widths");
                     await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 8 }, sessionId);
                     await call("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 8 }, sessionId);
                     assert.equal(await evaluate("document.querySelector('dialog[open]').contains(document.activeElement)"), true, `Shift+Tab escaped modal: ${await evaluate("document.activeElement.outerHTML.slice(0,400)")}`);

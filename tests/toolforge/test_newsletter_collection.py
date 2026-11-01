@@ -80,7 +80,11 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
             ("Game", "2026-10-18", "appearance"),
             ("Game", "2026-07-11", "appearance"),
         ]
-        self.article_history.assert_called_once()
+        assert self.article_history.call_count == 2
+        assert any(
+            call.args[1] is None
+            for call in self.article_history.call_args_list
+        )
         self.collectors["news"].assert_not_called()
         self.reader.history.assert_not_called()
         assert (
@@ -99,7 +103,7 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
             collector.reset_mock()
         snapshot = self._collect(dt.timedelta(seconds=1))
         self.newsletter.assert_called_once()
-        self.article_history.assert_called_once()
+        assert self.article_history.call_count == 2
         assert self.article_history.call_args.kwargs == {"required": True}
         assert not snapshot["reports"]["newsletter"]["failed"]
         for collector in self.collectors.values():

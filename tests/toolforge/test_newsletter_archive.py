@@ -321,17 +321,17 @@ class NewsletterDraftArchiveTests(TestCase):  # ruff: ignore[too-many-public-met
             assert 'datetime="2026-03-01"' in response.text
             if clock.day == 2:
                 assert (
-                    "* '''角色與元素\uff081\uff09'''\uff1a<!-- 3月 -->"
-                    "[[:March archived feature]]"
+                    "* '''角色與元素\uff081\uff09'''\uff1a"
+                    "[[:March archived feature]]<!-- 0301 -->"
                 ) in unescape(response.text)
             else:
                 assert (
-                    "* '''待分類\uff081\uff09'''\uff1a<!-- 3月 -->"
-                    "[[:March archived feature]]"
+                    "* '''待分類\uff081\uff09'''\uff1a"
+                    "[[:March archived feature]]<!-- 0301 -->"
                 ) in unescape(response.text)
             assert (
-                "* '''待分類\uff081\uff09'''\uff1a<!-- 3月 -->"
-                "[[:March archived feature]]"
+                "* '''待分類\uff081\uff09'''\uff1a"
+                "[[:March archived feature]]<!-- 0301 -->"
             ) in unescape(saved.text)
             assert response.text.count("data-newsletter-wikitext") == 1
             site.assert_not_called()
