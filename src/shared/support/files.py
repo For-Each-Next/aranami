@@ -10,12 +10,13 @@ from __future__ import annotations
 import json
 import os
 import stat
+import tempfile
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
     from typing import BinaryIO
 
 
@@ -156,3 +157,65 @@ def read_json_object(path: Path, max_bytes: int) -> dict[str, object]:
         return value
     message = "Saved JSON artifacts must contain an object."
     raise ValueError(message)
+
+
+def encode_json(value: dict) -> bytes:
+    """Encode stable UTF-8 JSON for storage and integrity digests.
+
+    Args:
+        value: Complete JSON object; nonfinite numbers are rejected.
+
+    Returns:
+        Encoded bytes with sorted keys and no insignificant whitespace.
+    """
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode()
+
+
+def atomic_json(path: Path, value: dict, *, max_bytes: int) -> None:
+    """Flush and atomically replace one bounded JSON file.
+
+    Sync both the complete file and the destination directory before
+    returning. Callers own domain locks and immutable-selection rules.
+
+    Args:
+        path: Existing regular parent and intended file destination.
+        value: Complete JSON object to retain.
+        max_bytes: Maximum accepted encoded content length.
+
+    Raises:
+        OSError: A destination is unsafe or persistence fails.
+        ValueError: JSON is invalid or exceeds its storage bound.
+    """
+    payload = encode_json(value)
+    if len(payload) > max_bytes:
+        message = "The saved JSON artifact exceeds its size limit."
+        raise ValueError(message)
+    if path.is_symlink() or path.parent.is_symlink():
+        message = "Saved JSON artifacts require regular paths."
+        raise OSError(message)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=staging_directory(path),
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

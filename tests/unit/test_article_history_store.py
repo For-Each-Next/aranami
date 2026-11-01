@@ -14,14 +14,14 @@ from unittest.mock import patch
 
 import polars as pl
 
-from backend.support.article_data import migrate_history
-from backend.support.article_history import (
+from backend.articles.history_store import (
     EVENT_SCHEMA,
     SCHEMA,
     load,
     merge_save,
     read_versions,
 )
+from backend.articles.storage import migrate_history
 
 
 def _snapshot(
@@ -96,7 +96,7 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
         assert load(self.path)["events"].to_list() == [[]]
 
     def test_legacy_events_gain_nullable_attribution(self) -> None:
-        """Preserve old versions when reading and refreshing history."""
+        """Preserve old versions through explicit migration."""
         legacy_fields = [
             field
             for field in EVENT_SCHEMA
@@ -116,11 +116,15 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
             ),
         )
         self.path.parent.mkdir()
-        original.write_parquet(self.path)
-        unchanged = self.path.read_bytes()
+        legacy = self.path.with_name("legacy.parquet")
+        original.write_parquet(legacy)
+        unchanged = legacy.read_bytes()
+        with self.assertRaises(ValueError):
+            load(legacy)
+        migrate_history(legacy, self.path)
         restored = load(self.path)
         assert restored.equals(_snapshot())
-        assert self.path.read_bytes() == unchanged
+        assert legacy.read_bytes() == unchanged
         row = _snapshot(revision=20, hour=1).to_dicts()[0]
         row["events"] = [
             {
@@ -165,9 +169,13 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
             ),
         )
         self.path.parent.mkdir()
-        original.write_parquet(self.path)
+        legacy = self.path.with_name("legacy.parquet")
+        original.write_parquet(legacy)
+        with self.assertRaises(ValueError):
+            load(legacy)
+        migrate_history(legacy, self.path)
         assert load(self.path).equals(source)
-        assert pl.read_parquet(self.path).equals(original)
+        assert pl.read_parquet(legacy).equals(original)
 
     def test_contributors_preserve_unknown_empty_and_safe_names(self) -> None:
         """Keep explicit lists and reject unsafe account identities."""
@@ -284,7 +292,7 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
         source = _snapshot()
         merge_save(self.path, source)
         previous = self.path.read_bytes()
-        with patch("backend.support.article_history._write") as writer:
+        with patch("backend.articles.history_store._write") as writer:
             assert merge_save(self.path, source).equals(source)
             empty = pl.DataFrame(schema=SCHEMA)
             assert merge_save(self.path, empty).equals(source)
@@ -360,7 +368,7 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
         source = _snapshot()
         merge_save(self.path, source)
         with (
-            patch("backend.support.article_history._MAX_BYTES", 1),
+            patch("backend.articles.history_store._MAX_BYTES", 1),
             self.assertRaises(ValueError),
         ):
             load(self.path)

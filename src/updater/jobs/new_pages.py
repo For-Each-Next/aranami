@@ -11,9 +11,9 @@ from backend.support.completion import completed_until, identity
 from shared.config import TASK_DEFINITIONS
 from shared.reports import report_key
 from shared.sources.wiki import read_pages
+from updater.edit_summary import EditSummary
 from updater.jobs import ProposedEdit, job_run
 from updater.services.zhwiki.new_pages import update_text
-from updater.support.edit_summary import EditSummary
 
 if TYPE_CHECKING:
     from updater.jobs import JobContext
@@ -95,20 +95,14 @@ def run(
     ):
         page = read_pages(active.site, [title])[0]
         original_text = page.text
-        revision = getattr(page, "latest_revision", None)
-        timestamp = getattr(revision, "timestamp", None)
-        if isinstance(timestamp, dt.datetime) and timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=dt.UTC)
-        revision_id = getattr(page, "latest_revision_id", None)
+        revision = page.latest_revision
         prepared = data.prepare_report(
             original_text,
             active.site,
             active.today,
             project="电子游戏",
-            source_revision=revision_id if type(revision_id) is int else None,
-            source_timestamp=timestamp
-            if isinstance(timestamp, dt.datetime)
-            else None,
+            source_revision=revision.revid,
+            source_timestamp=revision.timestamp.replace(tzinfo=dt.UTC),
         )
         text = update_text(original_text, prepared)
         if not prepared.filled_dates:

@@ -18,10 +18,10 @@ import pywikibot
 
 from backend.website import homepage
 from backend.website.collect import (
-    WikiReader,
     enrich_project_assessments,
     save_snapshot,
 )
+from shared.sources.wiki import WikiReader
 
 
 class TestProjectAssessmentEnrichment(TestCase):
@@ -217,7 +217,7 @@ class TestRevisionBoundaries(TestCase):
             tzinfo=dt.timezone(dt.timedelta(hours=8)),
         )
         with patch(
-            "backend.website.collect.pywikibot.Page",
+            "shared.sources.wiki.pywikibot.Page",
             return_value=self.page,
         ):
             assert self.reader.at("Template:Daily", boundary) == "3"
@@ -237,7 +237,7 @@ class TestRevisionBoundaries(TestCase):
         target = Mock(site=self.site)
         target.title.return_value = "Wikipedia:历史上的今天/10月17日"
         with patch(
-            "backend.website.collect.pywikibot.Page",
+            "shared.sources.wiki.pywikibot.Page",
             return_value=target,
         ) as page:
             assert (
@@ -264,7 +264,7 @@ class TestRevisionBoundaries(TestCase):
         )
         with (
             patch(
-                "backend.website.collect.pywikibot.Page",
+                "shared.sources.wiki.pywikibot.Page",
                 return_value=Mock(),
             ),
             self.assertRaisesRegex(ValueError, "stay on this wiki"),
@@ -274,7 +274,7 @@ class TestRevisionBoundaries(TestCase):
     def test_history_keeps_carry_in_and_excludes_end_boundary(self) -> None:
         """Retain the previous state and every in-window revision."""
         with patch(
-            "backend.website.collect.pywikibot.Page",
+            "shared.sources.wiki.pywikibot.Page",
             return_value=self.page,
         ):
             rows = self.reader.history(
@@ -311,7 +311,7 @@ class TestRevisionBoundaries(TestCase):
         }
         self.page.get.side_effect = AssertionError("Unexpected current text")
         with patch(
-            "backend.website.collect.pywikibot.Page",
+            "shared.sources.wiki.pywikibot.Page",
             return_value=self.page,
         ) as page:
             rows = homepage.collect_history(
@@ -337,7 +337,7 @@ class TestRevisionBoundaries(TestCase):
     ) -> None:
         """Read an exclusive historical cutoff once per refresh."""
         with patch(
-            "backend.website.collect.pywikibot.Page",
+            "shared.sources.wiki.pywikibot.Page",
             return_value=self.page,
         ):
             for _ in range(2):
@@ -370,7 +370,7 @@ class TestRevisionBoundaries(TestCase):
             ),
         ]
         with patch(
-            "backend.website.collect.pywikibot.Page",
+            "shared.sources.wiki.pywikibot.Page",
             side_effect=lambda _site, title: (
                 missing if title == today else available
             ),
@@ -394,7 +394,7 @@ class TestRevisionBoundaries(TestCase):
         self.page.get.return_value = "4"
         self.page.latest_revision_id = 4
         with patch(
-            "backend.website.collect.pywikibot.Page",
+            "shared.sources.wiki.pywikibot.Page",
             return_value=self.page,
         ):
             for read, expected in (

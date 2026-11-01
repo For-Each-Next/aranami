@@ -12,7 +12,6 @@ __all__ = ("read_membership", "read_top_pageviews", "source_cycle")
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -20,6 +19,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     import polars as pl
+
+    from shared.sources.pageviews import TopPageviews
 
 
 @dataclass(slots=True)
@@ -29,7 +30,9 @@ class _SourceCycle:
     memberships: dict[tuple[str, str], pl.DataFrame] = field(
         default_factory=dict,
     )
-    top_pageviews: dict[tuple[str, ...], object] = field(default_factory=dict)
+    top_pageviews: dict[tuple[str, ...], TopPageviews] = field(
+        default_factory=dict,
+    )
     active: bool = True
 
 
@@ -92,45 +95,33 @@ def read_membership(
     return cycle.memberships[key].clone()
 
 
-def read_top_pageviews[T](
+def read_top_pageviews(
     project: str,
     period: tuple[str, str, str],
-    fetch: Callable[[], object],
-    parse: Callable[[object], T],
-) -> T:
-    """Reuse a validated all-access top-list payload during this pass.
+    read: Callable[[], TopPageviews | None],
+) -> TopPageviews | None:
+    """Reuse one complete parsed top-list observation during this pass.
 
-    Consumers retain their own response interpretation and transport
-    behavior. Only successful fetches whose parser returns a result are
-    retained. Missing observations represented by ``None`` are retried
-    normally. Parser failures evict the observation and propagate;
-    subsequent calls may make a fresh request. Each parser receives its
-    own payload copy when an observation is reused.
+    The source adapter validates the entire observation before returning
+    it. Missing results and failed reads are never cached. Each consumer
+    receives a cloned frame, preserving independent selection policies.
 
     Args:
         project: Normalized Wikimedia project hostname.
         period: Exact API year, month, and day or all-days selectors.
-        fetch: Fetch and decode one raw JSON payload without retries.
-        parse: Validate and materialize the consumer's eager result.
+        read: Fetch, decode, and validate the complete source result.
 
     Returns:
-        The consumer's parsed result, including ``None`` when missing.
+        Complete observation, or none when the source is absent.
     """
     cycle = _CYCLE.get()
     if cycle is None or not cycle.active:
-        return parse(fetch())
+        return read()
     key = project, "all-access", *period
-    if key in cycle.top_pageviews:
-        try:
-            result = parse(deepcopy(cycle.top_pageviews[key]))
-        except Exception:
-            cycle.top_pageviews.pop(key, None)
-            raise
-        if result is None:
-            cycle.top_pageviews.pop(key, None)
-        return result
-    payload = fetch()
-    result = parse(deepcopy(payload))
-    if result is not None:
-        cycle.top_pageviews[key] = deepcopy(payload)
-    return result
+    if key not in cycle.top_pageviews:
+        observation = read()
+        if observation is None:
+            return None
+        cycle.top_pageviews[key] = observation.clone()
+        return observation
+    return cycle.top_pageviews[key].clone()

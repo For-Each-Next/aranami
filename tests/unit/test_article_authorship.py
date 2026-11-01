@@ -16,8 +16,8 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from backend.support import article_authorship as store
-from backend.website.article_authorship import enrich_authorship
+from backend.articles import authorship_store as store
+from backend.articles.authorship import enrich_authorship
 from shared.sources import wikiwho
 
 _CREATION = dt.datetime(2020, 1, 1, tzinfo=dt.UTC)

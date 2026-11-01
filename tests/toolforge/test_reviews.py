@@ -18,8 +18,7 @@ from urllib.parse import unquote
 
 import polars as pl
 
-from backend.support import article_milestones
-from backend.website.collect import WikiReader
+from backend.articles import milestone_store as article_milestones
 from backend.website.review_cache import ReviewCache
 from backend.website.review_milestones import retain_review_milestones
 from backend.website.reviews import (
@@ -29,6 +28,7 @@ from backend.website.reviews import (
     community_reviews,
     talk_review,
 )
+from shared.sources.wiki import WikiReader
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -10,6 +10,7 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 import polars as pl
+from pywikibot.page import Revision
 
 from backend.services.enwiki.key_articles import ReportData
 from backend.support.report_membership import MembershipReport
@@ -81,7 +82,13 @@ class TestJobDestinations(TestCase):
                         new_pages,
                         "read_pages",
                         return_value=[
-                            Mock(text=managed_region("new-pages", "")),
+                            Mock(
+                                text=managed_region("new-pages", ""),
+                                latest_revision=Revision(
+                                    revid=123,
+                                    timestamp="2026-10-02T22:00:00Z",
+                                ),
+                            ),
                         ],
                     ) as read,
                     patch.object(
@@ -119,7 +126,15 @@ class TestJobDestinations(TestCase):
             patch.object(
                 new_pages,
                 "read_pages",
-                return_value=[Mock(text=original)],
+                return_value=[
+                    Mock(
+                        text=original,
+                        latest_revision=Revision(
+                            revid=123,
+                            timestamp="2026-10-02T22:00:00Z",
+                        ),
+                    ),
+                ],
             ) as read,
             patch.object(
                 new_pages.data,
@@ -169,7 +184,15 @@ class TestJobDestinations(TestCase):
             patch.object(
                 dyks,
                 "read_pages",
-                return_value=[Mock(text=original)],
+                return_value=[
+                    Mock(
+                        text=original,
+                        latest_revision=Revision(
+                            revid=123,
+                            timestamp="2026-10-02T22:00:00Z",
+                        ),
+                    ),
+                ],
             ) as read,
             patch.object(
                 dyks.data,
@@ -218,7 +241,15 @@ class TestJobDestinations(TestCase):
             patch.object(
                 assessment_lists,
                 "read_pages",
-                return_value=[Mock(text=original)],
+                return_value=[
+                    Mock(
+                        text=original,
+                        latest_revision=Revision(
+                            revid=123,
+                            timestamp="2026-10-02T22:00:00Z",
+                        ),
+                    ),
+                ],
             ) as read,
             patch.object(
                 assessment_lists,

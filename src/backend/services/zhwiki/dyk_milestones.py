@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from backend.articles import milestone_store as store
+from backend.articles.storage import MILESTONES_PATH
 from backend.services.zhwiki.article_milestones import (
     extract_credits,
     source_events,
 )
-from backend.support import article_milestones as store
-from backend.support.article_data import MILESTONES_PATH
 
 if TYPE_CHECKING:
     from pywikibot.site import BaseSite

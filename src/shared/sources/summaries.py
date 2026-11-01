@@ -15,7 +15,7 @@ import urllib.request
 from http import HTTPStatus
 from urllib.parse import quote
 
-from shared.deployment import project_version
+from shared.identity import USER_AGENT
 
 _API_ROOT = "https://zh.wikipedia.org/api/rest_v1/page/summary/"
 _RESPONSE_LIMIT = 128 * 1024
@@ -49,9 +49,7 @@ def fetch_summary(title: str, *, variant: str = "zh") -> str | None:
         headers={
             "Accept": "application/json",
             "Accept-Language": variant,
-            "User-Agent": (
-                f"Aranami/{project_version()} (https://aranami.toolforge.org/)"
-            ),
+            "User-Agent": USER_AGENT,
         },
     )
     try:

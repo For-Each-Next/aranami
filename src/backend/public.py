@@ -26,11 +26,11 @@ from starlette.responses import Response, StreamingResponse
 from starlette.websockets import WebSocketState
 lazy import uvicorn
 
+from backend.newsletter.observations import OBSERVATIONS_PATH
 from backend.support.events import event_extra
 from backend.support.http import encoded_response, read_only_headers
 from backend.support.job_history import read_job_history
 from backend.support.logs import open_run_log
-from backend.support.newsletter_data import OBSERVATIONS_PATH
 from backend.support.page_cache import PageCache
 from backend.support.public_data import (
     MAX_LOG_BYTES,
@@ -44,13 +44,12 @@ from shared.config import routine_configuration
 from shared.deployment import project_version
 from shared.newsletter import Issue
 from shared.support.files import open_regular, read_json_object, read_regular
-lazy from backend.website.collect import validate_dashboard_snapshot
-lazy from backend.website.newsletter import read_newsletter_data
-lazy from backend.website.newsletter_archive import (
+lazy from backend.newsletter.archive import (
     DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
     NewsletterDraftArchive,
 )
-lazy from backend.website.newsletter_homepage import enrich_newsletter_homepage
+lazy from backend.newsletter.schema import read_newsletter_data
+lazy from backend.website.collect import validate_dashboard_snapshot
 lazy from updater.services.newsletter import render_issue
 lazy from updater.services.newsletter_editorial import render_annual_feature
 lazy from webservice import pages
@@ -770,15 +769,8 @@ class _PublicViews:
             value = render_issue(issue)
             generated_at = None
         else:
-            snapshot = self._dashboard() or {}
-            data = snapshot.get("newsletter") or {}
-            facts = enrich_newsletter_homepage(
-                data.get("issues", {}).get(issue.value) or {},
-                snapshot,
-                issue,
-            )
-            value = render_issue(issue, facts)
-            generated_at = facts.get("updated_at")
+            value = render_issue(issue)
+            generated_at = None
         try:
             feature_history = _newsletter_feature(
                 archive,

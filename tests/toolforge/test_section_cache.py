@@ -16,6 +16,8 @@ from unittest.mock import Mock, call, patch
 
 import polars as pl
 
+from backend.articles.milestone_store import SCHEMA as MILESTONE_SCHEMA
+from backend.newsletter.schema import read_newsletter_data
 from backend.website.collect import (
     REPORT_KEYS,
     collect_dashboard,
@@ -41,12 +43,12 @@ class DashboardFixture(TestCase):
             return_value={"items": []},
         )
         self.newsletter = self._patch(
-            "backend.website.collect.newsletter_sources.collect_source_facts",
+            "backend.newsletter.refresh.collection.collect_source_facts",
             return_value={"issues": {}},
         )
         self.article_history = self._patch(
             "backend.website.collect.article_milestones.read_events",
-            return_value=pl.DataFrame(),
+            return_value=pl.DataFrame(schema=MILESTONE_SCHEMA),
         )
         self.site = self._patch("backend.website.collect.pywikibot.Site")
         self._patch(
@@ -63,7 +65,7 @@ class DashboardFixture(TestCase):
             }),
         )
         self.page_projects = self._patch(
-            "backend.website.collect.query_project_intersections",
+            "backend.newsletter.refresh.query_project_intersections",
             return_value=pl.DataFrame(
                 schema={"page_id": pl.Int64, "project": pl.String},
             ),
@@ -150,6 +152,14 @@ class DashboardFixture(TestCase):
             now=now,
             **kwargs,
         )
+
+    def _newsletter_facts(self) -> dict | None:
+        """Read canonical saved facts independently of dashboard data.
+
+        Returns:
+            The current complete newsletter observation, when acquired.
+        """
+        return read_newsletter_data(self.cache / "data/observations")
 
 
 class TestDashboardReportCache(DashboardFixture):
@@ -275,6 +285,7 @@ class TestDashboardReportCache(DashboardFixture):
                 },
             ]
         self.article_history.return_value = pl.DataFrame({
+            "page_id": [11],
             "title": ["Game"],
             "kind": ["news"],
             "date": [self.clock.date()],
@@ -346,7 +357,7 @@ class TestDashboardReportCache(DashboardFixture):
             "page_id": [11, 11, 11, 11, 22, 999],
             "project": [*projects, "公司", "音樂"],
         })
-        first = self._collect()
+        self._collect()
         self.membership.assert_called_once_with(self.reader.site, "电子游戏")
         self.page_projects.assert_called_once()
         site, scope_project, names = self.page_projects.call_args.args
@@ -362,7 +373,8 @@ class TestDashboardReportCache(DashboardFixture):
         self.page_projects.reset_mock()
         self.newsletter.reset_mock()
         repeated = self._collect(dt.timedelta(minutes=30))
-        assert repeated["newsletter"] == first["newsletter"]
+        assert repeated["newsletter"] is None
+        assert self._newsletter_facts() == self.newsletter.return_value
         self.membership.assert_not_called()
         self.page_projects.assert_not_called()
         self.newsletter.assert_not_called()
@@ -383,7 +395,8 @@ class TestDashboardReportCache(DashboardFixture):
         )
         with self.assertLogs("backend.website.collect", level="ERROR"):
             failed = self._collect(dt.timedelta(days=1))
-        assert failed["newsletter"] == first["newsletter"]
+        assert failed["newsletter"] is None
+        assert self._newsletter_facts() == self.newsletter.return_value
         assert failed["reports"]["newsletter"]["failed"] is True
         assert (
             failed["reports"]["newsletter"]["last_success_at"]
@@ -665,7 +678,14 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     ) -> None:
         """Persist retry times before the first successful result."""
         self.membership.side_effect = RuntimeError("offline")
-        failed = self._collect()
+        with self.assertLogs("backend.website.collect", level="ERROR") as logs:
+            failed = self._collect()
+        assert len(logs.records) == 1
+        assert logs.records[0].exc_info is not None
+        self.reviews.assert_not_called()
+        self.popularity.assert_not_called()
+        self.backlog.assert_not_called()
+        self.newsletter.assert_not_called()
         assert len(failed["errors"]) == len(REPORT_KEYS)
         assert all(
             value["last_success_at"] is None
@@ -753,3 +773,14 @@ class TestDashboardRefreshIntervals(DashboardFixture):
                 self.clock.date(),
                 now=self.clock.replace(tzinfo=None),
             )
+
+    def test_newsletter_facts_stay_in_the_canonical_store(self) -> None:
+        """Expose newsletter status while facts stay in their store."""
+        snapshot = self._collect()
+        assert snapshot["newsletter"] is None
+        assert "issues" not in json.dumps(snapshot)
+        metadata = snapshot["reports"]["newsletter"]
+        assert metadata["last_success_at"] is not None
+        assert metadata["source_config_id"] is not None
+        assert metadata["failed"] is False
+        assert self._newsletter_facts() == self.newsletter.return_value

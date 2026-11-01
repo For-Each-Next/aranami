@@ -9,14 +9,15 @@ import datetime as dt
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 import polars as pl
 
-from backend.support import (
-    article_history as history_store,
-    article_milestones as store,
+from backend.articles import (
+    history_store,
+    milestone_store as store,
 )
-from backend.support.article_data import migrate_milestones
+from backend.articles.storage import migrate_milestones
 
 
 def events() -> pl.DataFrame:
@@ -62,6 +63,44 @@ class RecognitionStoreTests(TestCase):
             rows.filter(pl.col("grade") == "Bplus")["nominator_status"].item()
             == "not_applicable"
         )
+
+    def test_unchanged_merge_reads_once_and_preserves_saved_bytes(
+        self,
+    ) -> None:
+        """Keep unchanged evidence and its durable checkpoint."""
+        rows = store.sync_events(events(), self.path)
+        payload = self.path.read_bytes()
+        modified = self.path.stat().st_mtime_ns
+        with patch.object(store, "load", wraps=store.load) as read:
+            result = store.merge_save(self.path, rows)
+        read.assert_called_once_with(self.path)
+        assert result.equals(rows)
+        assert self.path.read_bytes() == payload
+        assert self.path.stat().st_mtime_ns == modified
+
+    def test_unchanged_facts_with_new_checkpoint_are_persisted(self) -> None:
+        """Keep new observation times even when article facts match."""
+        rows = store.sync_events(events(), self.path)
+        observed = rows["updated_at"].max() + dt.timedelta(seconds=1)
+        refreshed = rows.with_columns(
+            pl
+            .lit(observed.isoformat())
+            .str.to_datetime(time_zone="UTC")
+            .alias("updated_at"),
+        )
+        store.merge_save(self.path, refreshed)
+        assert store.load(self.path)["updated_at"].min() == observed
+
+    def test_symlinked_parent_cannot_create_a_store_lock(self) -> None:
+        """Reject unsafe write paths before creating their lock file."""
+        records = store.sync_events(events(), self.path)
+        target = self.path.parent / "target"
+        target.mkdir()
+        linked = self.path.parent / "linked"
+        linked.symlink_to(target, target_is_directory=True)
+        with self.assertRaises(OSError):
+            store.merge_save(linked / "recognition.parquet", records)
+        assert list(target.iterdir()) == []
 
     def test_explicit_evidence_completes_fields_without_inventing_declarations(
         self,
@@ -221,6 +260,27 @@ class RecognitionStoreTests(TestCase):
         pl.DataFrame(schema=store.SCHEMA).write_parquet(self.path)
         migrate_milestones(legacy, self.path)
         assert store.load(self.path).is_empty()
+        assert legacy.read_bytes() == original
+
+    def test_old_milestone_schema_requires_explicit_migration(self) -> None:
+        """Require explicit migration and preserve original evidence."""
+        legacy = self.path.with_name("legacy.parquet")
+        rows = store.sync_events(events(), legacy)
+        rows.drop(
+            "action_type",
+            "question",
+            "question_status",
+            "occurred_at",
+            "oldid",
+        ).write_parquet(legacy)
+        original = legacy.read_bytes()
+        with self.assertRaises(ValueError):
+            store.load(legacy)
+        migrate_milestones(legacy, self.path)
+        restored = store.load(self.path)
+        assert restored.height == rows.height
+        assert restored["event_id"].equals(rows["event_id"])
+        assert restored["updated_at"].equals(rows["updated_at"])
         assert legacy.read_bytes() == original
 
     def test_inventory_keeps_events_erased_from_newer_talk_revision(

@@ -19,6 +19,7 @@ import polars as pl
 from backend import hub
 from backend.support.logs import open_run_log
 from shared.sources.cycle import read_membership, read_top_pageviews
+from shared.sources.pageviews import TopPageviews
 
 
 class TestHubConfiguration(TestCase):
@@ -145,7 +146,13 @@ class TestHubDispatch(TestCase):
     @staticmethod
     def test_dispatch_reuses_sources_and_preserves_schedule_advice() -> None:
         """Share successful reads until each dispatch finishes."""
-        fetch = Mock(return_value={"views": 12})
+        fetch = Mock(
+            return_value=TopPageviews(
+                "zh.wikipedia.org",
+                ("2026", "10", "19"),
+                pl.DataFrame({"views": [12]}),
+            ),
+        )
         observed = []
         advice = dt.datetime(2026, 10, 21, tzinfo=dt.UTC)
 
@@ -156,7 +163,6 @@ class TestHubDispatch(TestCase):
                     "zh.wikipedia.org",
                     ("2026", "10", "19"),
                     fetch,
-                    dict,
                 ),
             )
 
@@ -181,7 +187,9 @@ class TestHubDispatch(TestCase):
                     )
                     is advice
                 )
-        assert observed == [{"views": 12}] * 4
+        assert [item.articles.to_dicts() for item in observed] == [
+            [{"views": 12}],
+        ] * 4
         assert fetch.call_count == 2  # ruff: ignore[magic-value-comparison]
         assert updater.refresh.call_count == 2  # ruff: ignore[magic-value-comparison]
 
@@ -212,7 +220,13 @@ class TestHubDispatch(TestCase):
     @staticmethod
     def test_daily_newsletter_waits_with_an_independent_source_cycle() -> None:
         """Queue daily collection with per-cycle source reuse."""
-        fetch = Mock(return_value={"views": 12})
+        fetch = Mock(
+            return_value=TopPageviews(
+                "zh.wikipedia.org",
+                ("2026", "10", "19"),
+                pl.DataFrame({"views": [12]}),
+            ),
+        )
 
         def collect(*, wait: bool) -> None:
             """Reuse reads within one required boundary collection."""
@@ -222,7 +236,6 @@ class TestHubDispatch(TestCase):
                     "zh.wikipedia.org",
                     ("2026", "12", "31"),
                     fetch,
-                    dict,
                 )
 
         updater = Mock(refresh=Mock(side_effect=collect))
@@ -384,7 +397,7 @@ class TestHubLifecycle(TestCase):
         assert daily.args == (hub.refresh_newsletter,)
         assert daily.kwargs == {
             "trigger": "cron",
-            "hour": 0,
+            "hour": "0",
             "minute": 0,
             "second": 0,
             "timezone": dt.UTC,
@@ -404,6 +417,7 @@ class TestHubLifecycle(TestCase):
         assert hourly.args == (hub.refresh_article_history,)
         assert hourly.kwargs == {
             "trigger": "cron",
+            "hour": "*",
             "minute": 0,
             "second": 0,
             "timezone": dt.UTC,

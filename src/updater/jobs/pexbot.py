@@ -22,7 +22,7 @@ from backend.services.zhwiki.pexbot import (
     subscribed_titles,
 )
 from shared.config import TASK_DEFINITIONS
-from shared.deployment import project_version
+from shared.identity import USER_AGENT
 from updater.jobs import JobContext, job_run
 from updater.services.zhwiki.pexbot import action_result
 
@@ -61,8 +61,7 @@ def _refresh(site: BaseSite, title: str) -> None:
         f"{_ENDPOINT}?{query}",
         headers={
             "Accept": "text/event-stream",
-            "User-Agent": f"Aranami/{project_version()} "
-            "(https://meta.wikimedia.org/wiki/User:For_Each_..._Next/)",
+            "User-Agent": USER_AGENT,
         },
     )
     with urllib.request.urlopen(request, timeout=300) as response:  # ruff: ignore[suspicious-url-open-usage]

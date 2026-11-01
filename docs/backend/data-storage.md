@@ -124,7 +124,7 @@ must use a distinct `contract` and preserve the original evidence.
 `authorship.parquet` stores successful listing-time calculations, keyed by
 `(page_id, date, grade, action, contract)`. Every top-level field is required.
 Missing or failed calculations remain absent rather than becoming empty
-successful records. The owning module is `backend.support.article_authorship`.
+successful records. The owning module is `backend.articles.authorship_store`.
 
 | Field | Polars dtype | Meaning |
 |---|---|---|
@@ -151,7 +151,7 @@ token count. Computed authorship stays distinct from source nomination credits.
 
 `milestones.parquet` stores events across all dates, including incomplete and
 undated events. The unique key is `event_id`. The owning
-`backend.support.article_milestones` module derives identity and coverage;
+`backend.articles.milestone_store` module derives identity and coverage;
 callers must not manufacture `complete` flags or treat exhausted retries as
 successful evidence.
 
@@ -204,7 +204,7 @@ evidence. A null boolean is unknown, while `false` is an observed negative.
 
 `scope.parquet` has one row per positive, unique `page_id`. Only complete,
 nonempty project membership observations advance it. The owning module is
-`backend.support.article_scope`.
+`backend.articles.scope`.
 
 | Field | Polars dtype | Meaning and missing-value semantics |
 |---|---|---|

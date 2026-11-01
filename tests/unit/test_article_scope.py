@@ -11,12 +11,12 @@ from unittest.mock import patch
 
 import polars as pl
 
-from backend.support import (
-    article_history as history,
-    article_milestones as store,
+from backend.articles import (
+    history_store as history,
+    milestone_store as store,
 )
-from backend.support.article_data import DEFAULT_ROOT, migrate_legacy
-from backend.support.article_scope import load, reconcile_scope
+from backend.articles.scope import load, reconcile_scope
+from backend.articles.storage import DEFAULT_ROOT, migrate_legacy
 
 
 class ArticleScopeTests(TestCase):

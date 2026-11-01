@@ -15,6 +15,7 @@ import polars as pl
 
 from shared import sources
 from shared.deployment import project_version
+from shared.identity import USER_AGENT
 from shared.sources import pageviews
 from shared.sources.pageviews import (
     DailyPageviews,
@@ -65,7 +66,7 @@ class TestPageviewValues(TestCase):
         assert (
             f"Aranami/{project_version()} "
             "(https://meta.wikimedia.org/wiki/User:For_Each_..._Next/)"
-        ) == pageviews._USER_AGENT
+        ) == USER_AGENT
 
     @staticmethod
     def test_sources_exports_the_pageviews_module() -> None:
@@ -75,12 +76,14 @@ class TestPageviewValues(TestCase):
         assert pageviews.__all__ == (
             "DailyPageviews",
             "IncompletePageviewsDayError",
+            "TopPageviews",
             "article_rank_filter",
             "fetch_data",
             "fetch_data_dataframe",
             "fetch_project_total",
             "fetch_top_dataframe",
             "massive",
+            "parse_top_observation",
         )
 
     @staticmethod
@@ -138,7 +141,7 @@ class TestPageviewTransport(TestCase):
             "C%2B%2B%20%2F%20%2520/daily/2026010100/2026010200"
         )
         assert request.get_header("Accept") == "application/json"
-        assert request.get_header("User-agent") == pageviews._USER_AGENT
+        assert request.get_header("User-agent") == USER_AGENT
         assert observations == [
             DailyPageviews(date(2026, 1, 1), 5),
             DailyPageviews(date(2026, 1, 2), 8),
@@ -347,9 +350,7 @@ class TestTopPageviewFrames(TestCase):
                     f"zh.wikipedia.org/all-access/2026/09/{day}"
                 )
                 assert request.get_header("Accept") == "application/json"
-                assert (
-                    request.get_header("User-agent") == pageviews._USER_AGENT
-                )
+                assert request.get_header("User-agent") == USER_AGENT
                 assert frame.schema == {"title": pl.String, "top": pl.Int64}
                 assert frame.to_dict(as_series=False) == {
                     "title": ["Video game"],
@@ -362,14 +363,14 @@ class TestTopPageviewFrames(TestCase):
         site, pages = self._site_pages()
         payload = self._payload()
         payload["items"][0]["articles"] = [
-            {"article": "Other_article", "rank": 8},
-            {"article": "Wikipedia:首页", "rank": 1},
-            {"article": "User:Example", "rank": 5},
-            {"article": "Star_Trek:_Discovery", "rank": 6},
-            {"article": "Special:Search", "rank": 2},
-            {"article": "Video_game", "rank": 3},
-            {"article": "首页", "rank": 4},
-            {"article": "XHamster", "rank": 7},
+            {"article": "Other_article", "views": 1, "rank": 8},
+            {"article": "Wikipedia:首页", "views": 1, "rank": 1},
+            {"article": "User:Example", "views": 1, "rank": 5},
+            {"article": "Star_Trek:_Discovery", "views": 1, "rank": 6},
+            {"article": "Special:Search", "views": 1, "rank": 2},
+            {"article": "Video_game", "views": 1, "rank": 3},
+            {"article": "首页", "views": 1, "rank": 4},
+            {"article": "XHamster", "views": 1, "rank": 7},
         ]
         response = BytesIO(json.dumps(payload).encode())
         with (
@@ -444,9 +445,9 @@ class TestTopPageviewFrames(TestCase):
         site, pages = self._site_pages()
         payload = self._payload()
         payload["items"][0]["articles"] = [
-            {"article": "Wikipedia:首页", "rank": 1},
-            {"article": "Special:Search", "rank": 2},
-            {"article": "User:Example", "rank": 3},
+            {"article": "Wikipedia:首页", "views": 1, "rank": 1},
+            {"article": "Special:Search", "views": 1, "rank": 2},
+            {"article": "User:Example", "views": 1, "rank": 3},
         ]
         response = BytesIO(json.dumps(payload).encode())
         with (
@@ -596,7 +597,7 @@ class TestTopPageviewFrames(TestCase):
                 payload = self._payload()
                 payload["items"][0][key] = value
                 with self.assertRaises(ValueError):
-                    pageviews._parse_top_dataframe(
+                    pageviews.parse_top_observation(
                         payload,
                         "zh.wikipedia.org",
                         ("2026", "09", "30"),
@@ -605,36 +606,52 @@ class TestTopPageviewFrames(TestCase):
     def test_invalid_records_and_duplicate_titles_are_rejected(self) -> None:
         """Reject invalid ranks and normalized title collisions."""
         for articles in (
-            [{"article": "A", "rank": 0}],
-            [{"article": "A", "rank": -2}],
-            [{"article": "A", "rank": True}],
-            [{"article": "A", "rank": "1"}],
-            [{"article": "_", "rank": 1}],
-            [{"article": None, "rank": 1}],
-            [{"article": "A_B", "rank": 1}, {"article": "A B", "rank": 2}],
+            [{"article": "A", "views": 1, "rank": 0}],
+            [{"article": "A", "views": 1, "rank": -2}],
+            [{"article": "A", "views": 1, "rank": True}],
+            [{"article": "A", "views": 1, "rank": "1"}],
+            [{"article": "_", "views": 1, "rank": 1}],
+            [{"article": None, "views": 1, "rank": 1}],
+            [
+                {"article": "A_B", "views": 1, "rank": 1},
+                {"article": "A B", "views": 1, "rank": 2},
+            ],
         ):
             with self.subTest(articles=articles):
                 payload = self._payload()
                 payload["items"][0]["articles"] = articles
                 with self.assertRaises(ValueError):
-                    pageviews._parse_top_dataframe(
+                    pageviews.parse_top_observation(
                         payload,
                         "zh.wikipedia.org",
                         ("2026", "09", "30"),
                     )
 
-    def test_empty_article_list_is_unavailable(self) -> None:
-        """Reject empty lists so a report can wait for complete data."""
+    def test_empty_article_list_remains_empty_and_report_waits(self) -> None:
+        """Keep source emptiness while reports await published ranks."""
         payload = self._payload()
         payload["items"][0]["articles"] = []
-        with self.assertRaisesRegex(ValueError, "not available yet"):
-            pageviews._parse_top_dataframe(
-                payload,
-                "zh.wikipedia.org",
-                ("2026", "09", "30"),
+        observation = pageviews.parse_top_observation(
+            payload,
+            "zh.wikipedia.org",
+            ("2026", "09", "30"),
+        )
+        assert observation.articles.is_empty()
+        site = MagicMock()
+        site.hostname.return_value = "zh.wikipedia.org"
+        with (
+            patch.object(
+                pageviews,
+                "_request_top_payload",
+                return_value=payload,
+            ),
+            self.assertRaisesRegex(ValueError, "not available yet"),
+        ):
+            pageviews.fetch_top_dataframe(
+                site,
+                date(2026, 9, 30),
+                date(2026, 10, 1),
             )
-        with self.assertRaisesRegex(ValueError, "not available yet"):
-            pageviews._parse_top_articles([])
 
 
 class TestPageviewFrames(TestCase):

@@ -52,7 +52,7 @@ Paths below are relative to `/data/project/aranami`:
 |---|---|
 | `app` | Atomically replaced symlink selecting an immutable source generation |
 | `app-staging-<id>/` | Uploaded source, retained at this path even after activation |
-| `deployment-backups/source-<id>/` | Setup receipt, saved job settings, and previous selection or legacy source |
+| `deployment-backups/source-<id>/` | Setup receipt, saved job settings, and previous source selection |
 | `deployment-envs/source-<id>/` | Isolated locked Python environment for that generation |
 | `deployment.lock/` | Concurrent-deployment guard; does not block service startup |
 | `python/`, `uv-bootstrap/` | Managed Python 3.15.0 and setup tooling |
@@ -71,10 +71,9 @@ Paths below are relative to `/data/project/aranami`:
 | `logs/` | UTC diagnostic logs and separate major-event records, retained for 30 dates |
 | `dry-run/` | Preview summaries, exact proposals, and isolated result bundles |
 
-Older installations may retain `app.previous/`, `pyvenv-3.15`, and
-`active-deployment.json` for recovery; new launchers do not select code through
-these legacy paths. Preserve credentials, reports, state, and logs during
-replacement. Clearing disposable caches forces later collection/revalidation;
+Keep credentials, reports, state, and logs during replacement. Retain a
+verified recovery generation with its own validator, receipt, and environment.
+Clearing disposable caches forces later collection/revalidation;
 it is not a normal deployment step. Inspect saved observations through the
 [terminal workflow](usage.md#inspect-results-and-logs).
 See the [newsletter storage table](backend/newsletter.md#data-cache-and-archive-lifecycle)
@@ -149,21 +148,12 @@ Job definitions, routing, credentials, reports, state, caches, and logs survive.
 Service replacement may briefly interrupt requests; this is not a guarantee
 of zero downtime. Toolforge manages the host and container lifecycle.
 
-The first promotion from the legacy real `app/` directory briefly pauses both
-existing services before moving that directory into the transaction backup.
-Their old processes read through `app/src`, so this one-time migration must
-finish their shutdown before changing the path. Job definitions are preserved.
-Finish any legacy manual or preview jobs that also use `app/src` beforehand.
-Subsequent promotions leave previous source directories in place and replace
-services individually. Do not edit a selected generation or reuse its upload
-token; prepare another upload instead.
+Promotion requires `app` to select an immutable generation and the running hub
+to advertise cooperative drain protocol 1. Each retained generation validates
+its own payload and matching setup receipt; historical version exceptions and
+operator idle overrides are not supported. Do not edit a selected generation
+or reuse its upload token; prepare another upload instead.
 
-Older generations without the drain protocol require a one-time idle check:
-inspect `state/routine-status.json` for running work, the hub's pod-local
-`/healthz` for `refreshing: false`, and current recognition-scan completion in
-the daily log. Only after confirming all work is idle, set
-`ARANAMI_LEGACY_IDLE_CONFIRMED=1` for that promotion. The helper sends no signal
-to an unsupported hub. Future promotions use the acknowledgement protocol.
 If source selection fails after a confirmed drain, promotion restarts the
 old source through a confirmed stop/start to resume scheduling. If recovery
 also fails, inspect its health and saved deployment markers before retrying.
@@ -246,14 +236,12 @@ it, such as image, command, resources, or published port. See the
 Promotion prints its transaction directory under `deployment-backups/`, with
 `jobs.yaml`, the source/environment setup receipt, and saved replica counts.
 `app.before` records the prior relative source link; interpret its target
-relative to the tool home, not the backup directory. The first migration
-retains `legacy-app/` instead. Existing generations and environments are never
+relative to the tool home, not the backup directory. Existing generations and environments are never
 overwritten or removed by promotion.
 
 Setup failure leaves existing services running. If cancellation cannot confirm
 that the setup job exited, the deployment lock remains for inspection.
-Failure before selection restores moved legacy source and resumes services
-whose shutdown was confirmed.
+Failure before selection resumes services whose shutdown was confirmed.
 After selection, a restart failure retains the new selection and both source
 generations: another process may already have loaded the new code. Inspect jobs,
 pods, and logs before retrying service replacement. A shutdown timeout never
@@ -270,9 +258,7 @@ python3 /data/project/aranami/app-staging-<id>/scripts/toolforge/validate-source
 
 Restart existing services as above and remove the lock when recovery finishes.
 Selection validates the retained source against its original setup receipt;
-it does not undo runtime data or wiki edits. Returning to a legacy directory
-requires both services to stop first, restoring its source and original
-environment/receipt together, then resuming the saved job definitions.
+it does not undo runtime data or wiki edits.
 
 Verify the new generation before removing recovery artifacts. Limit cleanup to
 exact obsolete paths; preserve credentials, `reports/`, `state/`, `logs/`, the

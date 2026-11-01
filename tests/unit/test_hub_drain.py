@@ -80,8 +80,8 @@ class HubDrainTests(TestCase):
         assert kill.call_args_list[0] == call(123, signal.SIGUSR1)
         assert kill.call_args_list[1:] == [call(123, 0)] * 3
 
-    def test_old_hubs_require_explicit_idle_confirmation(self) -> None:
-        """Do not signal unsupported generations or busy legacy work."""
+    def test_unsupported_hubs_are_never_signalled(self) -> None:
+        """Require a process-specific protocol before signalling."""
         with (
             patch.object(
                 _DRAIN,
@@ -89,21 +89,10 @@ class HubDrainTests(TestCase):
                 return_value={"refreshing": False},
             ),
             patch.object(_DRAIN.os, "kill") as kill,
-            patch("builtins.print"),
-        ):
-            with self.assertRaises(RuntimeError):
-                _DRAIN.drain()
-            _DRAIN.drain(legacy_idle_confirmed=True)
-            kill.assert_not_called()
-        with (
-            patch.object(
-                _DRAIN,
-                "read_health",
-                return_value={"refreshing": True},
-            ),
             self.assertRaises(RuntimeError),
         ):
-            _DRAIN.drain(legacy_idle_confirmed=True)
+            _DRAIN.drain()
+        kill.assert_not_called()
 
     def test_replaced_process_never_confirms_old_drain(self) -> None:
         """Reject an acknowledgement from a restarted hub."""

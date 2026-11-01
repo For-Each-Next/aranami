@@ -25,23 +25,21 @@ for path in deployment-backups deployment-envs; do
     test ! -L "$path"
     if [ -e "$path" ]; then test -d "$path"; fi
 done
-legacy=false
 if [ -L app ]; then
     previous_source=$(readlink app)
     previous_token=${previous_source#app-staging-}
     case "$previous_token" in ''|*[!a-f0-9]*) exit 2 ;; esac
     test "${#previous_token}" -eq 32 && test "$previous_source" = "app-staging-$previous_token"
-    python3 "$validator" runtime "$tool_dir/$previous_source" >/dev/null
+    python3 "$tool_dir/$previous_source/scripts/toolforge/validate-source.py" runtime "$tool_dir/$previous_source" >/dev/null
 elif [ -e app ]; then
-    test -d app
-    legacy=true
+    printf '%s\n' 'Expected app to select an immutable generation.' >&2
+    exit 2
 fi
 mkdir deployment.lock || { printf '%s\n' 'Another deployment holds deployment.lock.' >&2; exit 1; }
 backup=
 backup_created=false
 setup_started=false
 selected=false
-legacy_moved=false
 
 wait_stopped() {
     selector=$1
@@ -58,11 +56,7 @@ drain_hub() {
     # Exactly one publisher must identify and acknowledge its own drain.
     set -- $pods
     test "$#" -eq 1 || { printf '%s\n' 'Expected exactly one running hub pod before drain.' >&2; return 1; }
-    if [ "${ARANAMI_LEGACY_IDLE_CONFIRMED:-0}" = 1 ]; then
-        kubectl exec "$1" -- python3 "$stage/scripts/toolforge/drain-hub.py" --legacy-idle-confirmed || return 1
-    else
-        kubectl exec "$1" -- python3 "$stage/scripts/toolforge/drain-hub.py" || return 1
-    fi
+    kubectl exec "$1" -- python3 "$stage/scripts/toolforge/drain-hub.py" || return 1
     touch "$backup/aranami-hub.drained"
 }
 
@@ -98,9 +92,6 @@ finish() {
             fi
         fi
         if [ "$selected" = false ]; then
-            if [ "$legacy_moved" = true ] && [ ! -e app ] && [ ! -L app ]; then
-                mv "$backup/legacy-app" app
-            fi
             if [ "$backup_created" = true ]; then
                 for service in aranami-web aranami-hub; do
                     if [ -f "$backup/$service.stopped" ]; then resume_service "$service"; fi
@@ -157,15 +148,6 @@ for service in aranami-web aranami-hub; do
 done
 # Drain before selection or pod deletion; Kubernetes' grace timer has not begun.
 if [ -f "$backup/aranami-hub.replicas" ]; then drain_hub; fi
-if [ "$legacy" = true ]; then
-    printf '%s\n' 'Migrating legacy source: briefly pausing existing services once.'
-    for service in aranami-web aranami-hub; do
-        if [ -f "$backup/$service.replicas" ]; then pause_service "$service"; fi
-    done
-    wait_stopped 'app.kubernetes.io/name in (aranami-hub,aranami-web)'
-    mv app "$backup/legacy-app"
-    legacy_moved=true
-fi
 # app is the only selection pointer. Keep every uploaded source at its path.
 python3 "$validator" select "$stage"
 selected=true

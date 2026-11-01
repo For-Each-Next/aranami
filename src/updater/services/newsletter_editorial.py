@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from backend.website.newsletter_statistics import (
+from backend.newsletter.statistics import (
     HISTORICAL_DYK,
     QUALITY_GRADES,
 )
@@ -54,7 +54,7 @@ _OVERVIEW = {
     "bplus": "乙上级条目",
     "topics": "优良话题",
 }
-_ESCAPES = str.maketrans({
+LITERAL_ESCAPES = str.maketrans({
     **{character: f"&#{ord(character)};" for character in "[]{}|\r\n"},
     "<": "&lt;",
     ">": "&gt;",
@@ -77,7 +77,7 @@ def _literal(value: object) -> str:
     Returns:
         Literal text with markup delimiters encoded.
     """
-    text = str(value).translate(_ESCAPES)
+    text = str(value).translate(LITERAL_ESCAPES)
     return re.sub(r"'{2,}", lambda match: "&#39;" * len(match[0]), text)
 
 

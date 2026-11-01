@@ -17,8 +17,8 @@ from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
 from wiki_fixtures import OfflineSite
 
 from backend import hub
-from backend.support import article_scope
-from backend.website.article_history import (
+from backend.articles import scope as article_scope
+from backend.articles.history import (
     collect_article_history,
     history_membership,
 )
@@ -263,15 +263,15 @@ class RedirectHistoryTests(TestCase):
             path = Path(temporary) / "history.parquet"
             with (
                 patch(
-                    "backend.website.article_history.query_history_redirects",
+                    "backend.articles.history.query_history_redirects",
                     return_value=_redirects(),
                 ),
                 patch(
-                    "backend.website.article_history.template_aliases",
+                    "backend.articles.history.template_aliases",
                     side_effect=lambda _site, title: (title,),
                 ),
                 patch(
-                    "backend.website.article_history.query_tags",
+                    "backend.articles.history.query_tags",
                     side_effect=lambda _site, members, _tags: (
                         members.with_columns(
                             pl.lit([], dtype=pl.List(pl.String)).alias("tags"),
@@ -279,14 +279,14 @@ class RedirectHistoryTests(TestCase):
                     ),
                 ),
                 patch(
-                    "backend.website.article_history.latest_revisions",
+                    "backend.articles.history.latest_revisions",
                     return_value=pl.DataFrame({
                         "page_id": [12],
                         "page_latest": [120],
                     }),
                 ),
                 patch(
-                    "backend.website.article_history.read_talk_pages",
+                    "backend.articles.history.read_talk_pages",
                     return_value=[
                         TalkPage(
                             12,
@@ -322,7 +322,7 @@ class RedirectHistoryTests(TestCase):
             root = Path(temporary)
             observed = dt.datetime(2025, 1, 1, tzinfo=dt.UTC)
             with patch(
-                "backend.website.article_history.query_history_redirects",
+                "backend.articles.history.query_history_redirects",
                 return_value=_redirects(),
             ):
                 expanded = history_membership(

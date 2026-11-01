@@ -20,18 +20,21 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from backend.website.newsletter_layout import issue_contents
-from backend.website.newsletter_subpage_layout import (
+from backend.newsletter.layout import issue_contents
+from backend.newsletter.schema import STAT_KEYS
+from backend.newsletter.subpages import (
     complete_announcement_layout,
 )
 from shared.newsletter import ROOT, Issue
-from updater.services.newsletter_editorial import render_editorial
+from updater.services.newsletter_editorial import (
+    LITERAL_ESCAPES,
+    render_editorial,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 _UNAVAILABLE = "來源資料暫未取得。"
-_STAT_KEYS = ("total", "fa", "fl", "ga", "dyk", "bplus", "topics")
 _NEW_PAGE_GRADES = {
     "FA": ("典範", "典範級", "#9cbdff"),
     "FL": ("特色列表", "特色列表級", "#9cbdff"),
@@ -76,11 +79,6 @@ _QUALITY_SUMMARY_GRADES = (
 )
 _TEN = 10
 _HUNDRED = 100
-_LINK_ENTITIES = str.maketrans({
-    **{character: f"&#{ord(character)};" for character in "[]{}|\r\n"},
-    "<": "&lt;",
-    ">": "&gt;",
-})
 
 
 def _link(target: str, label: str | None = None) -> str:
@@ -90,11 +88,11 @@ def _link(target: str, label: str | None = None) -> str:
     ampersands and ordinary apostrophes and omit redundant labels.
     The leading colon prevents file embeds or categorization.
     """
-    title = target.translate(_LINK_ENTITIES)
+    title = target.translate(LITERAL_ESCAPES)
     title = f"{':' if not title.startswith(':') else ''}{title}"
     if label is None or label == target:
         return f"[[{title}]]"
-    text = (label or target).translate(_LINK_ENTITIES)
+    text = (label or target).translate(LITERAL_ESCAPES)
     text = re.sub(r"'{2,}", lambda match: "&#39;" * len(match[0]), text)
     return f"[[{title}|{text}]]"
 
@@ -181,7 +179,7 @@ def _main(issue: Issue, facts: Mapping[str, object]) -> str:
     }
     current = facts.get("overview") or {}
     previous = facts.get("previous_overview") or {}
-    for key in _STAT_KEYS:
+    for key in STAT_KEYS:
         count, before = current.get(key), previous.get(key)
         if count is None:
             text = re.sub(

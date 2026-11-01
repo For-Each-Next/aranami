@@ -76,20 +76,26 @@ directory and cannot replace production cache entries.
 
 ## Acquisition and saved-data boundary
 
-`backend.website.newsletter_sources.refresh_newsletter_data` acquires sources
+The `backend.newsletter` package owns collection, schema validation, source
+layouts, quarterly/annual analysis, and storage. `shared.sources.wiki` owns
+read-only wiki access and per-pass source evidence, with exact historical text
+in `shared.sources.revisions`. Wiki projection remains in updater; webservice
+owns the public HTML and assets.
+
+`backend.newsletter.refresh.collect_newsletter` acquires sources
 and validates complete newsletter facts before saving them through
-`backend.support.newsletter_observations`. Each generation stores
+`backend.newsletter.observations`. Each generation stores
 `data_version`, `captured_at`, a SHA-256 `digest`, and nested `facts`. The
 matching `current.json` is replaced only after its dated observation
 has been written. Readers validate generation metadata, facts,
 and digest together; a damaged durable observation fails rather than becoming
 an empty replacement.
 
-`backend.website.newsletter.read_newsletter_data` validates and reads this
+`backend.newsletter.schema.read_newsletter_data` validates and reads this
 selected generation. It does not make MediaWiki requests. Wikitext generation
 uses saved facts; request handlers never trigger acquisition. The website
-snapshot is a presentation cache, not the sole durable source for newsletter
-facts. Collection, durable data, and newsletter projection remain separate
+snapshot retains newsletter availability; requests read the canonical current
+observation or an immutable daily archive directly. Collection, durable data, and newsletter projection remain separate
 boundaries even when the hub coordinates them in one scheduled pass.
 
 Migration merges every retained legacy talk revision into the shared article
@@ -151,7 +157,7 @@ selection is independent of the quarterly `date` selection.
 
 ## Source cutoffs and quarterly facts
 
-The independent daily acquisition in `backend.website.newsletter_sources`
+The independent daily acquisition in `backend.newsletter.collection`
 fetches sources for the current publication quarter and its successor. It prepares the next
 issue while the reporting quarter is still in progress, with an explicit
 exclusive observation cutoff through the latest completed UTC day. Historical
@@ -266,7 +272,7 @@ against `Module:Graph` revision 95346885 and `Module:Graph/SVGRenderer` revision
 95350043. A narrow viewport scrolls only the chart container, preserving native
 axis-label and legend placement. Missing saved quality history produces no chart.
 
-`newsletter_statistics` retains audited quarterly cumulative DYK data from the
+`backend.newsletter.statistics` retains audited quarterly cumulative DYK data from the
 January 2026 feature's second image description and 2025/2024 assessment data
 from its third image and January 2025 predecessor, credited to SuperGrey and
 other contributors under CC BY-SA 4.0. Current milestones extend supported
@@ -332,3 +338,10 @@ view; earlier saved daily observations remain immutable.
 
 Introduction and editor commentary remain editorial work. Historical queries
 render the current page structure using only selected saved observations.
+
+Normal observation and daily archive readers accept only canonical inline
+facts and compact date folders. Explicit migration operations retain access to
+older digest selectors, ISO date folders, and schema-1 rendered records in
+preserved backups. Requests and ordinary startup never run those conversions.
+Both newsletter stores use the shared atomic JSON writer: it flushes the file
+before replacement and syncs the destination directory before returning.

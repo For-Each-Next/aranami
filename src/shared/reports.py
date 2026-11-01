@@ -587,14 +587,6 @@ class ReportStore:
                 return current
             latest = None
         else:
-            if self._selection(key)["latest"] is None:
-                old_key = _legacy_key(key)
-                if (self.legacy_root / old_key / "latest.json").exists():
-                    self._migrate_selection(
-                        key,
-                        ReportStore(self.legacy_root, dry=self.dry),
-                        old_key,
-                    )
             latest = self._selection(key)["latest"]
         if latest is not None:
             current = self._read_bundle(key, str(latest))
@@ -814,7 +806,7 @@ class ReportStore:
         """
         _validate_report_key(key)
         if not (self.root / key).exists():
-            return self._read_legacy(key, previous=previous)
+            return None
         with nullcontext() if locked else self.locked(key):
             if self.daily:
                 if previous:
@@ -827,39 +819,11 @@ class ReportStore:
                 )
             selection = self._selection(key)
             if selection["latest"] is None:
-                return self._read_legacy(key, previous=previous)
+                return None
             generation = selection["previous" if previous else "latest"]
             return (
                 self._read_bundle(key, str(generation)) if generation else None
             )
-
-    def _read_legacy(
-        self,
-        key: str,
-        *,
-        previous: bool = False,
-    ) -> ReportBundle | None:
-        """Read retained legacy evidence without modifying its files.
-
-        Args:
-            key: New readable destination identity.
-            previous: Select the former predecessor when requested.
-
-        Returns:
-            A validated old bundle, or null without retained evidence.
-        """
-        old_key = _legacy_key(key)
-        directory = self.legacy_root / old_key
-        if directory == self.root / key or not directory.exists():
-            return None
-        store = ReportStore(self.legacy_root, dry=self.dry)
-        selection = store._selection(old_key)
-        generation = selection["previous" if previous else "latest"]
-        return (
-            store._read_bundle(old_key, str(generation))
-            if generation is not None
-            else None
-        )
 
     def migrate_legacy(self) -> list[Path]:
         """Copy validated legacy selections into readable report paths.

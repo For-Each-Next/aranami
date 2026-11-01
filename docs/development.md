@@ -24,6 +24,7 @@ rules are maintained in [AGENTS.md](../AGENTS.md), not duplicated here.
 | Change | Start here |
 |---|---|
 | Source facts, parsing, comparisons, caches | `src/backend/services/` |
+| Shared article history, recognition, credits, retention | `src/backend/articles/` |
 | Scheduling, execution, status, storage | `src/backend/`, `src/backend/support/` |
 | Website collection/maintenance definitions | `src/backend/website/` |
 | Read-only HTTP and saved-data readers | `src/backend/public.py`, `src/backend/support/public_data.py` |
@@ -116,7 +117,7 @@ Consult the [newsletter interface](webservice/newsletter.md),
 [collection contracts](backend/newsletter.md), and
 [branding guide](webservice/branding.md) when changing those components.
 
-Render synthetic pages and check all three locales at thirteen widths from
+Render synthetic pages and check all three locales at fourteen widths from
 320 to 1920 CSS pixels:
 
 ```shell
@@ -139,7 +140,7 @@ These effective-width checks do not establish real-device touch behavior,
 Safari/Firefox behavior, screen-reader speech, forced colors, or browser zoom.
 
 Deployment tests use fake Toolforge/Kubernetes commands and temporary source
-generations. Cover legacy migration, pinned source/environment paths, staged
+generations. Cover current-generation upgrades, pinned source/environment paths, staged
 setup failures, individual service replacement, missing/paused jobs, and
 shutdown/restart failures without contacting Toolforge. Keep old generations
 available to running processes and require confirmed hub termination before

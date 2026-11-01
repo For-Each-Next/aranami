@@ -21,12 +21,12 @@ from backend.support.completion import (
 from shared.config import TASK_DEFINITIONS
 from shared.reports import report_key
 from shared.sources.wiki import read_pages
-from updater.jobs import ProposedEdit, job_run
-from updater.services.zhwiki import pageviews
-from updater.support.edit_summary import (
+from updater.edit_summary import (
     EditSummary,
     article_mention,
 )
+from updater.jobs import ProposedEdit, job_run
+from updater.services.zhwiki import pageviews
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

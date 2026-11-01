@@ -18,9 +18,9 @@ import polars as pl
 from backend.services.zhwiki import assessment_lists as source
 from backend.support.report_membership import MembershipReport
 from backend.support.report_status import read_report_status
+from updater.edit_summary import MAX_EDIT_SUMMARY_BYTES
 from updater.jobs import JobContext, assessment_lists as job
 from updater.services.zhwiki import assessment_lists as service
-from updater.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
 
 _TEXT = (
     'Intro<section begin="count" /><!-- aranami begin="assessment-count" -->'

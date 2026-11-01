@@ -2,6 +2,28 @@
 
 This file records major completed changes, grouped by package release line.
 
+## Until 0.9
+
+### 0.8.0 (2026-11-01 08:34 UTC)
+
+Overview: Reorganized newsletter and article evidence ownership, consolidated
+shared observations and persistence, and simplified source deployment contracts.
+
+- Grouped newsletter and article preparation into cohesive backend packages,
+  moved wiki reading to shared sources, and removed obsolete import paths.
+- Shared typed Pageviews decoding and application identity, and avoided
+  unchanged milestone rewrites while preserving recovery checkpoints.
+- Centralized collection schedules and freshness alongside report triggers,
+  preserving actual capture times and independent publication outcomes.
+- Restricted ordinary reads to canonical retained formats and kept explicit
+  historical conversion commands with their preserved source evidence.
+- Made source TOML authoritative, shared the bootstrap payload contract, and
+  required immutable generations and process-specific draining for promotion.
+- Removed request-time newsletter enrichment and copied dashboard facts,
+  retaining read-only access to canonical observations and immutable archives.
+- Added discoverable domain suites and Node/Chromium release gates covering
+  localization, native forms, accessibility and narrow layouts.
+
 ## Until 0.8
 
 ### 0.7.14 (2026-11-01 08:04 UTC)

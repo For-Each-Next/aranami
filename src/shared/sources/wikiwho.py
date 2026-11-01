@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 import pywikibot
 
-from shared.deployment import project_version
+from shared.identity import USER_AGENT
 
 if TYPE_CHECKING:
     from pywikibot.site import BaseSite
@@ -70,9 +70,7 @@ def _fetch(endpoint: str) -> dict:
         _ROOT + endpoint,
         headers={
             "Accept": "application/json",
-            "User-Agent": (
-                f"Aranami/{project_version()} (https://aranami.toolforge.org/)"
-            ),
+            "User-Agent": USER_AGENT,
         },
     )
     try:

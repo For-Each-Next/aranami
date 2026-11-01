@@ -1,9 +1,11 @@
 """Save compact daily project assessments and read them without sources.
 
-Each ``assessments-YYYYMMDD.parquet`` describes the day ending at the
-following 00:00 UTC boundary. Only stable page IDs and nullable grades
-are columns; capture times and aggregate totals stay in Parquet
-metadata.
+Each ``assessments-YYYYMMDD.parquet`` retains the first complete current
+assessment observation assigned to the day ending at the following
+00:00 UTC boundary. A delayed replica read observes its actual query
+time; it cannot reconstruct historical midnight state. Only stable page
+IDs and nullable grades are columns; capture times and aggregate totals
+stay in Parquet metadata.
 Titles are resolved by consumers after comparing datasets by page ID.
 """
 
@@ -608,7 +610,11 @@ def get_snapshot(
     observed_at: dt.datetime,
     dry: bool = False,
 ) -> ReportBundle:
-    """Reuse or capture assessments ending at today's UTC midnight.
+    """Reuse or capture the first observation for the completed UTC day.
+
+    The report date and scheduled boundary remain distinct from the
+    actual observation time. Missed older days stay unavailable rather
+    than receiving current assessments under historical dates.
 
     Args:
         site: Source wiki with current project assessments.

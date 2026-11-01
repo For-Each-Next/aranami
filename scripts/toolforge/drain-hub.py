@@ -3,8 +3,8 @@
 Run through ``kubectl exec`` using the validated staged source. The hub
 receives SIGUSR1 only after advertising the drain protocol on its local
 read-only health endpoint. It remains alive with its scheduler stopped
-until deployment scales the pod down. Older generations require an
-explicit operator confirmation that their work is already idle.
+until deployment scales the pod down. The running hub must support the
+process-specific drain protocol.
 """
 
 # The command reports deployment progress on its calling terminal.
@@ -12,17 +12,12 @@ explicit operator confirmation that their work is already idle.
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import signal
 import time
 import urllib.error
 import urllib.request
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 _HEALTH_URL = "http://127.0.0.1:8765/healthz"
 _MAX_BYTES = 8192
@@ -57,32 +52,18 @@ def read_health() -> dict[str, object]:
     return value
 
 
-def drain(*, legacy_idle_confirmed: bool = False) -> None:
+def drain() -> None:
     """Wait for confirmed job completion before allowing pod deletion.
 
-    Args:
-        legacy_idle_confirmed: An operator checked that an older hub's
-            routine and website work is idle before this invocation.
-
     Raises:
-        RuntimeError: An older hub is unconfirmed, busy, or replaced.
+        RuntimeError: The hub lacks the protocol or was replaced.
         OSError: The process or local health is unavailable.
         ValueError: Health content violates its contract.
     """
     health = read_health()
     if health.get("drain_protocol") != 1:
-        if not legacy_idle_confirmed or health.get("refreshing") is not False:
-            message = (
-                "The running hub predates cooperative drain. Verify its "
-                "routine status and website health are idle, then explicitly "
-                "set ARANAMI_LEGACY_IDLE_CONFIRMED=1 for this upgrade."
-            )
-            raise RuntimeError(message)
-        print(
-            "Older hub: operator confirmed idle work; no signal sent.",
-            flush=True,
-        )
-        return
+        message = "The running hub must support cooperative drain protocol 1."
+        raise RuntimeError(message)
     pid, identity = health.get("pid"), health.get("drain_id")
     if type(pid) is not int or pid <= 0 or not isinstance(identity, str):
         message = "The hub supplied an invalid drain identity."
@@ -121,13 +102,5 @@ def drain(*, legacy_idle_confirmed: bool = False) -> None:
         time.sleep(1)
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    """Parse the explicit legacy override and drain this pod's hub."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--legacy-idle-confirmed", action="store_true")
-    options = parser.parse_args(argv)
-    drain(legacy_idle_confirmed=options.legacy_idle_confirmed)
-
-
 if __name__ == "__main__":
-    main()
+    drain()

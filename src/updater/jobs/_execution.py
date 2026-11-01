@@ -21,8 +21,9 @@ from backend.support.execution import (
     routine_run,
 )
 from backend.support.logs import open_run_log
+from shared.identity import configure_pywikibot
+from updater.edit_summary import EditSummary
 from updater.jobs._edits import ProposedEdit
-from updater.support.edit_summary import EditSummary
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -113,6 +114,8 @@ def job_run(
     Yields:
         Destination publisher backed by the backend runtime.
     """
+    if context is None:
+        configure_pywikibot()
     with open_run_log():
         active = context or JobContext(
             pywikibot.Site("zh", "wikipedia"),

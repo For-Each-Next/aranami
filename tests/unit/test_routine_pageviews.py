@@ -18,9 +18,9 @@ from dateutil.relativedelta import relativedelta
 
 from backend.services.zhwiki import pageviews
 from shared.reports import ReportResult
+from updater.edit_summary import MAX_EDIT_SUMMARY_BYTES
 from updater.jobs import JobContext, pageviews as job
 from updater.services.zhwiki import pageviews as rendering
-from updater.support.edit_summary import MAX_EDIT_SUMMARY_BYTES
 
 _DAY = dt.date(2026, 1, 10)
 _STOP = dt.date(2026, 1, 11)

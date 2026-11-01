@@ -75,8 +75,16 @@ Keep dependencies flowing down through these layers:
 - `updater` contains report jobs, output projection services, and
   formatting helpers. The hub delegates wiki formatting and publication
   to those jobs; updater owns no scheduler.
-- `website/` owns read-only website collection, data processing, refresh
-  state, and the maintenance catalogue. Keep presentation in `webservice`.
+- `newsletter/` owns newsletter source collection, schema validation,
+  quarterly/annual preparation, source layouts, current observations, and
+  immutable daily archives. Keep wiki projection in updater and HTML in
+  webservice.
+- `website/` owns independent dashboard collection, refresh state, and the
+  maintenance catalogue. Read-only wiki access lives in `shared.sources.wiki`;
+  exact source text caching lives in `shared.sources.revisions`.
+- `articles/` owns shared article evidence, retention, recognition, and
+  authorship collection. Its stores preserve data independently of the
+  newsletter and website outputs that consume it.
 - Read-only sources and generic infrastructure live in `shared`.
   Shared code must not import backend or presentation code.
 - `support/` contains narrowly named cross-cutting helpers such as paths,

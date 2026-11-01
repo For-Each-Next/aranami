@@ -12,6 +12,110 @@ services, retained data formats, and production request counts were not
 inspected. Findings below distinguish observed code from work needing those
 measurements. An unchecked item is future work, not a confirmed defect.
 
+## Execution evidence (2026-11-01 UTC)
+
+Revalidation started from `abc5bf8` (`0.7.14`), not the older audited
+`031bc72`. The new view/edit controls were preserved. Production initially
+selected `app-staging-e70f17472d2848cd94cbc6fde5c863dc` (`0.7.13`), with
+manifest digest `f42dfe19ef3d0d767b341e66284cfbb5dc6f8677125fa91d1fbb0b8fea8bab48`.
+Its own validator confirmed its matching Python 3.15 environment and receipt;
+health advertised drain protocol 1. Exactly one hub and one web pod ran,
+with no manual/setup jobs. This generation is the retained recovery baseline.
+
+Implementation results T01–T23 refer to refactor commit `ca419d7`. Final cleanup removed unused observation enrichment/seed options and their two
+obsolete tests; locks and timestamp ordering remain. Dashboard newsletter facts
+were removed (18,614 → 3,357 fixture bytes); private refresh/retry checkpoints
+remain disposable and never serve public requests.
+
+| Tasks | Completed outcome and evidence |
+|---|---|
+| T01 | Baseline: 901 unit tests / 90.824 s; 14 integration / 0.238 s; 508 website / 12.744 s with two local-socket sandbox failures. Post-refactor website suite passed with loopback permission. Measurements below use fixed inputs, not production throughput estimates. |
+| T02 | Configuration/architecture separate triggers, cutoffs, actual captures and report dates. Snapshot tests cover concurrent first capture, delayed 02:13 capture after midnight, completed-day/year labels, restarts and preview isolation; log publication remains independent. |
+| T03 | Inspected canonical report roots, all newsletter envelope kinds, article schemas, source/environment generations, jobs and process paths. Current observations: 36 inline envelopes; quarterly archives: 3 schema-2 dates; annual archives: 2 schema-2 dates; 3 catalogs. History: 11,328 canonical rows / 222,004 bytes; milestones: 2,427 / 242,668. Legacy originals exist only in preserved migration backups. |
+| T04 | Newsletter preparation moved into `backend.newsletter`: schema, collection, observations, archive, homepage, newpages, layout, subpages, statistics, annual and refresh. Tiny constants merged into observations. Direct callers, tests, docs and reviewed payload changed together; no aliases. |
+| T05 | Article stores/acquisition moved to `backend.articles`; updater summary flattened to `updater.edit_summary`; wiki reader/revision cache moved to `shared.sources`. Newsletter acquisition moved out of the general website collector. Existing runtime helpers, HTTP orchestration and four top-level ownership packages retained: further topology changes offered no measured benefit. |
+| T06 | `shared.config` owns report/collection schedules, cutoffs and website freshness. Hub binds callbacks; `/api/config` and schedule state expose independent collections and actual interval overrides. |
+| T07 | Existing source-cycle membership and top-list ownership extended without global cross-job caching. Shared daily assessment lock gives two consumers one capture. Distinct independently timed current-state jobs retain separate observations. Shared membership failure logs once and retains seven independent retry checkpoints. |
+| T08 | One typed complete top-list decoder supplies eager title/source-rank/views frames. Tests in both consumer orders preserve report readiness, dashboard lookback, verified exclusions, measured empty lists and null ranks. |
+| T09 | Four custom HTTP clients share `shared.identity`; Pywikibot uses its documented description setting and retains framework identity. Mock requests and actual framework header construction verified; imports stay inert. |
+| T10 | Native database replacement rejected with evidence: locked Polars 1.44.2 / SQLAlchemy 2.1.2 imports asyncio support requiring absent `greenlet` before execution. Adding an unrelated dependency to replace the small working adapter is not simpler. Bound/empty/bytes/null/query-count/closure tests cover retained eager adapter behavior. No database writes introduced. |
+| T11 | Authoritative milestone merge reads once under lock and skips identical writes; new observation/progress facts still persist per lookup. Preserved aliases, source ordering, tombstones, concurrency and unsafe-path checks before lock creation. |
+| T12 | Public newsletter routes select canonical current facts or requested immutable archives. Removed dashboard fallback, request enrichment and implicit dashboard-to-archive seeds. Missing/corrupt/date/annual results and zero-source/read-only HTTP paths covered. |
+| T13 | Shared deterministic JSON encoding and atomic writer flush file and parent directory. Tests cover interruption, replacement/fsync failures, concurrency, immutable conflicts and corruption. Last complete bytes remain readable. |
+| T14 | Active data already canonical; no invented conversion needed. Normal newsletter/article/report reads no longer consult legacy formats or implicitly migrate. Explicit backup import/conversion commands retained because originals actually exist and remain recovery evidence. Optional historical facts remain unknown when evidence was never captured. |
+| T15 | Removed real-directory promotion, idle override and exact historical-version exceptions. Each immutable predecessor validates its own contract/receipt; shell tests cover current upgrade/recovery mechanics. Actual 0.7.13 compatibility requires observed production drain, recorded separately below. |
+| T16 | Concrete `WikiReader` contract moved to source boundary; removed capability probes, SimpleNamespace adapters and fake revision interfaces. Retained one documented batch API operation for conversion/redirect/page-ID evidence; high-level revisions/getOldVersion remain supported by pinned Pywikibot 11.8.0. |
+| T17 | Removed repeated archive validation, reader probes, Pageviews cache eviction/reparse catch, new-page revision getattr chains and partial shared-membership dispatch. Retained traced output isolation, external failures/rate limits, corruption, publication conflicts, cancellation and best-effort diagnostic persistence. Missing evidence stays distinct from zero. |
+| T18 | Removed obsolete imports, wrappers, enrichment helper, compatibility options and normal readers with callers/fixtures. Retained historical HOT parsing and explicit backup converters because retained evidence needs them. Source import/boundary and exact manifest checks cover executable paths. |
+| T19 | Required TOML is version authority; removed tracked/generated version JSON fallback. Shared bootstrap JSON policy owns packages, suffixes, scripts and metadata requirements. Both trust boundaries reject inconsistent locks, missing OAuth, unsafe/private/extra/corrupt payloads. |
+| T20 | Schema owns statistic keys and literal escaping has one owner. Distinct link wrappers retained deliberately for colon/label/apostrophe behavior; localized/source-specific grade order/colors retain their meanings. |
+| T21 | Shared scoped/all milestone inventory uses one read with native page-ID joins. Typed Pageviews filtering/ranking stays native. Existing annual/statistics grouping already uses Polars; parser/request loops and small semantic mappings retained instead of cosmetic rewrites. |
+| T22 | Every locked dependency has a runtime/test consumer, including dynamic `mysql+pymysql`, OAuth and `httpx2`; none removed speculatively. Python 3.15 and source-only deployment preserved. |
+| T23 | Moved 21 newsletter suites plus fixture helper into discoverable `tests/toolforge/newsletter`; two deployment suites into `tests/unit/deployment`. Removed seven obsolete enrichment tests and two obsolete deployment compatibility tests; added behavioral regressions. CI runs Node and Chromium gates with artifacts. |
+
+Representative fixture counts (baseline source `abc5bf8`; rerun the source-cycle,
+milestone, archive, section-cache, snapshot and public suites to reproduce):
+
+| Equivalent work | Before | After |
+|---|---|---|
+| Shared top-pageviews report + dashboard | 1 fetch, 2 parses | 1 fetch, 1 parse |
+| Unchanged/empty-overlap milestone merge (4 retained rows) | 2 reads, 1 write | 1 read, 0 writes |
+| Scoped newsletter + full annual milestone inventory | 2 reads | 1 read |
+| Two-issue archive save | 3 full schema validations | 1 validation |
+| Unchanged website pass / cached restart | 0 upstream work | 0 upstream work |
+| Read-only public requests | 0 upstream calls/writes | 0 upstream calls/writes |
+| Concurrent completed-day assessment consumers | 1 shared capture | 1 shared capture |
+
+Measurements are operation counts, not general latency claims. The native-query
+experiment measured the existing 100,000-row path at 0.200 s / 29,948,533 bytes
+Python peak allocation; native execution failed before querying, so no speed or
+memory comparison is claimed. No permanent benchmark pipeline was introduced.
+
+Browser verification: Chromium 155.0.8059.84 passed 336 page cases and 33 cases
+without JavaScript across 14 widths, 3 locales and 8 surfaces; six desktop/narrow
+screenshots were visually inspected. All 43 Node behavior tests passed. These
+are synthetic offline results, not production scheduling observations.
+
+Local inventory preserved `.venv`, ignored runtime facts/previews, IDE files and
+all three unrelated worktrees. Server cleanup must preserve durable facts,
+migration originals, credentials, active generations/processes and recovery.
+An attempted report export was rejected by automatic approval review; all
+subsequent production data inspection was performed in place.
+
+### Validated release candidate
+
+- Final offline suites: **910 unit** (82.829 s), **16 integration** (0.219 s),
+  **500 website** (6.429 s), all passing. Baseline discovery was 901/14/508;
+  two deployment compatibility tests and nine obsolete newsletter enrichment/
+  seed tests were removed with their implementations. Added boundary, source,
+  identity, atomic-storage, unsafe-path, scheduling and canonical-data cases.
+- Lockfile, Ruff no-fix, formatting (288 Python files), all shell syntax,
+  Markdown file targets, source-upload and extracted-payload verification passed.
+  The initial local-socket errors disappeared with loopback permission.
+- Formal source manifest SHA-256:
+  `ff0c05f9e3623aa3995ab9ed46b47c474093d2fa645b9c902ab57c395ce885d7`.
+- Dev1 selected `app-staging-3d4b4b859f9f4d858649c2c92847d58f`, digest
+  `12a57ea0b86a3c1d3a2105a6de4c87f0e9efd66cfca7f3782e18e03690143f4e`.
+  Setup receipt, real predecessor drain acknowledgement, web availability,
+  old-hub termination and single replacement publisher were observed.
+- In-place dev1 reads validated current facts, all 35 historical captures,
+  all three quarterly dates and both annual dates. Seven startup routines
+  completed `no_update`; the 08:31 assessment-list trigger also completed.
+  Next observed dates included newsletter/assessment/comparisons at November 2
+  00:00, New pages 00:07, and Pageviews November 1 18:59 (all UTC).
+- A schema diagnostic generated eight bytecode files in the recovery source.
+  Promotion correctly rejected unexpected files before setup or service changes.
+  Only the eight inventoried bytecode files were removed; original source hashes
+  and its matching receipt were revalidated before a successful retry. Later
+  diagnostics disabled bytecode writes.
+- Remote ancestry was refreshed and reviewed: nineteen prior Aranami release/
+  refinement commits were already local ancestors, with no unrelated remote
+  changes. Publishing the new tag necessarily retains those ancestors.
+
+Formal tag publication, formal promotion, exact cleanup results and the next
+production boundary are recorded separately after observation; dev1 success
+alone does not complete those gates.
+
 ## Direction and existing strengths
 
 Keep the useful ownership model: backend prepares and persists facts; updater
@@ -61,7 +165,7 @@ An ordinary delayed replica query does not reconstruct exact historical state.
 
 ### T01 — Establish a behavioral and efficiency baseline
 
-- [ ] **Where:** `src/backend/hub.py`, `monitor.py`, `runner.py`,
+- [x] **Where:** `src/backend/hub.py`, `monitor.py`, `runner.py`,
   `website/collect.py`, `shared/sources/cycle.py`, and the existing test suites.
   **What/how:** trace each producer, consumer, source identity, persisted path,
   freshness rule, and writer. Run the current offline suites before moving
@@ -75,7 +179,7 @@ An ordinary delayed replica query does not reconstruct exact historical state.
 
 ### T02 — Define exact boundary versus flexible collection semantics
 
-- [ ] **Where:** `shared/config.py`, `backend/monitor.py`, `backend/hub.py`,
+- [x] **Where:** `shared/config.py`, `backend/monitor.py`, `backend/hub.py`,
   `backend/services/project_assessments.py::get_snapshot`, and
   `docs/architecture.md` scheduling/report contracts.
   **Evidence:** report cron definitions and hub-only newsletter/history jobs
@@ -104,7 +208,7 @@ An ordinary delayed replica query does not reconstruct exact historical state.
 
 ### T03 — Inventory retained data and deployment dependencies
 
-- [ ] **Where:** runtime `reports/`, `state/`, `cache/`, `dry-run/`, migration
+- [x] **Where:** runtime `reports/`, `state/`, `cache/`, `dry-run/`, migration
   receipts/backups, source generations, environments, and Toolforge jobs.
   **What/how:** during authorized execution, inspect the server read-only and
   record exact paths, schemas, active/manual readers, retention purpose, and
@@ -120,7 +224,7 @@ An ordinary delayed replica query does not reconstruct exact historical state.
 
 ### T04 — Group the substantial newsletter backend domain
 
-- [ ] **Where:** ten `backend/website/newsletter*.py` modules and
+- [x] **Where:** ten `backend/website/newsletter*.py` modules and
   `backend/support/newsletter_{data,observations}.py`.
   **Evidence:** collection, archives, validation, annual analysis, and source
   layouts are spread across website/support; the constants module is seven
@@ -152,10 +256,10 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T05 — Reorganize other real domains and flatten artificial layers
 
-- [ ] **Where:** `backend/support/article_*.py`,
+- [x] **Where:** `backend/support/article_*.py`,
   `backend/website/article_*.py`, `history_archive.py`, the status/execution
   modules, `backend/public.py`, `webservice/pages.py`, and
-  `updater/support/edit_summary.py`.
+  `updater/edit_summary.py`.
   **What/how:** map imports and group cohesive article evidence and runtime
   state responsibilities, for example `backend/articles/` and
   `backend/runtime/`, only where this reduces cross-directory coupling. Move
@@ -174,7 +278,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T06 — Make schedule metadata complete and authoritative
 
-- [ ] **Where:** `shared/config.py::TASK_DEFINITIONS`,
+- [x] **Where:** `shared/config.py::TASK_DEFINITIONS`,
   `backend/hub.py::run`, `backend/monitor.py`, and `/api/config` producers.
   **Evidence:** hub-created `newsletter-history`, `newsletter-daily`, and
   website refresh scheduling are outside the report-definition registry.
@@ -187,7 +291,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T07 — Extend source reuse only across equivalent observations
 
-- [ ] **Where:** `shared/sources/cycle.py`, `backend/hub.py`,
+- [x] **Where:** `shared/sources/cycle.py`, `backend/hub.py`,
   `backend/server.py`, `backend/website/collect.py`, and report dispatch.
   **Evidence:** the ContextVar cycle shares membership and top-list payloads
   only in one sequential pass; independent scheduler jobs have separate cycles.
@@ -203,7 +307,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T08 — Consolidate top-pageviews decoding and ranking inputs
 
-- [ ] **Where:** `shared/sources/pageviews.py`,
+- [x] **Where:** `shared/sources/pageviews.py`,
   `backend/website/pageviews.py::_daily_articles`, and
   `shared/sources/cycle.py::read_top_pageviews`.
   **Evidence:** report and website paths independently decode/validate the top
@@ -219,7 +323,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T09 — Centralize application identity and User-Agent configuration
 
-- [ ] **Where:** `shared/sources/pageviews.py::_USER_AGENT`,
+- [x] **Where:** `shared/sources/pageviews.py::_USER_AGENT`,
   `shared/sources/summaries.py`, `shared/sources/wikiwho.py`,
   `updater/jobs/pexbot.py::_refresh`, and Pywikibot runtime configuration.
   **Evidence:** four adapters build Aranami headers with two contact URLs.
@@ -233,7 +337,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T10 — Use native query-to-Polars capabilities where they simplify code
 
-- [ ] **Where:** `shared/sources/quarry/query.py::QueryFrame.collect`, `_fetch`,
+- [x] **Where:** `shared/sources/quarry/query.py::QueryFrame.collect`, `_fetch`,
   `Replica`, and replica-adapter callers.
   **Evidence:** `_fetch` manually collects all rows into Python tuples before
   constructing a frame; `QueryFrame` is a small custom deferred query wrapper.
@@ -249,7 +353,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T11 — Reduce repeated durable reads and unchanged rewrites
 
-- [ ] **Where:** `backend/support/article_milestones.py::merge_save`,
+- [x] **Where:** `backend/support/article_milestones.py::merge_save`,
   `backend/website/article_milestones.py::enrich_milestones`, related history
   stores, and newsletter persistence.
   **Evidence:** `merge_save` loads the same file before taking the lock and
@@ -265,7 +369,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T12 — Give public newsletter requests one canonical data path
 
-- [ ] **Where:** `backend/public.py::_newsletter_saved_facts`,
+- [x] **Where:** `backend/public.py::_newsletter_saved_facts`,
   `_newsletter_page`, `newsletter_homepage.enrich_newsletter_homepage`, and
   `website/collect.py::_dashboard_snapshot`.
   **Evidence:** routes can use durable observations, dated archives, or older
@@ -281,7 +385,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T13 — Consolidate duplicated persistence primitives
 
-- [ ] **Where:** `newsletter_observations.py::_encoded`/`_write`,
+- [x] **Where:** `newsletter_observations.py::_encoded`/`_write`,
   `newsletter_archive.py::_encoded`/`_atomic_json`,
   `shared/support/files.py`, and other owning stores.
   **Evidence:** JSON encoding, hashing, bounds, temporary writes, and locking
@@ -298,7 +402,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T14 — Convert retained legacy formats before deleting their readers
 
-- [ ] **Where:** `newsletter_observations.load_observation`,
+- [x] **Where:** `newsletter_observations.load_observation`,
   `newsletter_archive._date_directory`/`_read_record`/`_read_feature`/
   `needs_conversion`/`migrate_from`, newsletter validators, and
   `backend/support/article_milestones.py::load`,
@@ -321,7 +425,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T15 — Retire deployment compatibility against verified predecessors
 
-- [ ] **Where:** `scripts/toolforge/deploy-source.sh`, `drain-hub.py`,
+- [x] **Where:** `scripts/toolforge/deploy-source.sh`, `drain-hub.py`,
   `validate-source.py::_expected_sources`, administration docs, and deployment
   fixtures.
   **Evidence:** real-directory `app/` migration,
@@ -336,10 +440,10 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T16 — Replace optional capability probing with an explicit reader contract
 
-- [ ] **Where:** `backend/website/collect.py::WikiReader`,
+- [x] **Where:** `backend/website/collect.py::WikiReader`,
   `shared/sources/wiki.py`, `newsletter_sources._collect_issue`,
   `newsletter_homepage._HomepageEvidence.at`, `collect_newsletter_homepage`,
-  and `history_archive.DailyHistoryArchive._snapshot`.
+  and `articles.archive.DailyHistoryArchive._snapshot`.
   **Evidence:** production paths accept `read: object`, probe `sources`/`at`
   with `getattr`/`callable`, and construct a `SimpleNamespace` adapter.
   `WikiReader` also combines raw requests, title resolution, history, caching,
@@ -359,7 +463,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T17 — Remove repeated internal validation and broad recovery branches
 
-- [ ] **Where:** newsletter schema/collection/archive/renderers,
+- [x] **Where:** newsletter schema/collection/archive/renderers,
   `backend/support/*status.py`, `shared/reports.py`, source adapters, report
   jobs, and deployment/bootstrap code.
   **What/how:** trace boundary validation through each call chain. Replace
@@ -381,7 +485,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T18 — Prove remaining legacy/dead-code removals across the repository
 
-- [ ] **Where:** all source packages, scripts, CLI options, environment keys,
+- [x] **Where:** all source packages, scripts, CLI options, environment keys,
   configuration, assets, fixtures, dependencies, and documentation.
   **What/how:** combine references, actual imports, dynamic callback resolution,
   manifests, CLI/service entry points, and T03 runtime evidence. Remove verified
@@ -396,8 +500,8 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T19 — Remove redundant version metadata and bootstrap duplication
 
-- [ ] **Where:** `shared/deployment.py::project_version`,
-  `shared/version.json`, `scripts/upload_toolforge.py`,
+- [x] **Where:** `shared/deployment.py::project_version`,
+  the removed `shared/version.json`, `scripts/upload_toolforge.py`,
   `scripts/toolforge/validate-source.py`, `setup-env.sh`, and
   `source-files.json`.
   **Evidence:** TOML says `0.7.13`; tracked JSON says `0.7.7`. The uploader
@@ -414,7 +518,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T20 — Consolidate facts and formatting constants by meaning
 
-- [ ] **Where:** newsletter `_STAT_KEYS`, grade definitions, issue/calendar
+- [x] **Where:** newsletter `_STAT_KEYS`, grade definitions, issue/calendar
   data, `updater/services/newsletter.py::_link`, and
   `newsletter_editorial.py::_literal`/`_link`.
   **Evidence:** statistic-key tuples and escaping maps repeat, but link
@@ -429,7 +533,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T21 — Simplify tabular transformations using native Polars
 
-- [ ] **Where:** newsletter statistics/annual analysis, article milestone and
+- [x] **Where:** newsletter statistics/annual analysis, article milestone and
   scope merging, Pageviews ranking, comparison preparation, and updater
   projections.
   **What/how:** identify Python loops/UDFs used for joins, grouping, ranking,
@@ -442,7 +546,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T22 — Review dependencies by their actual consumers
 
-- [ ] **Where:** `pyproject.toml`, `uv.lock`, source imports, Jinja usage,
+- [x] **Where:** `pyproject.toml`, `uv.lock`, source imports, Jinja usage,
   SQLAlchemy drivers, Uvicorn options, and test clients.
   **What/how:** record runtime/test consumers, including dynamic drivers and
   extras. Remove only packages made unnecessary by the refactor; use supported
@@ -455,7 +559,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T23 — Restructure tests around behavior and close CI coverage gaps
 
-- [ ] **Where:** flat `tests/toolforge/test_newsletter*.py`, deployment tests,
+- [x] **Where:** flat `tests/toolforge/test_newsletter*.py`, deployment tests,
   `tests/unit/test_source_deployment.py`, browser checks, and
   `.github/workflows/validate.yml`.
   **Evidence:** the Toolforge directory mixes pure transformations, rendering,
@@ -493,7 +597,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T25 — Complete offline verification of the final architecture
 
-- [ ] **Where:** all changed code and the reorganized suites.
+- [x] **Where:** all changed code and the reorganized suites.
   **What/how:** run the commands below, adapting discovery paths after T23.
   Consult the Python environment skill/configured IDE interpreter before running
   the toolchain. Fix refactor regressions and distinguish external test blockers
@@ -516,7 +620,7 @@ for script in scripts/toolforge/*.sh; do sh -n "$script"; done
 
 ### T26 — Verify outcomes, efficiency, and the web interface
 
-- [ ] **Where:** report generation, shared collection/storage, scheduler,
+- [x] **Where:** report generation, shared collection/storage, scheduler,
   HTTP routes, templates, localization, and interface fixtures.
   **What/how:** compare T01 results for equivalent inputs; verify one collection
   per declared shared observation, no upstream work for public requests, fewer

@@ -56,6 +56,7 @@ esac
 "$environment/bin/python" - <<'PY'
 import importlib
 import json
+import tomllib
 import os
 import sys
 from pathlib import Path
@@ -66,7 +67,7 @@ root = Path(os.environ["PYTHONPATH"]).parent
 from shared.config import TASK_DEFINITIONS, routine_configuration
 from shared.deployment import project_version
 json.dumps(routine_configuration(), allow_nan=False)
-assert json.loads((root / "src/shared/version.json").read_text())["version"] == project_version()
+assert tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"] == project_version()
 for name in TASK_DEFINITIONS:
     importlib.import_module(f"updater.jobs.{name}")
 import backend.hub

@@ -11,6 +11,7 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from backend.website.pageviews import collect_pageviews
+from shared.identity import USER_AGENT
 
 
 def _site() -> SimpleNamespace:
@@ -224,7 +225,7 @@ class TestDailyPageviews(TestCase):
         )
         fetch.assert_called_once_with(
             result["source_url"],
-            headers={"accept": "application/json"},
+            headers={"accept": "application/json", "user-agent": USER_AGENT},
             default_error_handling=False,
         )
 
@@ -370,7 +371,7 @@ class TestDailyPageviews(TestCase):
                     "backend.website.pageviews.http.fetch",
                     return_value=response,
                 ) as fetch,
-                self.assertRaisesRegex(ValueError, "metadata"),
+                self.assertRaisesRegex(ValueError, "period"),
             ):
                 collect_pageviews(
                     dt.date(2026, 10, 18),
@@ -400,7 +401,7 @@ class TestDailyPageviews(TestCase):
                     "backend.website.pageviews.http.fetch",
                     return_value=_response(articles=[article]),
                 ),
-                self.assertRaisesRegex(ValueError, "article observation"),
+                self.assertRaisesRegex(ValueError, "title, rank, or views"),
             ):
                 collect_pageviews(
                     dt.date(2026, 10, 18),

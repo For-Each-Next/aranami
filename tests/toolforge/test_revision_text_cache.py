@@ -14,8 +14,8 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from backend.website.collect import WikiReader
-from backend.website.revision_text_cache import RevisionTextCache
+from shared.sources.revisions import RevisionTextCache
+from shared.sources.wiki import WikiReader
 
 _NOW = dt.datetime(2026, 10, 31, tzinfo=dt.UTC)
 
@@ -67,7 +67,7 @@ class TestRevisionTextCache(TestCase):
             original = path.read_bytes()
             cache.put(2, "new")
             with patch(
-                "backend.website.revision_text_cache.write_parquet_cache",
+                "shared.sources.revisions.write_parquet_cache",
                 side_effect=OSError("unavailable"),
             ):
                 cache.save()
@@ -88,7 +88,7 @@ class TestRevisionTextCache(TestCase):
         ]
         page.getOldVersion.return_value = "new"
         with patch(
-            "backend.website.collect.pywikibot.Page",
+            "shared.sources.wiki.pywikibot.Page",
             return_value=page,
         ):
             assert reader.at("Game", _NOW - dt.timedelta(days=1)) == "old"
@@ -109,7 +109,7 @@ class TestRevisionTextCache(TestCase):
         page = Mock()
         page.revisions.side_effect = OSError("network unavailable")
         with (
-            patch("backend.website.collect.pywikibot.Page", return_value=page),
+            patch("shared.sources.wiki.pywikibot.Page", return_value=page),
             self.assertRaises(OSError),
         ):
             reader.at("Game", _NOW)
@@ -125,7 +125,7 @@ class TestRevisionTextCache(TestCase):
             cache.put(1, "live")
             cache.put(2, "second")
             cache.put(3, "third")
-            with patch("backend.website.revision_text_cache._MAX_ROWS", 2):
+            with patch("shared.sources.revisions._MAX_ROWS", 2):
                 cache.save()
             assert pl.read_parquet(live).height == 2
             original = live.read_bytes()

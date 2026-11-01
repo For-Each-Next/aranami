@@ -25,23 +25,24 @@ import polars as pl
 import pywikibot
 
 from backend import monitor
+from backend.articles.authorship import enrich_authorship
+from backend.articles.history import (
+    DEFAULT_PATH,
+    collect_article_history,
+    history_membership,
+)
+from backend.articles.milestone_store import sync_current_assessments
+from backend.articles.milestones import enrich_milestones
+from backend.articles.quality_register import collect_quality_register
+from backend.articles.scope import reconcile_scope
+from backend.articles.storage import MILESTONES_PATH
 from backend.server import (
     DashboardHTTPServer,
     DashboardUpdater,
     collect_dashboard_pass,
 )
-from backend.support.article_data import MILESTONES_PATH
-from backend.support.article_milestones import sync_current_assessments
-from backend.support.article_scope import reconcile_scope
 from backend.support.events import event_extra
 from backend.support.logs import open_run_log
-from backend.website.article_authorship import enrich_authorship
-from backend.website.article_history import (
-    DEFAULT_PATH,
-    collect_article_history,
-    history_membership,
-)
-from backend.website.article_milestones import enrich_milestones
 from backend.website.collect import (
     add_refresh_arguments,
     collect_dashboard,
@@ -49,8 +50,9 @@ from backend.website.collect import (
     report_intervals,
     save_snapshot,
 )
-from backend.website.quality_register import collect_quality_register
+from shared.config import COLLECTION_DEFINITIONS
 from shared.deployment import project_version
+from shared.identity import configure_pywikibot
 from shared.sources.cycle import source_cycle
 from shared.sources.quarry.projects import query_pages_by_wikiproject
 
@@ -86,7 +88,7 @@ class HubConfig:
     run_immediately: bool = True
     output: Path = Path("cache/toolforge/dashboard.json")
     log_dir: Path = Path("logs")
-    interval: float = 3600
+    interval: float = COLLECTION_DEFINITIONS["website"].interval
     days: int = 100
     host: str = "127.0.0.1"
     port: int = 8765
@@ -176,6 +178,7 @@ def refresh_article_history() -> None:
     Newsletter preparation reads the saved evidence separately.
     """
     with source_cycle():
+        configure_pywikibot()
         site = pywikibot.Site("zh", "wikipedia")
         membership = query_pages_by_wikiproject(site, "电子游戏")
         history_members = history_membership(site, membership)
@@ -280,6 +283,7 @@ def run(config: HubConfig) -> None:
         config: Validated runtime settings for this backend process.
     """
     stopped = Event()
+    configure_pywikibot()
     shutdown_reason = "HTTP loop ended"
     control = {"drain": False}
 
@@ -346,10 +350,12 @@ def run(config: HubConfig) -> None:
         )
         resources.callback(stop_jobs, scheduler, updater)
         if updater is not None:
+            history = COLLECTION_DEFINITIONS["newsletter-history"]
             scheduler.add_job(
                 refresh_article_history,
                 trigger="cron",
-                minute=0,
+                hour=history.hour,
+                minute=history.minute,
                 second=0,
                 timezone=dt.UTC,
                 id="newsletter-history",
@@ -357,11 +363,12 @@ def run(config: HubConfig) -> None:
                 coalesce=True,
                 misfire_grace_time=None,
             )
+            newsletter = COLLECTION_DEFINITIONS["newsletter-daily"]
             scheduler.add_job(
                 refresh_newsletter,
                 trigger="cron",
-                hour=0,
-                minute=0,
+                hour=newsletter.hour,
+                minute=newsletter.minute,
                 second=0,
                 timezone=dt.UTC,
                 id="newsletter-daily",
@@ -427,7 +434,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=Path("cache/toolforge/dashboard.json"),
     )
     parser.add_argument("--log-dir", type=Path, default=Path("logs"))
-    parser.add_argument("--interval", type=float, default=3600)
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=COLLECTION_DEFINITIONS["website"].interval,
+    )
     parser.add_argument("--days", type=int, default=100)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)

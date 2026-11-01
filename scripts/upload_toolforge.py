@@ -28,27 +28,14 @@ if TYPE_CHECKING:
 
 ROOT = Path(__file__).resolve().parents[1]
 
-_PACKAGES = ("backend", "updater", "webservice", "shared")
-_SUFFIXES = {".py", ".html", ".css", ".js", ".json", ".svg", ".png"}
-_SCRIPTS = (
-    "setup-env.sh",
-    "deploy-source.sh",
-    "drain-hub.py",
-    "run-hub.sh",
-    "run-web.sh",
-    "runtime-env.sh",
-    "source-files.json",
-    "validate-source.py",
+_CONTRACT = json.loads(
+    (ROOT / "scripts/toolforge/payload-contract.json").read_bytes(),
 )
-_PRIVATE_NAMES = {
-    "user-config.py",
-    "user-password.py",
-    "user-password.cfg",
-    "user-fixes.py",
-    ".my.cnf",
-    ".env",
-}
-_RUNTIME_PARTS = {"cache", "dry-run", "reports", "state", ".git", ".venv"}
+_PACKAGES = tuple(_CONTRACT["packages"])
+_SUFFIXES = set(_CONTRACT["suffixes"])
+_SCRIPTS = tuple(_CONTRACT["scripts"])
+_PRIVATE_NAMES = set(_CONTRACT["private_names"])
+_RUNTIME_PARTS = set(_CONTRACT["runtime_parts"])
 
 
 def _relative_path(name: str) -> PurePosixPath:
@@ -198,26 +185,37 @@ def source_payload(root: Path = ROOT) -> dict[str, bytes]:
     payload = {name: _read_regular(root, name) for name in required}
     metadata = tomllib.loads(payload["pyproject.toml"].decode())
     lock = tomllib.loads(payload["uv.lock"].decode())
-    version = metadata["project"]["version"]
-    packaging_invalid = (
+    policy = _CONTRACT["metadata"]
+    project = metadata["project"]
+    version = project["version"]
+    locked = [
+        package
+        for package in lock["package"]
+        if package["name"] == policy["project_name"]
+    ]
+    version_invalid = (
+        project["name"] != policy["project_name"]
+        or not isinstance(version, str)
+        or re.fullmatch(policy["version_pattern"], version) is None
+    )
+    package_invalid = (
         "build-system" in metadata
         or metadata["tool"]["uv"].get("package") is not False
-        or "pywikibot[mwoauth]" not in metadata["project"]["dependencies"]
+        or policy["required_dependency"] not in project["dependencies"]
     )
     runtime_invalid = (
-        metadata["project"]["requires-python"] != ">=3.15"
-        or lock.get("requires-python") not in {">=3.15", "==3.15.*"}
-        or payload[".python-version"].decode().strip() != "3.15.0"
+        project["requires-python"] != policy["requires_python"]
+        or lock.get("requires-python") not in policy["lock_requires_python"]
+        or payload[".python-version"].decode().strip()
+        != policy["python_version"]
     )
-    if (
-        packaging_invalid
-        or runtime_invalid
-        or not re.fullmatch(
-            r"\d+\.\d+\.\d+(?:\.(?:dev|post)\d+)?",
-            version,
-        )
-    ):
-        msg = "Expected locked Python 3.15 source deployment metadata."
+    lock_invalid = (
+        len(locked) != 1
+        or locked[0].get("version") != version
+        or locked[0].get("source") != {"virtual": "."}
+    )
+    if version_invalid or package_invalid or runtime_invalid or lock_invalid:
+        msg = "Expected consistent locked Python 3.15 source metadata."
         raise ValueError(msg)
     for name in _source_names(
         root,
@@ -233,10 +231,6 @@ def source_payload(root: Path = ROOT) -> dict[str, bytes]:
         if name not in payload:
             msg = f"Incomplete deployment: {name}"
             raise ValueError(msg)
-    payload["src/shared/version.json"] = json.dumps({
-        "schema": 1,
-        "version": version,
-    }).encode()
     payload["deployment.json"] = json.dumps(
         {
             "schema": 1,

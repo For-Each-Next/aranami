@@ -23,7 +23,11 @@ from backend.support.events import (
 from backend.support.report_status import read_report_status
 from backend.support.routine_status import read_routine_status
 from backend.support.server_status import validate_runtime
-from shared.config import configuration_id, routine_configuration
+from shared.config import (
+    COLLECTION_DEFINITIONS,
+    configuration_id,
+    routine_configuration,
+)
 from shared.support.files import open_regular, read_json_object
 
 if TYPE_CHECKING:
@@ -116,7 +120,51 @@ def read_schedule_status(path: Path) -> dict[str, object]:
             raise ValueError(message)
     if "runtime" in value:
         value["runtime"] = validate_runtime(value["runtime"])
+    if "collections" in value:
+        _validate_collection_schedules(value["collections"], value["state"])
     return value
+
+
+def _validate_collection_schedules(value: object, state: str) -> None:
+    """Validate saved dataset schedules independently of publication.
+
+    Raises:
+        ValueError: A saved collection schedule violates its contract.
+    """
+    if not isinstance(value, dict) or set(value) != set(
+        COLLECTION_DEFINITIONS,
+    ):
+        message = "Collection schedules must match current configuration."
+        raise ValueError(message)
+    for name, definition in COLLECTION_DEFINITIONS.items():
+        row = value[name]
+        if (
+            not isinstance(row, dict)
+            or row.get("state")
+            not in {"scheduled", "paused", "missing", "stopped"}
+            or "next_run_at" not in row
+            or any(
+                row.get(key) != getattr(definition, key)
+                for key in ("hour", "minute", "cutoff")
+            )
+        ):
+            message = "Invalid collection schedule observation."
+            raise ValueError(message)
+        if row.get("interval") != definition.interval and (
+            definition.interval is None
+            or not isinstance(row.get("interval"), int | float)
+            or isinstance(row["interval"], bool)
+            or not 0 < row["interval"] < float("inf")
+        ):
+            message = "Invalid collection check interval."
+            raise ValueError(message)
+        if row["next_run_at"] is not None:
+            _timestamp(row["next_run_at"])
+        if state == "running" and (
+            (row["state"] == "scheduled") != (row["next_run_at"] is not None)
+        ):
+            message = "Scheduled collections require an observed next run."
+            raise ValueError(message)
 
 
 def saved_status(runtime: Path) -> dict[str, object]:

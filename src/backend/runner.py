@@ -25,6 +25,7 @@ from backend.monitor import TASK_DEFINITIONS
 from backend.support.events import event_extra
 from backend.support.logs import open_run_log
 from shared.deployment import project_version
+from shared.identity import configure_pywikibot
 from updater.jobs import JobContext
 
 if TYPE_CHECKING:
@@ -144,6 +145,7 @@ def run_once(
     selected = _select_tasks(tasks)
     if not selected:
         return
+    configure_pywikibot()
     with open_run_log():
         started = perf_counter()
         started_at = dt.datetime.now(dt.UTC)

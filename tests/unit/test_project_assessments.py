@@ -135,6 +135,31 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
         assert not list(bundle.path.parent.glob("*.json"))
         self.query.assert_called_once_with(self.site, _PROJECT)
 
+    def test_delayed_restart_retains_actual_time_without_filling_missed_days(
+        self,
+    ) -> None:
+        """Keep the report date separate from a delayed observation."""
+        delayed = dt.datetime(2027, 1, 1, 2, 13, tzinfo=dt.UTC)
+        saved = self._capture(observed_at=delayed)
+        assert saved.manifest["calculated_at"] == delayed.isoformat(
+            timespec="microseconds",
+        )
+        assert saved.manifest["metadata"]["snapshot_date"] == "2026-12-31"
+        assert saved.manifest["metadata"]["scheduled_for"] == (
+            "2027-01-01T00:00:00+00:00"
+        )
+        assert (
+            snapshots.read_snapshot(
+                self.site,
+                _PROJECT,
+                dt.date(2026, 12, 30),
+            )
+            is None
+        )
+        repeated = self._capture(observed_at=delayed + dt.timedelta(hours=1))
+        assert repeated.manifest == saved.manifest
+        self.query.assert_called_once_with(self.site, _PROJECT)
+
     def test_repeated_consumers_reuse_original_capture(self) -> None:
         """Share facts without changing the original capture time."""
         first = self._capture()

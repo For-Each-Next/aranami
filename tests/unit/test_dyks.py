@@ -20,12 +20,12 @@ from backend.support import dyk_cache, report_membership
 from shared.sources.dyk import TalkPage
 from shared.support.dates import parse_date
 from shared.support.regions import region_content
-from updater.jobs import JobContext, dyks as dyk_job
-from updater.services.zhwiki import dyks as rendering
-from updater.support.edit_summary import (
+from updater.edit_summary import (
     MAX_EDIT_SUMMARY_BYTES,
     EditSummary,
 )
+from updater.jobs import JobContext, dyks as dyk_job
+from updater.services.zhwiki import dyks as rendering
 
 
 def _update_report(

@@ -14,12 +14,12 @@ from unittest.mock import patch
 import polars as pl
 from wiki_fixtures import OfflineSite
 
-from backend.services.zhwiki.quality_register import parse_bplus_register
-from backend.support import article_milestones as store
-from backend.website.quality_register import (
+from backend.articles import milestone_store as store
+from backend.articles.quality_register import (
     REGISTER_TITLE,
     collect_quality_register,
 )
+from backend.services.zhwiki.quality_register import parse_bplus_register
 from shared.sources.article_milestones import SourceRevision
 
 _FIXTURE = (
@@ -52,7 +52,7 @@ class QualityRegisterTests(TestCase):
         )
         self.source = self.enterContext(
             patch(
-                "backend.website.quality_register.read_revision",
+                "backend.articles.quality_register.read_revision",
                 return_value=SourceRevision(
                     REGISTER_TITLE,
                     91951615,
@@ -204,7 +204,7 @@ class QualityRegisterTests(TestCase):
         )
         with (
             patch(
-                "backend.website.quality_register.store.merge_save",
+                "backend.articles.quality_register.store.merge_save",
                 side_effect=OSError("disk full"),
             ),
             self.assertRaises(OSError),

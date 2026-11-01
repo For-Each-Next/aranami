@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from backend.website.history_archive import SCHEMA, DailyHistoryArchive
+from backend.articles.archive import SCHEMA, DailyHistoryArchive
 
 
 def _title(day: dt.date) -> str:
@@ -385,7 +385,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
             self._redirect_sources(pages)
             with (
                 self.subTest(message=message),
-                patch("backend.website.history_archive._MAX_REDIRECTS", 1),
+                patch("backend.articles.archive._MAX_REDIRECTS", 1),
                 self.assertRaisesRegex(ValueError, message),
             ):
                 archive.at(title, _boundary(day))
@@ -422,7 +422,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
         day = dt.date(2026, 10, 17)
         title, target = self._corrupt_redirect_cache(day)
         cached = DailyHistoryArchive(self.read, self.path, self.now)
-        with self.assertLogs("backend.website.history_archive", "WARNING"):
+        with self.assertLogs("backend.articles.archive", "WARNING"):
             assert cached.at(title, _boundary(day)) == "Final"
         assert self.read.at.call_args_list == [
             unittest.mock.call(title, _boundary(day)),
@@ -444,7 +444,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
         self.read.at.side_effect = OSError("Source unavailable")
         cached = DailyHistoryArchive(self.read, self.path, self.now)
         with (
-            self.assertLogs("backend.website.history_archive", "WARNING"),
+            self.assertLogs("backend.articles.archive", "WARNING"),
             self.assertRaises(OSError),
         ):
             cached.at(title, _boundary(day))
@@ -452,7 +452,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
         assert self.path.read_bytes() == original
         self._redirect_sources({title: (100, 10, f"#REDIRECT [[{title}]]")})
         with (
-            self.assertLogs("backend.website.history_archive", "WARNING"),
+            self.assertLogs("backend.articles.archive", "WARNING"),
             self.assertRaisesRegex(ValueError, "cycle"),
         ):
             cached.at(title, _boundary(day))
@@ -467,13 +467,13 @@ class AnniversaryArchiveTests(unittest.TestCase):
         title, target = self._corrupt_redirect_cache(day)
         first = DailyHistoryArchive(self.read, self.path, self.now)
         second = DailyHistoryArchive(self.read, self.path, self.now)
-        with self.assertLogs("backend.website.history_archive", "WARNING"):
+        with self.assertLogs("backend.articles.archive", "WARNING"):
             assert first.at(title, _boundary(day)) == "Final"
         self._redirect_sources({
             title: (100, 10, f"#REDIRECT [[{target}]]"),
             target: (200, 21, "Concurrent valid repair"),
         })
-        with self.assertLogs("backend.website.history_archive", "WARNING"):
+        with self.assertLogs("backend.articles.archive", "WARNING"):
             assert (
                 second.at(title, _boundary(day)) == "Concurrent valid repair"
             )
@@ -548,14 +548,14 @@ class AnniversaryArchiveTests(unittest.TestCase):
         self.path.parent.mkdir()
         self.path.write_bytes(b"invalid parquet")
         with self.assertLogs(
-            "backend.website.history_archive",
+            "backend.articles.archive",
             level="WARNING",
         ):
             archive = DailyHistoryArchive(self.read, self.path, self.now)
         day = dt.date(2026, 10, 17)
         archive.at(_title(day), _boundary(day))
         with self.assertLogs(
-            "backend.website.history_archive",
+            "backend.articles.archive",
             level="WARNING",
         ):
             archive.save()
@@ -580,7 +580,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
         archive.at(_title(next_day), _boundary(next_day))
         with (
             patch(
-                "backend.website.history_archive.write_parquet_cache",
+                "backend.articles.archive.write_parquet_cache",
                 side_effect=OSError,
             ),
             self.assertRaises(OSError),

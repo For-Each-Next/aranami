@@ -9,9 +9,14 @@ from pathlib import Path
 from threading import RLock
 
 from apscheduler.schedulers.base import STATE_PAUSED, STATE_STOPPED
+from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.support.server_status import sample_runtime
-from shared.config import TASK_DEFINITIONS, configuration_id
+from shared.config import (
+    COLLECTION_DEFINITIONS,
+    TASK_DEFINITIONS,
+    configuration_id,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_BYTES = 1024 * 1024
@@ -67,6 +72,28 @@ def _write_schedule(scheduler: object, started_at: dt.datetime | None) -> None:
             "pages": dict(definition.pages),
             "prefixes": definition.prefixes,
         }
+    collections = {}
+    for name, definition in COLLECTION_DEFINITIONS.items():
+        job = None if state == "stopped" else scheduler.get_job(name)
+        next_run = getattr(job, "next_run_time", None)
+        collections[name] = {
+            "state": "stopped"
+            if state == "stopped"
+            else "missing"
+            if job is None
+            else "paused"
+            if next_run is None or state == "paused"
+            else "scheduled",
+            "next_run_at": next_run.astimezone(dt.UTC).isoformat()
+            if next_run is not None
+            else None,
+            "hour": definition.hour,
+            "minute": definition.minute,
+            "interval": job.trigger.interval.total_seconds()
+            if job is not None and isinstance(job.trigger, IntervalTrigger)
+            else definition.interval,
+            "cutoff": definition.cutoff,
+        }
     content = json.dumps(
         {
             "schema": 1,
@@ -78,6 +105,7 @@ def _write_schedule(scheduler: object, started_at: dt.datetime | None) -> None:
             "config_id": configuration_id(),
             "runtime": sample_runtime(),
             "routines": routines,
+            "collections": collections,
         },
         ensure_ascii=False,
     ).encode()

@@ -12,16 +12,17 @@ from unittest.mock import Mock, patch
 
 import mwparserfromhell
 import polars as pl
+from pywikibot.page import Revision
 from pywikibot.site import BaseSite, Namespace
 
 from backend.services.zhwiki import new_pages
 from shared.support.regions import managed_region
-from updater.jobs import JobContext, new_pages as new_pages_job
-from updater.services.zhwiki import new_pages as rendering
-from updater.support.edit_summary import (
+from updater.edit_summary import (
     MAX_EDIT_SUMMARY_BYTES,
     EditSummary,
 )
+from updater.jobs import JobContext, new_pages as new_pages_job
+from updater.services.zhwiki import new_pages as rendering
 
 _DAY_HEADING_LEVEL = 3
 
@@ -653,7 +654,13 @@ class TestNewPageRecords(TestCase):
             {"days": "2"},
         )
         context = JobContext(site, today, dry=True)
-        page = Mock(text=original)
+        page = Mock(
+            text=original,
+            latest_revision=Revision(
+                revid=123,
+                timestamp="2026-10-02T22:00:00Z",
+            ),
+        )
         title = "WikiProject:电子游戏/新进条目/关键词筛选"
         with (
             patch.object(
@@ -756,7 +763,15 @@ class TestNewPageRecords(TestCase):
             patch.object(
                 new_pages_job,
                 "read_pages",
-                return_value=[Mock(text=original)],
+                return_value=[
+                    Mock(
+                        text=original,
+                        latest_revision=Revision(
+                            revid=123,
+                            timestamp="2026-10-02T22:00:00Z",
+                        ),
+                    ),
+                ],
             ),
             patch.object(
                 new_pages,
@@ -847,7 +862,13 @@ class TestNewPageRecords(TestCase):
                     today,
                     dry=dry,
                 )
-                page = Mock(text=original)
+                page = Mock(
+                    text=original,
+                    latest_revision=Revision(
+                        revid=123,
+                        timestamp="2026-10-02T22:00:00Z",
+                    ),
+                )
                 with (
                     patch.object(
                         new_pages_job,

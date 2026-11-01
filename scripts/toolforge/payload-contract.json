@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "packages": [
+    "backend",
+    "updater",
+    "webservice",
+    "shared"
+  ],
+  "suffixes": [
+    ".py",
+    ".html",
+    ".css",
+    ".js",
+    ".json",
+    ".svg",
+    ".png"
+  ],
+  "scripts": [
+    "setup-env.sh",
+    "deploy-source.sh",
+    "drain-hub.py",
+    "run-hub.sh",
+    "run-web.sh",
+    "runtime-env.sh",
+    "source-files.json",
+    "validate-source.py",
+    "payload-contract.json"
+  ],
+  "private_names": [
+    "user-config.py",
+    "user-password.py",
+    "user-password.cfg",
+    "user-fixes.py",
+    ".my.cnf",
+    ".env"
+  ],
+  "runtime_parts": [
+    "cache",
+    "dry-run",
+    "reports",
+    "state",
+    ".git",
+    ".venv",
+    "logs"
+  ],
+  "metadata": {
+    "project_name": "aranami",
+    "version_pattern": "\\d+\\.\\d+\\.\\d+(?:\\.(?:dev|post)\\d+)?",
+    "python_version": "3.15.0",
+    "requires_python": ">=3.15",
+    "lock_requires_python": [
+      ">=3.15",
+      "==3.15.*"
+    ],
+    "required_dependency": "pywikibot[mwoauth]"
+  }
+}

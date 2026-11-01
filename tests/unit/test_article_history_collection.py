@@ -13,11 +13,11 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from backend.support.article_history import load, read_versions
-from backend.website.article_history import collect_article_history, main
+from backend.articles.history import collect_article_history, main
+from backend.articles.history_store import load, read_versions
 from shared.sources.dyk import TalkPage
 
-_MODULE = "backend.website.article_history."
+_MODULE = "backend.articles.history."
 
 
 class ArticleHistoryCollectionTests(unittest.TestCase):

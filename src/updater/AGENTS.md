@@ -18,8 +18,8 @@ repository-wide instructions.
 - Keep one report task per module in `jobs/`. `jobs.__init__` provides
   `JobContext`, `ProposedEdit`, and `job_run` for publication coordination.
 - `services/` projects prepared data into report rows and wikitext without
-  selecting publication destinations. `support/` contains narrowly named
-  formatting helpers. Backend services own published-membership caches
+  selecting publication destinations. `edit_summary.py` owns bounded
+  publication summaries. Backend services own published-membership caches
   and identity comparisons; updater formatters only turn metadata into text.
 - Updater may consume backend data APIs and shared infrastructure. Backend
   data services and shared code must not import updater. The hub resolves

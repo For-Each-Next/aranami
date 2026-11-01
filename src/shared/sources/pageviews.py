@@ -23,12 +23,14 @@ from __future__ import annotations
 __all__ = (
     "DailyPageviews",
     "IncompletePageviewsDayError",
+    "TopPageviews",
     "article_rank_filter",
     "fetch_data",
     "fetch_data_dataframe",
     "fetch_project_total",
     "fetch_top_dataframe",
     "massive",
+    "parse_top_observation",
 )
 
 import datetime as dt
@@ -45,7 +47,7 @@ import polars as pl
 import pywikibot
 from tqdm import tqdm
 
-from shared.deployment import project_version
+from shared.identity import USER_AGENT
 from shared.sources import pageviews_rate
 from shared.sources.cycle import read_top_pageviews
 
@@ -55,10 +57,6 @@ if TYPE_CHECKING:
     from pywikibot.site import BaseSite
 
 
-_USER_AGENT: Final[str] = (
-    f"Aranami/{project_version()} "
-    "(https://meta.wikimedia.org/wiki/User:For_Each_..._Next/)"
-)
 _DATA_FRAME_SCHEMA: Final[pl.Schema] = pl.Schema(
     {
         "page": pl.String,
@@ -70,6 +68,8 @@ _TOP_FRAME_SCHEMA: Final[pl.Schema] = pl.Schema(
     {"title": pl.String, "top": pl.Int64},
 )
 # Topviews' config/topviews_excludes.yaml was verified on 2026-10-18.
+_TOP_LIMIT = 1000
+_MAX_VIEWS = 2**64 - 1
 _TOPVIEWS_EXCLUDED_TITLES: Final[frozenset[str]] = frozenset({"XHamster"})
 
 
@@ -84,6 +84,29 @@ class DailyPageviews:
 
     date: dt.date
     pageview: int
+
+
+@dataclass(frozen=True, slots=True)
+class TopPageviews:
+    """Retain one validated complete site-wide top-list observation.
+
+    Attributes:
+        project: Wikimedia hostname requested from the API.
+        period: Exact year, month, and day or all-days selectors.
+        articles: Normalized titles, source ranks, and observed views.
+    """
+
+    project: str
+    period: tuple[str, str, str]
+    articles: pl.DataFrame
+
+    def clone(self) -> TopPageviews:
+        """Return this observation with an independent frame.
+
+        Returns:
+            Detached frame sharing immutable column buffers.
+        """
+        return TopPageviews(self.project, self.period, self.articles.clone())
 
 
 class IncompletePageviewsDayError(ValueError):
@@ -216,7 +239,7 @@ def fetch_project_total(site: BaseSite, day: dt.date) -> int:
     # ruff: ignore[suspicious-url-open-usage]
     request = urllib.request.Request(
         f"{base}{project}/all-access/user/hourly/{stamp}00/{stamp}23",
-        headers={"Accept": "application/json", "User-Agent": _USER_AGENT},
+        headers={"Accept": "application/json", "User-Agent": USER_AGENT},
     )
     try:
         pageviews_rate.wait_for_pageviews_request()
@@ -274,8 +297,8 @@ def fetch_top_dataframe(
     supported lists raise an error. Absence from an available list does
     not establish a rank or zero views.
     Make one request attempt without retrying transport failures.
-    An active source cycle reuses a successful raw list for the same
-    project and period while applying this site's metadata separately.
+    An active source cycle reuses a complete parsed observation for the
+    same project and period, applying this site's metadata separately.
 
     Args:
         site: Site whose hostname identifies the Wikimedia project.
@@ -297,11 +320,21 @@ def fetch_top_dataframe(
     if period is None:
         return pl.DataFrame(schema=_TOP_FRAME_SCHEMA)
     project = site.hostname().strip().lower()
-    ranks = read_top_pageviews(
+    observation = read_top_pageviews(
         project,
         period,
-        lambda: _request_top_payload(project, period),
-        lambda payload: _parse_top_dataframe(payload, project, period),
+        lambda: parse_top_observation(
+            _request_top_payload(project, period),
+            project,
+            period,
+        ),
+    )
+    if observation is None or observation.articles.is_empty():
+        message = "Wikimedia top-pageviews list is not available yet"
+        raise ValueError(message)
+    ranks = observation.articles.select(
+        "title",
+        pl.col("source_rank").cast(pl.Int64).alias("top"),
     )
     return _article_top_ranks(site, ranks)
 
@@ -327,7 +360,7 @@ def _request_top_payload(
     # ruff: ignore[suspicious-url-open-usage]
     request = urllib.request.Request(
         f"{base}{'/'.join(segments)}",
-        headers={"Accept": "application/json", "User-Agent": _USER_AGENT},
+        headers={"Accept": "application/json", "User-Agent": USER_AGENT},
     )
     try:
         pageviews_rate.wait_for_pageviews_request()
@@ -426,31 +459,38 @@ def _top_period(
     return None
 
 
-def _parse_top_dataframe(
+def parse_top_observation(
     payload: object,
     project: str,
     period: tuple[str, str, str],
-) -> pl.DataFrame:
-    """Validate requested top-list metadata and preserve official ranks.
+) -> TopPageviews | None:
+    """Validate and normalize a complete official top-pageviews list.
 
     Args:
-        payload: Decoded JSON response from the Wikimedia top endpoint.
+        payload: Decoded source JSON, or none for an HTTP 404.
         project: Normalized hostname identifying the requested site.
-        period: Expected year, month, and day path components.
+        period: Expected year, month, and day or all-days selectors.
 
     Returns:
-        Official ranks with normalized titles in API order.
+        Typed source ranks, titles, and view counts, or none for an
+        explicitly absent period. An available empty list stays empty.
 
     Raises:
-        TypeError: The response containers have unexpected types.
-        ValueError: The response identifies another period or contains
-            malformed metadata, titles, or ranks.
+        TypeError: The response has invalid container types.
+        ValueError: Source metadata or article observations are invalid.
     """
-    if not isinstance(payload, dict):
+    if payload is None:
+        return None
+    if not isinstance(payload, dict) or not isinstance(
+        payload.get("items"),
+        list,
+    ):
         message = "Malformed Wikimedia top-pageviews response"
         raise TypeError(message)
-    items = payload.get("items")
-    if not isinstance(items, list) or len(items) != 1:
+    items = payload["items"]
+    if not items:
+        return None
+    if len(items) != 1:
         message = "Expected one Wikimedia top-pageviews period"
         raise ValueError(message)
     item = items[0]
@@ -466,44 +506,56 @@ def _parse_top_dataframe(
     ):
         message = "Wikimedia top-pageviews period does not match request"
         raise ValueError(message)
-    articles = item.get("articles")
-    return _parse_top_articles(articles)
+    return TopPageviews(project, period, _top_articles(item.get("articles")))
 
 
-def _parse_top_articles(articles: object) -> pl.DataFrame:
-    """Validate article titles and ranks supplied by Wikimedia's API.
+def _top_articles(articles: object) -> pl.DataFrame:
+    """Validate source article records and normalize their identities.
 
     Args:
-        articles: Decoded records containing article titles and ranks.
+        articles: Untrusted records from one API top list.
 
     Returns:
-        A typed frame preserving supplied ranks and source order.
+        Complete typed source observations in their original order.
 
     Raises:
-        TypeError: If the list or record containers have invalid types.
-        ValueError: If the list is empty or has invalid titles or ranks.
+        TypeError: An article record is not an object.
+        ValueError: The list or one of its observations is invalid.
     """
-    if not isinstance(articles, list):
+    if not isinstance(articles, list) or len(articles) > _TOP_LIMIT:
         message = "Malformed Wikimedia top-pageviews articles"
-        raise TypeError(message)
-    if not articles:
-        message = "Wikimedia top-pageviews list is not available yet"
         raise ValueError(message)
-    rows: list[tuple[str, int]] = []
+    rows = []
     for article in articles:
         if not isinstance(article, dict):
             message = "Malformed Wikimedia top-pageviews article"
             raise TypeError(message)
-        title, rank = article.get("article"), article.get("rank")
-        if not isinstance(title, str) or type(rank) is not int or rank < 1:
-            message = "Invalid Wikimedia top-pageviews title or rank"
+        title, rank, views = (
+            article.get("article"),
+            article.get("rank"),
+            article.get("views"),
+        )
+        if not isinstance(title, str) or not title.replace("_", " ").strip():
+            message = "Invalid Wikimedia top-pageviews title, rank, or views"
             raise ValueError(message)
-        title = title.replace("_", " ").strip()
-        if not title:
-            message = "Empty Wikimedia top-pageviews title"
+        if (
+            type(rank) is not int
+            or not 1 <= rank <= _TOP_LIMIT
+            or type(views) is not int
+            or not 0 <= views <= _MAX_VIEWS
+        ):
+            message = "Invalid Wikimedia top-pageviews title, rank, or views"
             raise ValueError(message)
-        rows.append((title, rank))
-    frame = pl.DataFrame(rows, schema=_TOP_FRAME_SCHEMA, orient="row")
+        rows.append((title.replace("_", " ").strip(), rank, views))
+    frame = pl.DataFrame(
+        rows,
+        schema={
+            "title": pl.String,
+            "source_rank": pl.UInt32,
+            "views": pl.UInt64,
+        },
+        orient="row",
+    )
     if frame.get_column("title").n_unique() != frame.height:
         message = "Duplicate Wikimedia top-pageviews titles"
         raise ValueError(message)
@@ -576,7 +628,7 @@ def _build_request(
         f"{base}{'/'.join(segments)}",
         headers={
             "Accept": "application/json",
-            "User-Agent": _USER_AGENT,
+            "User-Agent": USER_AGENT,
         },
     )
     return request

@@ -8,12 +8,12 @@ from backend.services.zhwiki import dyks as data
 from shared.config import TASK_DEFINITIONS
 from shared.reports import report_key
 from shared.sources.wiki import read_pages
-from updater.jobs import ProposedEdit, job_run
-from updater.services.zhwiki.dyks import update_text
-from updater.support.edit_summary import (
+from updater.edit_summary import (
     EditSummary,
     article_mention,
 )
+from updater.jobs import ProposedEdit, job_run
+from updater.services.zhwiki.dyks import update_text
 
 if TYPE_CHECKING:
     from updater.jobs import JobContext

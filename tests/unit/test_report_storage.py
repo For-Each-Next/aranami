@@ -502,7 +502,7 @@ class TestReportStore(TestCase):
                 )
             store = ReportStore(reports / "records")
             key = report_key("test-report", "zhwiki", target)
-            assert store.read(key).wikitext == "report 2"
+            assert store.read(key) is None
             assert store.migrate_legacy() == [reports / old_key]
             latest = store.read(key)
             assert latest.wikitext == "report 2"
@@ -510,7 +510,7 @@ class TestReportStore(TestCase):
             assert store.read(key, previous=True).wikitext == "report 1"
             assert source.read(old_key).wikitext == "report 2"
             (store.root / key / "latest.json").unlink()
-            assert store.read(key).wikitext == "report 2"
+            assert store.read(key) is None
             assert store.migrate_legacy() == [reports / old_key]
             assert (store.root / key / "latest.json").exists()
 

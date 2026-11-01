@@ -35,8 +35,7 @@ remain inert. Resolve imports through the pinned generation's `src` on
 
 `shared.config.TASK_DEFINITIONS` is the sole definition of report destinations
 and UTC schedules. `routine_configuration()` supplies its serialized form.
-`pyproject.toml` supplies the version, with generated `shared/version.json` in
-deployments. The backend exposes these contracts through `/api/config` and
+`pyproject.toml` is the required version authority in source and deployments. The backend exposes these contracts through `/api/config` and
 passes them to renderers; no installed distribution is required.
 
 ## Service updates
@@ -54,9 +53,8 @@ until no process uses them, including manual jobs.
 Replace the read-only web service first and wait for availability, then
 terminate the hub's old pods before restoring its single replica. Missing
 or deliberately paused services stay stopped. Never overlap publishers or
-fall back to deleting all jobs. The legacy real `app/` layout needs one
-confirmed shutdown before migration; subsequent updates need no shared source
-shutdown. See [Administration](administration.md) for commands and recovery.
+fall back to deleting all jobs. Promotion requires immutable source selection and a cooperative drain
+protocol in both the active and recovery generations. See [Administration](administration.md) for commands and recovery.
 
 The deployment lock serializes promotions without blocking startup from an
 already validated generation. A failed setup leaves current services intact.
@@ -68,6 +66,35 @@ startup time remains the observed hub start. Log and state formats do not need
 to change for this deployment mechanism.
 
 ## Scheduling and observed state
+
+`shared.config` keeps publication destinations in `TASK_DEFINITIONS`,
+independent collection triggers in `COLLECTION_DEFINITIONS`, and website
+dataset freshness in `WEBSITE_REFRESH_INTERVALS`. The hub binds callbacks;
+`/api/config` exposes the same definitions. Saved schedule status reports
+actual collection next runs separately from publication routines, including
+an overridden website check interval. Dataset cache identities retain the
+settings that affect their facts.
+
+| Work | UTC trigger | Boundary and late-run behavior |
+|---|---|---|
+| Assessment log and English comparisons | Daily 00:00:00 | Share the first complete assessment capture assigned to yesterday; publication outcomes remain independent. |
+| Newsletter daily facts | Daily 00:00:00 | Preserve yesterday's cutoff and first complete daily capture, independent annual facts, and quarter rollover. |
+| Article evidence and DYK | Hourly :00 | Refresh current evidence; historical revision reads retain their explicit cutoffs. |
+| Assessment lists | Hourly :31 | Prepare fresh current assessments independently of the daily capture. |
+| New pages | Daily 00:07 | Complete retained dates through yesterday, resuming gaps after interruption. |
+| Pageviews | Hourly :59 when behind | Require actual-time 18:00 readiness; once current, postpone until the next 18:59 check. |
+| PexBot | Daily 00:00 | Check the wiki's actual edit date before delegation; returned edit counts remain unknown. |
+| Website | Hourly due check | Reviews refresh hourly; other datasets normally refresh 24 hours after success; newsletter dates/configuration invalidate independently. |
+
+The scheduled boundary, source cutoff, actual observation time, and report
+date are separate facts. Current-state replica queries made after midnight
+observe the later state and do not reconstruct historical midnight. The
+assessment capture records the supplied actual observation time separately
+from `scheduled_for`; a restart reuses the first complete file for the most
+recent completed date and leaves missed older dates unavailable. Historical
+wiki revisions and Pageviews use their supported dated source contracts.
+Coalesced callbacks and normal startup checks recover due work; they do not
+invent observations for dates without source evidence.
 
 The monitor coalesces triggers and allows one active invocation per routine.
 Fresh monitors normally check all routines; `run_immediately=False` waits for
@@ -392,11 +419,16 @@ uses its footer as the live uptime clock anchor.
 
 The read-only newsletter tool prepares quarterly data pages and editorial
 scaffolds, including January's annual feature. Source acquisition belongs to
-`backend.website.newsletter_sources`; it saves complete facts through the
-durable observation store. `backend.website.newsletter` validates and reads
+`backend.newsletter.refresh`, which uses `collection` and saves facts through the
+durable observation store. `backend.newsletter.schema` validates and reads
 those saved generations without MediaWiki requests. Updater projects saved
 facts into wikitext at query time; webservice presents drafts. Requests never
 collect, publish, or change runtime data.
+
+The dashboard snapshot carries newsletter acquisition status only; complete
+facts stay in the observation store and dated archive. The private newsletter
+refresh checkpoint retains its last complete result for due selection and
+independent retries, and public requests never read that checkpoint.
 
 `reports/data/newsletter/observations/` holds `current.json` and immutable
 prepared JSON generations in `YYYYMMDD` folders. Shared source

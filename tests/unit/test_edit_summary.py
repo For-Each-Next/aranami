@@ -9,12 +9,12 @@ from dataclasses import asdict
 from unittest import TestCase
 from unittest.mock import Mock
 
-from updater.jobs import ProposedEdit
-from updater.support.edit_summary import (
+from updater.edit_summary import (
     MAX_EDIT_SUMMARY_BYTES,
     EditSummary,
     article_mention,
 )
+from updater.jobs import ProposedEdit
 
 _CHINESE_CHARACTER_BYTES = 3
 _EXAMPLE_SUFFIX = "([[toolforge:Aranami|Aranami]])"

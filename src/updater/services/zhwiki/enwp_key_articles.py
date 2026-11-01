@@ -18,7 +18,7 @@ from mwparserfromhell.nodes import Heading
 from backend.services.enwiki.key_articles import ReportDefinition
 from shared.reports import ReportResult
 from shared.support.regions import replace_by_tag
-from updater.support.edit_summary import (
+from updater.edit_summary import (
     MAX_EDIT_SUMMARY_BYTES,
     EditSummary,
     article_mention,

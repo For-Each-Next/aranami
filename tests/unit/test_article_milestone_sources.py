@@ -9,8 +9,8 @@ from unittest.mock import Mock, patch
 
 from test_dyks import _OfflineSite  # ruff: ignore[import-private-name]
 
+from backend.articles.milestone_sources import lookup_milestone
 from backend.services.zhwiki.article_milestones import extract_credits
-from backend.website.article_milestone_sources import lookup_milestone
 from shared.sources.article_milestones import SourceRevision
 
 _ENTRY = (
@@ -35,7 +35,7 @@ class RecognitionSourceTests(TestCase):
         """Prepare local namespace metadata."""
         self.site = _OfflineSite("zh", "wikipedia")
         aliases = patch(
-            "backend.website.article_milestone_sources.source.template_names",
+            "backend.articles.milestone_sources.source.template_names",
             return_value={},
         )
         aliases.start()
@@ -74,11 +74,11 @@ class RecognitionSourceTests(TestCase):
             assert result[0]["contributors"] is None
 
     @patch(
-        "backend.website.article_milestone_sources.source.read_archives",
+        "backend.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
     @patch(
-        "backend.website.article_milestone_sources.source.read_revision",
+        "backend.articles.milestone_sources.source.read_revision",
         return_value=_SOURCE,
     )
     def test_unique_credit_retains_exact_provenance(
@@ -99,10 +99,10 @@ class RecognitionSourceTests(TestCase):
         assert result["nomination_link"].endswith("oldid=10")
 
     @patch(
-        "backend.website.article_milestone_sources.source.read_archives",
+        "backend.articles.milestone_sources.source.read_archives",
     )
     @patch(
-        "backend.website.article_milestone_sources.source.read_revision",
+        "backend.articles.milestone_sources.source.read_revision",
         return_value=_SOURCE,
     )
     def test_archives_resume_before_claiming_unique(
@@ -135,11 +135,11 @@ class RecognitionSourceTests(TestCase):
         assert archives.call_args.kwargs["after"] == "Talk:Example/Archive 8"
 
     @patch(
-        "backend.website.article_milestone_sources.source.read_archives",
+        "backend.articles.milestone_sources.source.read_archives",
         side_effect=OSError,
     )
     @patch(
-        "backend.website.article_milestone_sources.source.read_revision",
+        "backend.articles.milestone_sources.source.read_revision",
         return_value=_SOURCE,
     )
     def test_failure_preserves_checkpoint(
@@ -157,11 +157,11 @@ class RecognitionSourceTests(TestCase):
         assert result["lookup_cursor"] == cursor
 
     @patch(
-        "backend.website.article_milestone_sources.source.read_archives",
+        "backend.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
     @patch(
-        "backend.website.article_milestone_sources.source.read_revision",
+        "backend.articles.milestone_sources.source.read_revision",
         return_value=None,
     )
     def test_missing_sources_stay_unresolved(
@@ -175,10 +175,10 @@ class RecognitionSourceTests(TestCase):
         assert "contributors" not in result
 
     @patch(
-        "backend.website.article_milestone_sources.source.read_archives",
+        "backend.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
-    @patch("backend.website.article_milestone_sources.source.read_revision")
+    @patch("backend.articles.milestone_sources.source.read_revision")
     def test_later_complete_revision_of_same_round_wins(
         self,
         read: Mock,
@@ -197,10 +197,10 @@ class RecognitionSourceTests(TestCase):
         assert result["sources"][0]["revision_id"] == _SOURCE.revision_id
 
     @patch(
-        "backend.website.article_milestone_sources.source.read_archives",
+        "backend.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
-    @patch("backend.website.article_milestone_sources.source.read_revision")
+    @patch("backend.articles.milestone_sources.source.read_revision")
     def test_previous_dyk_round_does_not_conflict(
         self,
         read: Mock,
@@ -217,10 +217,10 @@ class RecognitionSourceTests(TestCase):
         assert result["status"] == "complete"
 
     @patch(
-        "backend.website.article_milestone_sources.source.read_archives",
+        "backend.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
-    @patch("backend.website.article_milestone_sources.source.read_revision")
+    @patch("backend.articles.milestone_sources.source.read_revision")
     def test_explicit_external_archive_target(
         self,
         read: Mock,
@@ -248,10 +248,10 @@ class RecognitionSourceTests(TestCase):
         assert result["main_author"] is None
 
     @patch(
-        "backend.website.article_milestone_sources.source.read_archives",
+        "backend.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
-    @patch("backend.website.article_milestone_sources.source.read_revision")
+    @patch("backend.articles.milestone_sources.source.read_revision")
     def test_unique_missing_date_has_source_proof(
         self,
         read: Mock,
@@ -314,10 +314,10 @@ class RecognitionSourceTests(TestCase):
             assert not observed or observed[0]["question"] is None
 
     @patch(
-        "backend.website.article_milestone_sources.source.read_archives",
+        "backend.articles.milestone_sources.source.read_archives",
         return_value=([], "Talk:Example/Archive 8"),
     )
-    @patch("backend.website.article_milestone_sources.source.read_revision")
+    @patch("backend.articles.milestone_sources.source.read_revision")
     def test_question_text_does_not_overflow_continuation(
         self,
         read: Mock,

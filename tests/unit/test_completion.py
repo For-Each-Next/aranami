@@ -14,6 +14,7 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 import polars as pl
+from pywikibot.page import Revision
 
 from backend import runner
 from backend.support import completion
@@ -410,7 +411,15 @@ class TestDailyCompletion(TestCase):
             patch.object(
                 new_pages,
                 "read_pages",
-                return_value=[Mock(text=_new_pages_text())],
+                return_value=[
+                    Mock(
+                        text=_new_pages_text(),
+                        latest_revision=Revision(
+                            revid=123,
+                            timestamp="2026-10-02T22:00:00Z",
+                        ),
+                    ),
+                ],
             ) as read,
         ):
             new_pages.run(automatic=True)
@@ -432,8 +441,13 @@ class TestDailyCompletion(TestCase):
         """Revalidate manual runs without rediscovering old records."""
         key = self._checkpoint("new_pages")
         context = _context()
-        page = Mock(text=_new_pages_text(), latest_revision_id=123)
-        page.latest_revision.timestamp = _NOW - dt.timedelta(hours=2)
+        page = Mock(
+            text=_new_pages_text(),
+            latest_revision=Revision(
+                revid=123,
+                timestamp=(_NOW - dt.timedelta(hours=2)).isoformat(),
+            ),
+        )
         with (
             patch.object(
                 new_pages,
@@ -452,9 +466,12 @@ class TestDailyCompletion(TestCase):
         assert record["evidence"] == "verified-wiki"
         output_key = report_key("new-pages", "zhwiki", new_pages._TARGET)
         bundle = ReportStore().read(output_key)
+        assert bundle.manifest["provenance"]["revision"] == 123  # ruff: ignore[magic-value-comparison]
         assert (
             bundle.manifest["provenance"]["source_timestamp"]
-            == page.latest_revision.timestamp.isoformat()
+            == page.latest_revision.timestamp.replace(
+                tzinfo=dt.UTC,
+            ).isoformat()
         )
         assert bundle.manifest["calculated_at"] is None
         page.save.assert_not_called()
@@ -492,7 +509,13 @@ class TestDailyCompletion(TestCase):
         """Require a confirmed save to complete a daily date."""
         context = _context()
         original = _pageviews_text(_DAY - dt.timedelta(days=1))
-        page = Mock(text=original)
+        page = Mock(
+            text=original,
+            latest_revision=Revision(
+                revid=123,
+                timestamp="2026-10-02T22:00:00Z",
+            ),
+        )
         page.save.side_effect = RuntimeError("save failed")
         with (
             patch.object(
@@ -760,7 +783,13 @@ class TestDailyCompletion(TestCase):
         """New-page proposals require a confirmed wiki save too."""
         context = _context()
         original = managed_region("new-pages", "", {"days": "1"})
-        page = Mock(text=original)
+        page = Mock(
+            text=original,
+            latest_revision=Revision(
+                revid=123,
+                timestamp="2026-10-02T22:00:00Z",
+            ),
+        )
         page.save.side_effect = RuntimeError("save failed")
         with (
             patch.object(

@@ -18,11 +18,11 @@ from backend.support.report_membership import (
 from shared.config import TASK_DEFINITIONS
 from shared.reports import report_key
 from shared.sources.wiki import read_pages
+from updater.edit_summary import EditSummary
 from updater.jobs import ProposedEdit, job_run
 from updater.services.zhwiki.assessment_lists import (
     prepare_report,
 )
-from updater.support.edit_summary import EditSummary
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

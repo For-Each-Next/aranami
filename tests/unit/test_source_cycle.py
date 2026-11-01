@@ -160,8 +160,8 @@ class TestMembershipCycle(TestCase):
 class TestTopPageviewsCycle(TestCase):
     """Share successful exact top-list observations across consumers."""
 
-    def test_wiki_ranks_and_website_views_share_the_raw_request(self) -> None:
-        """Use both real parsers while making only one HTTP request."""
+    def test_wiki_ranks_and_website_views_share_one_parse(self) -> None:
+        """Share the complete parser and make only one HTTP request."""
         day = date(2026, 10, 19)
         for website_first in (False, True):
             with self.subTest(website_first=website_first):
@@ -174,6 +174,7 @@ class TestTopPageviewsCycle(TestCase):
                         "4": {"*": "Wikipedia"},
                     },
                 }
+                parse = pageviews.parse_top_observation
                 payload = _top_payload()
                 response = Mock(status_code=200)
                 response.json.return_value = payload
@@ -189,6 +190,16 @@ class TestTopPageviewsCycle(TestCase):
                     patch(
                         "shared.sources.pageviews.pywikibot.Page",
                     ) as page,
+                    patch.object(
+                        pageviews,
+                        "parse_top_observation",
+                        wraps=parse,
+                    ) as report_parse,
+                    patch.object(
+                        website_pageviews,
+                        "parse_top_observation",
+                        wraps=parse,
+                    ) as web_parse,
                     source_cycle(),
                 ):
                     page.return_value.title.return_value = "Wikipedia:首页"
@@ -201,6 +212,7 @@ class TestTopPageviewsCycle(TestCase):
                     )
                     if not website_first:
                         observed = website_pageviews._request(day)
+                assert report_parse.call_count + web_parse.call_count == 1
                 assert urlopen.call_count + website_fetch.call_count == 1
                 assert urlopen.call_count == (0 if website_first else 1)
                 assert observed is not None
@@ -218,56 +230,52 @@ class TestTopPageviewsCycle(TestCase):
                 ]
 
     @staticmethod
-    def test_top_payloads_are_detached_and_keys_are_exact() -> None:
-        """Isolate results and distinguish source sites and periods."""
-        fetch = Mock(side_effect=_top_payload)
-        parse = Mock(side_effect=lambda value: value)
+    def test_top_observations_are_detached_and_keys_are_exact() -> None:
+        """Isolate frames and distinguish source sites and periods."""
+        observation = pageviews.parse_top_observation(
+            _top_payload(),
+            _PROJECT,
+            _DAY,
+        )
+        fetch = Mock(return_value=observation)
         with source_cycle():
-            first = read_top_pageviews(_PROJECT, _DAY, fetch, parse)
-            first.clear()
-            second = read_top_pageviews(_PROJECT, _DAY, fetch, parse)
-            read_top_pageviews("en.wikipedia.org", _DAY, fetch, parse)
-            read_top_pageviews(_PROJECT, ("2026", "10", "18"), fetch, parse)
-            read_top_pageviews(
-                _PROJECT,
-                ("2026", "10", "all-days"),
-                fetch,
-                parse,
-            )
-        assert second == _top_payload()
+            first = read_top_pageviews(_PROJECT, _DAY, fetch)
+            first.articles.drop_in_place("views")
+            second = read_top_pageviews(_PROJECT, _DAY, fetch)
+            read_top_pageviews("en.wikipedia.org", _DAY, fetch)
+            read_top_pageviews(_PROJECT, ("2026", "10", "18"), fetch)
+            read_top_pageviews(_PROJECT, ("2026", "10", "all-days"), fetch)
+        assert second.articles["views"].to_list() == [12]
         assert fetch.call_count == 4
-        read_top_pageviews(_PROJECT, _DAY, fetch, parse)
+        read_top_pageviews(_PROJECT, _DAY, fetch)
         with source_cycle():
-            read_top_pageviews(_PROJECT, _DAY, fetch, parse)
+            read_top_pageviews(_PROJECT, _DAY, fetch)
         assert fetch.call_count == 6
 
     def test_transport_missing_and_validation_failures_are_not_retained(
         self,
     ) -> None:
-        """Retry failures and evict incompatible cached responses."""
-        fetch = Mock(side_effect=ConnectionError("top"))
-        parse = Mock(
-            side_effect=[None, ValueError("metadata"), {"views": 12}],
+        """Retain only complete observations after failed reads."""
+        observation = pageviews.parse_top_observation(
+            _top_payload(),
+            _PROJECT,
+            _DAY,
+        )
+        fetch = Mock(
+            side_effect=[
+                ConnectionError("top"),
+                None,
+                ValueError("metadata"),
+                observation,
+            ],
         )
         with source_cycle():
             with self.assertRaises(ConnectionError):
-                read_top_pageviews(_PROJECT, _DAY, fetch, parse)
-            fetch.side_effect = None
-            fetch.return_value = _top_payload()
-            assert read_top_pageviews(_PROJECT, _DAY, fetch, parse) is None
+                read_top_pageviews(_PROJECT, _DAY, fetch)
+            assert read_top_pageviews(_PROJECT, _DAY, fetch) is None
             with self.assertRaises(ValueError):
-                read_top_pageviews(_PROJECT, _DAY, fetch, parse)
-            assert read_top_pageviews(_PROJECT, _DAY, fetch, parse) == {
-                "views": 12,
-            }
-            rejected = Mock(side_effect=ValueError("views"))
-            with self.assertRaises(ValueError):
-                read_top_pageviews(_PROJECT, _DAY, fetch, rejected)
-            result = read_top_pageviews(
-                _PROJECT,
-                _DAY,
-                fetch,
-                lambda _payload: {"views": 12},
-            )
-        assert result == {"views": 12}
-        assert fetch.call_count == 5
+                read_top_pageviews(_PROJECT, _DAY, fetch)
+            first = read_top_pageviews(_PROJECT, _DAY, fetch)
+            second = read_top_pageviews(_PROJECT, _DAY, fetch)
+        assert first.articles.equals(second.articles)
+        assert fetch.call_count == 4

@@ -17,29 +17,17 @@ import tempfile
 import tomllib
 from pathlib import Path, PurePosixPath
 
-_SCRIPTS = {
-    "setup-env.sh",
-    "deploy-source.sh",
-    "drain-hub.py",
-    "run-hub.sh",
-    "run-web.sh",
-    "runtime-env.sh",
-    "source-files.json",
-    "validate-source.py",
-}
-_PACKAGES = {"backend", "updater", "webservice", "shared"}
-_SUFFIXES = {".py", ".html", ".css", ".js", ".json", ".svg", ".png"}
+_CONTRACT = json.loads(
+    Path(__file__).with_name("payload-contract.json").read_bytes(),
+)
+_SCRIPTS = set(_CONTRACT["scripts"])
+_PACKAGES = set(_CONTRACT["packages"])
+_SUFFIXES = set(_CONTRACT["suffixes"])
+_PRIVATE = set(_CONTRACT["private_names"])
+_RUNTIME_PARTS = set(_CONTRACT["runtime_parts"])
 _MAX_JSON = 4 * 1024 * 1024
 _MAX_FILE = 32 * 1024 * 1024
 _MAX_TOTAL = 128 * 1024 * 1024
-_PRIVATE = {
-    "user-config.py",
-    "user-password.py",
-    "user-password.cfg",
-    "user-fixes.py",
-    ".my.cnf",
-    ".env",
-}
 
 
 def _canonical_below(home: Path, path: Path) -> bool:
@@ -94,7 +82,10 @@ def _regular(root: Path, name: str, *, bound: int = _MAX_FILE) -> bytes:
         and relative.as_posix() == name
     )
     private = (
-        ".." in relative.parts or "\\" in name or relative.name in _PRIVATE
+        ".." in relative.parts
+        or "\\" in name
+        or relative.name in _PRIVATE
+        or bool(_RUNTIME_PARTS.intersection(relative.parts))
     )
     if not canonical or private:
         msg = f"Unsafe source path: {name}"
@@ -136,12 +127,11 @@ def _json(root: Path, name: str) -> dict[str, object]:
     return value
 
 
-def _expected_sources(root: Path, *, version: str) -> set[str]:
+def _expected_sources(root: Path) -> set[str]:
     """Read the reviewed source names and required deployment helpers.
 
     Args:
         root: Source root containing the reviewed file contract.
-        version: Manifest version selecting the bootstrap contract.
 
     Returns:
         Exact filenames required in the source hash manifest.
@@ -172,18 +162,11 @@ def _expected_sources(root: Path, *, version: str) -> set[str]:
         ):
             msg = f"Unexpected reviewed source: {name}"
             raise ValueError(msg)
-    scripts = _SCRIPTS.copy()
-    if version == "0.7.10" or re.fullmatch(
-        r"0\.7\.10\.post(?:[1-9]|1[0-2])",
-        version,
-    ):
-        # Immutable earlier generations predate the drain helper.
-        scripts -= {"drain-hub.py"}
     return set(names) | {
         "pyproject.toml",
         "uv.lock",
         ".python-version",
-        *(f"scripts/toolforge/{name}" for name in scripts),
+        *(f"scripts/toolforge/{name}" for name in _SCRIPTS),
     }
 
 
@@ -268,7 +251,7 @@ def verify(root: Path) -> dict[str, object]:
     ):
         msg = "Unsupported deployment manifest."
         raise ValueError(msg)
-    expected = _expected_sources(root, version=manifest["version"])
+    expected = _expected_sources(root)
     _verify_hashes(root, manifest["files"], expected)
     if _actual_sources(root) != expected | {"deployment.json"}:
         msg = "Unexpected or missing files in the source directory."
@@ -276,34 +259,59 @@ def verify(root: Path) -> dict[str, object]:
             msg,
         )
     metadata = tomllib.loads(_regular(root, "pyproject.toml").decode())
-    if (
-        metadata["project"]["version"] != manifest["version"]
-        or _regular(root, ".python-version").decode().strip() != "3.15.0"
-        or "build-system" in metadata
+    lock = tomllib.loads(_regular(root, "uv.lock").decode())
+    policy = _CONTRACT["metadata"]
+    project = metadata["project"]
+    version = project["version"]
+    locked = [
+        package
+        for package in lock["package"]
+        if package["name"] == policy["project_name"]
+    ]
+    version_invalid = (
+        project["name"] != policy["project_name"]
+        or not isinstance(version, str)
+        or re.fullmatch(policy["version_pattern"], version) is None
+    )
+    package_invalid = (
+        "build-system" in metadata
         or metadata["tool"]["uv"].get("package") is not False
+        or policy["required_dependency"] not in project["dependencies"]
+    )
+    runtime_invalid = (
+        project["requires-python"] != policy["requires_python"]
+        or lock.get("requires-python") not in policy["lock_requires_python"]
+        or _regular(root, ".python-version").decode().strip()
+        != policy["python_version"]
+    )
+    lock_invalid = (
+        len(locked) != 1
+        or locked[0].get("version") != version
+        or locked[0].get("source") != {"virtual": "."}
+    )
+    if (
+        version_invalid
+        or package_invalid
+        or runtime_invalid
+        or lock_invalid
+        or version != manifest["version"]
     ):
-        msg = "Expected consistent Python 3.15 source metadata."
+        msg = "Expected consistent locked Python 3.15 source metadata."
         raise ValueError(msg)
     return manifest
 
 
-def _receipt_path(root: Path, path: Path, *, write: bool) -> None:
+def _receipt_path(root: Path, path: Path) -> None:
     """Require setup evidence inside this tool's backup directory.
 
     Args:
         root: Validated source generation.
         path: Requested receipt artifact.
-        write: Whether this request can create new setup evidence.
 
     Raises:
         ValueError: The receipt could overwrite unrelated runtime data.
     """
     backup = root.parent / "deployment-backups"
-    if not write and path == root.parent / "active-deployment.json":
-        if not _canonical_below(root.parent, path):
-            msg = "Active setup evidence cannot be a symlink."
-            raise ValueError(msg)
-        return
     valid_directory = (
         path.parent.parent == backup
         and path.parent.is_dir()
@@ -340,7 +348,7 @@ def receipt(
         ValueError: Evidence is missing, stale, or from another runtime.
     """
     manifest = verify(root)
-    _receipt_path(root, path, write=write)
+    _receipt_path(root, path)
     evidence = {} if write else _json(path.parent, path.name)
     environment = environment or Path(str(evidence.get("environment", "")))
     if (
@@ -381,13 +389,6 @@ def receipt(
         _atomic_write(path, json.dumps(expected) + "\n")
     elif evidence != expected:
         msg = "Setup did not confirm this exact source generation."
-        raise ValueError(msg)
-    if (
-        not write
-        and path == root.parent / "active-deployment.json"
-        and (root.parent / "pyvenv-3.15").resolve() != environment.resolve()
-    ):
-        msg = "Active environment differs from its setup evidence."
         raise ValueError(msg)
     return expected
 
@@ -433,7 +434,7 @@ def select_generation(root: Path) -> None:
     generation(root)
     selected = root.parent / "app"
     if selected.exists() and not selected.is_symlink():
-        msg = "Migrate the legacy app directory before selecting source."
+        msg = "Expected app to select an immutable source generation."
         raise ValueError(msg)
     descriptor, name = tempfile.mkstemp(prefix=".app-", dir=root.parent)
     os.close(descriptor)

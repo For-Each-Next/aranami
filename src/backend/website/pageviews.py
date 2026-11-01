@@ -27,9 +27,10 @@ from urllib.parse import quote
 import polars as pl
 from pywikibot.comms import http
 
+from shared.identity import USER_AGENT
 from shared.sources import pageviews_rate
 from shared.sources.cycle import read_top_pageviews
-from shared.sources.pageviews import article_rank_filter
+from shared.sources.pageviews import article_rank_filter, parse_top_observation
 
 if TYPE_CHECKING:
     from pywikibot.site import BaseSite
@@ -38,16 +39,8 @@ _API_ROOT = (
     "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/"
     "zh.wikipedia.org/all-access/"
 )
-_TOP_LIMIT = 1000
 _ITEM_LIMIT = 12
 _LOOKBACK_DAYS = 7
-_MAX_VIEWS = 2**64 - 1
-_SCHEMA = {
-    "title": pl.String,
-    "url": pl.String,
-    "views": pl.UInt64,
-    "_source_rank": pl.UInt32,
-}
 
 
 def _source_url(day: dt.date) -> str:
@@ -60,100 +53,6 @@ def _source_url(day: dt.date) -> str:
         Auditable official API URL.
     """
     return _API_ROOT + day.strftime("%Y/%m/%d")
-
-
-def _article_record(value: object) -> dict[str, str | int]:
-    """Validate and decode one observed title and its uncombined count.
-
-    Args:
-        value: Article record supplied by the official API.
-
-    Returns:
-        Presentation fields and the source's ranking tie breaker.
-
-    Raises:
-        TypeError: The article observation is not an object.
-        ValueError: A title, view count, or source rank is malformed.
-    """
-    if not isinstance(value, dict):
-        message = "Pageviews returned a non-object article observation."
-        raise TypeError(message)
-    title, views, rank = (
-        value.get("article"),
-        value.get("views"),
-        value.get("rank"),
-    )
-    if not isinstance(title, str) or not title.strip():
-        message = "Pageviews returned an invalid article observation title."
-        raise ValueError(message)
-    if (
-        type(views) is not int
-        or not 0 <= views <= _MAX_VIEWS
-        or type(rank) is not int
-        or not 1 <= rank <= _TOP_LIMIT
-    ):
-        message = "Pageviews returned an invalid article observation."
-        raise ValueError(message)
-    return {
-        "title": title,
-        "url": "https://zh.wikipedia.org/wiki/"
-        + quote(title.replace(" ", "_"), safe="/:"),
-        "views": views,
-        "_source_rank": rank,
-    }
-
-
-def _daily_articles(value: object, day: dt.date) -> pl.DataFrame | None:
-    """Validate one daily response before interpreting its observations.
-
-    Args:
-        value: Decoded official API response.
-        day: Exact date requested from the API.
-
-    Returns:
-        Typed observed articles, or none for an explicit absent result.
-
-    Raises:
-        TypeError: The daily result has invalid object or list types.
-        ValueError: Metadata or article observations are malformed.
-    """
-    if not isinstance(value, dict) or not isinstance(value.get("items"), list):
-        message = "Pageviews returned an invalid daily result."
-        raise TypeError(message)
-    items = value["items"]
-    if not items:
-        return None
-    if len(items) != 1 or not isinstance(items[0], dict):
-        message = "Pageviews returned ambiguous daily observations."
-        raise ValueError(message)
-    item = items[0]
-    expected = {
-        "project": "zh.wikipedia",
-        "access": "all-access",
-        "year": day.strftime("%Y"),
-        "month": day.strftime("%m"),
-        "day": day.strftime("%d"),
-    }
-    if any(
-        item.get(key) != expected_value
-        for key, expected_value in expected.items()
-    ):
-        message = "Pageviews metadata does not match the requested day."
-        raise ValueError(message)
-    articles = item.get("articles")
-    if not isinstance(articles, list) or len(articles) > _TOP_LIMIT:
-        message = "Pageviews returned an invalid top-1,000 article list."
-        raise ValueError(message)
-    frame = pl.DataFrame(
-        [_article_record(article) for article in articles],
-        schema=_SCHEMA,
-    ).with_columns(
-        pl.col("title").str.replace_all("_", " ", literal=True),
-    )
-    if frame["title"].n_unique() != frame.height:
-        message = "Pageviews returned duplicate article identities."
-        raise ValueError(message)
-    return frame
 
 
 def _fetch_payload(day: dt.date) -> object:
@@ -173,7 +72,7 @@ def _fetch_payload(day: dt.date) -> object:
     pageviews_rate.wait_for_pageviews_request()
     response = http.fetch(
         _source_url(day),
-        headers={"accept": "application/json"},
+        headers={"accept": "application/json", "user-agent": USER_AGENT},
         default_error_handling=False,
     )
     if isinstance(response, Exception):
@@ -196,11 +95,29 @@ def _request(day: dt.date) -> pl.DataFrame | None:
     Returns:
         Validated observations, or none for HTTP 404 or no result.
     """
-    return read_top_pageviews(
+    period = day.strftime("%Y"), day.strftime("%m"), day.strftime("%d")
+    observation = read_top_pageviews(
         "zh.wikipedia.org",
-        (day.strftime("%Y"), day.strftime("%m"), day.strftime("%d")),
-        lambda: _fetch_payload(day),
-        lambda value: None if value is None else _daily_articles(value, day),
+        period,
+        lambda: parse_top_observation(
+            _fetch_payload(day),
+            "zh.wikipedia.org",
+            period,
+        ),
+    )
+    if observation is None:
+        return None
+    frame = observation.articles.rename({"source_rank": "_source_rank"})
+    return frame.with_columns(
+        pl.Series(
+            "url",
+            [
+                "https://zh.wikipedia.org/wiki/"
+                + quote(title.replace(" ", "_"), safe="/:")
+                for title in frame["title"]
+            ],
+            dtype=pl.String,
+        ),
     )
 
 
