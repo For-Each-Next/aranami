@@ -1,9 +1,10 @@
 """Prepare original newsletter subpages as bounded data-slot layouts.
 
-Only recognized issue metadata and old report bodies become slots. The
-source banners, headings, prose, conversion calls, column wrappers, and
-categories stay intact. Prototypes retain original row punctuation and
-chart options without carrying previous-issue observations forward.
+Recognized issue metadata and old report bodies become slots. Featured
+and good homepage appearances share one section. Other source banners,
+headings, prose, conversion calls, column wrappers, and categories stay
+intact. Prototypes retain original row punctuation and chart options
+without carrying previous-issue observations forward.
 """
 
 # Match source wikitext typography without normalizing its punctuation.
@@ -30,13 +31,13 @@ _HOMEPAGE_KINDS = {
     "特色內容": "featured",
     "典範條目": "featured",
     "典範內容": "featured",
+    "典優內容": "recognized",
     "新聞動態": "news",
     "歷史上的今天": "history",
 }
 _HOMEPAGE_SECTIONS = (
-    ("featured", "典範內容", "「典範條目」或「特色列表」"),
+    ("recognized", "典優內容", "「典範條目（特色列表）」和「優良條目」"),
     ("dyk", "新條目推薦", "「新條目推薦」"),
-    ("good", "優良條目", "「優良條目」"),
     ("news", "新聞動態", "「新聞動態」"),
     ("history", "歷史上的今天", "「歷史上的今天」"),
 )
@@ -355,13 +356,16 @@ def _homepage_slots(
             return None
         old_body = columns[2]
         bullet = re.search(
-            r"^(\*\s*)(\[\[[^\r\n]+?\]\])(<small[^>]*>（)\d{1,2}月\d{1,2}日(）</small>)$",
+            r"^(\*\s*)(\[\[[^\r\n]+?\]\])(<small[^>]*>（)"
+            r"(?:\d{1,2}月\d{1,2}日(?:典範條目|特色列表|優良條目)?"
+            r"|期初已在首頁，首次日期不詳)(）</small>)$",
             old_body,
             re.MULTILINE,
         )
         if bullet is None and old_body.strip() not in {
             "",
             "（無）",
+            "* （無）",
             "來源資料暫未取得。",
         }:
             return None
@@ -386,14 +390,14 @@ def _homepage_slots(
 
 
 def _complete_homepage_layout(text: str, rows: dict[str, str]) -> str:
-    """Retain every homepage section in the previous issue's order.
+    """Combine quality appearances and complete other homepage sections.
 
-    Existing sections retain their original headings and introductions.
-    Missing sections use the verified newsletter columns and an existing
-    bullet prototype. Empty observations fill these slots with none.
+    Featured and good appearances share one heading and introduction.
+    Other existing sections retain their text; missing sections use
+    the verified newsletter columns and an existing bullet prototype.
 
     Returns:
-        The source with all five recognized homepage subsections.
+        The source with the four current homepage subsections.
     """
     start = _heading(text, "在首頁上", 3).end()
     end = _award_heading(text).start()
@@ -411,8 +415,18 @@ def _complete_homepage_layout(text: str, rows: dict[str, str]) -> str:
     }
     parts = [section[: headings[0].start()]]
     prototype = next(iter(rows.values()))
+    rows["recognized"] = next(
+        (
+            rows[kind]
+            for kind in ("recognized", "featured", "good")
+            if kind in rows
+        ),
+        prototype,
+    )
+    rows.pop("featured", None)
+    rows.pop("good", None)
     for kind, label, introduction in _HOMEPAGE_SECTIONS:
-        if kind in blocks:
+        if kind in blocks and kind != "recognized":
             parts.append(blocks[kind])
         else:
             parts.append(
@@ -422,7 +436,7 @@ def _complete_homepage_layout(text: str, rows: dict[str, str]) -> str:
                 + _slot("homepage:" + kind)
                 + "\n{{div col end}}\n\n",
             )
-            rows[kind] = prototype
+            rows.setdefault(kind, prototype)
     return text[:start] + "".join(parts) + text[end:]
 
 

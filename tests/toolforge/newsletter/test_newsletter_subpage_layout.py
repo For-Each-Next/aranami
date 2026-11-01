@@ -52,7 +52,13 @@ def _pages() -> list[dict]:
             "dyk": [{"title": "推薦遊戲", "date": "2026-11-05"}],
             "homepage": {
                 "featured": [],
-                "good": [{"title": "優良遊戲", "date": "2026-12-09"}],
+                "good": [
+                    {
+                        "title": "優良遊戲",
+                        "date": "2026-12-09",
+                        "kind": "ga",
+                    },
+                ],
                 "news": None,
                 "history": [],
             },
@@ -64,8 +70,8 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
     """Keep verified source styling while replacing factual content."""
 
     @staticmethod
-    def test_featured_content_heading_alias_keeps_original_source() -> None:
-        """Recognize the preceding issue's featured-content heading."""
+    def test_featured_content_heading_alias_joins_recognized_content() -> None:
+        """Normalize the preceding issue's featured-content heading."""
         source = (
             Path(__file__).resolve().parents[2]
             / "fixtures"
@@ -78,16 +84,15 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
             "announcements",
         )
         assert layout is not None
-        assert "featured" in layout["homepage_rows"]
         assert set(layout["homepage_rows"]) == {
-            "featured",
+            "recognized",
             "dyk",
-            "good",
             "news",
             "history",
         }
-        assert "==== 典範內容 ====" in layout["text"]
-        assert "@@aranami:homepage:featured@@" in layout["text"]
+        assert "==== 典優內容 ====" in layout["text"]
+        assert "==== 典範內容 ====" not in layout["text"]
+        assert "@@aranami:homepage:recognized@@" in layout["text"]
         assert valid_subpage_layout(layout)
 
     @staticmethod
@@ -95,9 +100,8 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
         """Keep missing sections as explicit empty article lists."""
         layout = subpage_layouts()["宣告"]
         headings = (
-            "典範內容",
+            "典優內容",
             "新條目推薦",
-            "優良條目",
             "新聞動態",
             "歷史上的今天",
         )
@@ -107,9 +111,9 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
         assert offsets == sorted(offsets)
         assert all(
             f"@@aranami:homepage:{kind}@@" in layout["text"]
-            for kind in ("featured", "dyk", "good", "news", "history")
+            for kind in ("recognized", "dyk", "news", "history")
         )
-        assert layout["text"].count("{{div col|colwidth=27em}}") == 5
+        assert layout["text"].count("{{div col|colwidth=27em}}") == 4
         assert valid_subpage_layout(layout)
 
     @staticmethod
@@ -120,20 +124,23 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
             / "fixtures"
             / "newsletter-announcements-2026-10.wikitext"
         ).read_text(encoding="utf-8")
-        source = re.sub(
-            r"\{\{div col\|colwidth=27em\}\}.*?\{\{div col end\}\}",
-            "{{div col|colwidth=27em}}\n（無）\n{{div col end}}",
-            source,
-            flags=re.DOTALL,
-        )
-        layout = prepare_subpage_layout(
-            source,
-            Issue.parse("2026-10"),
-            "announcements",
-        )
-        assert layout is not None
-        assert len(layout["homepage_rows"]) == 5
-        assert valid_subpage_layout(layout)
+        for placeholder in ("（無）", "* （無）"):
+            empty_source = re.sub(
+                r"\{\{div col\|colwidth=27em\}\}.*?\{\{div col end\}\}",
+                "{{div col|colwidth=27em}}\n"
+                + placeholder
+                + "\n{{div col end}}",
+                source,
+                flags=re.DOTALL,
+            )
+            layout = prepare_subpage_layout(
+                empty_source,
+                Issue.parse("2026-10"),
+                "announcements",
+            )
+            assert layout is not None
+            assert len(layout["homepage_rows"]) == 4
+            assert valid_subpage_layout(layout)
 
     @staticmethod
     def test_generated_empty_subpages_can_prepare_the_next_issue() -> None:
@@ -158,6 +165,13 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
                     **observations,
                 },
             )["pages"]
+            if observations:
+                assert (
+                    pages[2]["text"].count(
+                        "{{div col|colwidth=27em}}\n* （無）\n{{div col end}}",
+                    )
+                    == 4
+                )
             for page, kind in zip(
                 pages[1:3],
                 ("quality", "announcements"),
@@ -175,8 +189,34 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
     def test_legacy_completion_is_pure_and_keeps_custom_source() -> None:
         """Normalize older saved layouts without altering the input."""
         layout = subpage_layouts()["宣告"]
+        prototype = layout["homepage_rows"].pop("recognized")
+        layout["text"] = (
+            layout["text"]
+            .replace(
+                "==== 典優內容 ====",
+                "==== 優良條目 ====",
+            )
+            .replace(
+                "以下條目曾登上首頁的「典範條目（特色列表）」和「優良條目」區塊。",
+                "以下條目曾登上首頁的「優良條目」區塊。",
+            )
+            .replace(
+                "@@aranami:homepage:recognized@@",
+                "@@aranami:homepage:good@@",
+            )
+        )
+        layout["homepage_rows"]["good"] = prototype
+        layout["homepage_rows"]["featured"] = prototype
+        layout["text"] = layout["text"].replace(
+            "==== 優良條目 ====",
+            "==== 典範內容 ====\n\n"
+            "以下條目曾登上首頁的「典範條目」或「特色列表」區塊。\n"
+            "{{div col|colwidth=27em}}\n"
+            "@@aranami:homepage:featured@@\n"
+            "{{div col end}}\n\n"
+            "==== 優良條目 ====",
+        )
         for label, kind in (
-            ("典範內容", "featured"),
             ("新聞動態", "news"),
             ("歷史上的今天", "history"),
         ):
@@ -194,7 +234,12 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
         original = deepcopy(layout)
         result = complete_announcement_layout(layout)
         assert layout == original
-        assert len(result["homepage_rows"]) == 5
+        assert len(result["homepage_rows"]) == 4
+        assert "==== 典優內容 ====" in result["text"]
+        assert "==== 典範內容 ====" not in result["text"]
+        assert "==== 優良條目 ====" not in result["text"]
+        assert "@@aranami:homepage:featured@@" not in result["text"]
+        assert "@@aranami:homepage:good@@" not in result["text"]
         assert "保留原本說明。" in result["text"]
         assert valid_subpage_layout(result)
 
@@ -206,7 +251,7 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
             ("=== 在首頁上 ===", "=== Missing ==="),
             ("=== ACG專題獎 ===", "=== Missing ==="),
             ("=== 在首頁上 ===", "=== 在首頁上 ===\n=== 在首頁上 ==="),
-            ("==== 新聞動態 ====", "==== 優良條目 ===="),
+            ("==== 新聞動態 ====", "==== 典優內容 ===="),
         ):
             layout = {
                 **original,
@@ -272,9 +317,9 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
             "{{div col end}}"
         ) in text
         assert (
-            "以下條目曾登上首頁的「優良條目」區塊。\n"
+            "以下條目曾登上首頁的「典範條目（特色列表）」和「優良條目」區塊。\n"
             "{{div col|colwidth=27em}}\n"
-            "* [[:優良遊戲]]<small>（12月9日）</small>\n"
+            "* [[:優良遊戲]]<small>（12月9日優良條目）</small>\n"
             "{{div col end}}"
         ) in text
         assert "<!-- 1105 -->" not in text
@@ -290,7 +335,7 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
             for template in templates
             if template.name.matches("div col end")
         ]
-        assert len(starts) == len(ends) == 5
+        assert len(starts) == len(ends) == 4
         assert all(
             str(template.get("colwidth").value) == "27em"
             for template in starts

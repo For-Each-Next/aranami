@@ -378,45 +378,82 @@ def _quality(issue: Issue, facts: Mapping[str, object]) -> str:
     layout = (facts.get("subpage_layouts") or {}).get("特優內容")
     if layout is None:
         return _UNAVAILABLE
-    summary = _quality_summary(issue, facts)
-    undated = (facts.get("history_undated") or {}).get("quality", 0)
-    if undated:
-        summary += (
-            f"另保留{undated}項日期不詳的評級變動紀錄，未列入本期按日期統計。"
-        )
     return _fill(
         layout["text"],
         {
             **_subpage_values(issue),
-            "quality_summary": summary,
+            "quality_summary": _quality_summary(issue, facts),
             "quality_months": _quality_months(issue, facts, layout),
         },
     )
 
 
-def _source_homepage_rows(rows: object, prototype: str) -> str:
+def _source_homepage_rows(
+    rows: object,
+    prototype: str,
+    *,
+    content_kinds: bool = False,
+) -> str:
     """Fill only the source column's article-list body.
+
+    Args:
+        rows: Prepared appearances, or none when unavailable.
+        prototype: Source bullet with title and date slots.
+        content_kinds: Append each recognized content type to its date.
 
     Returns:
         Source-formatted bullets or observed empty/unavailable text.
     """
     if rows is None:
         return _UNAVAILABLE
-    return (
-        "\n".join(
+    labels = {"fa": "典範條目", "fl": "特色列表", "ga": "優良條目"}
+    lines = []
+    for row in rows:
+        date = (
+            "期初已在首頁，首次日期不詳"
+            if row.get("date_kind") == "window_start"
+            else _date_label(row["date"])
+        )
+        if content_kinds:
+            date += labels.get(row.get("kind"), "")
+        lines.append(
             _fill(
                 prototype,
-                {
-                    "title": _link(row["title"]),
-                    "date": "期初已在首頁，首次日期不詳"
-                    if row.get("date_kind") == "window_start"
-                    else _date_label(row["date"]),
-                },
-            )
-            for row in rows
+                {"title": _link(row["title"]), "date": date},
+            ),
         )
-        or "（無）"
+    return "\n".join(lines) or "* （無）"
+
+
+def _recognized_homepage_rows(homepage: Mapping, prototype: str) -> str:
+    """Combine featured and good appearances in chronological order.
+
+    Args:
+        homepage: Separately retained homepage observations.
+        prototype: Source bullet with title and date slots.
+
+    Returns:
+        Typed bullets with an unavailable source notice when needed,
+        distinguishing missing observations from empty data.
+    """
+    schema = {"title": pl.String, "date": pl.String, "kind": pl.String}
+    featured = homepage.get("featured")
+    good = homepage.get("good")
+    rows = (
+        pl
+        .concat([
+            pl.from_dicts(featured or [], schema=schema),
+            pl.from_dicts(good or [], schema=schema).with_columns(
+                pl.lit("ga").alias("kind"),
+            ),
+        ])
+        .sort("date", "title", "kind")
+        .to_dicts()
     )
+    body = _source_homepage_rows(rows, prototype, content_kinds=True)
+    if featured is None or good is None:
+        return body + "\n" + _UNAVAILABLE if rows else _UNAVAILABLE
+    return body
 
 
 def _source_awards(facts: Mapping, layout: Mapping) -> str:
@@ -535,7 +572,7 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
     """Fill the actual previous announcements page with collected facts.
 
     Returns:
-        Original headings and formatting around the updated data.
+        Source formatting with combined homepage recognition.
     """
     layout = (facts.get("subpage_layouts") or {}).get("宣告")
     if layout is None:
@@ -549,6 +586,12 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
         "newcomers": "",
     }
     for kind, prototype in layout["homepage_rows"].items():
+        if kind == "recognized":
+            values["homepage:" + kind] = _recognized_homepage_rows(
+                facts.get("homepage") or {},
+                prototype,
+            )
+            continue
         rows = (
             facts.get("dyk")
             if kind == "dyk"
@@ -569,28 +612,7 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
                 else str(size),
             },
         )
-    undated = facts.get("history_undated") or {}
-    labels = (
-        ("dyk", "新條目推薦"),
-        ("news", "新聞動態"),
-        ("history", "歷史上的今天"),
-    )
-    unknown = "、".join(
-        f"{label}{undated[kind]}項"
-        for kind, label in labels
-        if undated.get(kind)
-    )
-    values["homepage_undated"] = (
-        f"\n\n另保留日期不詳的紀錄（{unknown}），未列入本期按日期列出的條目。"
-        if unknown
-        else ""
-    )
-    template = layout["text"].replace(
-        "=== 在首頁上 ===",
-        "=== 在首頁上 ===@@aranami:homepage_undated@@",
-        1,
-    )
-    text = _fill(template, values)
+    text = _fill(layout["text"], values)
     return re.sub(
         r"\n(?:[ \t]*\n)+(?=\[\[Category:電子遊戲專題簡訊宣告\]\])",
         "\n\n",

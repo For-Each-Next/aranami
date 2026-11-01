@@ -4,6 +4,16 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.9
 
+### 0.8.1 (2026-11-01 08:57 UTC)
+
+Overview: Simplified newsletter announcements with combined homepage recognition
+lists and cleaner draft text.
+
+- Combined featured and good homepage appearances under `典優內容`, with
+  dated content-type labels and bulleted empty lists.
+- Removed generated explanations about undated records from newsletter drafts.
+- Added spaces after commas in newsletter chart data for clearer wikitext.
+
 ### 0.8.0 (2026-11-01 08:34 UTC)
 
 Overview: Reorganized newsletter and article evidence ownership, consolidated
@@ -23,6 +33,8 @@ shared observations and persistence, and simplified source deployment contracts.
   retaining read-only access to canonical observations and immutable archives.
 - Added discoverable domain suites and Node/Chromium release gates covering
   localization, native forms, accessibility and narrow layouts.
+- Made headless interface checks select and verify desktop mouse capabilities
+  consistently on Linux and macOS.
 
 ## Until 0.8
 

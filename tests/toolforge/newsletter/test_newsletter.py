@@ -164,10 +164,10 @@ class NewsletterWikitextTests(unittest.TestCase):
             .partition(
                 "==== 新條目推薦 ====",
             )[2]
-            .partition("==== 優良條目 ====")[0]
+            .partition("==== 新聞動態 ====")[0]
         )
         assert "以下條目曾登上首頁的「新條目推薦」區塊。" in dyk
-        assert "{{div col|colwidth=27em}}\n（無）\n{{div col end}}" in dyk
+        assert "{{div col|colwidth=27em}}\n* （無）\n{{div col end}}" in dyk
 
     @staticmethod
     def test_editorial_templates_do_not_reuse_authored_prose() -> None:

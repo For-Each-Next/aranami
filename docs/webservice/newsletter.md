@@ -20,6 +20,10 @@ October–December 2026 in its regular pages and all of 2026 in its annual featu
 All pages use the current newsletter banner. Feature and interview prose stays
 editorial work; the generator never copies a previous author's article.
 
+Announcements combine homepage featured articles, featured lists, and good
+articles under `典優內容`. Entries show the appearance date and content type in
+chronological order. Homepage lists with no entries use `* （無）`.
+
 Use **Copy** to copy the draft, **View newsletter page** to read its destination,
 and **Edit newsletter page** to open the wiki editor. The edit link prefills a
 source-linked summary such as `[[toolforge:aranami/newsletter|2026年10月30日资料]]`

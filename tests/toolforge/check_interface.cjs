@@ -52,7 +52,10 @@ async function main() {
     await bounded(once(server, "listening"), "local fixture server startup");
     const base = `http://127.0.0.1:${server.address().port}`;
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), "aranami-browser-"));
-    const browser = spawn(chromium, ["--headless", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+    // Headless Linux has no hardware mouse; select desktop input explicitly.
+    // This is the headless Chromium setup used by Playwright's launcher.
+    const desktopInput = "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4";
+    const browser = spawn(chromium, ["--headless", desktopInput, "--disable-gpu", "--no-first-run", "--disable-background-networking", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
     let socket;
     try {
         const endpoint = await new Promise((resolve, reject) => {
@@ -120,6 +123,11 @@ async function main() {
             if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
             return result.result.value;
         };
+        const inputCapabilities = await evaluate(`({
+            hover: matchMedia('(hover: hover)').matches,
+            finePointer: matchMedia('(pointer: fine)').matches
+        })`);
+        assert.deepEqual(inputCapabilities, {hover: true, finePointer: true}, "interface checks require emulated desktop mouse input");
         const press = async (key, virtual, modifiers = 0) => {
             // Enter needs its character event for Chromium's native summary activation.
             await call("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: virtual, modifiers, ...(key === "Enter" ? { text: "\r" } : {}) }, sessionId);
@@ -673,7 +681,7 @@ async function main() {
                 console.error(`${label}: ${error.message}`);
             }
         }
-        const result = { browser: browserVersion, checked, withoutJavaScript, widths, locales, surfaces, failures };
+        const result = { browser: browserVersion, inputCapabilities, checked, withoutJavaScript, widths, locales, surfaces, failures };
         fs.writeFileSync(path.join(outputRoot, "results.json"), JSON.stringify(result, null, 2));
         console.log(JSON.stringify(result, null, 2));
         assert.equal(failures.length, 0, "responsive interface checks failed");

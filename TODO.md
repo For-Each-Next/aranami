@@ -116,6 +116,64 @@ Formal tag publication, formal promotion, exact cleanup results and the next
 production boundary are recorded separately after observation; dev1 success
 alone does not complete those gates.
 
+### Formal deployment and selective cleanup
+
+- Release commit `ea67331` was merged into `trunk`; immutable `v0.8.0` was
+  pushed. Every tagged runtime file was compared with its payload digest.
+- Formal generation: `app-staging-77d387c62c814ce58d8ef630ab347cb7`, manifest
+  `ff0c05f9e3623aa3995ab9ed46b47c474093d2fa645b9c902ab57c395ce885d7`.
+  Setup passed, drain was acknowledged, the web became available, and the old
+  hub terminated before one replacement started. Both process PYTHONPATH values,
+  version and receipt matched. Health had no error; seven public page/locale
+  requests returned HTTP 200. Current facts, 35 historical captures, three
+  quarterly dates and two annual dates validated in place after promotion.
+- Removed **108 exact inventoried paths**: 52 obsolete source generations,
+  53 unused environments, `app.previous`, `active-deployment.json` and
+  `pyvenv-3.15`. Inventory SHA-256:
+  `1242a53cf00499d74f386b87543820af995bf8737916edf86fcbf403c89b91ae`.
+  The durable receipt is `deployment-backups/cleanup-v0.8.0.json`.
+  Preserved formal, dev1 and 0.7.13 source/environment/receipt sets; all
+  transaction receipts, legacy migration source originals, runtime data and
+  credentials. No obsolete running service or manual job needed removal.
+  Locally removed only the inventoried obsolete updater/support bytecode folder;
+  unrelated worktrees and ignored runtime artifacts were preserved.
+- Tag-triggered GitHub validation passed Python/Node checks but failed six
+  hover assertions because headless Linux Chrome exposed no hover device.
+  Reproducing that input state locally produced the same six failures. The
+  checker now explicitly selects/asserts desktop mouse input (the official
+  Playwright Chromium launcher uses the same settings), without weakening
+  checks or changing runtime files. All 336 page and 33 no-JavaScript cases
+  then passed in the reproduced environment. The published tag is unchanged;
+  corrected trunk CI and GitHub source-artifact publication are verified below.
+- **Pending production observation:** November 2 00:00 UTC assessment/newsletter
+  boundary and subsequent 00:07 New pages; Pageviews November 1 18:59 UTC.
+  Controlled tests and saved next-run times are not those future executions.
+
+### Published release receipt
+
+- [GitHub release v0.8.0](https://github.com/For-Each-Next/aranami/releases/tag/v0.8.0)
+  was published after [corrected CI](https://github.com/For-Each-Next/aranami/actions/runs/41290234667)
+  passed at `2f9d804`. The immutable tag remains `ea67331`; the CI portability
+  fix changes only the checker, not any runtime payload file.
+- The CI source archive matched the original formal archive byte for byte.
+  Published `aranami-source.tar` (2,631,680 bytes) was downloaded and verified:
+  SHA-256 `9c58ba3d1be32e7e5c372badfaf1e9a4632fc8502f9b251eea7f4a056b12624f`.
+  Its manifest digest remains `ff0c05f9e3623aa3995ab9ed46b47c474093d2fa645b9c902ab57c395ce885d7`.
+  Release notes came from the tagged changelog. The initial tag workflow's
+  headless-input failure remains historical; publication used the verified
+  successful CI artifact without moving the tag or changing deployed source.
+- Post-cleanup validation again confirmed all three retained generations and
+  environments, exactly one healthy hub plus one web pod, unchanged routine
+  outcomes, and public version `0.8.0`. Sixty setup receipts remain preserved.
+- Commit evidence: implementation `ca419d7`, final cleanup/release `ea67331`,
+  browser portability and deployment/cleanup record `2f9d804`; this receipt
+  is a documentation-only follow-up. T27 and T28 are complete. T29's cleanup,
+  restart, archive and current-schedule checks are complete; its future daily
+  production observations remain explicitly pending above.
+- Concurrent comma-formatting work began after the release and was preserved
+  outside its tag/payload. This receipt was prepared in an isolated worktree
+  and published without that unrelated commit.
+
 ## Direction and existing strengths
 
 Keep the useful ownership model: backend prepares and persists facts; updater
@@ -579,7 +637,7 @@ CSS/JS files do not need extra folders merely for symmetry.
 
 ### T24 — Rewrite current documentation and verify artifact cleanup
 
-- [ ] **Where:** README, all `docs/`, CONTRIBUTING, scoped instructions, and
+- [x] **Where:** README, all `docs/`, CONTRIBUTING, scoped instructions, and
   inventoried local/server artifacts.
   **What/how:** keep product results/UTC triggers in README, commands in usage,
   deployment/recovery in administration, checks in development, and ownership
@@ -635,7 +693,7 @@ for script in scripts/toolforge/*.sh; do sh -n "$script"; done
 
 ### T27 — Finalize one consistent release identity
 
-- [ ] **Where:** `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, payload metadata,
+- [x] **Where:** `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, payload metadata,
   release workflow, and version-bearing documentation.
   **What/how:** use sequential `0.8.0.devN` only for needed test deployments.
   Perform the required final cleanup pass, then publish base `0.8.0`; maintain
@@ -650,7 +708,7 @@ for script in scripts/toolforge/*.sh; do sh -n "$script"; done
 
 ### T28 — Deploy using the verified current Toolforge contract
 
-- [ ] **Where:** uploader, setup/validation scripts, `aranami-web`,
+- [x] **Where:** uploader, setup/validation scripts, `aranami-web`,
   `aranami-hub`, and the selected immutable source/environment generation.
   **What/how:** deploy only when execution is authorized and T03/T25–T27 gates
   are met. Validate the complete staged payload/environment before promotion;

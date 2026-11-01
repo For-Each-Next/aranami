@@ -580,7 +580,7 @@ def _quality_charts(review: Mapping, year: int) -> str:
             "|x="
             + ",".join(labels)
             + "\n|y1="
-            + ",".join(map(str, counts))
+            + ", ".join(map(str, counts))
             + "\n|colors="
             + ",".join(meta[1] for _, meta in observed)
             + "\n|legend=true|showValues=false\n}}"
@@ -832,7 +832,7 @@ def _quality_history_chart(review: Mapping) -> str:
         "|xType=string|x=" + ",".join(labels),
     ]
     for index, (key, label, _color) in enumerate(groups, start=1):
-        values = ",".join(str(value) for value in frame[key])
+        values = ", ".join(str(value) for value in frame[key])
         parameters.append(f"|y{index}={values}|y{index}Title={label}")
     parameters.extend((
         "|colors=" + ",".join(color for _key, _label, color in groups),
@@ -876,7 +876,7 @@ def _milestone_charts(review: Mapping, year: int) -> tuple[str, str]:
         "{{Graph:Chart|type=area|width=400|height=250|xType=date|x="
         + ",".join(day for day, _ in dyk)
         + "|y1="
-        + ",".join(str(count) for _, count in dyk)
+        + ", ".join(str(count) for _, count in dyk)
         + "|colors=#b4bbff|xAxisTitle=日期|yAxisTitle=條目數}}"
     )
     return quality, (

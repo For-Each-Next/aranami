@@ -12,6 +12,7 @@ from pathlib import Path
 import mwparserfromhell
 
 from backend.newsletter.layout import prepare_main_layout
+from backend.newsletter.subpages import prepare_subpage_layout
 from newsletter.fixtures import subpage_layouts
 from shared.newsletter import Issue
 from updater.services.newsletter import render_issue
@@ -85,18 +86,16 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "{{icon|DGA}}&thinsp;撤銷優良條目" in text
         assert "{{icon|A}}&thinsp;當選甲級條目" in text
         assert "{{icon|Bplus}}&thinsp;撤銷乙上級條目" in text
-        assert (
-            "另保留2項日期不詳的評級變動紀錄，未列入本期按日期統計。" in text
-        )
+        assert "日期不詳的評級變動紀錄" not in text
         assert "{{icon|GT}}&thinsp;當選優良話題：（無）" in text
         assert "（無已知日期的變動）" not in text
         assert "列表新增" not in text
         assert "列表移除" not in text
 
     @staticmethod
-    def test_undated_homepage_records_have_a_separate_caveat() -> None:
-        """Keep unknown dates separate from dated article lists."""
-        pages = _render({
+    def test_undated_homepage_records_do_not_add_explanatory_prose() -> None:
+        """Retain unknown-date evidence without generated caveats."""
+        facts = {
             "quality_changes": [],
             "quality_source": "article_history",
             "history_undated": {
@@ -106,17 +105,16 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
                 "history": 4,
             },
             "dyk": [],
-        })
+        }
+        original_counts = facts["history_undated"].copy()
+        pages = _render(facts)
         quality, announcements = pages[1]["text"], pages[2]["text"]
         assert "新增典範條目0篇、特色列表0篇、優良條目0篇" in quality
         assert "無特優內容變動" not in quality
         assert "（無變動）" in quality
-        assert (
-            "（新條目推薦2項、新聞動態3項、歷史上的今天4項）" in announcements
-        )
-        assert "未列入本期按日期列出的條目。" in announcements
-        assert "=== 在首頁上 ===\n\n另保留日期不詳" in announcements
-        assert "日期不詳的評級變動" not in announcements
+        assert "另保留" not in quality + announcements
+        assert "未列入本期按日期" not in quality + announcements
+        assert facts["history_undated"] == original_counts
         assert "@@aranami:" not in announcements
 
     @staticmethod
@@ -330,8 +328,20 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             "issue": issue.value,
             "available": True,
             "homepage": {
-                "featured": [{"title": "額外展示", "date": "2026-12-31"}],
-                "good": [{"title": "展示遊戲", "date": "2026-12-31"}],
+                "featured": [
+                    {
+                        "title": "額外展示",
+                        "date": "2026-12-31",
+                        "kind": "fa",
+                    },
+                ],
+                "good": [
+                    {
+                        "title": "展示遊戲",
+                        "date": "2026-12-31",
+                        "kind": "ga",
+                    },
+                ],
                 "news": None,
                 "history": None,
             },
@@ -343,24 +353,30 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             .partition(f"==== {label} ====")[2]
             .partition("====")[0]
             .partition("=== ACG專題獎 ===")[0]
-            for label in ("新條目推薦", "優良條目")
+            for label in ("新條目推薦", "典優內容")
         }
-        for label, text in sections.items():
-            assert f"以下條目曾登上首頁的「{label}」區塊。" in text
+        for text in sections.values():
             assert "{{div col|colwidth=27em}}" in text
             assert "{{div col end}}" in text
         assert (
-            "* [[:展示遊戲]]<small>（12月31日）</small>"
-            in sections["優良條目"]
+            "* [[:展示遊戲]]<small>（12月31日優良條目）</small>"
+            in sections["典優內容"]
         )
-        assert "==== 典範內容 ====" in announcements
-        assert "額外展示" in announcements
+        assert (
+            "* [[:額外展示]]<small>（12月31日典範條目）</small>"
+            in sections["典優內容"]
+        )
+        assert "==== 典範內容 ====" not in announcements
+        assert "==== 優良條目 ====" not in announcements
         assert "==== 新聞動態 ====" in announcements
         assert "==== 歷史上的今天 ====" in announcements
-        empty = {**facts, "homepage": {**facts["homepage"], "good": []}}
+        empty = {
+            **facts,
+            "homepage": {**facts["homepage"], "featured": [], "good": []},
+        }
         empty["subpage_layouts"] = subpage_layouts()
         assert (
-            "{{div col|colwidth=27em}}\n（無）\n{{div col end}}"
+            "{{div col|colwidth=27em}}\n* （無）\n{{div col end}}"
             in (render_issue(issue, empty)["pages"][2]["text"])
         )
         unavailable = {
@@ -369,11 +385,22 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         }
         unavailable["subpage_layouts"] = subpage_layouts()
         text = render_issue(issue, unavailable)["pages"][2]["text"]
-        good = text.partition("==== 優良條目 ====")[2].partition(
-            "=== ACG專題獎 ===",
+        recognized = text.partition("==== 典優內容 ====")[2].partition(
+            "==== 新條目推薦 ====",
         )[0]
-        assert "來源資料暫未取得" in good
-        assert "\n（無）\n" not in good
+        assert "來源資料暫未取得" in recognized
+        assert "* （無）" not in recognized
+        partial = {
+            **facts,
+            "homepage": {**facts["homepage"], "featured": None},
+        }
+        text = render_issue(issue, partial)["pages"][2]["text"]
+        recognized = text.partition("==== 典優內容 ====")[2].partition(
+            "==== 新條目推薦 ====",
+        )[0]
+        assert "[[:展示遊戲]]" in recognized
+        assert "來源資料暫未取得" in recognized
+        assert "* （無）" not in recognized
 
     @staticmethod
     def test_new_news_and_history_sections_preserve_source_style() -> None:
@@ -415,7 +442,7 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "* [[:歷史遊戲]]<small>（10月15日）</small>" in announcements
         assert "[[:延續新聞]]<!--" not in announcements
         assert "10月1日" not in announcements
-        assert "==== 典範內容 ====" in announcements
+        assert "==== 典優內容 ====" in announcements
 
     @staticmethod
     def test_existing_news_section_is_filled_without_duplicate() -> None:
@@ -447,7 +474,7 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "保留的說明。" in text
         assert "期初已在首頁，首次日期不詳" in text
         assert "10月1日" not in text
-        assert "==== 典範內容 ====" in text
+        assert "==== 典優內容 ====" in text
         assert "==== 歷史上的今天 ====" in text
 
     @staticmethod
@@ -718,6 +745,92 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         })[0]["text"]
         assert "截至2027年1月1日，[[维基专题" in text
         assert "截至2026年第四季底" not in text
+
+
+class NewsletterRecognizedHomepageTests(unittest.TestCase):
+    """Verify combined recognized-content announcements."""
+
+    @staticmethod
+    def test_recognized_homepage_content_combines_dates_and_types() -> None:
+        """Combine all three content types in observed date order."""
+        facts = {
+            "homepage": {
+                "featured": [
+                    {
+                        "title": "任天堂DSi 22",
+                        "date": "2026-10-15",
+                        "kind": "fl",
+                    },
+                    {
+                        "title": "任天堂DSi",
+                        "date": "2026-10-13",
+                        "kind": "fa",
+                    },
+                ],
+                "good": [
+                    {
+                        "title": "任天堂DSi 333",
+                        "date": "2026-10-19",
+                        "kind": "ga",
+                    },
+                ],
+                "news": [],
+                "history": [],
+            },
+            "dyk": [],
+        }
+        text = _render(facts)[2]["text"]
+        assert text.count("==== 典優內容 ====") == 1
+        assert (
+            "以下條目曾登上首頁的「典範條目（特色列表）」和「優良條目」區塊。\n"
+            "{{div col|colwidth=27em}}\n"
+            "* [[:任天堂DSi]]<small>（10月13日典範條目）</small>\n"
+            "* [[:任天堂DSi 22]]<small>（10月15日特色列表）</small>\n"
+            "* [[:任天堂DSi 333]]<small>（10月19日優良條目）</small>\n"
+            "{{div col end}}"
+        ) in text
+        assert "==== 典範內容 ====" not in text
+        assert "==== 優良條目 ====" not in text
+        layout = prepare_subpage_layout(
+            text,
+            Issue(2027, 1),
+            "announcements",
+        )
+        assert layout is not None
+        assert layout["homepage_rows"]["recognized"] == (
+            "* @@aranami:title@@<small>（@@aranami:date@@）</small>"
+        )
+        assert "任天堂DSi" not in layout["text"]
+
+    @staticmethod
+    def test_recognized_homepage_content_retains_multiple_appearances() -> (
+        None
+    ):
+        """Keep different appearances of one subject and title ties."""
+        text = _render({
+            "homepage": {
+                "featured": [
+                    {"title": "B", "date": "2026-10-15", "kind": "fl"},
+                    {"title": "A", "date": "2026-10-15", "kind": "fa"},
+                ],
+                "good": [
+                    {"title": "A", "date": "2026-10-15", "kind": "ga"},
+                    {"title": "A", "date": "2026-10-10", "kind": "ga"},
+                ],
+            },
+        })[2]["text"]
+        recognized = text.partition("==== 典優內容 ====")[2].partition(
+            "==== 新條目推薦 ====",
+        )[0]
+        assert [
+            str(link.title)
+            for link in mwparserfromhell.parse(recognized).filter_wikilinks()
+        ] == [":A", ":A", ":A", ":B"]
+        assert "[[:A]]<small>（10月10日優良條目）</small>" in recognized
+        assert "[[:A]]<small>（10月15日典範條目）</small>" in recognized
+        assert "[[:A]]<small>（10月15日優良條目）</small>" in recognized
+        assert recognized.index("10月10日") < recognized.index("10月15日")
+        assert recognized.rindex("[[:A]]") < recognized.index("[[:B]]")
 
 
 class NewsletterQualitySummaryTests(unittest.TestCase):

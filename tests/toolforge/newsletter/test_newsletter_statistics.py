@@ -86,7 +86,7 @@ class NewsletterStatisticsTests(TestCase):
                 "甲级：5150",
                 "优良级：3851",
             ]
-            assert pie.get("y1").value.strip() == "499,500,5150,3851"
+            assert pie.get("y1").value.strip() == "499, 500, 5150, 3851"
             assert pie.get("showValues").value.strip() == "false"
             assert not pie.has("1")
         assert "<svg" not in text
@@ -316,7 +316,7 @@ class NewsletterStatisticsTests(TestCase):
         )
         assert "2025-12-31,2026-03-31,2026-06-30,2026-09-30|y1=" in chart
         assert "2026-10-31" not in chart
-        assert "1323,1360,1380,1400,1420|colors=" in chart
+        assert "1323, 1360, 1380, 1400, 1420|colors=" in chart
         assert "! 品質 !!" not in text
         assert "2024年條目品質概況" not in text
         assert "2025年條目品質概況" in text

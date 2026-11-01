@@ -184,9 +184,16 @@ class NewsletterQualityYearTests(TestCase):
 
     @staticmethod
     def test_native_chart_preserves_stack_order_without_expansion() -> None:
-        """Keep grade order and plain years in native parameters."""
+        """Keep grade order, plain years, and spaced numeric series."""
         review = {
             "quality_year_ends": [
+                {
+                    "year": 2025,
+                    "grades": dict.fromkeys(
+                        ("FA", "FL", "A", "AL", "GA", "Bplus"),
+                        0,
+                    ),
+                },
                 {
                     "year": 2026,
                     "grades": {
@@ -211,13 +218,13 @@ class NewsletterQualityYearTests(TestCase):
         params = {
             str(p.name).strip(): str(p.value).strip() for p in chart.params
         }
-        assert params["x"] == "2026"
+        assert params["x"] == "2025,2026"
         assert params["xAxisTitle"] == "年份"
         assert [params[f"y{index}"] for index in range(1, 5)] == [
-            "3",
-            "7",
-            "6",
-            "5",
+            "0, 3",
+            "0, 7",
+            "0, 6",
+            "0, 5",
         ]
         assert [params[f"y{index}Title"] for index in range(1, 5)] == [
             "典范级",
