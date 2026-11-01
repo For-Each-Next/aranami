@@ -24,7 +24,7 @@ def action_result(
     """Retain the delegated action without inventing confirmed edits.
 
     Args:
-        report: Backend-prepared current-day history evidence.
+        report: Backend-prepared rolling 24-hour history evidence.
         wiki: Database identity of the publication destination.
         endpoint: Delegated publication endpoint selected by the job.
 
@@ -37,7 +37,7 @@ def action_result(
             "actions": pl.DataFrame(
                 {
                     "title": [report.title],
-                    "checked_date": [report.checked_date],
+                    "checked_at": [report.checked_at.isoformat()],
                     "already_edited_by_pexbot": [report.already_updated],
                     "action": [
                         "skip" if report.already_updated else "refresh",
@@ -45,7 +45,7 @@ def action_result(
                 },
                 schema={
                     "title": pl.String,
-                    "checked_date": pl.Date,
+                    "checked_at": pl.String,
                     "already_edited_by_pexbot": pl.Boolean,
                     "action": pl.String,
                 },
@@ -54,7 +54,7 @@ def action_result(
         metadata={"delegated": True, "confirmed_edit_count": None},
         provenance={
             "wiki": wiki,
-            "source": "current-day-revision-history",
+            "source": "preceding-24-hours-revision-history",
             "endpoint": endpoint,
         },
         calculated_at=datetime.now(UTC),

@@ -25,18 +25,19 @@ A successful check can finish with **no update needed**.
 |---|---|---|
 | [New-article recommendations (DYK)][dyk] | Hourly, `HH:00` | Completed DYK entries, current nominees, assessments, and cumulative statistics. |
 | [New pages][new-pages] | Daily, `00:07` | Keyword-selected new pages and pages rewritten from redirects, with assessments to help editors review them. |
-| [Article assessments][assessments] | Hourly, `HH:31` | Six assessment and review lists: Bplus, BPAN, A, AL, ACC, and PPR. |
+| [Article assessments][assessments] | Daily, when idle after `00:00` | Six assessment and review lists: Bplus, BPAN, A, AL, ACC, and PPR. |
 | [Assessment change log][assessment-log] | Daily, `00:00:00` | A reusable full project assessment snapshot, plus removals, new assessments, reassessments, and renames grouped by observation date. |
 | [Pageview rankings][pageviews] | Daily cycle from `18:00`; normal first attempt `18:59`, retries at `HH:59` | Daily, weekly, monthly, seasonal, yearly, and monthly task-force rankings. |
-| [English Wikipedia comparisons][english] | Daily, `00:00:00`, after assessment capture | Important and high-quality English articles, their Chinese counterparts, and relevant changes. |
-| [Database reports][database] | Daily, `00:00` | Delegated refresh requests for subscribed PexBot reports within the configured project scope. |
+| [English Wikipedia comparisons][english] | Daily, when idle after `00:00`, after assessment capture | Important and high-quality English articles, their Chinese counterparts, and relevant changes. |
+| [Database reports][database] | Daily, when idle after `00:00` | Delegated refresh requests for subscribed PexBot reports within the configured project scope. |
 | [Newsletter drafts](https://aranami.toolforge.org/newsletter/) | Daily, `00:00` | Independent daily JSON histories for quarterly drafts and January's annual feature, rendered as wikitext on request. |
 | Article milestones | Hourly, `HH:00` | Shared project review and homepage actions, questions, nomination credits, and historical authorship. |
 
 New pages and Pageviews fill missing daily reports and retain confirmed
 completion across restarts. Pageviews uses an 18:00 UTC reporting boundary;
-incomplete data retries hourly. PexBot reports already edited that UTC day
-are not requested again.
+incomplete data retries hourly. The three idle daily tasks wait for other
+scheduled work and then run one at a time. PexBot reports edited by PexBot
+within the preceding 24 hours are not requested again.
 
 The website refreshes content reviews hourly and its other five datasets
 independently every 24 hours after success. Review cards link to active

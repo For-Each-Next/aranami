@@ -113,6 +113,7 @@ def read_schedule_status(path: Path) -> dict[str, object]:
             raise ValueError(message)
         if row["next_run_at"] is not None:
             _timestamp(row["next_run_at"])
+        _validate_idle_schedule(row, definition, value["state"], updated)
         if (row["state"] == "scheduled") != (
             row["next_run_at"] is not None
         ) and value["state"] == "running":
@@ -123,6 +124,32 @@ def read_schedule_status(path: Path) -> dict[str, object]:
     if "collections" in value:
         _validate_collection_schedules(value["collections"], value["state"])
     return value
+
+
+def _validate_idle_schedule(
+    row: Mapping[str, object],
+    definition: Mapping[str, object],
+    state: str,
+    updated: dt.datetime,
+) -> None:
+    """Validate optional queue evidence against idle policy and time.
+
+    Raises:
+        ValueError: Queue evidence disagrees with policy or observation.
+    """
+    if "idle" in row and (
+        type(row["idle"]) is not bool or row["idle"] != definition["idle"]
+    ):
+        message = "Invalid idle routine configuration."
+        raise ValueError(message)
+    if row.get("queued_since") is not None and (
+        not definition["idle"]
+        or row["state"] not in {"scheduled", "paused"}
+        or state == "stopped"
+        or _timestamp(row["queued_since"]) > updated
+    ):
+        message = "Invalid idle routine eligibility observation."
+        raise ValueError(message)
 
 
 def _validate_collection_schedules(value: object, state: str) -> None:

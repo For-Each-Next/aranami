@@ -20,6 +20,7 @@ class TaskDefinition:
         prefixes: Allowed slash-delimited PexBot subscription roots.
         misfire_grace_time: Maximum accepted scheduler delay in seconds.
         cutoff: Dataset boundary or current-source freshness contract.
+        idle: Wait for ordinary scheduled work before starting.
     """
 
     pages: Mapping[str, str]
@@ -28,6 +29,7 @@ class TaskDefinition:
     prefixes: tuple[str, ...] = ()
     misfire_grace_time: int | None = None
     cutoff: str = "Current source observations; publication is independent."
+    idle: bool = False
 
 
 TASK_DEFINITIONS: dict[str, TaskDefinition] = {
@@ -50,7 +52,10 @@ TASK_DEFINITIONS: dict[str, TaskDefinition] = {
             "ACC": "WikiProject:电子游戏/认证条目/ACC",
             "PPR": "WikiProject:电子游戏/认证条目/PPR",
         },
-        minute=31,
+        hour="0",
+        minute=0,
+        misfire_grace_time=None,
+        idle=True,
     ),
     "assessment_log": TaskDefinition(
         pages={"report": "WikiProject:电子游戏/评级/日志"},
@@ -74,13 +79,15 @@ TASK_DEFINITIONS: dict[str, TaskDefinition] = {
         hour="0",
         minute=0,
         cutoff="Reuse the completed-day assessment capture, including delays.",
+        idle=True,
     ),
     "pexbot": TaskDefinition(
         pages={},
         hour="0",
         minute=0,
         prefixes=("WikiProject:电子游戏/数据库报告",),
-        cutoff="Check actual wiki edit date before delegated publication.",
+        cutoff="Skip PexBot edits within 24 hours before delegation.",
+        idle=True,
     ),
 }
 

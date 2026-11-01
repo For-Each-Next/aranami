@@ -166,22 +166,28 @@ class TestPexbotEvents(TestCase):
     def test_backend_interprets_history_and_stream_outcomes() -> None:
         """Prepare source evidence without delegated writes."""
         site = _site()
-        day = dt.date(2026, 10, 20)
+        checked_at = dt.datetime(2026, 10, 20, 0, 5, tzinfo=dt.UTC)
         with (
             patch.object(
                 service,
-                "edited_by_on_date",
+                "edited_by_between",
                 return_value=True,
             ) as read,
             patch.object(job.urllib.request, "urlopen") as request,
         ):
-            report = service.prepare_report(site, "Report", day)
+            report = service.prepare_report(site, "Report", checked_at)
         assert report == service.PexBotReport(
             "Report",
-            day,
+            checked_at,
             already_updated=True,
         )
-        read.assert_called_once_with(site, "Report", user="PexBot", day=day)
+        read.assert_called_once_with(
+            site,
+            "Report",
+            user="PexBot",
+            since=checked_at - dt.timedelta(hours=24),
+            until=checked_at,
+        )
         request.assert_not_called()
         assert service.StreamEvent("error-query").failed
         assert service.StreamEvent("failed-save").failed
@@ -329,7 +335,7 @@ class TestPexbotJob(TestCase):
         )
         history = patch.object(
             service,
-            "edited_by_on_date",
+            "edited_by_between",
             return_value=False,
         )
         history.start()
@@ -481,7 +487,7 @@ class TestPexbotJob(TestCase):
                 side_effect=lambda: started + dt.timedelta(seconds=elapsed[0]),
             ),
             patch.object(job, "subscribed_titles", side_effect=select),
-            patch.object(service, "edited_by_on_date", side_effect=history),
+            patch.object(service, "edited_by_between", side_effect=history),
             patch.object(job, "_refresh", side_effect=refresh),
             patch.object(job.time, "sleep", side_effect=cooldown) as pause,
             self.assertLogs("backend.support.execution", level="INFO"),
@@ -656,8 +662,8 @@ class TestPexbotJob(TestCase):
         assert completed.manifest["publication"]["state"] == "delegated"
 
     def test_already_updated_reports_are_skipped_in_both_modes(self) -> None:
-        """Record today's edit and skip proposals and refreshes."""
-        today = dt.date(2026, 10, 18)
+        """Record a recent edit and skip proposals and refreshes."""
+        checked_at = dt.datetime(2026, 10, 18, 0, 5, tzinfo=dt.UTC)
         for dry in (False, True):
             context = JobContext(_site(), dt.date(2000, 1, 1), dry=dry)
             with (
@@ -668,10 +674,10 @@ class TestPexbotJob(TestCase):
                     return_value=nullcontext(context),
                 ),
                 patch.object(job, "subscribed_titles", return_value=["A"]),
-                patch.object(job, "_utc_today", return_value=today),
+                patch.object(job, "_utc_now", return_value=checked_at),
                 patch.object(
                     service,
-                    "edited_by_on_date",
+                    "edited_by_between",
                     return_value=True,
                 ) as history,
                 patch.object(job, "_refresh") as refresh,
@@ -684,7 +690,8 @@ class TestPexbotJob(TestCase):
                 context.site,
                 "A",
                 user="PexBot",
-                day=today,
+                since=checked_at - dt.timedelta(hours=24),
+                until=checked_at,
             )
             refresh.assert_not_called()
             request.assert_not_called()
@@ -692,7 +699,7 @@ class TestPexbotJob(TestCase):
             assert context.notes == [
                 (
                     "Skipped PexBot refresh: A. PexBot already edited "
-                    "this page on 2026-10-18 UTC."
+                    "this page within the last 24 hours."
                 ),
             ]
             assert context.notes[0] in logs.output[-1]
@@ -718,7 +725,7 @@ class TestPexbotJob(TestCase):
             ),
             patch.object(
                 service,
-                "edited_by_on_date",
+                "edited_by_between",
                 side_effect=[True, False, True, True, False, True],
             ),
             patch.object(job, "_refresh") as refresh,
@@ -743,7 +750,7 @@ class TestPexbotJob(TestCase):
             patch.object(job, "subscribed_titles", return_value=["A", "B"]),
             patch.object(
                 service,
-                "edited_by_on_date",
+                "edited_by_between",
                 side_effect=[error, False],
             ),
             patch.object(job, "_refresh") as refresh,
@@ -757,22 +764,22 @@ class TestPexbotJob(TestCase):
         pause.assert_not_called()
 
     @staticmethod
-    def test_each_report_uses_current_utc_date_across_midnight() -> None:
-        """Use the new day after midnight despite an old anchor."""
+    def test_each_report_uses_current_utc_instant_across_midnight() -> None:
+        """Advance the rolling window despite an old report anchor."""
         context = JobContext(_site(), dt.date(2000, 1, 1), dry=True)
-        before_midnight = dt.date(2026, 10, 18)
-        after_midnight = dt.date(2026, 10, 19)
+        before_midnight = dt.datetime(2026, 10, 18, 23, 59, tzinfo=dt.UTC)
+        after_midnight = dt.datetime(2026, 10, 19, 0, 1, tzinfo=dt.UTC)
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(job, "subscribed_titles", return_value=["A", "B"]),
             patch.object(
                 job,
-                "_utc_today",
+                "_utc_now",
                 side_effect=[before_midnight, after_midnight],
             ),
             patch.object(
                 service,
-                "edited_by_on_date",
+                "edited_by_between",
                 return_value=False,
             ) as history,
             patch.object(job.urllib.request, "urlopen") as request,
@@ -780,8 +787,20 @@ class TestPexbotJob(TestCase):
         ):
             job.run(context=context)
         assert history.call_args_list == [
-            call(context.site, "A", user="PexBot", day=before_midnight),
-            call(context.site, "B", user="PexBot", day=after_midnight),
+            call(
+                context.site,
+                "A",
+                user="PexBot",
+                since=before_midnight - dt.timedelta(hours=24),
+                until=before_midnight,
+            ),
+            call(
+                context.site,
+                "B",
+                user="PexBot",
+                since=after_midnight - dt.timedelta(hours=24),
+                until=after_midnight,
+            ),
         ]
         request.assert_not_called()
         pause.assert_not_called()

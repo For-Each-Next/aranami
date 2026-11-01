@@ -87,10 +87,10 @@ class AnnualQualityLayoutTests(TestCase):
         assert "甲級條目0篇" not in quality
         assert "甲級列表0篇" not in quality
         assert (
-            "{{collapsible list\n| titlestyle = font-weight: normal;\n"
-            "| title = 1篇典範條目\n"
-            "| 1 = {{icon|FA}}&thinsp;[[:Featured game]]<!-- 0101 -->\n"
-            "}}"
+            "{{collapsible list| titlestyle = font-weight: normal;\n"
+            "  | title = 1篇典範條目\n"
+            "  | {{icon|FA}}&thinsp;[[:Featured game]]<!-- 0101 -->\n"
+            "  }}"
         ) in quality
         assert "{{hlist-comma" not in quality
         assert review == original
@@ -203,7 +203,9 @@ class AnnualQualityLayoutTests(TestCase):
         }
         partial = _quality_section(review)
         complete = _quality_section({**review, "complete": True})
-        assert "{{Memo|截至2026年10月31日|inline:info}}" in partial
+        assert partial.lstrip().startswith(
+            "{{Memo|截至2026年10月31日|inline:info}}2026年度，",
+        )
         assert "〈暫定〉" not in partial
         assert "{{Memo|" not in complete
 

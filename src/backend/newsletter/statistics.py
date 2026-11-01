@@ -2,8 +2,8 @@
 
 Historical chart values come from the local January 2026/2025 image
 information pages. Popularity supports their former HOT templates and
-the current HOT/v2 JSON contract. Source intervals stay explicit so
-unfinished annual drafts cannot claim rolling observations cover a year.
+the current HOT/v2 JSON contract. Source intervals stay explicit, and
+annual drafts use calendar-year observations rather than rolling years.
 """
 
 from __future__ import annotations
@@ -136,6 +136,7 @@ _MAX_VIEWS = 2**63 - 1
 _MONTHS = 12
 _MONTH_REPORT_DAYS = 4
 _MAX_MONTH_REVISIONS = 128
+_ANNUAL_RANKING_LIMIT = 200
 
 
 def quality_statistics(
@@ -301,7 +302,7 @@ def parse_popularity(
     return None
 
 
-def collect_popularity(
+def collect_popularity(  # ruff: ignore[too-many-arguments]
     read: Callable[[str, dt.datetime], str],
     issue: Issue,
     now: dt.datetime,
@@ -310,6 +311,7 @@ def collect_popularity(
     revision_history: (
         Callable[[str, dt.date, dt.date], list[dict[str, object]]] | None
     ) = None,
+    annual_pageviews: Callable[[int, dt.date], dict | None] | None = None,
 ) -> dict:
     """Read completed months and the latest annual draft ranking.
 
@@ -323,6 +325,8 @@ def collect_popularity(
             publication window, including revisions overwritten later
             the same day. Rows supply text, timestamps, and revision IDs
             directly from the historical source.
+        annual_pageviews: Read prepared calendar-year Pageviews through
+            an exclusive date boundary, without source requests.
 
     Returns:
         Monthly winners and annual data with their actual intervals.
@@ -353,6 +357,15 @@ def collect_popularity(
         if winner is not None:
             months.append({"month": month, "days": end.day, **winner})
     annual = _annual_popularity(read, issue, now)
+    if annual_pageviews is not None:
+        prepared = annual_pageviews(year, min(issue.end, now.date()))
+        if prepared is not None and (
+            annual is None or prepared["end"] > annual["end"]
+        ):
+            annual = {
+                **prepared,
+                "items": prepared["items"][:_ANNUAL_RANKING_LIMIT],
+            }
     return {"monthly_popularity": months, "annual_popularity": annual}
 
 
@@ -464,7 +477,8 @@ def _annual_popularity(
     """Select a year-end report while allowing delayed January updates.
 
     Returns:
-        Exact calendar-year data or provisional observations.
+        Calendar-year data ending no later than the acquisition cutoff.
+        Rolling-year reports never substitute for calendar-year data.
     """
     year = issue.year - 1
     annual = None
@@ -496,7 +510,12 @@ def _annual_popularity(
         start, end = (
             dt.date.fromisoformat(candidate[key]) for key in ("start", "end")
         )
-        if end.year != year:
+        if (
+            start != dt.date(year, 1, 1)
+            or end.year != year
+            or end < start
+            or end >= now.date()
+        ):
             continue
         candidate["provisional"] = start != dt.date(
             year,

@@ -4,6 +4,38 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.9
 
+### 0.8.3 (2026-11-01 11:54 UTC)
+
+Overview: Corrected annual newsletter statistics and credits, refined report
+history and assessment counts, and scheduled daily reports around other hub work.
+
+- Prepared calendar-year Pageviews rankings from existing downloads and reused
+  them for annual drafts, with year-only prose and dated provisional coverage.
+- Excluded delisted and superseded quality promotions from annual lists,
+  totals, and author credits while preserving historical evidence.
+- Used Graph:Chart's built-in stacked-chart legend and a zero-to-fifty
+  vertical range that expands for larger observed cohorts.
+- Titled the stacked chart `歷年新入選、晉級高品質條目`.
+- Matched the prior issue's data-summary credit style with `User:Example`.
+- Used primary contributors directly when nominators are unknown and limited
+  attribution notices to explicit disagreements.
+- Removed the repeated DYK chart introduction and kept its cutoff in the caption.
+- Prefixed annual sentences with their coverage notices and indented author
+  lists with unnamed article parameters for simpler wikitext editing.
+- Limited the Reports page to the newest twenty execution records and
+  retained their stage dialogs in all three interface languages.
+- Scheduled assessment lists, English comparisons, and PexBot daily after
+  midnight UTC, waiting for other hub work and running one at a time.
+- Skipped PexBot refreshes when the bot had edited a report within the
+  preceding 24 hours, including edits before midnight.
+- Added gray signed changes to assessment-log introduction counts using
+  prior observed totals, preserving daily deltas across failed saves.
+- Consolidated Git history into version-tagged releases, preserving release
+  snapshots and archiving other histories for recovery.
+- Removed the superseded v0.8.0 refactor plan.
+- Deployed v0.8.3 to Toolforge and verified its payload, both services,
+  public version, and chart title at 2026-11-01 11:54 UTC.
+
 ### 0.8.2 (2026-11-01 10:28 UTC)
 
 Overview: Refined annual newsletter statistics, contributor credits, navigation

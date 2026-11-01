@@ -107,7 +107,7 @@ def _partial_annual_review() -> dict:
             {"month": 1, "days": 31, "title": "Monthly", "views": 31000},
         ],
         "annual_popularity": {
-            "start": "2025-11-01",
+            "start": "2026-01-01",
             "end": "2026-10-31",
             "items": [{"title": "Popular", "views": 31000}],
             "article_count": 1,
@@ -330,9 +330,9 @@ class NewsletterStatisticsTests(TestCase):
 
     @staticmethod
     def test_annual_prose_charts_rankings_and_award_summary() -> None:
-        """Keep reference formulas and explicit provisional dates."""
+        """Keep year-only popularity prose and inline cutoff notices."""
         popularity = parse_popularity(
-            _popular("2025-11-01", "2026-10-31"),
+            _popular("2026-01-01", "2026-10-31"),
             "yearly",
         )
         popularity["provisional"] = True
@@ -373,7 +373,8 @@ class NewsletterStatisticsTests(TestCase):
         )
         assert "較去年年末的12,497篇淨增長503篇，日均淨增長1.65篇" in text
         assert "{{Memo|截至2026年10月31日|inline:info}}" in text
-        assert "2025-11-01至2026-10-31統計期間內瀏覽量最多的條目" in text
+        assert "以下列出2026年瀏覽量最多的條目，至多25篇" in text
+        assert "2025-11-01至2026-10-31統計期間內" not in text
         assert "暫定" not in text
         assert "# [[:Game]]：123笔修订" in text
         assert "年内共有1名编辑获得ACG专题奖得分。其中1名編者首次得分" in text
@@ -463,6 +464,8 @@ class AnnualFigureIntroductionTests(TestCase):
         assert notices[0].name.matches("Memo")
         assert notices[0].get("1").value == "截至2026年10月31日"
         assert notices[0].get("2").value == "inline:info"
+        assert introduction.startswith(str(notices[0]))
+        assert introduction.endswith("各年度條目品質分布如下：")
 
     def test_each_block_has_its_notice_in_the_immediate_introduction(
         self,
@@ -509,16 +512,6 @@ class AnnualFigureIntroductionTests(TestCase):
             (
                 dyk,
                 next(
-                    template
-                    for template in dyk.filter_templates(recursive=False)
-                    if template.name.matches("Image frame")
-                ),
-                "歷年新條目推薦累計數量如下：",
-                "2026年9月30日",
-            ),
-            (
-                dyk,
-                next(
                     tag
                     for tag in dyk.filter_tags(recursive=False)
                     if tag.tag == "li"
@@ -535,7 +528,7 @@ class AnnualFigureIntroductionTests(TestCase):
             (
                 articles,
                 columns[1],
-                "以下列出2025-11-01至2026-10-31統計期間內瀏覽量最多的條目",
+                "以下列出2026年瀏覽量最多的條目",
                 "2026年10月31日",
             ),
             (
@@ -558,7 +551,9 @@ class AnnualFigureIntroductionTests(TestCase):
         for code, node, sentence, date in blocks:
             with self.subTest(introduction=sentence):
                 introduction = _preceding_introduction(code, node)
-                assert sentence in introduction
+                assert introduction.startswith(
+                    f"{{{{Memo|截至{date}|inline:info}}}}" + sentence,
+                )
                 notices = [
                     template
                     for template in mwparserfromhell.parse(
@@ -575,7 +570,18 @@ class AnnualFigureIntroductionTests(TestCase):
                     for notice in notices
                 )
         popularity_intro = _preceding_introduction(articles, columns[1])
-        assert "2025-11-01至2026-10-31統計期間內" in popularity_intro
+        assert "以下列出2026年瀏覽量最多的條目" in popularity_intro
+        assert "2025-11-01至2026-10-31統計期間內" not in popularity_intro
+        assert "歷年新條目推薦累計數量如下：" not in text
+        dyk_chart = next(
+            template
+            for template in dyk.filter_templates(recursive=False)
+            if template.name.matches("Image frame")
+        )
+        assert str(dyk_chart.get("caption").value).strip() == (
+            "{{Memo|截至2026年9月30日|inline:info}}"
+            "電子遊戲專題累計新條目推薦數量"
+        )
         revision_tail = str(articles).partition("[[:Revised]]")[2]
         assert not any(
             template.name.matches("Memo")

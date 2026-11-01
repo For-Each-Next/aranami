@@ -14,6 +14,8 @@ import polars as pl
 from backend.newsletter import collection, schema
 from backend.newsletter.observations import save_observation
 from backend.services import project_assessments
+from backend.services.zhwiki.pageviews import read_annual_popularity
+from shared.config import TASK_DEFINITIONS
 from shared.newsletter import DYK_PROJECTS
 from shared.sources.quarry.projects import (
     project_revision_counts,
@@ -198,6 +200,11 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments]
             project_revision_counts,
             read.site,
             "电子游戏",
+        ),
+        annual_pageviews=partial(
+            read_annual_popularity,
+            read.site,
+            title=TASK_DEFINITIONS["pageviews"].pages["report"],
         ),
         current_assessments=membership,
         dyk_projects=dyk_projects,

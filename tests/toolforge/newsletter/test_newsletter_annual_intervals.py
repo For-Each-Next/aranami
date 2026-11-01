@@ -45,7 +45,9 @@ class AnnualGrowthIntervalTests(TestCase):
             introduction = _article_report(review).split("\n\n", 1)[0]
             assert "淨增長503篇" in introduction
             assert f"日均淨增長{rate}篇。" in introduction
-            assert f"{{{{Memo|截至{date}|inline:info}}}}" in introduction
+            assert introduction.startswith(
+                f"{{{{Memo|截至{date}|inline:info}}}}本年度統計中，",
+            )
 
     @staticmethod
     def test_complete_year_uses_its_full_calendar_length() -> None:
@@ -92,7 +94,9 @@ class AnnualGrowthIntervalTests(TestCase):
                 "previous_overview": {"total": 12497},
             }).split("\n\n", 1)[0]
             assert "日均增長統計待補充。" in introduction
-            assert "{{Memo|統計截至日期待補。|inline:info}}" in introduction
+            assert introduction.startswith(
+                "{{Memo|統計截至日期待補。|inline:info}}本年度統計中，",
+            )
             assert "日均淨增長" not in introduction
 
 
@@ -118,6 +122,50 @@ class AnnualEmptyRankingTests(TestCase):
         assert text.count("\n* （無）\n") == 2
         assert "前25名" not in text
         assert "排行待補充" not in text
+
+    @staticmethod
+    def test_partial_empty_rankings_start_with_their_date_notice() -> None:
+        """Prefix observed empty rankings with their coverage date."""
+        text = _article_report({
+            "complete": False,
+            "observation_end": "2026-11-01",
+            "revision_ranking": [],
+            "annual_popularity": {
+                "start": "2026-01-01",
+                "end": "2026-10-31",
+                "items": [],
+                "article_count": 0,
+                "total_views": 0,
+                "provisional": True,
+            },
+        })
+        for sentence in (
+            "本年度沒有可列出的瀏覽量排行紀錄。",
+            "本年度沒有可列出的修訂次數紀錄。",
+        ):
+            assert (
+                "{{Memo|截至2026年10月31日|inline:info}}" + sentence
+            ) in text
+
+    @staticmethod
+    def test_legacy_rolling_popularity_is_not_relabelled_as_a_year() -> None:
+        """Exclude rolling archives from calendar-year claims."""
+        text = _article_report({
+            "complete": False,
+            "annual_popularity": {
+                "start": "2025-11-01",
+                "end": "2026-10-31",
+                "items": [{"title": "Rolling article", "views": 123456}],
+                "article_count": 1,
+                "total_views": 123456,
+                "provisional": True,
+            },
+        })
+        assert "本年度瀏覽量排行待補充。" in text
+        assert "本年度瀏覽量統計待補充。" in text
+        assert "Rolling article" not in text
+        assert "以下列出2026年瀏覽量最多的條目" not in text
+        assert "总浏览量为" not in text
 
     @staticmethod
     def test_missing_rankings_do_not_claim_observed_empty_results() -> None:

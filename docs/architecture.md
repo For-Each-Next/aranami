@@ -77,13 +77,14 @@ settings that affect their facts.
 
 | Work | UTC trigger | Boundary and late-run behavior |
 |---|---|---|
-| Assessment log and English comparisons | Daily 00:00:00 | Share the first complete assessment capture assigned to yesterday; publication outcomes remain independent. |
+| Assessment log | Daily 00:00:00 | Retain the first complete assessment capture assigned to yesterday; publication remains independent. |
+| English comparisons | Daily, idle after 00:00 | Reuse the completed day's assessment capture before preparing either report. |
 | Newsletter daily facts | Daily 00:00:00 | Preserve yesterday's cutoff and first complete daily capture, independent annual facts, and quarter rollover. |
 | Article evidence and DYK | Hourly :00 | Refresh current evidence; historical revision reads retain their explicit cutoffs. |
-| Assessment lists | Hourly :31 | Prepare fresh current assessments independently of the daily capture. |
+| Assessment lists | Daily, idle after 00:00 | Prepare fresh current assessments independently of the daily capture. |
 | New pages | Daily 00:07 | Complete retained dates through yesterday, resuming gaps after interruption. |
 | Pageviews | Hourly :59 when behind | Require actual-time 18:00 readiness; once current, postpone until the next 18:59 check. |
-| PexBot | Daily 00:00 | Check the wiki's actual edit date before delegation; returned edit counts remain unknown. |
+| PexBot | Daily, idle after 00:00 | Skip PexBot edits within the preceding 24 hours; returned edit counts remain unknown. |
 | Website | Hourly due check | Reviews refresh hourly; other datasets normally refresh 24 hours after success; newsletter dates/configuration invalidate independently. |
 
 The scheduled boundary, source cutoff, actual observation time, and report
@@ -100,6 +101,15 @@ The monitor coalesces triggers and allows one active invocation per routine.
 Fresh monitors normally check all routines; `run_immediately=False` waits for
 triggers, and reusing an active monitor adds no startup pass. Stop with
 `scheduler.shutdown(wait=True)` before changing output mode or clearing caches.
+Assessment lists, English comparisons, and PexBot become eligible daily at
+midnight and during normal startup recovery. They wait outside worker threads
+until ordinary submitted reports and collection work finish, then run one at
+a time. A complete due-job batch is submitted before idle work can start.
+New ordinary work may start during an idle report; running publication is
+never interrupted. Waiting creates no execution-history entry. The schedule
+snapshot records queued eligibility separately from the next cron recurrence.
+Pause retains waiting work; resume admits it when idle. Shutdown discards
+unstarted work, while the next normal startup makes it eligible again.
 On shutdown, `hub.stop_jobs` pauses scheduled dispatch and rejects queued
 website refreshes before draining running work. Output locks and diagnostics
 stay open until final status writes complete. SIGUSR1 requests the same drain
@@ -134,6 +144,7 @@ diagnostics, with at most sixty-four explicit stages per invocation and a
 4 MiB file bound. Each record preserves start, final outcome, measured total
 duration, and observed data-read, preparation, durable-data, and publication
 boundaries. Trimming intermediate stages preserves start and completion.
+The Reports page shows the newest twenty invocations with stage dialogs.
 Report-history dialogs consume these saved facts; they never parse logs or
 infer activity from service messages. Invalid saved history stays untouched
 and appears unavailable; history storage failure does not interrupt a job.
@@ -703,6 +714,9 @@ option. A snapshot collected on a UTC date labels the previous day's report;
 keep its actual collection timestamp and immutable source date unchanged.
 Daily introductions summarize mainspace article/list quality and importance
 counts in assessment order, omit zero counts, and survive failed-save recovery.
+Displayed counts show gray signed changes when comparable prior observations
+are known; unchanged or unknown comparisons omit the suffix. Keep prior
+aggregate evidence aligned with observations rather than confirmed wiki saves.
 Article-only counts are retained as aggregate Parquet metadata, without adding
 per-page titles or namespaces to the compact dataset. See
 [Saved data and Parquet fields](backend/data-storage.md) for all storage schemas.
@@ -732,8 +746,9 @@ and `Module:Graph` 95334515).
 
 ### English comparison reports
 
-Trigger daily at `00:00:00 UTC` and require the completed day's retained
-project assessment dataset before reading or preparing either comparison.
+Become eligible daily at `00:00 UTC` and run after other scheduled work is
+idle. Require the completed day's retained project assessment dataset before
+reading or preparing either comparison.
 Share the snapshot's existing capture lock with the assessment-log routine;
 concurrent starts reuse the same immutable data. A capture failure stops the
 comparison, while assessment-log publication remains independent. Preview

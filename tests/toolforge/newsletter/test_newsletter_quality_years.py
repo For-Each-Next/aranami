@@ -236,6 +236,10 @@ class NewsletterQualityYearTests(TestCase):
         assert params["colors"] == "#9CBDFF, #66FFFF, #66FF66, #8CFF66"
         assert params["interactive"] == "true"
         assert params["animate"] == "true"
+        assert params["title"] == "歷年新入選、晉級高品質條目"
+        assert params["legend"] == "true"
+        assert params["yAxisMin"] == "0"
+        assert params["yAxisMax"] == "50"
         assert params["xType"] == "string"
         assert params["xAxisAngle"] == "-30"
         assert (
@@ -251,6 +255,33 @@ class NewsletterQualityYearTests(TestCase):
             "gr-ov",
         ):
             assert expanded not in text
+        assert "annual-quality-legend" not in text
+
+    @staticmethod
+    def test_stack_axis_expands_instead_of_clipping_large_cohorts() -> None:
+        """Keep ten-unit bounds above an observed stack over fifty."""
+        text = render_annual_feature(
+            Issue(2027, 1),
+            {
+                "quality_year_ends": [
+                    {
+                        "year": 2026,
+                        "grades": {
+                            **dict.fromkeys(QUALITY_HISTORY_GRADES, 0),
+                            "GA": 64,
+                        },
+                    },
+                ],
+            },
+        )
+        chart = next(
+            template
+            for template in mwparserfromhell.parse(text).filter_templates()
+            if template.name.matches("Graph:Chart")
+            and template.get("type").value.strip() == "stackedrect"
+        )
+        assert str(chart.get("yAxisMax").value).strip() == "70"
+        assert str(chart.get("y2").value).strip() == "64"
 
     @staticmethod
     def test_all_zero_a_group_is_absent_and_missing_history_stays_blank() -> (

@@ -709,6 +709,11 @@
     "zh-hans": "下次排程：",
     "zh-hant": "下次排程："
   },
+  "ops.schedule_idle": {
+    "en": "Waiting for idle time",
+    "zh-hans": "等待空闲时执行",
+    "zh-hant": "等待空閒時執行"
+  },
   "time.minutes_ago": {
     "en": "({count} minutes ago)",
     "zh-hans": "（{count}分钟前）",
@@ -1735,9 +1740,9 @@
     "zh-hant": "檢查站內報告頁更新狀態"
   },
   "reports.history_note": {
-    "en": "The latest 100 job invocations. Select a task to read its recorded stages.",
-    "zh-hans": "最近100次任务执行。点击任务可查看各阶段记录。",
-    "zh-hant": "最近100次任務執行。點選任務可查看各階段紀錄。"
+    "en": "The latest 20 job invocations. Select a task to read its recorded stages.",
+    "zh-hans": "最近20次任务执行。点击任务可查看各阶段记录。",
+    "zh-hant": "最近20次任務執行。點選任務可查看各階段紀錄。"
   },
   "reports.empty": {
     "en": "No saved job invocations are available yet.",

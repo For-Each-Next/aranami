@@ -19,6 +19,9 @@ repository-wide instructions.
   independent per-routine UTC cron triggers, coalesce missed executions,
   and limit each job to one active instance. Repeated starts reuse an
   active monitor in the same mode.
+  Assessment lists, English comparisons, and PexBot become eligible daily
+  at midnight and wait for other submitted work before starting, one at a
+  time. Keep idle waiting outside worker threads and routine lifecycles.
 - `backend.run(dry=True)` also runs the schedules continuously, writing
   previews at each trigger without wiki edits or PexBot refresh requests.
 - `backend.run_once(date=None, dry=False, tasks=None)` executes selected

@@ -32,10 +32,10 @@ tail -n 100 logs/aranami.YYYY-MM-DD.log
 Choose a UTC date. Logs retain the current date and previous 29 dates.
 The About page links to the [daily-log archive](https://aranami.toolforge.org/logs/)
 for raw diagnostic downloads. The website does not translate diagnostics into
-narrated summaries. Site-report history uses separately recorded structured
-events, with date, task, result, and duration columns. Search, result filters,
-and chronological ordering operate on its recent event window, with 25 rows
-per page. Earlier diagnostic files remain downloadable without inferred events.
+narrated summaries. Site-report history shows the latest 20 recorded
+invocations with date, task, result, and duration columns. Open a task's dialog
+to inspect its observed stages. Earlier diagnostics remain downloadable
+separately without inferred execution records.
 Choose English, Simplified Chinese, or Traditional Chinese; that choice lasts
 one year in the current browser. Article titles keep their source spelling.
 
@@ -75,15 +75,18 @@ Use these identifiers in `tasks`:
 |---|---|---|
 | `dyks` | Completed DYK entries, nominees, and statistics | Every hour at `:00` |
 | `new_pages` | Daily keyword-matched new/conversion entries | Daily at `00:07` |
-| `assessment_lists` | Project assessment and review lists | Every hour at `:31` |
+| `assessment_lists` | Project assessment and review lists | Daily, when idle after `00:00` |
 | `assessment_log` | Full project assessment snapshot and observed changes | Daily at `00:00:00` |
 | `pageviews` | Rankings for each missing eligible date | Every hour at `:59` while behind/deferred |
-| `enwp_key_articles` | Current English importance/quality comparisons | Daily at `00:00:00`, after assessment capture |
-| `pexbot` | Subscribed report refresh requests | Daily at `00:00` |
+| `enwp_key_articles` | Current English importance/quality comparisons | Daily, when idle after `00:00`, after assessment capture |
+| `pexbot` | Subscribed report refresh requests | Daily, when idle after `00:00` |
 
 Triggers do not guarantee edits: unchanged outputs are not saved. New pages
 retains 100 complete UTC dates through yesterday, then waits for its next daily
 trigger. English comparisons and PexBot refresh current state, not daily history.
+The three idle daily tasks wait until other submitted hub work finishes and
+run one at a time. A fresh hub makes them eligible during its startup check;
+manual `run_once` requests still execute immediately.
 English comparisons first reuse or capture the completed day's assessment
 dataset. A failed capture prevents comparison publication; an assessment-log
 wiki save failure does not block it once the shared dataset is complete.
@@ -135,8 +138,9 @@ maintainer-led revalidation. Imports and `--help` do not execute reports.
 
 The hub's `--dry` mode runs recurring previews without production website
 collection or HTTP serving; see [startup options](administration.md#start-the-applications).
-PexBot selects configured Chinese-Wikipedia roots, skips that UTC day's completed
-refreshes, and waits 15 seconds between live attempts.
+PexBot selects configured Chinese-Wikipedia roots, skips reports edited by
+PexBot within the preceding 24 hours, and waits 15 seconds between live
+refresh attempts.
 
 ## Managed report settings
 

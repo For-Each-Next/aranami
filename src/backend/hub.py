@@ -347,6 +347,7 @@ def run(config: HubConfig) -> None:
             dry=config.dry,
             run_immediately=config.run_immediately,
             dispatch=partial(dispatch_report, updater=updater),
+            start_paused=True,
         )
         resources.callback(stop_jobs, scheduler, updater)
         if updater is not None:
@@ -392,6 +393,7 @@ def run(config: HubConfig) -> None:
                 coalesce=True,
                 **startup,
             )
+        scheduler.resume()
         try:
             _serve_until_stopped(server, scheduler, updater, stopped, control)
         except KeyboardInterrupt:

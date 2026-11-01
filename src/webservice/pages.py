@@ -748,8 +748,11 @@ class _Page:
                 if event
                 else None
             )
+            routine_schedule = schedule["routines"].get(identifier, {})
             upcoming = (
-                schedule["routines"].get(identifier, {}).get("next_run_at")
+                routine_schedule.get("next_run_at")
+                if not routine_schedule.get("queued_since")
+                else None
             )
             pages = sorted(
                 (

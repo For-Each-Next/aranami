@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -803,11 +804,23 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         )
         prepared = self._prepare(members)
         rendered = update_text(_TEXT, prepared)
+        plain = re.sub(
+            r'<small style="color: gray;">[^<]+</small>',
+            "",
+            rendered,
+        )
         assert (
             "'''條目頁1,241篇'''：\n* '''典范级'''条目1,234篇、列表2篇，"
             "'''优良级'''条目1篇，'''乙上级'''条目1篇，'''乙级'''条目1篇、列表1篇，'''未评级'''1篇。\n"
             "* '''极高重要度'''1,234篇，'''高重要度'''2篇，"
             "'''中重要度'''1篇，'''低重要度'''3篇，'''未知重要度'''1篇。"
+        ) in plain
+        assert (
+            "'''典范级'''条目1,234篇"
+            '<small style="color: gray;">（+1,233）</small>'
+        ) in rendered
+        assert (
+            "1,241篇'''<small style=\"color: gray;\">（+1,240）</small>"
         ) in rendered
         totals = next(
             line
@@ -836,10 +849,16 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         older = rendered[rendered.index("=== 2026年10月25日 ===") :]
         newer = rendered[: rendered.index("=== 2026年10月25日 ===")]
         assert (
-            "'''條目頁2篇'''：\n* '''乙级'''条目1篇，'''丙级'''条目1篇。"
-            in older
+            "'''條目頁2篇'''"
+            '<small style="color: gray;">（+1）</small>：\n'
+            "* '''乙级'''条目1篇，'''丙级'''条目1篇"
+            '<small style="color: gray;">（+1）</small>。' in older
         )
-        assert "'''條目頁1篇'''：\n* '''乙级'''条目1篇。" in newer
+        assert (
+            "'''條目頁1篇'''"
+            '<small style="color: gray;">（-1）</small>：\n'
+            "* '''乙级'''条目1篇。"
+        ) in newer
         self._retain(second, rendered, 3)
         retry = self._prepare(
             seed,
@@ -883,7 +902,10 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         groups = ("重命名", "變更評級", "新增評級", "移除評級")
         positions = [rendered.index(f"==== {group} ====") for group in groups]
         assert positions == sorted(positions)
-        assert "=== 2026年10月24日 ===\n\n'''條目頁2篇'''：" in rendered
+        assert (
+            "=== 2026年10月24日 ===\n\n'''條目頁2篇'''"
+            '<small style="color: gray;">（+1）</small>：'
+        ) in rendered
         for group in groups:
             assert f"==== {group} ====\n\n* " in rendered
         assert "。\n\n==== 變更評級 ====" in rendered
@@ -1384,8 +1406,136 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
         assert removed.item(0, "old_title") == "Current departed name"
         rendered = update_text(_TEXT, prepared)
         assert "'''條目頁3篇'''：" in rendered
+        assert (
+            "'''乙级'''条目2篇<small style=\"color: gray;\">（+1）</small>"
+        ) in rendered
+        assert (
+            "'''高重要度'''2篇<small style=\"color: gray;\">（+1）</small>"
+        ) in rendered
         assert "[[:Current name]]" in rendered
         assert "重命名" not in rendered
+
+    def test_unknown_prior_totals_do_not_invent_count_changes(self) -> None:
+        """Keep changes unknown for older compact observations."""
+        prior = _members((1, "Existing", "B", "High"))
+        current = _members(
+            (1, "Existing", "B", "High"),
+            (2, "Added", "GA", "Low"),
+        )
+        previous = self._snapshot(prior, _NOW - dt.timedelta(days=1))
+        previous.manifest["metadata"].pop("article_totals")
+        with (
+            patch.object(
+                source,
+                "get_snapshot",
+                return_value=self._snapshot(current, _NOW),
+            ),
+            patch.object(
+                source,
+                "read_previous_snapshot",
+                return_value=previous,
+            ),
+            patch.object(
+                source,
+                "page_metadata",
+                return_value=_replica_rows(current),
+            ),
+        ):
+            prepared = source.prepare_data(
+                self.site,
+                "电子游戏",
+                _TITLE,
+                _TEXT,
+                observed_at=_NOW,
+            )
+        rendered = update_text(_TEXT, prepared)
+        assert "'''條目頁2篇'''：" in rendered
+        assert '<small style="color: gray;">' not in rendered
+
+    def test_aggregate_changes_cover_articles_and_nonarticles(self) -> None:
+        """Compare displayed count dimensions with the prior capture."""
+        prior = _members(
+            (1, "Existing", "B", "High"),
+            (2, "Changed", "B", "High"),
+            (3, "Good", "GA", "High"),
+            (4, "Template:Same", "Template", "NA"),
+        )
+        current = _members(
+            (1, "Existing", "B", "High"),
+            (2, "Template:Changed", "Template", "NA"),
+            (3, "Good", "GA", "Low"),
+            (4, "Template:Same", "Template", "NA"),
+        )
+        before = self._snapshot(prior, _NOW - dt.timedelta(days=1))
+        after = self._snapshot(current, _NOW)
+        before.manifest["metadata"]["article_totals"] = {
+            "count": 3,
+            "class": [{"value": "B", "count": 2}, {"value": "GA", "count": 1}],
+            "importance": [{"value": "High", "count": 3}],
+            "nonarticles": {
+                "count": 1,
+                "class": [{"value": "Template", "count": 1}],
+            },
+            "redirects": 0,
+        }
+        after.manifest["metadata"]["article_totals"] = {
+            "count": 2,
+            "class": [{"value": "B", "count": 1}, {"value": "GA", "count": 1}],
+            "importance": [
+                {"value": "High", "count": 1},
+                {"value": "Low", "count": 1},
+            ],
+            "nonarticles": {
+                "count": 2,
+                "class": [{"value": "Template", "count": 2}],
+            },
+            "redirects": 0,
+        }
+        with (
+            patch.object(source, "get_snapshot", return_value=after),
+            patch.object(
+                source,
+                "read_previous_snapshot",
+                return_value=before,
+            ),
+            patch.object(
+                source,
+                "page_metadata",
+                return_value=_replica_rows(current),
+            ),
+        ):
+            prepared = source.prepare_data(
+                self.site,
+                "电子游戏",
+                _TITLE,
+                _TEXT,
+                observed_at=_NOW,
+            )
+        rendered = update_text(_TEXT, prepared)
+        for fragment in (
+            "條目頁2篇'''" + '<small style="color: gray;">（-1）</small>',
+            "'''乙级'''条目1篇" + '<small style="color: gray;">（-1）</small>',
+            "'''高重要度'''1篇" + '<small style="color: gray;">（-2）</small>',
+            "非條目2頁'''" + '<small style="color: gray;">（+1）</small>',
+            "'''模板級'''2頁" + '<small style="color: gray;">（+1）</small>',
+        ):
+            assert fragment in rendered
+        assert "'''优良级'''条目1篇，" in rendered
+        assert "'''專題共計4頁'''。" in rendered
+        assert "（不含0重定向頁）" in rendered
+        self._retain(prepared, rendered, 1)
+        with (
+            patch.object(source, "get_snapshot", return_value=after),
+            patch.object(source, "read_previous_snapshot", return_value=None),
+        ):
+            retry = source.prepare_data(
+                self.site,
+                "电子游戏",
+                _TITLE,
+                rendered,
+                observed_at=_NOW,
+            )
+        assert update_text(rendered, retry) == rendered
 
     def test_unchanged_or_first_dataset_does_not_resolve_titles(self) -> None:
         """Avoid name reads for initial and unchanged datasets."""
@@ -1512,6 +1662,14 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
                     observed_at=observed,
                 )
             rendered = update_text(_TEXT, prepared)
+            assert (
+                "'''丙级'''条目1篇<small style=\"color: gray;\">（+1）</small>"
+            ) in rendered
+            if sequence == 3:  # ruff: ignore[magic-value-comparison]
+                assert (
+                    "'''乙级'''条目1篇"
+                    '<small style="color: gray;">（+1）</small>'
+                ) in rendered
             self._retain(prepared, rendered, sequence, state="unconfirmed")
         assert prepared.pending
         assert prepared.changes.item(0, "old_class") == "C"

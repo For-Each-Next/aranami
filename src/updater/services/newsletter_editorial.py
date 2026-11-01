@@ -85,6 +85,8 @@ _CREDIT_GRADES = {
 }
 _AWARD_THRESHOLD = 10
 _DYK_BASELINE_YEAR = 2025
+_QUALITY_AXIS_STEP = 10
+_QUALITY_AXIS_MINIMUM_MAX = 50
 
 
 def _literal(value: object) -> str:
@@ -199,7 +201,7 @@ def _annual_intro(
     partial: bool | None = None,
     data_through: str | None = None,
 ) -> str:
-    """Keep a figure or list's coverage date in its introduction.
+    """Prefix a figure or list's introduction with its coverage date.
 
     Args:
         review: Saved annual facts with the shared observation cutoff.
@@ -208,12 +210,12 @@ def _annual_intro(
         data_through: Inclusive date for independently dated data.
 
     Returns:
-        The introduction with an inline coverage mark when needed.
+        The introduction prefixed by a coverage mark when needed.
     """
     incomplete = not review.get("complete") if partial is None else partial
-    return sentence + (
+    return (
         _annual_as_of(review, data_through=data_through) if incomplete else ""
-    )
+    ) + sentence
 
 
 def _table(
@@ -338,11 +340,12 @@ def _quality(review: Mapping) -> tuple[str, str]:
 
 
 def _credits(changes: pl.DataFrame) -> str:
-    """Credit nominators and explain retained authorship per article.
+    """Credit nominators and explain explicit authorship differences.
 
     Returns:
         The reference table with nominators preferred over computed
-        authors, retaining tied author fallbacks and explicit notices.
+        authors. Missing nominators fall back directly to known primary
+        text contributors; notices require both identities to be known.
     """
     contributions = (
         changes
@@ -422,7 +425,11 @@ def _credits(changes: pl.DataFrame) -> str:
             if article["main_author"] is False:
                 text += "（非主編）"
             authors = article["authors"]
-            if authors and article["nominator"] not in authors:
+            if (
+                authors
+                and article["nominator"]
+                and article["nominator"] not in authors
+            ):
                 text += "{{small|主要文字貢獻者為" + _users(authors) + "。}}"
             articles.append(text)
             dates.append(article["date"])
@@ -437,17 +444,10 @@ def _credits(changes: pl.DataFrame) -> str:
             if row[grade]
         )
         listing = "\n".join([
-            "{{collapsible list",
-            "| titlestyle = font-weight: normal;",
-            f"| title = {summary}",
-            *(
-                f"| {number} = {text}"
-                for number, text in enumerate(
-                    _dated_articles(articles, dates),
-                    1,
-                )
-            ),
-            "}}",
+            "{{collapsible list| titlestyle = font-weight: normal;",
+            f"  | title = {summary}",
+            *(f"  | {text}" for text in _dated_articles(articles, dates)),
+            "  }}",
         ])
         cells = [editor, listing]
         if row["rank"] != previous_rank:
@@ -799,14 +799,6 @@ def _article_growth_prose(
         else 0
     )
     days = year_days if review.get("complete") else elapsed_days or None
-    marker = (
-        _annual_as_of(
-            review,
-            data_through=data_through,
-        )
-        if not review.get("complete")
-        else ""
-    )
     timing = f"截至{year}年年末" if review.get("complete") else "本年度統計中"
     if current is None:
         introduction = "本年度條目總數與增長統計待補充。"
@@ -839,7 +831,7 @@ def _article_growth_prose(
                 else "。日均增長統計待補充。"
             )
         )
-    return introduction + marker
+    return _annual_intro(review, introduction, data_through=data_through)
 
 
 def _annual_ranking(
@@ -857,7 +849,7 @@ def _annual_ranking(
         introduction: Prose introducing an observed nonempty ranking.
         missing: Complete sentence for unavailable observations.
         empty: Complete sentence for an observed empty ranking.
-        marker: Inline coverage mark attached to the list introduction.
+        marker: Inline coverage mark prefixed to the list introduction.
 
     Returns:
         Ranking columns or the corresponding missing-data sentence.
@@ -865,8 +857,8 @@ def _annual_ranking(
     if rows is None:
         return missing
     return (
-        (introduction if rows else empty)
-        + marker
+        marker
+        + (introduction if rows else empty)
         + "\n{{div col|colwidth=25em}}\n"
         + ("\n".join(rows) if rows else "* （無）")
         + "\n{{div col end}}"
@@ -923,11 +915,12 @@ def _article_report(  # ruff: ignore[too-many-locals]
         + "\n{{div col end}}",
     )
     popularity = review.get("annual_popularity")
-    period_label = (
-        "在統計期間內"
-        if popularity and popularity.get("provisional")
-        else f"{year}年"
-    )
+    if popularity and not (
+        popularity["start"] == f"{year}-01-01"
+        and popularity["start"] <= popularity["end"] <= f"{year}-12-31"
+    ):
+        popularity = None
+    period_label = f"{year}年"
     count = popularity.get("article_count") if popularity else current
     total = popularity.get("total_views") if popularity else None
     interval_days = (
@@ -958,11 +951,6 @@ def _article_report(  # ruff: ignore[too-many-locals]
         )
     else:
         popularity_prose = "本年度瀏覽量統計待補充。"
-    ranking_period = (
-        f"{popularity['start']}至{popularity['end']}統計期間內"
-        if popularity
-        else "本年度"
-    )
     parts.append(  # ruff: ignore[repeated-append]
         popularity_prose
         + "\n\n"
@@ -975,7 +963,7 @@ def _article_report(  # ruff: ignore[too-many-locals]
             if popularity is not None
             else None,
             introduction=(
-                f"以下列出{ranking_period}瀏覽量最多的條目，至多25篇；"
+                f"以下列出{year}年瀏覽量最多的條目，至多25篇；"
                 "前200名可參見"
                 "[[WikiProject:电子游戏/热门条目#年瀏覽量|熱門條目頁]]："
             ),
@@ -1099,8 +1087,16 @@ def _quality_history_chart(review: Mapping) -> str:
         if group[0] != "a" or (frame["a"] > 0).any()
     )
     labels = frame["year"].cast(pl.String)
+    maximum = frame.select(
+        pl.sum_horizontal(key for key, _label, _color in groups).max(),
+    ).item()
+    axis_maximum = max(
+        _QUALITY_AXIS_MINIMUM_MAX,
+        math.ceil(maximum / _QUALITY_AXIS_STEP) * _QUALITY_AXIS_STEP,
+    )
     parameters = [
         "{{Graph:Chart",
+        "| title = 歷年新入選、晉級高品質條目",
         "| type = stackedrect | width = 600 | height = 300",
         "| xType = string | x = " + ", ".join(labels),
     ]
@@ -1113,7 +1109,7 @@ def _quality_history_chart(review: Mapping) -> str:
         "| xAxisAngle = -30 | xAxisTitle = 年份",
         (
             "| yAxisTitle = 入選篇數 | yType = integer "
-            "| yAxisMin = 0 | yGrid = true"
+            f"| yAxisMin = 0 | yAxisMax = {axis_maximum} | yGrid = true"
         ),
         "}}",
     ))
@@ -1158,18 +1154,19 @@ def _milestone_charts(review: Mapping, year: int) -> tuple[str, str]:
         + " | colors = #b4bbff | xAxisTitle = 日期 | yAxisTitle = 條目數 }}"
     )
     return quality, (
-        _annual_intro(
+        "{{Image frame\n| align = right | width = 400\n| content = "
+        + chart
+        + "\n| caption = "
+        + _annual_intro(
             review,
-            "歷年新條目推薦累計數量如下：",
+            "電子遊戲專題累計新條目推薦數量",
             partial=(
                 not review.get("complete")
                 or bool(dyk and dyk[-1][0] < f"{year}-12-31")
             ),
             data_through=dyk[-1][0] if dyk else None,
         )
-        + "\n{{Image frame\n| align = right | width = 400\n| content = "
-        + chart
-        + "\n| caption = 電子遊戲專題累計新條目推薦數量\n}}"
+        + "\n}}"
     )
 
 
@@ -1240,8 +1237,7 @@ def _quality_summary(review: Mapping, year: int) -> str:
         )
         summary = f"{year}年度，專題共誕生高品質條目{_count(total)}篇"
         summary += ("，其中" + details if details else "") + "。"
-    if not review.get("complete"):
-        summary += _annual_as_of(review)
+    summary = _annual_intro(review, summary)
     if total is None or previous is None:
         return summary
     difference = total - previous
@@ -1320,7 +1316,7 @@ def _annual(issue: Issue, review: Mapping) -> str:
         (
             f"== 專題報導兼訪談：{year}年年終回顧 ==\n"
             "{{WikiProject:電子遊戲/簡訊/年终回顾导航模板}}\n"
-            ": {{small|資料整理者待補。}}"
+            ": {{small|数据总结：[[:User:Example|Example]]}}"
         ),
         "=== 引言 ===",
         "==== 內容評審 ====\n\n" + quality_section,

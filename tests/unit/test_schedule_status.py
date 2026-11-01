@@ -1,5 +1,8 @@
 """Verify actual schedules without wiki requests or outcome changes."""
 
+# Keep the existing unittest exception assertions.
+# ruff: file-ignore[pytest-unittest-raises-assertion]
+
 import datetime as dt
 import json
 from pathlib import Path
@@ -14,6 +17,7 @@ from apscheduler.schedulers.base import (
 )
 from apscheduler.triggers.interval import IntervalTrigger
 
+from backend.support.idle_scheduler import IdleScheduler
 from backend.support.public_data import read_schedule_status
 from backend.support.schedule_status import write_schedule_status
 from shared.config import (
@@ -25,6 +29,57 @@ from shared.config import (
 
 class TestScheduleStatus(TestCase):
     """Keep actual predictions separate from measured report results."""
+
+    def test_idle_eligibility_is_validated_separately_from_recurrence(
+        self,
+    ) -> None:
+        """Retain queue evidence and reject malformed optional data."""
+        queued = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)
+        recurrence = queued + dt.timedelta(days=1)
+        scheduler = Mock(spec=IdleScheduler, state=STATE_RUNNING)
+        scheduler.get_job.return_value = Mock(next_run_time=recurrence)
+        scheduler.pending_since.side_effect = lambda name: (
+            queued if name == "assessment_lists" else None
+        )
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "state" / "schedule-status.json"
+            with patch("pathlib.Path.cwd", return_value=root):
+                write_schedule_status(scheduler)
+            content = path.read_text()
+            observed = read_schedule_status(path)
+            row = observed["routines"]["assessment_lists"]
+            assert row["idle"] is True
+            assert row["queued_since"] == queued.isoformat()
+            assert row["next_run_at"] == recurrence.isoformat()
+            cases = (
+                ("assessment_lists", "idle", 1),
+                ("assessment_lists", "idle", False),
+                ("dyks", "queued_since", queued.isoformat()),
+                ("assessment_lists", "state", "missing"),
+                ("assessment_lists", "state", "stopped"),
+                ("assessment_lists", "queued_since", "2026-01-01T00:00"),
+                (
+                    "assessment_lists",
+                    "queued_since",
+                    (queued + dt.timedelta(days=2)).isoformat(),
+                ),
+            )
+            for name, key, value in cases:
+                invalid = json.loads(content)
+                invalid["routines"][name][key] = value
+                path.write_text(json.dumps(invalid))
+                with (
+                    self.subTest(name=name, key=key, value=value),
+                    self.assertRaises(ValueError),
+                ):
+                    read_schedule_status(path)
+            old = json.loads(content)
+            for row in old["routines"].values():
+                row.pop("idle")
+                row.pop("queued_since")
+            path.write_text(json.dumps(old))
+            assert read_schedule_status(path)["routines"] == old["routines"]
 
     @staticmethod
     def test_actual_postponement_and_pauses_preserve_outcomes() -> None:

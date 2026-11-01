@@ -357,6 +357,7 @@ def _year_review(  # ruff: ignore[too-many-arguments]
     provenance: dict,
     revision_counts: Callable[[dt.date, dt.date], pl.DataFrame] | None,
     source_for: Callable[[str], Mapping | None],
+    annual_pageviews: Callable[[int, dt.date], dict | None] | None = None,
     revision_history: (
         Callable[[str, dt.date, dt.date], list[dict[str, object]]] | None
     ) = None,
@@ -380,13 +381,25 @@ def _year_review(  # ruff: ignore[too-many-arguments]
         "awards": None,
         "newcomers": None,
     }
-    history = prepare_year_history(article_history, issue, through)
+    assessment_options = _new_page_assessment_options(
+        issue,
+        now,
+        current_assessments,
+        assessments_at,
+    )
+    history = prepare_year_history(
+        article_history,
+        issue,
+        through,
+        assessments=assessment_options["assessments"],
+    )
     for source in history.pop("sources"):
         provenance[source["url"]] = source
     result.update(history)
     result["quality_year_ends"] = prepare_quality_year_ends(
         quality_history if quality_history is not None else article_history,
         through,
+        assessments=assessment_options["assessments"],
     )
     result["dyk_new_quarters"] = prepare_year_dyk_quarters(
         article_history,
@@ -463,12 +476,6 @@ def _year_review(  # ruff: ignore[too-many-arguments]
                 through,
                 start=start,
             )
-    assessment_options = _new_page_assessment_options(
-        issue,
-        now,
-        current_assessments,
-        assessments_at,
-    )
     result["dyk"] = enrich_year_dyk(
         result["dyk"],
         historical,
@@ -499,6 +506,7 @@ def _year_review(  # ruff: ignore[too-many-arguments]
                 now,
                 source_for=source_for,
                 revision_history=revision_history,
+                annual_pageviews=annual_pageviews,
             ),
         )
     result["dyk_projects_observed_at"] = (
@@ -528,6 +536,7 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
     ),
     prior: Mapping[str, object] | None,
     revision_counts: Callable[[dt.date, dt.date], pl.DataFrame] | None,
+    annual_pageviews: Callable[[int, dt.date], dict | None] | None,
 ) -> dict:
     """Prepare elapsed-quarter observations for one newsletter issue.
 
@@ -739,6 +748,7 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
             overview_at=overview_at,
             provenance=provenance,
             revision_counts=revision_counts,
+            annual_pageviews=annual_pageviews,
             source_for=source_for,
             revision_history=historical_revisions,
         )
@@ -766,6 +776,7 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
     ) = None,
     prior_facts: Mapping[str, object] | None = None,
     revision_counts: Callable[[dt.date, dt.date], pl.DataFrame] | None = None,
+    annual_pageviews: Callable[[int, dt.date], dict | None] | None = None,
 ) -> dict:
     """Prepare quarterly drafts and the current year's annual feature.
 
@@ -796,6 +807,9 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
             snapshots leave new-article grade breakdowns unavailable.
         revision_counts: Replica ranking for an explicit annual
             UTC interval. Missing readers leave revisions unavailable.
+        annual_pageviews: Read prepared calendar-year Pageviews through
+            an exclusive date boundary. Missing observations remain
+            unknown.
         prior_facts: Previously validated saved issues. Retain their
             overview counts only for identical reporting boundaries.
 
@@ -844,6 +858,7 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
                 assessments_at=assessments_at,
                 prior=(prior_facts or {}).get("issues", {}).get(issue.value),
                 revision_counts=revision_counts,
+                annual_pageviews=annual_pageviews,
             )
             for issue in issues
         },

@@ -199,7 +199,8 @@ feature at revision 91016278: the introduction contains exactly four ordered
 level-four data sections, `內容評審`, `新章推薦`, `条目报告`, and `榮譽表彰`.
 The `新章推薦` label is an intentional correction to the reference.
 Missing annual data uses complete placeholder sentences; partial statistics
-carry prominent dated markers, and rolling pageview figures state their dates.
+carry inline cutoff-date markers. Annual popularity uses calendar-year
+observations, never a rolling year relabeled as the reviewed year.
 Only the two editor-comment invitations use buttons, both with the verified
 reflection preload; introduction and data slots have no invitation buttons.
 The invitations use `Template:Clickable button 2` revision 61200765 and
@@ -257,13 +258,19 @@ promotions select one year-end grade, so an A article promoted to FA during
 that year is counted as FA. A matching removal before that year's boundary
 excludes the article; later removals do not change earlier years. Unknown
 action dates have no inferred year; absent history
-stays null. Current assessment grades never replace historical evidence.
+stays null. Annual lists and author credits likewise include only the latest
+surviving promotion at the cutoff. A current or exact-boundary assessment can
+exclude a conflicting final-year grade; missing assessments leave recorded
+history intact. Current grades never rewrite earlier annual cohorts.
 Legacy `quality_years` observations remain readable but are not interpreted
 as year-end counts.
 
 The quality chart uses native `Graph:Chart` parameters with `type=stackedrect`.
 It stacks FA+FL, A+AL, GA, and Bplus from bottom to top, omitting the A layer
-when its entire series is zero. The legend follows the same order. Category
+when its entire series is zero. The template's default legend follows the same
+order in its native position. The
+vertical axis starts at zero and reaches at least 50; higher observed totals
+extend its upper limit to the next multiple of ten. Category
 labels contain only years because native stacked charts do not support total
 labels above bars or interpret line-break markup in labels.
 Native hover shows each stacked group's value,
@@ -271,7 +278,7 @@ and native chart animation stays enabled. Generated wikitext contains no expande
 SVG, explicit Graph styles, or custom overlays. This contract was verified
 against `Module:Graph` revision 95346885 and `Module:Graph/SVGRenderer` revision
 95350043. A narrow viewport scrolls only the chart container, preserving native
-axis-label and legend placement. Missing saved quality history produces no chart.
+axis labels. Missing saved quality history produces no chart.
 
 `backend.newsletter.statistics` retains audited quarterly cumulative DYK data from the
 January 2026 feature's second image description and 2025/2024 assessment data
@@ -310,7 +317,8 @@ omit this field. The DYK chart adds supported quarter counts to its historical
 baseline, then appends the current point when its date is later. December 31
 appears once, including after the fourth quarter is complete. The chart uses the
 verified `Template:Image frame` content, align, width, and caption parameters
-(revision 86263920) to float a 400-pixel thumbnail on the right.
+(revision 86263920) to float a 400-pixel thumbnail on the right. Its caption
+contains the cutoff notice without a repeated introductory sentence in the text.
 
 Monthly winners come from historical revisions of the project's popular
 articles page. Only exact calendar-month intervals fill a month slot. Both
@@ -325,9 +333,16 @@ revision. Readers without revision iteration use bounded daily snapshots and
 their immediate source URLs. It never comes from a reporting boundary or
 accumulated provenance. Older
 observations without this field remain valid and keep plain month labels.
-The latest rolling annual report can fill the current
-provisional draft, with its actual start/end printed explicitly. Bounded
-January 2/3 captures are revisited to find delayed calendar-year reports.
+Normal Pageviews collection also saves complete current- and previous-calendar-
+year rankings from its existing fresh histories, without extra article requests.
+Newsletter collection reads these validated durable results for January 1 through
+the latest available completed date. It never reads disposable caches as facts
+or collects traffic during website requests. Absent calendar-year results remain
+unavailable rather than using rolling-year traffic. The introduction names only
+the reviewed year, while an inline Memo preserves the actual provisional cutoff.
+Unknown article totals leave the project total unknown, without suppressing
+measured ranking entries. Bounded January 2/3 captures are revisited to find
+delayed calendar-year wiki reports.
 Annual total pageviews render as whole, comma-grouped units of ten thousand;
 saved observations retain the exact measured integer counts.
 Annual revision counts use one read-only replica aggregation over current

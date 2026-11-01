@@ -476,7 +476,10 @@ def _valid_annual_statistics(
                 start <= end
                 and end.year == year
                 and count(annual.get("article_count"))
-                and count(annual.get("total_views"))
+                and (
+                    annual.get("total_views") is None
+                    or count(annual["total_views"])
+                )
                 and type(annual.get("provisional")) is bool
                 and _rows(annual.get("items"), lambda row: item(row, "views"))
             )

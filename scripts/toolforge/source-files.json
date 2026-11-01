@@ -65,6 +65,7 @@
     "src/backend/support/execution.py",
     "src/backend/support/failure_status.py",
     "src/backend/support/http.py",
+    "src/backend/support/idle_scheduler.py",
     "src/backend/support/interrupted_runs.py",
     "src/backend/support/job_history.py",
     "src/backend/support/logs.py",

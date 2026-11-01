@@ -13,11 +13,11 @@ from threading import Event
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_PAUSED
 from apscheduler.triggers.cron import CronTrigger
 
 from backend import monitor
+from backend.support.idle_scheduler import IdleScheduler
 from updater.jobs import (
     assessment_lists,
     assessment_log,
@@ -49,11 +49,12 @@ def _complete(
         finished.set()
 
 
-class _PausedScheduler(BackgroundScheduler):
+class _PausedScheduler(IdleScheduler):
     """Validate APScheduler registration without executing reports."""
 
-    def start(self) -> None:
+    def start(self, *, paused: bool = False) -> None:
         """Start a paused scheduler whose due jobs remain unexecuted."""
+        del paused
         super().start(paused=True)
 
 
@@ -72,7 +73,7 @@ class TestMonitor(TestCase):
             patch.object(monitor, "_dry", None),
             patch.object(
                 monitor,
-                "BackgroundScheduler",
+                "IdleScheduler",
                 side_effect=self._create_scheduler,
             ),
         ):
@@ -158,6 +159,8 @@ class TestMonitor(TestCase):
         assert len({job.next_run_time for job in jobs.values()}) == 1
         assert jobs["pageviews"].misfire_grace_time == _PAGEVIEWS_GRACE_SECONDS
         assert jobs["dyks"].misfire_grace_time == 1
+        for name in ("assessment_lists", "enwp_key_articles", "pexbot"):
+            assert jobs[name].misfire_grace_time is None
 
     @staticmethod
     def test_cron_times_follow_explicit_utc_schedule() -> None:
@@ -176,9 +179,9 @@ class TestMonitor(TestCase):
             "assessment_lists": dt.datetime(
                 2026,
                 10,
-                3,
+                4,
                 0,
-                31,
+                0,
                 tzinfo=dt.UTC,
             ),
             "pageviews": dt.datetime(2026, 10, 3, 0, 59, tzinfo=dt.UTC),
@@ -212,8 +215,8 @@ class TestMonitor(TestCase):
             assert previous is not None
             actual.append(previous)
         assert actual == [
-            dt.datetime(2026, 10, 3, hour, 31, tzinfo=dt.UTC)
-            for hour in range(5)
+            dt.datetime(2026, 10, day, 0, 0, tzinfo=dt.UTC)
+            for day in range(4, 9)
         ]
 
     @staticmethod

@@ -4,6 +4,7 @@ Edit ``TASK_DEFINITIONS`` before building to change report pages, PexBot
 subscription roots, or cron times. Starting the monitor runs
 reports independently in the background. By default, a fresh monitor
 checks every report immediately before continuing its cron schedules.
+Idle daily reports become eligible at startup and wait for other work.
 Pass ``run_immediately=False`` to start at the next scheduled times
 instead.
 Keep the calling Python process alive. Call ``shutdown(wait=True)`` on
@@ -30,10 +31,10 @@ from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING
 
 from apscheduler.events import EVENT_ALL, EVENT_SCHEDULER_SHUTDOWN
-from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from backend.support.events import event_extra
+from backend.support.idle_scheduler import IdleScheduler
 from backend.support.interrupted_runs import recover_interrupted_runs
 from backend.support.logs import open_run_log
 from backend.support.schedule_status import write_schedule_status
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 _START_LOCK = Lock()
-_scheduler: BackgroundScheduler | None = None
+_scheduler: IdleScheduler | None = None
 _dry: bool | None = None
 _active_dispatch: Callable[..., dt.datetime | None] | None = None
 
@@ -68,7 +69,7 @@ def _dispatch(name: str, *, dry: bool) -> dt.datetime | None:
 
 
 def _heartbeat(  # ruff: ignore[too-many-arguments]
-    scheduler: BackgroundScheduler,
+    scheduler: IdleScheduler,
     stopped: Event,
     changed: Event,
     advice: SimpleQueue[tuple[str, dt.datetime]],
@@ -182,12 +183,14 @@ def start(
     clear_cache: bool = False,
     run_immediately: bool = True,
     dispatch: Callable[..., dt.datetime | None] | None = None,
-) -> BackgroundScheduler:
+    start_paused: bool = False,
+) -> IdleScheduler:
     """Start routine monitoring or return this process's monitor.
 
     By default, a fresh monitor checks every report immediately in live
     and preview modes. Set ``run_immediately=False`` to wait for the
-    UTC schedule. Reports may overlap; each report has at most one
+    UTC schedule. Idle daily reports wait until ordinary scheduled work
+    finishes and run one at a time. Reports may overlap; each has one
     active execution. Missed runs coalesce into one invocation. Stopped
     monitors are replaced on the next call. Paused monitors are returned
     without resuming them. Reusing an active monitor leaves its jobs
@@ -206,6 +209,9 @@ def start(
         dispatch: Optional hub callback invoked with the routine name
             and dry mode. Omit to run reports without website
             collection. An active monitor retains its original callback.
+        start_paused: Allow the hub to register collection jobs before
+            any startup work is submitted. Resume the returned scheduler
+            after registration. Existing monitors keep their state.
 
     Returns:
         Running background scheduler, which the caller can inspect,
@@ -244,7 +250,7 @@ def start(
                 _LOGGER.info("Cleared disposable runtime cache.")
             started_at = dt.datetime.now(dt.UTC)
             recover_interrupted_runs(before=started_at, dry=dry)
-            scheduler = BackgroundScheduler(timezone=dt.UTC)
+            scheduler = IdleScheduler(timezone=dt.UTC)
 
             shutdown_event = Event()
             changed_event = Event()
@@ -284,6 +290,7 @@ def start(
                 options = (
                     {"misfire_grace_time": schedule.misfire_grace_time}
                     if schedule.misfire_grace_time is not None
+                    or TASK_DEFINITIONS[schedule.name].idle
                     else {}
                 )
                 scheduler.add_job(
@@ -300,7 +307,7 @@ def start(
             _scheduler = scheduler
             _dry = dry
             _active_dispatch = callback
-            scheduler.start()
+            scheduler.start(paused=start_paused)
             Thread(
                 target=_heartbeat,
                 args=(scheduler, shutdown_event, changed_event, advice),

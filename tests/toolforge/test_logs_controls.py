@@ -1,4 +1,4 @@
-"""Verify complete invocation history and separate diagnostic access."""
+"""Verify recent invocation history and separate diagnostic access."""
 
 from __future__ import annotations
 
@@ -108,11 +108,11 @@ class LogControlsTests(unittest.TestCase):
                 assert response.status_code == 200
                 output = response.text
                 listing = self._listing(output)
-                assert listing.count("<tr>") == 100
-                assert listing.count("<td>") == 400
+                assert listing.count("<tr>") == 20
+                assert listing.count("<td>") == 80
                 assert output.count('<th scope="col">') == 4
                 assert re.findall(r'<time datetime="([^"]+)"', listing) == [
-                    event["time"] for event in reversed(self.events)
+                    event["time"] for event in reversed(self.events[-20:])
                 ]
                 assert interface.text("logs.result.updated") in listing
                 assert interface.text("logs.result.failed") in listing
@@ -123,11 +123,12 @@ class LogControlsTests(unittest.TestCase):
                 assert interface.text("logs.download") not in output
                 assert " download>" not in output
                 assert "job-history-" in listing
-                assert listing.count('<a class="status-link"') == 100
-                assert listing.count('aria-haspopup="dialog"') == 100
+                assert listing.count('<a class="status-link"') == 20
+                assert listing.count('aria-haspopup="dialog"') == 20
                 assert "<button" not in listing
-                for index in range(100):
+                for index in range(80, 100):
                     assert f'href="#job-history-{index:032x}"' in listing
+                assert f'href="#job-history-{79:032x}"' not in listing
                 archive_output = self.client.get(
                     "/logs/",
                     headers={"Accept-Language": locale},
@@ -158,7 +159,7 @@ class LogControlsTests(unittest.TestCase):
                     == "diagnostic details\n"
                 )
 
-    def test_obsolete_controls_leave_complete_history_visible(self) -> None:
+    def test_obsolete_controls_leave_recent_history_visible(self) -> None:
         """Ignore retired history controls without changing the rows."""
         for locale in ("en", "zh-hans", "zh-hant"):
             headers = {"Accept-Language": locale}
@@ -209,7 +210,7 @@ class LogControlsTests(unittest.TestCase):
             path.unlink()
         response = self.client.get("/reports/")
         assert response.status_code == 200
-        assert self._listing(response.text).count("<tr>") == 100
+        assert self._listing(response.text).count("<tr>") == 20
         assert self.client.get("/logs/").status_code == 200
         (self.runtime / "state" / "job-history.json").write_text("{}")
         response = self.client.get("/reports/")

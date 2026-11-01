@@ -19,7 +19,7 @@ from webservice.presentation import (
 if TYPE_CHECKING:
     from webservice.presentation import Interface, Record
 
-_RUN_LIMIT = 100
+_RUN_LIMIT = 20
 
 
 def history_context(interface: Interface, data: Record) -> Record:
@@ -30,7 +30,7 @@ def history_context(interface: Interface, data: Record) -> Record:
         data: Validated saved invocations.
 
     Returns:
-        At most one hundred execution rows with explicit stage popups.
+        At most twenty execution rows with explicit stage popups.
     """
     rows = []
     runs = sorted(

@@ -49,6 +49,113 @@ _DYK_SCHEMA = {
     "release_year": pl.Int32,
 }
 QUALITY_HISTORY_GRADES = ("FA", "FL", "A", "AL", "GA", "Bplus")
+_GRADE_PRIORITY = {"FA": 4, "FL": 4, "A": 3, "AL": 3, "GA": 2, "Bplus": 1}
+
+
+def _observed_quality(
+    events: pl.DataFrame,
+    assessments: pl.DataFrame | None,
+    *,
+    year: int | None = None,
+) -> pl.DataFrame:
+    """Keep promotions compatible with an observed boundary grade.
+
+    Args:
+        events: Active quality additions, optionally grouped by year.
+        assessments: Current or exact-boundary project assessments.
+            Missing rows or null grades cannot establish status loss.
+        year: Only constrain this annual cohort when supplied.
+
+    Returns:
+        Matching promotions without changing historical evidence.
+    """
+    if assessments is None:
+        return events
+    members = assessments
+    if "page_namespace" in members.columns:
+        members = members.filter(pl.col("page_namespace") == 0)
+    identity = (
+        "page_id"
+        if "page_id" in events.columns and "page_id" in members.columns
+        else "title"
+    )
+    grades = members.select(
+        pl.col("page_id")
+        if identity == "page_id"
+        else pl.col("full_title").str.replace_all("_", " ").alias("title"),
+        pl.col("pa_class").is_not_null().alias("_grade_observed"),
+        pl
+        .col("pa_class")
+        .cast(pl.String)
+        .str.strip_chars()
+        .str.to_lowercase()
+        .str.replace(r"[级級]$", "")
+        .replace_strict(_HIGH_GRADES, default=None)
+        .alias("_observed_grade"),
+    ).unique()
+    compatible = ~pl.col("_grade_observed").fill_null(value=False) | (
+        pl.col("grade") == pl.col("_observed_grade")
+    ).fill_null(value=False)
+    return (
+        events
+        .join(grades, on=identity, how="left", validate="m:1")
+        .filter(
+            (pl.col("year") != year) | compatible
+            if year is not None
+            else compatible,
+        )
+        .drop("_grade_observed", "_observed_grade")
+    )
+
+
+def _active_quality(
+    events: pl.DataFrame,
+    through: dt.date,
+    *,
+    groups: tuple[str, ...] = (),
+) -> pl.DataFrame:
+    """Select the latest surviving quality addition at a cutoff.
+
+    Args:
+        events: Recorded quality events, optionally expanded by cohort.
+        through: Exclusive observation date.
+        groups: Cohort columns whose statuses remain independent.
+
+    Returns:
+        One addition per article, with higher grades winning same-day
+        ties. Removal clears that grade without reviving earlier awards.
+    """
+    identity = "page_id" if "page_id" in events.columns else "title"
+    observed = events.filter(
+        (pl.col("kind") == "quality")
+        & pl.col("grade").is_in(QUALITY_HISTORY_GRADES)
+        & (pl.col("date") < through),
+    )
+    latest = (
+        observed
+        .filter(pl.col("action") == "added")
+        .with_columns(
+            pl.col("grade").replace_strict(_GRADE_PRIORITY).alias("_priority"),
+        )
+        .sort("date", "_priority", "grade")
+        .unique([*groups, identity], keep="last")
+        .drop("_priority")
+    )
+    removed = (
+        observed
+        .filter(pl.col("action") == "removed")
+        .group_by(*groups, identity, "grade")
+        .agg(pl.col("date").max().alias("_removed"))
+    )
+    return (
+        latest
+        .join(removed, on=[*groups, identity, "grade"], how="left")
+        .filter(
+            pl.col("_removed").is_null()
+            | (pl.col("_removed") < pl.col("date")),
+        )
+        .drop("_removed")
+    )
 
 
 def _game_release(text: str) -> tuple[bool | None, int | None]:
@@ -303,6 +410,8 @@ def prepare_year_history(
     events: pl.DataFrame | None,
     issue: Issue,
     through: dt.date,
+    *,
+    assessments: pl.DataFrame | None = None,
 ) -> dict:
     """Select recorded annual milestones with their source evidence.
 
@@ -310,19 +419,46 @@ def prepare_year_history(
         events: Complete project article histories, or unavailable.
         issue: January publication following the reviewed year.
         through: Exclusive observation date within the reviewed year.
+        assessments: Current or exact-boundary project grades. Missing
+            observations leave the recorded milestone state unchanged.
 
     Returns:
         Nullable DYK and quality event lists plus revision provenance.
         Nominators are recorded separately from verified authorship.
-        Duplicate milestones count once; conflicting attribution
-        stays unknown.
+        Only the latest surviving annual quality addition is listed.
+        Delisted and superseded grades supply no list or author credit.
+        Duplicate milestones count once; conflicting attribution stays
+        unknown. Removed events and their sources remain retained.
     """
-    return prepare_history(events, dt.date(issue.year - 1, 1, 1), through)
+    start = dt.date(issue.year - 1, 1, 1)
+    result = prepare_history(events, start, through)
+    if events is None:
+        return result
+    active = _observed_quality(_active_quality(events, through), assessments)
+    added = events.filter(
+        (pl.col("action") == "added") & (pl.col("kind") == "quality"),
+    ).join(
+        active.select("title", "date", "grade").unique(),
+        on=["title", "date", "grade"],
+        how="semi",
+    )
+    selected = pl.concat([
+        events.filter(
+            (pl.col("kind") != "quality") | (pl.col("action") != "added"),
+        ),
+        added,
+    ])
+    result["quality_changes"] = prepare_history(selected, start, through)[
+        "quality_changes"
+    ]
+    return result
 
 
 def prepare_quality_year_ends(
     events: pl.DataFrame | None,
     through: dt.date,
+    *,
+    assessments: pl.DataFrame | None = None,
 ) -> list[dict] | None:
     """Classify annual quality promotions at each year's boundary.
 
@@ -331,6 +467,8 @@ def prepare_quality_year_ends(
             Stable IDs keep renamed and redirected subjects distinct.
         through: Exclusive observation date. Completed years use the
             following January 1; the open year uses this date.
+        assessments: Current or exact-boundary project grades for the
+            final cohort. Earlier years retain their historical state.
 
     Returns:
         Each year's articles with at least one dated quality addition,
@@ -379,40 +517,13 @@ def prepare_quality_year_ends(
         .select("year", identity)
         .unique()
     )
-    latest = (
-        expanded
-        .filter(pl.col("action") == "added")
-        .with_columns(
-            pl
-            .col("grade")
-            .replace_strict({
-                "FA": 4,
-                "FL": 4,
-                "A": 3,
-                "AL": 3,
-                "GA": 2,
-                "Bplus": 1,
-            })
-            .alias("priority"),
-        )
-        .sort("date", "priority", "grade")
-        .unique(["year", identity], keep="last")
-        .join(annual_members, on=["year", identity], how="semi")
-        .select("year", identity, "grade", pl.col("date").alias("added"))
-    )
-    removed = (
-        expanded
-        .filter(pl.col("action") == "removed")
-        .group_by("year", identity, "grade")
-        .agg(pl.col("date").max().alias("removed"))
+    active = _active_quality(expanded, through, groups=("year",)).join(
+        annual_members,
+        on=["year", identity],
+        how="semi",
     )
     counts = (
-        latest
-        .join(removed, on=["year", identity, "grade"], how="left")
-        .filter(
-            pl.col("removed").is_null()
-            | (pl.col("removed") < pl.col("added")),
-        )
+        _observed_quality(active, assessments, year=last_year)
         .group_by("year")
         .agg(
             pl

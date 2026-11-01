@@ -36,13 +36,13 @@ _ENDPOINT = "https://pexbot.toolforge.org/database-report/stream"
 _COOLDOWN_SECONDS = 15
 
 
-def _utc_today() -> dt.date:
-    """Read the execution date independently of the report anchor.
+def _utc_now() -> dt.datetime:
+    """Read the execution instant independently of the report anchor.
 
     Returns:
-        The current UTC date, refreshed before each report check.
+        The current UTC instant, refreshed before each report check.
     """
-    return dt.datetime.now(dt.UTC).date()
+    return dt.datetime.now(dt.UTC)
 
 
 def _refresh(site: BaseSite, title: str) -> None:
@@ -154,12 +154,11 @@ def _prepare_action(active: JobContext, title: str) -> PexBotReport | None:
         Prepared evidence requiring a live refresh, or null after a skip
         or preview has been retained and its outcome recorded.
     """
-    today = _utc_today()
-    report = prepare_report(active.site, title, today)
+    report = prepare_report(active.site, title, _utc_now())
     if report.already_updated:
         note = (
             f"Skipped PexBot refresh: {title}. PexBot already "
-            f"edited this page on {today} UTC."
+            "edited this page within the last 24 hours."
         )
         active.notes.append(note)
         _LOGGER.info("%s", note)
@@ -183,7 +182,7 @@ def run(
 ) -> None:
     """Refresh subscribed reports or describe delegated dry-run actions.
 
-    Skip reports edited by PexBot on the current UTC date, even when
+    Skip reports edited by PexBot within the last 24 hours, even when
     another editor has since changed them. Apply this check to dry-run
     proposals too. After a live refresh attempt, pause for 15 seconds
     before checking the next report. Skips schedule no further pause;

@@ -1795,6 +1795,26 @@ class LiveVisibilityTests(unittest.TestCase):
         assert card is not None
         return card[1]
 
+    def test_queued_idle_reports_show_waiting(self) -> None:
+        """Show waiting idle reports in the page and live fragments."""
+        definition = self.data["config"]["routines"]["routines"]["pageviews"]
+        definition["idle"] = True
+        schedule = self.data["status"]["schedule"]
+        schedule["routines"]["pageviews"]["queued_since"] = (
+            "2026-10-18T11:00:00Z"
+        )
+        for locale in ("en", "zh-hans", "zh-hant"):
+            for output in self._outputs(locale):
+                card = self._card(output)
+                assert Interface(locale).text("ops.schedule_idle") in card
+                assert "2026-10-20 18:59" not in card
+                future = Interface(locale).text("time.days_ahead", count=2)
+                assert future not in card
+        schedule["state"] = "paused"
+        assert Interface("en").text("ops.schedule_paused") in self._card(
+            self._outputs("en")[0],
+        )
+
     def test_completed_daily_reports_show_their_confirmed_date(self) -> None:
         """Use dated success labels after verified daily work."""
         status = self.data["status"]
@@ -2868,7 +2888,7 @@ class EventPresentationTests(unittest.TestCase):
             assert 'class="pagination"' not in output
 
     def test_history_is_bounded_and_complete(self) -> None:
-        """Show all one hundred newest retained invocations together."""
+        """Show twenty recent invocations and their stage dialogs."""
         runs = [
             self._run(
                 index,
@@ -2878,12 +2898,14 @@ class EventPresentationTests(unittest.TestCase):
             )
             for index in range(105)
         ]
-        output = self._render(runs)
-        rows = self._rows(output)
-        assert len(rows) == 100
-        assert rows[0][0] == "2026-10-18 13:44:30"
-        assert rows[-1][0] == "2026-10-18 12:05:30"
-        assert output.count('<dialog id="job-history-') == 100
+        for locale in ("en", "zh-hans", "zh-hant"):
+            output = self._render(runs, locale)
+            rows = self._rows(output)
+            assert len(rows) == 20
+            assert rows[0][0] == "2026-10-18 13:44:30"
+            assert rows[-1][0] == "2026-10-18 13:25:30"
+            assert output.count('<dialog id="job-history-') == 20
+            assert Interface(locale).text("reports.history_note") in output
         output = self._render([
             self._run(truncated=True),
         ])

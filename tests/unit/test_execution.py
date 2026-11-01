@@ -361,7 +361,7 @@ class TestRoutineOutput(TestCase):
             ),
             patch.object(
                 pexbot_data,
-                "edited_by_on_date",
+                "edited_by_between",
                 return_value=False,
             ) as history,
             patch.object(pexbot, "_refresh") as refresh,

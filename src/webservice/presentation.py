@@ -1061,6 +1061,15 @@ def schedule_state(
             if snapshot["state"] == "running" and row["state"] == "scheduled"
             else None,
         }
+        queued = timestamp(row.get("queued_since"))
+        if (
+            definition.get("idle") is True
+            and queued is not None
+            and queued <= updated
+            and snapshot["state"] == "running"
+            and row["state"] == "scheduled"
+        ):
+            routines[key]["queued_since"] = row["queued_since"]
     started = timestamp(snapshot.get("started_at"))
     return {
         "state": snapshot["state"],
@@ -1086,6 +1095,8 @@ def next_run(schedule: Record, routine: str, interface: Interface) -> str:
         The actual next UTC time or a localized state explanation.
     """
     row = schedule["routines"].get(routine, {})
+    if row.get("queued_since") is not None:
+        return interface.text("ops.schedule_idle")
     if (
         schedule["state"] == "running"
         and row.get("state") == "scheduled"

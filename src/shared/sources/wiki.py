@@ -95,39 +95,55 @@ def read_page_ids(
     ]
 
 
-def edited_by_on_date(
+def edited_by_between(
     site: BaseSite,
     title: str,
     *,
     user: str,
-    day: dt.date,
+    since: dt.datetime,
+    until: dt.datetime,
 ) -> bool:
-    """Check current page history for an author's edit on one UTC date.
+    """Check live page history for an author's edit within a UTC window.
 
     Read metadata from the live wiki so replica lag cannot cause a
-    duplicate refresh. Search the whole date even when another author
+    duplicate refresh. Search the whole window even when another author
     made a newer revision. Revision content is not requested.
 
     Args:
         site: Existing authenticated site to read.
         title: Full page title whose history is checked.
         user: Exact registered username to match.
-        day: UTC date to search, including its midnight boundary.
+        since: Inclusive beginning of the timezone-aware search window.
+        until: Inclusive end of the timezone-aware search window.
 
     Returns:
-        Whether the requested author made any revision on that date.
+        Whether the requested author made a revision within the window.
+
+    Raises:
+        ValueError: A bound has no timezone or the window is reversed.
     """
-    midnight = pywikibot.Timestamp(day.year, day.month, day.day)
-    last_second = midnight + dt.timedelta(days=1, seconds=-1)
+    if since.utcoffset() is None or until.utcoffset() is None:
+        message = "Revision-history windows require timezone-aware bounds."
+        raise ValueError(message)
+    since = since.astimezone(dt.UTC)
+    until = until.astimezone(dt.UTC)
+    if since > until:
+        message = "Revision-history windows must not be reversed."
+        raise ValueError(message)
     page = pywikibot.Page(site, title)
-    return any(
-        revision.user == user and revision.timestamp.date() == day
-        for revision in page.revisions(
-            content=False,
-            starttime=last_second,
-            endtime=midnight,
-        )
-    )
+    for revision in page.revisions(
+        content=False,
+        starttime=pywikibot.Timestamp.set_timestamp(
+            until.replace(tzinfo=None),
+        ),
+        endtime=pywikibot.Timestamp.set_timestamp(since.replace(tzinfo=None)),
+    ):
+        observed = revision.timestamp
+        if observed.utcoffset() is None:
+            observed = observed.replace(tzinfo=dt.UTC)
+        if revision.user == user and since <= observed <= until:
+            return True
+    return False
 
 
 def template_aliases(site: BaseSite, title: str) -> tuple[str, ...]:

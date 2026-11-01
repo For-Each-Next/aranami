@@ -113,10 +113,23 @@ class EditorialDraftTests(unittest.TestCase):
         ]
         assert all(
             str(row).startswith(
-                "{{collapsible list\n| titlestyle = font-weight: normal;\n"
-                "| title = ",
+                "{{collapsible list| titlestyle = font-weight: normal;\n"
+                "  | title = ",
             )
             for row in lists
+        )
+        assert all(str(row).endswith("\n  }}") for row in lists)
+        assert all(
+            not parameter.showkey
+            for row in lists
+            for parameter in row.params
+            if str(parameter.name).strip().isdecimal()
+        )
+        assert str(lists[0].get("1").value).strip() == (
+            "{{icon|FA}}&thinsp;[[:ZEarly]]<!-- 0101 -->"
+        )
+        assert str(lists[0].get("2").value).strip() == (
+            "{{icon|FA}}&thinsp;[[:AlphabeticallyFirst]]<!-- 1201 -->"
         )
         assert "{{hlist-comma" not in text
         assert (
@@ -226,10 +239,10 @@ class EditorialDraftTests(unittest.TestCase):
             "{{icon|GA}}&thinsp;[[:BTie]]<!-- 0201 -->",
         ]
         assert (
-            "\n| 1 = {{icon|FA}}&thinsp;[[:ATie]]<!-- 0201 -->\n"
-            "| 2 = {{icon|FA}}&thinsp;[[:ALate]]<!-- 1201 -->\n"
-            "| 3 = {{icon|GA}}&thinsp;[[:ZEarly]]<!-- 0101 -->\n"
-            "| 4 = {{icon|GA}}&thinsp;[[:BTie]]<!-- 0201 -->\n}}"
+            "\n  | {{icon|FA}}&thinsp;[[:ATie]]<!-- 0201 -->\n"
+            "  | {{icon|FA}}&thinsp;[[:ALate]]<!-- 1201 -->\n"
+            "  | {{icon|GA}}&thinsp;[[:ZEarly]]<!-- 0101 -->\n"
+            "  | {{icon|GA}}&thinsp;[[:BTie]]<!-- 0201 -->\n  }}"
         ) in str(listing)
         assert "<!-- 0301 -->" not in text
         assert "月 -->" not in text
@@ -308,7 +321,7 @@ class EditorialDraftTests(unittest.TestCase):
         assert "{{WikiProject:電子遊戲/簡訊/年终回顾导航模板}}" in text
         assert (
             "{{WikiProject:電子遊戲/簡訊/年终回顾导航模板}}\n"
-            ": {{small|資料整理者待補。}}"
+            ": {{small|数据总结：[[:User:Example|Example]]}}"
         ) in text
         assert "=== 引言 ===\n\n==== 內容評審 ====" in text
         for unwanted in (
@@ -828,10 +841,8 @@ class AuthorCreditRoleTests(unittest.TestCase):
         assert all("主要文字貢獻者" not in owner for owner in owners)
         for listing in _credit_lists(table):
             article = str(listing.get("1").value)
-            assert (
-                "[[:Subject]]{{small|主要文字貢獻者為"
-                "[[:User:WriterA|WriterA]]、[[:User:WriterB|WriterB]]。}}"
-            ) in article
+            assert "[[:Subject]]<!-- 0102 -->" in article
+            assert "主要文字貢獻者" not in article
         unknown = self._credit_table("GA", None, None)
         assert "User:" not in unknown
         assert "主要文字貢獻者" not in unknown

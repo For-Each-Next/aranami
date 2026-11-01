@@ -380,6 +380,8 @@ class TestHubLifecycle(TestCase):
         assert start.call_args.kwargs["dispatch"].keywords == {
             "updater": updater,
         }
+        assert start.call_args.kwargs["start_paused"] is True
+        scheduler.resume.assert_called_once_with()
         options = scheduler.add_job.call_args.kwargs
         assert options["id"] == "website"
         assert options["seconds"] == 3600  # ruff: ignore[magic-value-comparison]

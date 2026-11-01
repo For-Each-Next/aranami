@@ -11,6 +11,7 @@ from threading import RLock
 from apscheduler.schedulers.base import STATE_PAUSED, STATE_STOPPED
 from apscheduler.triggers.interval import IntervalTrigger
 
+from backend.support.idle_scheduler import IdleScheduler
 from backend.support.server_status import sample_runtime
 from shared.config import (
     COLLECTION_DEFINITIONS,
@@ -52,6 +53,11 @@ def _write_schedule(scheduler: object, started_at: dt.datetime | None) -> None:
     for name, definition in TASK_DEFINITIONS.items():
         job = None if state == "stopped" else scheduler.get_job(name)
         next_run = getattr(job, "next_run_time", None)
+        queued = (
+            scheduler.pending_since(name)
+            if isinstance(scheduler, IdleScheduler) and state != "stopped"
+            else None
+        )
         routines[name] = {
             "state": "stopped"
             if state == "stopped"
@@ -71,6 +77,8 @@ def _write_schedule(scheduler: object, started_at: dt.datetime | None) -> None:
             "minute": definition.minute,
             "pages": dict(definition.pages),
             "prefixes": definition.prefixes,
+            "idle": definition.idle,
+            "queued_since": queued.isoformat() if queued is not None else None,
         }
     collections = {}
     for name, definition in COLLECTION_DEFINITIONS.items():

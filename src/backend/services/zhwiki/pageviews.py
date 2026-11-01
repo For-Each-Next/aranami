@@ -28,7 +28,7 @@ from backend.support.pageviews_cache import (
     PageviewsCache,
 )
 from backend.support.routine_status import report_progress
-from shared.reports import ReportResult
+from shared.reports import ReportResult, ReportStore, report_key
 from shared.sources import pageviews
 from shared.sources.quarry.projects import query_pages_by_wikiproject
 from shared.support.regions import integer_option, region_options
@@ -56,6 +56,13 @@ _VIEWS_SCHEMA = {
     "title": pl.String,
     "start": pl.Date,
     "stop": pl.Date,
+    "views": pl.Int64,
+}
+_ANNUAL_SCHEMA = {
+    "year": pl.Int32,
+    "start": pl.Date,
+    "stop": pl.Date,
+    "title": pl.String,
     "views": pl.Int64,
 }
 _RANKING_GROUP_SCHEMA = {
@@ -254,6 +261,25 @@ def report_periods(
         start = stop - config.delta
         periods.extend(((start - config.delta, start), (start, stop)))
     return tuple(dict.fromkeys(periods))
+
+
+def _calendar_year_periods(
+    stop: dt.date,
+) -> tuple[tuple[dt.date, dt.date], ...]:
+    """Keep the open year and preceding full year in each observation.
+
+    Args:
+        stop: Exclusive reporting end date.
+
+    Returns:
+        Calendar intervals supported by the same full article histories.
+        The preceding year remains available during January follow-up.
+    """
+    year = (stop - dt.timedelta(days=1)).year
+    return tuple(
+        (dt.date(selected, 1, 1), min(stop, dt.date(selected + 1, 1, 1)))
+        for selected in (year - 1, year)
+    )
 
 
 def _require_daily_count(
@@ -589,6 +615,7 @@ def prepare_downloads(  # ruff: ignore[too-many-arguments]
     start = min((
         first_stop - dt.timedelta(days=history_days),
         *(begin for begin, _ in report_periods(first_stop, configurations)),
+        *(begin for begin, _ in _calendar_year_periods(first_stop)),
     ))
     candidate = target_date
     while True:
@@ -1253,7 +1280,7 @@ def _report_observations(  # ruff: ignore[too-many-arguments]
         prefetch_stop: Optional download end for later reports.
 
     Returns:
-        Available project members and their validated interval totals.
+        Complete selected members and available validated totals.
 
     Raises:
         PageviewsDeferredError: A required source is temporarily absent.
@@ -1271,7 +1298,12 @@ def _report_observations(  # ruff: ignore[too-many-arguments]
         if settings.task_forces
         else settings.periods
     )
-    intervals = report_periods(stop, configurations)
+    intervals = tuple(
+        dict.fromkeys((
+            *report_periods(stop, configurations),
+            *_calendar_year_periods(stop),
+        )),
+    )
     # API health needs the target day independently of display periods.
     intervals = tuple(dict.fromkeys((*intervals, (data_date, stop))))
     batch = _DOWNLOAD_BATCH.get()
@@ -1317,7 +1349,152 @@ def _report_observations(  # ruff: ignore[too-many-arguments]
     # The allowance shrinks back to normal as catch-up advances.
     ahead = max(0, ((prefetch_stop or stop) - stop).days)
     cache.save(titles, history_days=history_days + ahead)
-    return articles.join(views.select("title"), on="title", how="semi"), views
+    return articles, views
+
+
+def _annual_popularity_rows(
+    articles: pl.DataFrame,
+    views: pl.DataFrame,
+    stop: dt.date,
+) -> pl.DataFrame:
+    """Retain complete calendar-year totals without synthetic zeroes.
+
+    Args:
+        articles: Complete selected project population.
+        views: Observed interval totals from this run's fresh histories.
+        stop: Exclusive reporting cutoff.
+
+    Returns:
+        Every selected article's nullable totals for the open and prior
+        calendar years. Failed requests and unobserved intervals remain
+        unknown, including provisional zeroes used by wiki reports.
+    """
+    intervals = pl.DataFrame(
+        _calendar_year_periods(stop),
+        schema={"start": pl.Date, "stop": pl.Date},
+        orient="row",
+    )
+    measured = pl.col("views")
+    if "observed" in views.columns:
+        measured = pl.when(pl.col("observed")).then(measured).otherwise(None)
+    return (
+        articles
+        .select("title")
+        .unique()
+        .join(intervals, how="cross")
+        .join(
+            views.select(
+                "title",
+                "start",
+                "stop",
+                measured.cast(pl.Int64).alias("views"),
+            ),
+            on=["title", "start", "stop"],
+            how="left",
+            validate="1:1",
+        )
+        .select(
+            pl.col("start").dt.year().cast(pl.Int32).alias("year"),
+            "start",
+            "stop",
+            "title",
+            "views",
+        )
+        .sort(
+            "year",
+            "views",
+            "title",
+            descending=[False, True, False],
+            nulls_last=True,
+        )
+    )
+
+
+def read_annual_popularity(
+    site: BaseSite,
+    year: int,
+    through: dt.date,
+    *,
+    title: str,
+) -> dict | None:
+    """Read a saved calendar-year ranking without collecting inputs.
+
+    Args:
+        site: Source wiki identifying the durable production store.
+        year: Calendar year required by the newsletter.
+        through: Exclusive cutoff; later intervals are ineligible.
+        title: Concrete Pageviews report destination selected by caller.
+
+    Returns:
+        Complete ranked measured articles, population size, nullable
+        total, and actual inclusive dates, or none without eligible
+        validated data. Missing observations never become zeroes.
+        The prior year's completed totals remain reusable after January
+        follow-up calculations. Preview results are never selected.
+    """
+    try:  # ruff: ignore[too-many-statements-in-try-clause]
+        bundle = ReportStore().read(
+            report_key("pageviews", site.dbName(), title),
+        )
+        if (
+            bundle is None
+            or bundle.manifest["family"] != "pageviews"
+            or bundle.manifest["metadata"].get("project") != "电子游戏"
+            or bundle.manifest["target"]
+            != {"site": site.dbName(), "title": title}
+        ):
+            return None
+        frame = bundle.tables.get("annual_popularity")
+        if frame is None or frame.schema != pl.Schema(_ANNUAL_SCHEMA):
+            return None
+        data_date = dt.date.fromisoformat(
+            bundle.manifest["metadata"]["data_date"],
+        )
+        start = dt.date(year, 1, 1)
+        stop = min(data_date + dt.timedelta(days=1), dt.date(year + 1, 1, 1))
+        if (
+            stop <= start
+            or stop > through
+            or data_date.year not in {year, year + 1}
+        ):
+            return None
+        rows = frame.filter(pl.col("year") == year)
+        if (
+            rows.is_empty()
+            or rows.get_column("views").null_count() == rows.height
+            or not rows.filter(
+                pl.col("start").is_null()
+                | pl.col("stop").is_null()
+                | (pl.col("start") != start)
+                | (pl.col("stop") != stop)
+                | pl.col("title").is_null()
+                | (pl.col("title").str.len_chars() == 0)
+                | pl.col("title").is_duplicated()
+                | (pl.col("views") < 0),
+            ).is_empty()
+        ):
+            return None
+        observed = rows.filter(pl.col("views").is_not_null()).sort(
+            "views",
+            "title",
+            descending=[True, False],
+        )
+        return {
+            "start": start.isoformat(),
+            "end": (stop - dt.timedelta(days=1)).isoformat(),
+            "article_count": rows.height,
+            "total_views": observed["views"].sum()
+            if observed.height == rows.height
+            else None,
+            "items": observed.select("title", "views").to_dicts(),
+            "provisional": stop != dt.date(year + 1, 1, 1),
+        }
+    except OSError, ValueError, TypeError, KeyError, pl.exceptions.PolarsError:
+        logger.warning(
+            "Ignoring unavailable saved annual Pageviews data",
+            exc_info=True,
+        )
+        return None
 
 
 def prepare_report(  # ruff: ignore[too-many-arguments]
@@ -1362,13 +1539,18 @@ def prepare_report(  # ruff: ignore[too-many-arguments]
             are committed on failure. The next invocation downloads full
             histories again.
     """  # ruff: ignore[docstring-extraneous-exception]
-    articles, views = _report_observations(
+    selected_articles, views = _report_observations(
         site,
         stop,
         settings,
         history_days,
         missing_percent,
         prefetch_stop=prefetch_stop,
+    )
+    articles = selected_articles.join(
+        views.select("title"),
+        on="title",
+        how="semi",
     )
     data_date = stop - dt.timedelta(days=1)
     populations: list[RankingData] = []
@@ -1428,6 +1610,11 @@ def prepare_report(  # ruff: ignore[too-many-arguments]
             tables={
                 "rankings": complete,
                 "totals": _ranking_totals(complete, groups),
+                "annual_popularity": _annual_popularity_rows(
+                    selected_articles,
+                    views,
+                    stop,
+                ),
             },
             metadata={
                 "data_date": data_date.isoformat(),

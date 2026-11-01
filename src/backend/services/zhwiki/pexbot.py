@@ -6,6 +6,7 @@ wiki edits and belong exclusively to the publication job.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,11 +18,11 @@ import pywikibot
 
 from shared.reports import ReportResult, ReportStore, report_key
 from shared.sources.quarry.projects import category_members
-from shared.sources.wiki import edited_by_on_date
+from shared.sources.wiki import edited_by_between
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-    from datetime import date, datetime
+    from datetime import datetime
 
     from pywikibot.site import BaseSite
 
@@ -67,16 +68,16 @@ class StreamEvent:
 
 @dataclass(frozen=True, slots=True)
 class PexBotReport:
-    """Record an eligible report's current-day publication evidence.
+    """Record an eligible report's recent publication evidence.
 
     Attributes:
         title: Normalized subscribed report title.
-        checked_date: Actual UTC date whose revision history was read.
-        already_updated: Whether PexBot edited the page on that date.
+        checked_at: Actual UTC instant ending the history window.
+        already_updated: Whether PexBot edited it in the last 24 hours.
     """
 
     title: str
-    checked_date: date
+    checked_at: datetime
     already_updated: bool
 
 
@@ -159,13 +160,17 @@ def store_action(  # ruff: ignore[too-many-arguments]
         )
 
 
-def prepare_report(site: BaseSite, title: str, day: date) -> PexBotReport:
-    """Read current-day PexBot history without requesting a refresh.
+def prepare_report(
+    site: BaseSite,
+    title: str,
+    checked_at: datetime,
+) -> PexBotReport:
+    """Read the preceding 24 hours of PexBot publication history.
 
     Args:
         site: Chinese Wikipedia site whose revisions supply evidence.
         title: Report selected from the allowed subscriptions.
-        day: Actual UTC date at this report's invocation.
+        checked_at: Timezone-aware instant at this report's check.
 
     Returns:
         Reusable history evidence for skipping or proposing publication.
@@ -173,8 +178,14 @@ def prepare_report(site: BaseSite, title: str, day: date) -> PexBotReport:
     require_zhwiki(site)
     return PexBotReport(
         title,
-        day,
-        edited_by_on_date(site, title, user="PexBot", day=day),
+        checked_at,
+        edited_by_between(
+            site,
+            title,
+            user="PexBot",
+            since=checked_at - dt.timedelta(hours=24),
+            until=checked_at,
+        ),
     )
 
 

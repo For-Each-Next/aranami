@@ -79,6 +79,8 @@ class AssessmentLogData:
         pending: Retained unsaved history still needs publication.
         unchanged: A newer daily observation confirms no changes.
         summaries: Retained per-day assessment totals paragraphs.
+        previous_source: Prior source rows with known namespaces.
+        previous_totals: Prior article-only aggregate facts.
     """
 
     members: pl.DataFrame
@@ -95,6 +97,8 @@ class AssessmentLogData:
     pending: bool = False
     unchanged: bool = False
     summaries: Mapping[dt.date, str] = field(default_factory=dict)
+    previous_source: pl.DataFrame | None = None
+    previous_totals: Mapping[str, object] | None = None
 
     @property
     def report_date(self) -> dt.date:
@@ -115,6 +119,7 @@ class _LogBaseline:
         observed_source: Full source rows of that observation.
         body: Published or pending history of the last observation.
         observed_at: Actual UTC time of the last retained observation.
+        observed_totals: Article-only aggregates of that observation.
     """
 
     members: pl.DataFrame
@@ -123,6 +128,7 @@ class _LogBaseline:
     observed_source: pl.DataFrame
     body: str
     observed_at: dt.datetime
+    observed_totals: Mapping[str, object] | None = None
 
 
 def _validated_members(frame: pl.DataFrame) -> pl.DataFrame:
@@ -366,20 +372,24 @@ def _daily_summaries(
         ValueError: Daily text has unsupported or contradictory content.
     """
     summaries = {}
+    delta = r'<small style="color: gray;">\uFF08[+-][0-9,]+\uFF09</small>'
     for day, introduction in introductions.items():
         paragraphs = introduction.strip().split("\n\n")
         if re.fullmatch(r"'''总条目'''[0-9,]+篇。[^\r\n]*", paragraphs[0]):
             summaries[day] = paragraphs.pop(0)
         elif re.fullmatch(
-            r"'''條目頁[0-9,]+篇'''\uFF1A\n\* [^\r]+",
+            rf"'''條目頁[0-9,]+篇'''(?:{delta})?\uFF1A\n\* [^\r]+",
             paragraphs[0],
         ):
             summary = [paragraphs.pop(0)]
             summary.extend(
                 paragraphs.pop(0)
                 for pattern in (
-                    r"'''非條目[0-9,]+頁'''\uFF1A[^\r\n]+",
-                    r"'''專題共計[0-9,]+頁'''。(?:\uFF08不含[0-9,]+重定向頁\uFF09)?",
+                    rf"'''非條目[0-9,]+頁'''(?:{delta})?\uFF1A[^\r\n]+",
+                    (
+                        rf"'''專題共計[0-9,]+頁'''(?:{delta})?。"
+                        rf"(?:\uFF08不含[0-9,]+重定向頁(?:{delta})?\uFF09)?"
+                    ),
                 )
                 if paragraphs and re.fullmatch(pattern, paragraphs[0])
             )
@@ -560,6 +570,7 @@ def _baseline(
         observed_source,
         proposal_body if name == "baseline" else body,
         dt.datetime.fromisoformat(bundle.manifest["calculated_at"]),
+        bundle.manifest["metadata"].get("article_totals"),
     )
 
 
@@ -679,6 +690,9 @@ def _compact_baseline(  # ruff: ignore[too-many-arguments]
                     observed_members=_assessment_members(source),
                     observed_source=source,
                     observed_at=retained_at,
+                    observed_totals=retained.manifest["metadata"].get(
+                        "article_totals",
+                    ),
                 )
         return previous
     baseline_source = retained.tables["members"] if retained else source
@@ -695,6 +709,9 @@ def _compact_baseline(  # ruff: ignore[too-many-arguments]
         baseline_source,
         body,
         baseline_time,
+        retained.manifest["metadata"].get("article_totals")
+        if retained
+        else None,
     )
 
 
@@ -795,6 +812,8 @@ def _prepare_compact(  # ruff: ignore[too-many-arguments]
         unchanged=state.observed_at.date() < instant.date()
         and changes.is_empty(),
         summaries=summaries,
+        previous_source=state.observed_source,
+        previous_totals=state.observed_totals,
     )
 
 
@@ -948,4 +967,6 @@ def prepare_data(  # ruff: ignore[too-many-arguments, too-many-locals]
             and changes.is_empty()
         ),
         summaries=summaries,
+        previous_source=state.observed_source,
+        previous_totals=state.observed_totals,
     )

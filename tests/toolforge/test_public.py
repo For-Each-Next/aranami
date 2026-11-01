@@ -509,13 +509,13 @@ class PublicWebsiteTests(unittest.TestCase):
         _, marker, remainder = human.partition("<tbody>")
         assert marker
         rows = remainder.partition("</tbody>")[0]
-        assert rows.count("<tr>") == 100
+        assert rows.count("<tr>") == 20
         assert "Pageview rankings" in rows
         assert "Running" in rows
         assert "2026-10-23 12:02:29" in rows
-        assert "2026-10-22 12:00:50" in rows
+        assert "2026-10-22 12:00:50" not in rows
         assert rows.index("2026-10-23 12:02:29") < rows.index(
-            "2026-10-22 12:00:50",
+            "2026-10-23 12:02:10",
         )
         assert '<form action="/reports/"' not in human
         assert 'class="log-pagination"' not in human
@@ -558,10 +558,10 @@ class PublicWebsiteTests(unittest.TestCase):
                 assert status == 200
                 output = body.decode()
                 rows = output.partition("<tbody>")[2].partition("</tbody>")[0]
-                assert rows.count("<tr>") == 100
-                assert "2026-10-22 12:00:50" in rows
+                assert rows.count("<tr>") == 20
+                assert "2026-10-22 12:00:50" not in rows
                 assert rows.index("2026-10-23 12:02:29") < rows.index(
-                    "2026-10-22 12:00:50",
+                    "2026-10-23 12:02:10",
                 )
                 assert "lang=zh-hant" in output
         with patch(

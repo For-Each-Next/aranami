@@ -232,7 +232,7 @@ class TestRoutineResults(TestCase):
                 ),
                 patch.object(
                     pexbot_data,
-                    "edited_by_on_date",
+                    "edited_by_between",
                     return_value=skipped,
                 ),
                 patch.object(pexbot, "_refresh") as refresh,
@@ -255,7 +255,7 @@ class TestRoutineResults(TestCase):
         context = JobContext(site, dt.date(2026, 10, 18), dry=False)
         with (
             patch.object(pexbot, "subscribed_titles", return_value=["Target"]),
-            patch.object(pexbot_data, "edited_by_on_date", return_value=False),
+            patch.object(pexbot_data, "edited_by_between", return_value=False),
             patch.object(
                 pexbot,
                 "_refresh",

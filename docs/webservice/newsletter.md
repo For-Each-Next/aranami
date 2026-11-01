@@ -57,7 +57,7 @@ The second label is an intentional correction to the reference. No extra data he
 added. Supported quality milestones, credits, DYK lists, article statistics,
 and award gains fill the corresponding slots. Missing observations use natural
 placeholder sentences. Introductions immediately before partial annual figures
-and lists carry an inline date notice, such as
+and lists begin with an inline date notice, such as
 `{{Memo|截至2026年10月31日|inline:info}}`. The template's second parameter
 uses the verified `inline:` prefix so following content stays on the same line
 ([Memo documentation, revision 93779044](https://zh.wikipedia.org/w/index.php?title=Template:Memo/doc&oldid=93779044)).
@@ -69,7 +69,9 @@ The quality review leads with annual high-quality totals, grouping FA+FL as
 `典範內容` and A+AL as `甲級內容`, followed by GA and Bplus. Known-zero groups
 are omitted. The comparison and chart precede the distinct grade lists,
 subject-distribution placeholder, and centered author table. Author lists put
-each template parameter and article on its own line, with a plain count summary.
+the opening `collapsible list` and `titlestyle` on one line, then indent the title,
+unnamed article parameters, and closing braces by two spaces, with a plain count
+summary.
 
 Credits prioritize recorded nominators for every quality grade. Explicit
 non-main-author declarations remain marked `非主編` beside the article.
@@ -77,7 +79,9 @@ Listing-time text attribution is separate: saved WikiWho evidence identifies
 original contributors of the raw wikitext tokens surviving at the selected
 listing revision, with tied leading contributors retained. When the nominator
 differs from those contributors, a small inline notice after the article names
-them. Listings without a recorded nominator use the saved leading contributors.
+them only when both identities are known and explicitly disagree. Listings
+without a recorded nominator use the saved leading contributors directly,
+without an attribution notice.
 Missing authorship remains unknown, and usernames have no authorship qualifier.
 DYK contributors are retained in the database from explicit author fields in
 supported DYKEntry nominations or archives; annual drafts omit these credits.
@@ -88,6 +92,9 @@ titles show each editor's grade breakdown. Editors tied on all four counts
 share a rank cell; subsequent ranks include all tied editors. Quality and DYK
 groups follow listing dates. Editor lists group FA/FL together, then A/AL,
 GA, and Bplus, with dates and title ties within each grade.
+Annual quality lists and credits exclude promotions removed or superseded before
+the reporting cutoff. An observed current or exact-boundary grade also gates the
+final year's cohort; older years retain their own historical states.
 Each dated article ends with an invisible MMDD comment such as `<!-- 0904 -->`
 to help edit the copied draft. Quarterly quality lists use the same markers.
 Announcement homepage lists keep visible dates without these comments.
@@ -142,8 +149,11 @@ appears only in FA. Later delisting or demotion does not change earlier years.
 Its layers rise
 from FA+FL through A+AL and GA to Bplus; the A layer disappears when all its
 values are zero. The chart retains native `Graph:Chart` parameters and native
-hover details without expanded SVG. The legend follows the layer order, and
-x-axis labels contain only years. Narrow screens scroll within the container.
+hover details without expanded SVG. The template's default legend follows the
+layer order in its native position. The x-axis labels contain only years. The
+vertical axis starts at zero and reaches at least 50, expanding in multiples of
+ten for larger cohorts.
+Narrow screens scroll within the container.
 Unknown event dates do not receive an
 inferred year, and missing historical observations produce no chart.
 
@@ -153,14 +163,18 @@ appearance since January 1, added to the historical baseline. A separate
 current-day point includes milestones already observed today, capped at
 December 31. Repeated displays and earlier-year subjects do not increase
 counts, and the year-end point appears only once.
-The DYK trend floats on the right in a captioned image frame.
+The DYK trend floats on the right in a captioned image frame. Its cutoff notice
+belongs in the caption, without a repeated introductory sentence in the text.
 
 Monthly pageview winners come from exact calendar-month reports in the popular
 articles page history. Month labels link to the permanent revision used for
 that month's result when its source revision is known; older observations
 without that metadata keep plain labels. Annual pageviews and revision counts supply the top 25;
-the popularity list links to the top-200 report. Current rolling pageview data
-is marked provisional and states its actual interval. Annual total pageviews
+the popularity list links to the top-200 report. Current annual rankings use
+January 1 through the latest available completed date from saved Pageviews
+results. Introductions show only the year, such as `2026年`; provisional results
+retain an inline cutoff-date Memo. Rolling-year data never substitutes for this
+calendar-year interval. Annual total pageviews
 use whole, comma-grouped units of ten thousand, such as `6,775万`. The January
 feature continues to refresh after January 1, allowing reports completed on January
 2 or 3 to appear in the latest draft. Saved earlier date selections retain
