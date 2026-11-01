@@ -6,7 +6,7 @@ import re
 import unittest
 from copy import deepcopy
 from html import unescape
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from shared.newsletter import Issue
 from updater.services.newsletter import render_issue
@@ -156,14 +156,14 @@ class NewsletterPresentationTests(unittest.TestCase):
                 assert "source-updated" not in output
                 assert "{{模板|標題}}" not in output
 
-    def test_copy_button_and_native_wiki_link_have_independent_actions(
+    def test_copy_and_native_wiki_links_have_independent_actions(
         self,
     ) -> None:
-        """Keep copying separate from native view-page navigation."""
-        for locale, copy_label, link_label in (
-            ("en", "Copy", "Go to wiki page"),
-            ("zh-hans", "复制", "前往维基页面"),
-            ("zh-hant", "複製", "前往維基頁面"),
+        """Keep copying, viewing, and manual editing independent."""
+        for locale, copy_label, view_label, edit_label in (
+            ("en", "Copy", "View newsletter page", "Edit newsletter page"),
+            ("zh-hans", "复制", "查看简讯页", "编辑简讯页"),
+            ("zh-hant", "複製", "檢視簡訊頁", "編輯簡訊頁"),
         ):
             with self.subTest(locale=locale):
                 value = _issue()
@@ -181,16 +181,19 @@ class NewsletterPresentationTests(unittest.TestCase):
                     output,
                     re.DOTALL,
                 )
-                assert len(buttons) == len(links) == len(value["pages"])
-                for copy, link, page in zip(
+                assert len(buttons) == len(value["pages"])
+                assert len(links) == 2 * len(value["pages"])
+                for copy, view, edit, page in zip(
                     buttons,
-                    links,
+                    links[::2],
+                    links[1::2],
                     value["pages"],
                     strict=True,
                 ):
                     for (attributes, text), label, action, weight in (
                         (copy, copy_label, "default", "normal"),
-                        (link, link_label, "progressive", "primary"),
+                        (view, view_label, "default", "normal"),
+                        (edit, edit_label, "progressive", "primary"),
                     ):
                         assert unescape(text).strip() == label
                         classes = re.search(r'class="([^"]+)"', attributes)
@@ -201,32 +204,42 @@ class NewsletterPresentationTests(unittest.TestCase):
                             f"cdx-button--weight-{weight}",
                         } <= set(classes[1].split())
                     assert "hidden" in copy[0]
-                    assert "hidden" not in link[0]
-                    assert "data-newsletter-copy=" not in link[0]
-                    assert "cdx-button--fake-button--enabled" in link[0]
-                    target = re.search(
-                        r'href="([^"]+)"',
-                        link[0],
-                    )
-                    assert target is not None
-                    url = urlsplit(unescape(target[1]))
-                    assert unescape(target[1]) == page["url"]
-                    assert url.scheme == "https"
-                    assert url.netloc == "zh.wikipedia.org"
-                    assert not url.query
+                    for link in (view, edit):
+                        assert "hidden" not in link[0]
+                        assert "data-newsletter-copy=" not in link[0]
+                        assert "cdx-button--fake-button--enabled" in link[0]
+                        target = re.search(r'href="([^"]+)"', link[0])
+                        assert target is not None
+                        url = urlsplit(unescape(target[1]))
+                        assert url.scheme == "https"
+                        assert url.netloc == "zh.wikipedia.org"
+                        if link == view:
+                            assert unescape(target[1]) == page["url"]
+                            assert not url.query
+                        else:
+                            assert unquote(url.path) == (
+                                "/wiki/" + page["title"].replace(" ", "_")
+                            )
+                            assert parse_qs(url.query) == {
+                                "action": ["edit"],
+                                "summary": [
+                                    "[[toolforge:aranami/newsletter|简讯资料]]",
+                                ],
+                            }
                 assert "data-newsletter-edit=" not in output
                 assert "newsletter-destination" not in output
                 assert "built-in method" not in unescape(output)
 
-    def test_wiki_page_links_stay_in_view_mode_for_each_data_date(
+    def test_edit_summaries_use_selected_or_draft_data_dates(
         self,
     ) -> None:
-        """Use view-page destinations for current and saved drafts."""
+        """Keep summaries Chinese and tied to the actual draft date."""
         for locale in ("en", "zh-hans", "zh-hant"):
             for archived in (False, True):
                 with self.subTest(locale=locale, archived=archived):
                     value = _issue()
                     value["data_through"] = "2026-10-15"
+                    value["pages"][-1]["data_through"] = "2026-09-30"
                     if archived:
                         value["draft_history"] = {
                             "dates": ["2026-10-14"],
@@ -239,12 +252,23 @@ class NewsletterPresentationTests(unittest.TestCase):
                         r'<a class="cdx-button[^"]*" href="([^"]+)"',
                         output,
                     )
-                    assert [unescape(target) for target in targets] == [
+                    assert [unescape(target) for target in targets[::2]] == [
                         page["url"] for page in value["pages"]
                     ]
-                    assert all(
-                        not urlsplit(target).query for target in targets
-                    )
+                    expected = [
+                        "2026年10月14日" if archived else "2026年10月15日",
+                    ] * (len(value["pages"]) - 1) + ["2026年9月30日"]
+                    for target, day in zip(
+                        targets[1::2],
+                        expected,
+                        strict=True,
+                    ):
+                        assert parse_qs(urlsplit(unescape(target)).query) == {
+                            "action": ["edit"],
+                            "summary": [
+                                f"[[toolforge:aranami/newsletter|{day}资料]]",
+                            ],
+                        }
 
     def test_issue_menu_preserves_native_submission_fallback(
         self,

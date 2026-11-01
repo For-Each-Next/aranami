@@ -1584,20 +1584,15 @@
     "zh-hans": "复制",
     "zh-hant": "複製"
   },
-  "newsletter.go_to_wiki": {
-    "en": "Go to wiki page",
-    "zh-hans": "前往维基页面",
-    "zh-hant": "前往維基頁面"
+  "newsletter.view_page": {
+    "en": "View newsletter page",
+    "zh-hans": "查看简讯页",
+    "zh-hant": "檢視簡訊頁"
   },
-  "newsletter.edit_summary": {
-    "en": "Updated through {date}",
-    "zh-hans": "更新至{date}",
-    "zh-hant": "更新至{date}"
-  },
-  "newsletter.edit_summary_unknown": {
-    "en": "Updated newsletter draft",
-    "zh-hans": "更新简讯草稿",
-    "zh-hant": "更新簡訊草稿"
+  "newsletter.edit_page": {
+    "en": "Edit newsletter page",
+    "zh-hans": "编辑简讯页",
+    "zh-hant": "編輯簡訊頁"
   },
   "newsletter.copied": {
     "en": "Wikitext copied.",

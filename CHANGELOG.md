@@ -4,10 +4,21 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
+### 0.7.14 (2026-11-01 08:04 UTC)
+
+Overview: Separated newsletter viewing and editing, with dated source
+attribution prefilled for manual wiki edits.
+
+- Added distinct view and edit links beside each newsletter's copy control
+  in all three interface languages.
+- Prefilled edit summaries with the draft's data date and newsletter-tool
+  attribution, preserving independently dated annual observations.
+
 ### 0.7.13 (2026-11-01 07:24 UTC)
 
 Overview: Refined native newsletter charts, historical monthly coverage and
 editing controls, with compact pies and independent copying and navigation.
+Documented the source audit and implementation plan for the v0.8.0 refactor.
 
 - Rendered ordered native quality stacks with plain year labels, short grade
   names, animation and hover, without expanded SVG or custom hover targets.
@@ -25,6 +36,8 @@ editing controls, with compact pies and independent copying and navigation.
   section preload links and keyboard focus.
 - Removed invisible announcement date comments while retaining visible dates
   and date markers in quality and annual article lists.
+- Added an evidence-based v0.8.0 TODO covering architecture, consolidation,
+  legacy removal, verification, and deployment prerequisites.
 
 ### 0.7.12 (2026-11-01 05:39 UTC)
 

@@ -1260,6 +1260,25 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
     return _render("maintenance.html", context)
 
 
+def _newsletter_edit_url(title: str, data_through: str | None) -> str:
+    """Link to the wiki editor with dated Chinese source attribution.
+
+    Args:
+        title: Newsletter page receiving the reviewed draft.
+        data_through: Inclusive date of the draft's saved observations.
+
+    Returns:
+        Edit-form URL with an attributed summary for manual review.
+    """
+    day = dt.date.fromisoformat(data_through) if data_through else None
+    label = f"{day.year}年{day.month}月{day.day}日资料" if day else "简讯资料"
+    query = urlencode({
+        "action": "edit",
+        "summary": f"[[toolforge:aranami/newsletter|{label}]]",
+    })
+    return f"{title_url(title)}?{query}"
+
+
 def render_newsletter(  # ruff: ignore[too-many-arguments]
     value: Record,
     locale: str,
@@ -1309,15 +1328,6 @@ def render_newsletter(  # ruff: ignore[too-many-arguments]
     issue = Issue.parse(str(value["issue"]))
     dates = sorted(history.get("dates") or [])
     data_through = history.get("selected_date") or value.get("data_through")
-    edit_query = urlencode({
-        "action": "edit",
-        "summary": page.text(
-            "newsletter.edit_summary",
-            date=page.interface.date(data_through),
-        )
-        if data_through
-        else page.text("newsletter.edit_summary_unknown"),
-    })
     context.update(
         navigation=navigation,
         available=value["available"],
@@ -1363,17 +1373,9 @@ def render_newsletter(  # ruff: ignore[too-many-arguments]
                     "newsletter.page."
                     + labels[draft["label"].lstrip("/") or "主頁"],
                 ),
-                "edit_url": f"{title_url(draft['title'])}?"
-                + (
-                    urlencode({
-                        "action": "edit",
-                        "summary": page.text(
-                            "newsletter.edit_summary",
-                            date=page.interface.date(draft["data_through"]),
-                        ),
-                    })
-                    if draft.get("data_through")
-                    else edit_query
+                "edit_url": _newsletter_edit_url(
+                    draft["title"],
+                    draft.get("data_through") or data_through,
                 ),
             }
             for draft in value["pages"]

@@ -20,8 +20,12 @@ October–December 2026 in its regular pages and all of 2026 in its annual featu
 All pages use the current newsletter banner. Feature and interview prose stays
 editorial work; the generator never copies a previous author's article.
 
-Use **Copy** to copy the draft, and **Go to wiki page** to open its destination.
-The navigation link never writes the clipboard and works without JavaScript.
+Use **Copy** to copy the draft, **View newsletter page** to read its destination,
+and **Edit newsletter page** to open the wiki editor. The edit link prefills a
+source-linked summary such as `[[toolforge:aranami/newsletter|2026年10月30日资料]]`
+using the draft's data date, including the annual feature's own date. Undated
+drafts use `简讯资料`. Both links work without JavaScript and leave copying
+to the separate button.
 Review and preview the wikitext before saving it on Wikipedia. Code blocks
 also support native selection and copying. The annual feature includes two
 blue primary buttons for editors to add comments, using the newsletter's

@@ -670,7 +670,17 @@ class NewsletterRouteTests(unittest.TestCase):
             response.text,
         )
         assert destinations
-        assert all(not urlsplit(unescape(url)).query for url in destinations)
+        for view_url, edit_url in zip(
+            destinations[::2],
+            destinations[1::2],
+            strict=True,
+        ):
+            assert not urlsplit(unescape(view_url)).query
+            query = parse_qs(urlsplit(unescape(edit_url)).query)
+            assert query["action"] == ["edit"]
+            assert query["summary"][0].startswith(
+                "[[toolforge:aranami/newsletter|",
+            )
         assert "No saved draft is available" not in response.text
         assert all(
             path.read_bytes() == value for path, value in before.items()

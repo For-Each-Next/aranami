@@ -280,7 +280,9 @@ async function main() {
                 assert.equal(await evaluate("document.activeElement.matches('[data-newsletter-copy]:focus-visible')"), true, "Copy must be reachable with visible keyboard focus");
                 await press("Tab", 9);
             }
-            assert.equal(await evaluate("document.activeElement.matches('.newsletter-copy-controls a:focus-visible')"), true, "Go to wiki page must be reachable with visible keyboard focus");
+            assert.equal(await evaluate("document.activeElement.matches('.newsletter-copy-controls a:first-of-type:focus-visible')"), true, "View newsletter page must be reachable with visible keyboard focus");
+            await press("Tab", 9);
+            assert.equal(await evaluate("document.activeElement.matches('.newsletter-copy-controls a:nth-of-type(2):focus-visible')"), true, "Edit newsletter page must be reachable with visible keyboard focus");
         };
         let checked = 0;
         matrix: for (const locale of locales) for (const width of widths) for (const surface of surfaces) {
@@ -417,7 +419,7 @@ async function main() {
                                 }
                                 const draft = document.querySelector('[data-newsletter-wikitext]');
                                 const copy = document.querySelector('[data-newsletter-copy]');
-                                const wiki = document.querySelector('.newsletter-copy-controls a');
+                                const [view, edit] = document.querySelector('.newsletter-copy-controls').querySelectorAll('a');
                                 copy.click();
                                 await Promise.resolve();
                                 const requested = new URL(request.url, location.href);
@@ -428,8 +430,8 @@ async function main() {
                                     submitHidden: form.querySelector('button[type=submit]').hidden,
                                     calendarReady: document.querySelector('#newsletter-data-date').type === 'date' && !document.querySelector('#newsletter-data-date').hidden,
                                     copyReady: !copy.hidden && copied === draft.textContent && writes === 1,
-                                    wikiReady: Boolean(wiki && !wiki.hidden && !wiki.hasAttribute('data-newsletter-copy') && new URL(wiki.href).origin === 'https://zh.wikipedia.org' && !new URL(wiki.href).search),
-                                    buttonWeights: copy.classList.contains('cdx-button--weight-normal') && wiki?.classList.contains('cdx-button--weight-primary'),
+                                    wikiReady: [view, edit].every(link => link && !link.hidden && !link.hasAttribute('data-newsletter-copy') && new URL(link.href).origin === 'https://zh.wikipedia.org') && !new URL(view.href).search && new URL(edit.href).searchParams.get('action') === 'edit' && new URL(edit.href).searchParams.get('summary').startsWith('[[toolforge:aranami/newsletter|'),
+                                    buttonWeights: copy.classList.contains('cdx-button--weight-normal') && view?.classList.contains('cdx-button--weight-normal') && edit?.classList.contains('cdx-button--weight-primary'),
                                     noDestination: !document.querySelector('.newsletter-destination'),
                                     plainText: draft.children.length === 0};
                             } finally {
@@ -444,7 +446,7 @@ async function main() {
                         assert.ok(switched.readOnly && switched.noDate, "issue selection needs a fresh read-only date scope");
                         assert.equal(switched.submitHidden, true, "enhanced issue selection should not need a submit button");
                         assert.ok(switched.calendarReady && switched.copyReady, "replacement draft controls were not initialized");
-                        assert.ok(switched.wikiReady && switched.buttonWeights, "replacement drafts need independent Copy and Go to wiki page actions");
+                        assert.ok(switched.wikiReady && switched.buttonWeights, "replacement drafts need independent Copy, View, and Edit actions");
                         assert.equal(switched.noDestination, true, "standalone newsletter destination should be removed");
                         assert.equal(switched.plainText, true, "draft text should not contain syntax highlighting spans");
                         await checkNewsletterControlHeights();
@@ -658,9 +660,12 @@ async function main() {
                     await checkNewsletterControlHeights();
                     if ([320, 640, 1440].includes(width)) await checkNewsletterKeyboardActions(false);
                     assert.equal(await evaluate(`(() => {
-                        const links = [...document.querySelectorAll('.newsletter-copy-controls a')];
-                        return links.length === document.querySelectorAll('.newsletter-draft').length && links.every(link => link.getBoundingClientRect().height > 0 && !link.hasAttribute('data-newsletter-copy') && new URL(link.href).origin === 'https://zh.wikipedia.org' && !new URL(link.href).search);
-                    })()`), true, "Go to wiki page must remain a visible native view-page link without JavaScript");
+                        return [...document.querySelectorAll('.newsletter-copy-controls')].every(controls => {
+                            const links = [...controls.querySelectorAll('a')];
+                            const [view, edit] = links.map(link => new URL(link.href));
+                            return links.length === 2 && links.every(link => link.getBoundingClientRect().height > 0 && !link.hasAttribute('data-newsletter-copy') && new URL(link.href).origin === 'https://zh.wikipedia.org') && !view.search && edit.searchParams.get('action') === 'edit' && edit.searchParams.get('summary').startsWith('[[toolforge:aranami/newsletter|');
+                        });
+                    })()`), true, "View and Edit must remain visible native links without JavaScript");
                 }
                 withoutJavaScript++;
             } catch (error) {
