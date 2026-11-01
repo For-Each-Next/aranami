@@ -4,7 +4,62 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.8
 
-### 0.7.10 (2026-10-31 15:04 UTC)
+### 0.7.11 (2026-11-01 04:51 UTC)
+
+Overview: Rebuilt newsletter drafts around shared evidence, independent daily
+facts, annual charts and source-linked rankings. Refined responsive navigation,
+regional Chinese content, maintenance filters, report status and resource
+presentation. Separated durable data from caches, retired temporary workflows,
+and added logged job draining before shutdown and deployment.
+
+- Saved independent daily newsletter facts and rendered selected observations
+  on request, with year-long January features and quarterly editorial drafts.
+- Unified milestone dates, nomination roles, questions and provenance across
+  DYK reports, reviews and newsletters, with listing-time author attribution.
+- Preserved recorded nominators separately from computed authorship and
+  retained tied leading contributors without inventing missing evidence.
+- Added annual historical charts, monthly winners, provisional view/edit
+  rankings and ACG participation summaries while retaining statistical prose.
+- Rendered two assessment pies with grade/count labels and black values,
+  framed quarterly DYK trends on the right, and removed redundant source prose.
+- Linked monthly popularity labels to their exact source revisions and
+  displayed annual pageview totals in whole, comma-grouped ten-thousands.
+- Classified DYK subjects by exact database project names, including 音乐,
+  and grouped games by observed release years without guessing unknowns.
+- Ordered editor credits by grade and date, merged tied ranks and retained
+  full annual award rankings with first-score and first-award summaries.
+- Used one native newsletter calendar with saved-date bounds, in-place issue
+  changes, literal copying and accessible editing invitations.
+- Split source acquisition from draft rendering and retained complete daily
+  archives, historical revisions and original migration evidence.
+- Separated collected data and generated records into readable dated paths,
+  timestamped generations and validated enum-backed Parquet assessments.
+- Retained comparison predecessors atomically, reused English snapshots only
+  when live text matched, and kept PexBot actions in latest-only caches.
+- Preserved shared records for 365 days after confirmed project removal and
+  prevented delayed observations from restoring purged data.
+- Cached exact historical text only after revision/hash checks and scheduled
+  English comparisons after the daily assessment snapshot at midnight.
+- Recovered interrupted executions as failed while preserving active owners,
+  confirmed report dates and unknown finish times or edit counts.
+- Added permanent revision links for confirmed report saves and assessment
+  summaries separating articles, nonarticles, project totals and redirects.
+- Fixed narrow-screen contents, adopted the Codex language icon and native
+  names, and used browser Taiwan/Hong Kong variants for article content.
+- Displayed uptime across pages, unified duration formats, added filesystem
+  capacity and refined review activity, assessment tooltips and rank links.
+- Rebuilt maintenance filters with open assessment bounds, genre and size
+  controls, other tags and ten-row default pagination.
+- Drained jobs before shutdown and deployment pod deletion, retained final
+  status/logs and required a process-specific completion acknowledgement.
+- Preserved validation of older immutable source generations and resumed the
+  old hub safely when source selection failed after draining.
+- Removed temporary jobs, task state/logs, inspection pages, implementation
+  and workflow rules while preserving durable evidence and report archives.
+- Consolidated component guides and retained source, storage, publication and
+  runtime lifecycle contracts in their owning documentation.
+
+### 0.7.10 (2026-10-31 15:40 UTC)
 
 Overview: Refined the website around Codex navigation and controls, introduced
 a new Aranami identity, and improved reviews, maintenance filters, report
@@ -20,14 +75,26 @@ execution history, and newsletter drafts.
   and preserved upstream attribution and licenses.
 - Clarified review start, response, and participant labels and corrected
   nested discussion dates, including 豐川祥子's review.
+- Unified review links and separated their metadata with CSS bars; used
+  365.25 / 12-day months for opening ages and inclusive comment windows.
 - Added regular-expression title searches and shared inclusive assessment
   comparisons, with a sorting menu, direction radios, and plain grade labels.
 - Retained independent per-job execution history with measured durations and
   dialogs showing observed preparation, storage, and publication stages.
-- Made newsletter issue changes explicit, added a Sunday-first calendar with
-  unavailable dates disabled, and removed repeated code headings.
+- Reduced wide-screen status separators, made history task controls look
+  like text links, and linked stage page titles without forced line breaks.
+- Simplified history to the latest 100 executions without filters or paging,
+  with bulleted stage details and millisecond timestamps.
+- Added an issue menu that updates drafts in place and a Sunday-first calendar
+  with unavailable dates disabled and only the selected date shaded.
+- Simplified newsletter labels and plain wikitext displays while preserving
+  full copying from compact boxes, daily selection, and no-JavaScript use.
+- Added a primary copy-and-open action for each newsletter edit page beside
+  the secondary copy button, with localized date-based edit summaries.
 - Displayed zero milestone counts and compacted completed empty months while
   preserving later corrections and backfilled assessment changes.
+- Listed per-grade milestone totals, including zeros, while a quarter is open;
+  reserved the no-change summary for complete, observed empty quarters.
 
 ### 0.7.9 (2026-10-31 13:43 UTC)
 

@@ -31,6 +31,8 @@ _PAGE_SCHEMA = {
     "page_namespace": pl.Int64,
     "page_title": pl.String,
     "page_revision": pl.Int64,
+    "page_length": pl.Int64,
+    "page_is_redirect": pl.Int64,
     "talk_page_id": pl.Int64,
     "talk_revision": pl.Int64,
     "pa_class": pl.String,
@@ -82,6 +84,166 @@ def query_pages_by_wikiproject(
         project_name,
         lambda: _project_membership(database, project_name),
     )
+    return _with_titles(site, frame)
+
+
+def query_project_assessments(
+    site: BaseSite,
+    project_name: str,
+) -> pl.DataFrame:
+    """Read project assessment IDs and grades without resolving titles.
+
+    Args:
+        site: Wiki whose replica holds the assessment observations.
+        project_name: Exact PageAssessments project title.
+
+    Returns:
+        Eager page IDs, namespaces, and nullable quality/importance
+        observations. Namespace supports aggregate article totals only;
+        no subject names, talk pages, or revisions are requested.
+    """
+    page = tables.Page
+    assessment = tables.PageAssessments
+    project = tables.PageAssessmentsProjects
+    statement = (
+        select(
+            page.page_id,
+            page.page_namespace,
+            page.page_is_redirect,
+            assessment.pa_class,
+            assessment.pa_importance,
+        )
+        .select_from(project)
+        .join(assessment, project.pap_project_id == assessment.pa_project_id)
+        .join(page, assessment.pa_page_id == page.page_id)
+        .where(project.pap_project_title == project_name)
+        .order_by(page.page_id)
+    )
+    return (
+        _replica(site.dbName())
+        .query(
+            statement,
+            schema_overrides={
+                "page_id": pl.Int64,
+                "page_namespace": pl.Int64,
+                "page_is_redirect": pl.Int64,
+                "pa_class": pl.String,
+                "pa_importance": pl.String,
+            },
+        )
+        .collect()
+    )
+
+
+def page_projects(
+    site: BaseSite,
+    page_ids: Iterable[int],
+    project_names: Iterable[str],
+) -> pl.DataFrame:
+    """Read selected project memberships for bounded page identities.
+
+    Args:
+        site: Wiki whose project assessments are requested.
+        page_ids: Exact page identifiers permitted in the result.
+        project_names: Exact PageAssessments project titles to include.
+
+    Returns:
+        Eager page IDs and project names. Empty identifiers or project
+        names return a typed empty frame without querying replicas.
+        Requests deduplicate inputs and include at most 500 page IDs.
+    """
+    schema = {"page_id": pl.Int64, "project": pl.String}
+    names = tuple(dict.fromkeys(project_names))
+    if not names:
+        return pl.DataFrame(schema=schema)
+    assessment = tables.PageAssessments
+    project = tables.PageAssessmentsProjects
+    statement = (
+        select(
+            assessment.pa_page_id.label("page_id"),
+            project.pap_project_title.label("project"),
+        )
+        .select_from(assessment)
+        .join(project, assessment.pa_project_id == project.pap_project_id)
+        .where(project.pap_project_title.in_(names))
+        .order_by(assessment.pa_page_id, project.pap_project_title)
+    )
+    frames = [
+        _replica(site.dbName())
+        .query(
+            statement.where(assessment.pa_page_id.in_(batch)),
+            schema_overrides=schema,
+        )
+        .collect()
+        for batch in batched(
+            dict.fromkeys(page_ids),
+            _BATCH_SIZE,
+            strict=False,
+        )
+    ]
+    return pl.concat(frames) if frames else pl.DataFrame(schema=schema)
+
+
+def query_project_intersections(
+    site: BaseSite,
+    scope_project: str,
+    project_names: Iterable[str],
+) -> pl.DataFrame:
+    """Read requested project memberships within one scope project.
+
+    Args:
+        site: Wiki whose replica holds the project assessments.
+        scope_project: Exact project title bounding the pages.
+        project_names: Exact project titles to intersect.
+            Repeated titles are queried once.
+
+    Returns:
+        Eager ``page_id`` and ``project`` rows ordered by page ID and
+        project title. Overlapping memberships remain separate rows so
+        callers can apply their own priority. Only assessment IDs and
+        project names are read in one query. Empty input returns a typed
+        frame without a query.
+    """
+    names = tuple(dict.fromkeys(project_names))
+    schema = {"page_id": pl.Int64, "project": pl.String}
+    if not names:
+        return pl.DataFrame(schema=schema)
+    scope = tables.PageAssessmentsProjects.__table__.alias("scope_project")
+    members = tables.PageAssessments.__table__.alias("scope_assessment")
+    assessment = tables.PageAssessments.__table__.alias("topic_assessment")
+    project = tables.PageAssessmentsProjects.__table__.alias("topic_project")
+    statement = (
+        select(
+            members.c.pa_page_id.label("page_id"),
+            project.c.pap_project_title.label("project"),
+        )
+        .select_from(scope)
+        .join(members, scope.c.pap_project_id == members.c.pa_project_id)
+        .join(assessment, members.c.pa_page_id == assessment.c.pa_page_id)
+        .join(project, assessment.c.pa_project_id == project.c.pap_project_id)
+        .where(
+            scope.c.pap_project_title == scope_project,
+            project.c.pap_project_title.in_(names),
+        )
+        .order_by(members.c.pa_page_id, project.c.pap_project_title)
+    )
+    return (
+        _replica(site.dbName())
+        .query(statement, schema_overrides=schema)
+        .collect()
+    )
+
+
+def _with_titles(site: BaseSite, frame: pl.DataFrame) -> pl.DataFrame:
+    """Resolve namespace-aware subject and talk names without requests.
+
+    Args:
+        site: Wiki namespace definitions already in use.
+        frame: Replica rows containing namespace, title, and talk ID.
+
+    Returns:
+        Rows with full subject and nullable talk titles.
+    """
     titles: list[str] = []
     talk_titles: list[str | None] = []
     for namespace, title, talk_id in frame.select(
@@ -105,6 +267,63 @@ def query_pages_by_wikiproject(
     )
 
 
+def page_metadata(site: BaseSite, page_ids: Iterable[int]) -> pl.DataFrame:
+    """Read current titles and revision references for selected IDs.
+
+    Args:
+        site: Wiki whose current page records are requested.
+        page_ids: Exact changed identities, including departed members.
+
+    Returns:
+        Current subject/talk names, namespaces, and revision IDs.
+        Deleted IDs are absent; no page content is requested.
+    """
+    page = tables.Page.__table__
+    talk = page.alias("talk")
+    schema = {
+        name: dtype
+        for name, dtype in _PAGE_SCHEMA.items()
+        if name
+        not in {"pa_class", "pa_importance", "page_length", "page_is_redirect"}
+    }
+    statement = (
+        select(
+            page.c.page_id,
+            page.c.page_namespace,
+            page.c.page_title,
+            page.c.page_latest.label("page_revision"),
+            talk.c.page_id.label("talk_page_id"),
+            talk.c.page_latest.label("talk_revision"),
+        )
+        .select_from(page)
+        .outerjoin(
+            talk,
+            and_(
+                talk.c.page_namespace == page.c.page_namespace + 1,
+                talk.c.page_title == page.c.page_title,
+            ),
+        )
+        .order_by(page.c.page_id)
+    )
+    frames = [
+        _replica(site.dbName())
+        .query(
+            statement.where(page.c.page_id.in_(batch)),
+            schema_overrides=schema,
+        )
+        .collect()
+        for batch in batched(
+            dict.fromkeys(page_ids),
+            _BATCH_SIZE,
+            strict=False,
+        )
+    ]
+    return _with_titles(
+        site,
+        pl.concat(frames) if frames else pl.DataFrame(schema=schema),
+    )
+
+
 def _project_membership(database: str, project_name: str) -> pl.DataFrame:
     """Materialize exact project assessments from one replica.
 
@@ -125,6 +344,8 @@ def _project_membership(database: str, project_name: str) -> pl.DataFrame:
             page.c.page_namespace,
             page.c.page_title,
             page.c.page_latest.label("page_revision"),
+            page.c.page_len.label("page_length"),
+            page.c.page_is_redirect,
             talk.c.page_id.label("talk_page_id"),
             talk.c.page_latest.label("talk_revision"),
             assessment.pa_class,
@@ -643,4 +864,59 @@ def query_tags(
         maintain_order="left",
     ).with_columns(
         pl.col("tags").fill_null(pl.lit([], dtype=pl.List(pl.String))),
+    )
+
+
+def project_revision_counts(
+    site: BaseSite,
+    project_name: str,
+    start: dt.date,
+    stop: dt.date,
+) -> pl.DataFrame:
+    """Count replicated article revisions during a reporting period.
+
+    Args:
+        site: Wiki whose read-only replica supplies revisions.
+        project_name: Exact current PageAssessments project title.
+        start: Inclusive UTC reporting date.
+        stop: Exclusive UTC reporting date.
+
+    Returns:
+        All edited project articles with page ID, current title, and
+        revision count, ordered by count descending then title. The
+        query includes creation edits and available revision metadata.
+    """
+    schema = {"page_id": pl.Int64, "title": pl.String, "revisions": pl.Int64}
+    if stop <= start:
+        return pl.DataFrame(schema=schema)
+    page, revision = tables.Page, tables.Revision
+    assessment, project = (
+        tables.PageAssessments,
+        tables.PageAssessmentsProjects,
+    )
+    count = func.count(revision.rev_id)
+    statement = (
+        select(
+            page.page_id,
+            page.page_title.label("title"),
+            count.label("revisions"),
+        )
+        .select_from(project)
+        .join(assessment, project.pap_project_id == assessment.pa_project_id)
+        .join(page, page.page_id == assessment.pa_page_id)
+        .join(revision, revision.rev_page == page.page_id)
+        .where(
+            project.pap_project_title == project_name,
+            page.page_namespace == Namespace.MAIN,
+            revision.rev_timestamp >= start.strftime("%Y%m%d000000"),
+            revision.rev_timestamp < stop.strftime("%Y%m%d000000"),
+        )
+        .group_by(page.page_id, page.page_title)
+        .order_by(count.desc(), page.page_title)
+    )
+    return (
+        _replica(site.dbName())
+        .query(statement, schema_overrides=schema)
+        .collect()
+        .with_columns(pl.col("title").str.replace_all("_", " ", literal=True))
     )

@@ -15,6 +15,7 @@ import math
 import os
 import re
 import tempfile
+from contextlib import ExitStack
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,18 +26,32 @@ import polars as pl
 import pywikibot
 
 from backend.services import project_assessments
-from backend.website import backlog, homepage, newsletter, pageviews, reviews
+from backend.support import article_milestones
+from backend.support.article_data import MILESTONES_PATH
+from backend.support.newsletter_data import OBSERVATIONS_PATH
+from backend.support.newsletter_observations import save_observation
+from backend.website import (
+    backlog,
+    homepage,
+    newsletter,
+    newsletter_sources,
+    pageviews,
+    reviews,
+)
+from backend.website.article_history import prepared_news
 from backend.website.extracts import MAX_EXTRACT_BYTES, ExtractCache
 from backend.website.newsletter_archive import (
     DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
     NewsletterDraftArchive,
 )
-from backend.website.newsletter_history import (
-    collect_article_history,
-    prepared_news,
+from backend.website.review_milestones import retain_review_milestones
+from backend.website.revision_text_cache import RevisionTextCache
+from shared.newsletter import DYK_PROJECTS, Issue
+from shared.sources.quarry.projects import (
+    project_revision_counts,
+    query_pages_by_wikiproject,
+    query_project_intersections,
 )
-from shared.newsletter import Issue
-from shared.sources.quarry.projects import query_pages_by_wikiproject
 from shared.sources.summaries import fetch_summary
 from shared.support.files import read_json_object
 
@@ -163,6 +178,7 @@ class WikiReader:
         ] = {}
         self._resolved: dict[str, str] = {}
         self._resolved_page_ids: dict[str, int | None] = {}
+        self.revision_cache: RevisionTextCache | None = None
 
     def _remember(self, title: str, revision: int) -> None:
         """Keep one audited revision link per source page."""
@@ -370,14 +386,26 @@ class WikiReader:
                             cutoff - dt.timedelta(seconds=1),
                         ),
                         total=1,
-                        content=True,
+                        content=self.revision_cache is None,
                     ),
                 ),
                 None,
             )
-            if revision is None or revision.text is None:
+            if revision is None:
                 raise pywikibot.exceptions.NoPageError(page)
-            self._texts[key] = revision.text
+            text = revision.text
+            if self.revision_cache is not None:
+                text = self.revision_cache.get(
+                    revision.revid,
+                    getattr(revision, "sha1", None),
+                )
+                if text is None:
+                    text = page.getOldVersion(revision.revid)
+                if text is not None:
+                    self.revision_cache.put(revision.revid, text)
+            if text is None:
+                raise pywikibot.exceptions.NoPageError(page)
+            self._texts[key] = text
             self._text_revisions[key] = revision.revid
             self._text_page_ids[key] = (
                 page.pageid
@@ -645,7 +673,13 @@ def _cache_article(value: object) -> bool:
                         and len(value[field].encode()) <= MAX_EXTRACT_BYTES
                         and re.search(r"[\x00-\x1f\x7f]", value[field]) is None
                     )
-                    for field in ("extract", "extract_hant", "extract_zh")
+                    for field in (
+                        "extract",
+                        "extract_hant",
+                        "extract_zh",
+                        "extract_tw",
+                        "extract_hk",
+                    )
                 )
             )
             and all(
@@ -753,6 +787,11 @@ def _valid_backlog_cache(value: object) -> bool:  # ruff: ignore[complex-structu
                 ):
                     return False
                 month = row.get("oldest_issue_month")
+                if row.get("page_length") is not None and (
+                    type(row["page_length"]) is not int
+                    or row["page_length"] < 0
+                ):
+                    return False
                 if month is not None and (
                     dt.date.fromisoformat(month + "-01").isoformat()[:-3]
                     != month
@@ -805,7 +844,10 @@ def _maintenance_cache_key() -> str | None:
     """
     try:
         return hashlib.sha256(
-            Path(backlog.__file__).with_name("maintenance.json").read_bytes(),
+            b"maintenance-v2:page-length:"
+            + Path(backlog.__file__)
+            .with_name("maintenance.json")
+            .read_bytes(),
         ).hexdigest()
     except OSError:
         return None
@@ -1353,7 +1395,7 @@ def _report_plan(
             if name == "reviews"
             else "zh:all-access:user:top1000:limit12:lookback7:extracts-v3"
             if name == "pageviews"
-            else "quarterly-newsletter-v10:daily-drafts:talk-notices"
+            else "quarterly-newsletter-v15:annual-statistics"
             if name == "newsletter"
             else f"days:{days}:extracts-v3:talk-news-v1"
             if name == "news_history"
@@ -1552,32 +1594,32 @@ def _newsletter_assessments_at(
 
 
 def _retained_events(
-    read: WikiReader,
     membership: pl.DataFrame,
     cache: dict[str, pl.DataFrame],
     *,
-    now: dt.datetime,
     path: Path | None,
 ) -> pl.DataFrame:
-    """Reuse successful talk-page collection within a dashboard pass.
+    """Read shared milestone data once within a dashboard pass.
 
     Args:
-        read: Configured read-only wiki source.
         membership: Complete current project membership.
         cache: Shared results belonging to this dashboard invocation.
-        now: Aware observation time for the durable history archive.
-        path: Archive destination, or none for memory.
+        path: Required canonical milestones file.
 
     Returns:
-        Complete retained events, collecting only on the first request.
-        Failed collection never populates the shared cache.
+        Complete saved events scoped to current project membership.
+
+    Raises:
+        RuntimeError: No canonical milestone path was supplied.
     """
     if "events" not in cache:
-        cache["events"] = collect_article_history(
-            read.site,
+        if path is None:
+            message = "Shared article milestone data is unavailable."
+            raise RuntimeError(message)
+        cache["events"] = article_milestones.read_events(
+            path,
             membership,
-            now=now,
-            path=path,
+            required=True,
         )
     return cache["events"]
 
@@ -1591,7 +1633,8 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
     *,
     cache_directory: Path | None = None,
     now: dt.datetime | None = None,
-    history_path: Path | None = None,
+    observations_path: Path | None = None,
+    milestones_path: Path | None = None,
     today_history_path: Path | None = None,
     article_history_cache: dict[str, pl.DataFrame],
     prior_facts: dict | None = None,
@@ -1616,11 +1659,9 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
     events = None
     if name in {"newsletter", "news_history"}:
         events = _retained_events(
-            read,
             membership,
             article_history_cache,
-            now=now or dt.datetime.now(dt.UTC),
-            path=history_path,
+            path=milestones_path,
         )
     if name == "newsletter":
         members = set(
@@ -1628,24 +1669,60 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
                 "full_title"
             ].to_list(),
         )
-
-        data = newsletter.collect_newsletter(
-            read,
-            now=now or dt.datetime.now(dt.UTC),
-            current_counts=_newsletter_counts(membership),
-            current_assessments=membership,
-            overview_at=partial(_newsletter_overview_at, read),
-            assessments_at=partial(_newsletter_assessments_at, read),
-            prior_facts=prior_facts,
-            members=members,
-            member_ids=set(
-                membership.filter(pl.col("page_namespace") == 0)[
-                    "page_id"
-                ].to_list(),
-            ),
-            article_history=events,
-            today_history_path=today_history_path,
+        articles = membership.filter(pl.col("page_namespace") == 0).select(
+            "page_id",
+            "full_title",
         )
+        dyk_projects = (
+            query_project_intersections(
+                read.site,
+                "电子游戏",
+                DYK_PROJECTS,
+            )
+            .join(articles, on="page_id", how="inner", validate="m:1")
+            .select("full_title", "project")
+        )
+
+        with ExitStack() as stack:
+            observations = observations_path or (
+                Path(stack.enter_context(tempfile.TemporaryDirectory()))
+                / "observations"
+            )
+            if prior_facts is not None:
+                save_observation(
+                    observations,
+                    prior_facts,
+                    newsletter.valid_newsletter,
+                    only_if_missing=True,
+                )
+            prior_facts = (
+                newsletter.read_newsletter_data(observations) or prior_facts
+            )
+            newsletter_sources.refresh_newsletter_data(
+                read,
+                path=observations,
+                now=now or dt.datetime.now(dt.UTC),
+                current_counts=_newsletter_counts(membership),
+                revision_counts=partial(
+                    project_revision_counts,
+                    read.site,
+                    "电子游戏",
+                ),
+                current_assessments=membership,
+                dyk_projects=dyk_projects,
+                overview_at=partial(_newsletter_overview_at, read),
+                assessments_at=partial(_newsletter_assessments_at, read),
+                prior_facts=prior_facts,
+                members=members,
+                member_ids=set(
+                    membership.filter(pl.col("page_namespace") == 0)[
+                        "page_id"
+                    ].to_list(),
+                ),
+                article_history=events,
+                today_history_path=today_history_path,
+            )
+            data = newsletter.read_newsletter_data(observations)
     elif name == "reviews":
         data = reviews.collect_reviews(
             read.site,
@@ -1654,6 +1731,15 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
             resolve_many=read.resolve_many,
             cache_directory=cache_directory,
             now=now or dt.datetime.now(dt.UTC),
+            retain=(
+                partial(
+                    retain_review_milestones,
+                    membership=membership,
+                    path=milestones_path,
+                )
+                if milestones_path is not None
+                else None
+            ),
         )
         data["items"] = enrich_project_assessments(data["items"], membership)
     elif name == "pageviews":
@@ -1750,14 +1836,12 @@ def _seed_daily_drafts(
     previous: dict | None,
     path: Path | None,
     clock: dt.datetime,
-    projector: Callable[[Issue, dict], dict] | None,
 ) -> None:
     """Retain an existing observation without disrupting refreshes."""
     if previous and previous.get("data") is not None:
         try:
             NewsletterDraftArchive(path).save(
                 previous["data"],
-                projector=projector,
                 generated_at=clock,
             )
         except Exception as error:  # ruff: ignore[blind-except]
@@ -1768,7 +1852,7 @@ def _seed_daily_drafts(
             )
 
 
-def collect_dashboard(  # ruff: ignore[too-many-arguments]
+def collect_dashboard(  # ruff: ignore[too-many-arguments, too-many-statements, complex-structure]
     today: dt.date,
     days: int = 100,
     *,
@@ -1776,12 +1860,12 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
     cache_directory: Path | None = None,
     now: dt.datetime | None = None,
     refresh_intervals: Mapping[str, float] | None = None,
-    history_path: Path | None = Path("reports/newsletter-history-v1.parquet"),
+    observations_path: Path | None = OBSERVATIONS_PATH,
+    milestones_path: Path | None = MILESTONES_PATH,
     today_history_path: Path | None = Path(
         "cache/today-in-history-v1.parquet",
     ),
     draft_archive_path: Path | None = DRAFT_ARCHIVE_PATH,
-    draft_projector: Callable[[Issue, dict], dict] | None = None,
 ) -> dict[str, object]:
     """Refresh due Chinese reports and preserve independent successes.
 
@@ -1792,10 +1876,10 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
         cache_directory: Private persisted report envelopes.
         now: Optional aware UTC clock used for due selection.
         refresh_intervals: Independent report intervals in seconds.
-        history_path: Durable Parquet history, or none for memory.
+        observations_path: Prepared newsletter data, or none for memory.
+        milestones_path: Required shared article milestone data.
         today_history_path: Wiki-wide OTD cache, or none for memory.
-        draft_archive_path: Durable daily drafts, or none to disable.
-        draft_projector: Caller-owned renderer retained with new drafts.
+        draft_archive_path: Independent daily JSON facts, or none.
 
     Returns:
         Schema-two snapshot with actual successful refresh timestamps,
@@ -1823,7 +1907,6 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
         plan["caches"].get("newsletter"),
         draft_archive_path,
         clock,
-        draft_projector,
     )
     if not plan["due"]:
         return _dashboard_snapshot(plan, intervals, period, stamp)
@@ -1871,6 +1954,13 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
             "data": previous["data"] if previous else None,
         }
         try:  # ruff: ignore[too-many-statements-in-try-clause]
+            if name == "newsletter" and read is not None:
+                read.revision_cache = RevisionTextCache(
+                    cache_directory / "newsletter-revisions-v1.parquet"
+                    if cache_directory
+                    else None,
+                    clock,
+                )
             data = _collect_report(
                 name,
                 read,
@@ -1879,7 +1969,8 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
                 period,
                 cache_directory=cache_directory,
                 now=clock,
-                history_path=history_path,
+                observations_path=observations_path,
+                milestones_path=milestones_path,
                 today_history_path=today_history_path,
                 article_history_cache=article_history_cache,
                 prior_facts=(previous or {}).get("data")
@@ -1892,9 +1983,10 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
             if name == "newsletter":
                 NewsletterDraftArchive(draft_archive_path).save(
                     data,
-                    projector=draft_projector,
                     generated_at=now or dt.datetime.now(dt.UTC),
                 )
+                if read is not None and read.revision_cache:
+                    read.revision_cache.save()
             completed = (
                 (now or dt.datetime.now(dt.UTC))
                 .astimezone(dt.UTC)
@@ -1936,6 +2028,8 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments]
                     "Dashboard retry state could not be saved: %s",
                     name,
                 )
+        if read is not None:
+            read.revision_cache = None
         plan["caches"][name] = record
         if publish is not None:
             publish(_dashboard_snapshot(plan, intervals, period, stamp))

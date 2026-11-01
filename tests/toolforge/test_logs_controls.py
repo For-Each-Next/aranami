@@ -1,4 +1,4 @@
-"""Verify invocation-history controls and separate diagnostic access."""
+"""Verify complete invocation history and separate diagnostic access."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
-from urllib.parse import urlencode
 
 from fastapi.testclient import TestClient
 
@@ -23,7 +22,7 @@ class LogControlsTests(unittest.TestCase):
     """Exercise HTTP pages over bounded saved job invocations."""
 
     def setUp(self) -> None:
-        """Provide sixty invocations and separate diagnostic files."""
+        """Provide one hundred invocations and diagnostic files."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         runtime = Path(temporary.name)
@@ -44,7 +43,7 @@ class LogControlsTests(unittest.TestCase):
                 "updated": None if index % 2 else 1,
                 "duration_seconds": 6.83,
             }
-            for index in range(60)
+            for index in range(100)
         ]
         (logs / "events.2026-10-23.jsonl").write_text(
             "\n".join(json.dumps(event) for event in self.events) + "\n",
@@ -95,10 +94,10 @@ class LogControlsTests(unittest.TestCase):
         assert match is not None
         return match[1]
 
-    def test_newest_default_and_chronology_keep_downloads_reachable(
+    def test_newest_history_keeps_diagnostic_downloads_reachable(
         self,
     ) -> None:
-        """Keep chronology and downloads in each locale."""
+        """Show invocations and separate downloads in every locale."""
         for locale in ("en", "zh-hans", "zh-hant"):
             with self.subTest(locale=locale):
                 interface = Interface(locale)
@@ -109,16 +108,26 @@ class LogControlsTests(unittest.TestCase):
                 assert response.status_code == 200
                 output = response.text
                 listing = self._listing(output)
-                assert listing.count("<tr>") == 25
-                assert listing.count("<td>") == 100
+                assert listing.count("<tr>") == 100
+                assert listing.count("<td>") == 400
                 assert output.count('<th scope="col">') == 4
-                assert listing.index(self.events[-1]["time"]) < listing.index(
-                    self.events[-2]["time"],
-                )
-                assert "60" in output
+                assert re.findall(r'<time datetime="([^"]+)"', listing) == [
+                    event["time"] for event in reversed(self.events)
+                ]
+                assert interface.text("logs.result.updated") in listing
+                assert interface.text("logs.result.failed") in listing
+                assert '<form action="/reports/"' not in output
+                assert 'class="log-query"' not in output
+                assert 'class="log-match-count"' not in output
+                assert 'class="pagination"' not in output
                 assert interface.text("logs.download") not in output
                 assert " download>" not in output
                 assert "job-history-" in listing
+                assert listing.count('<a class="status-link"') == 100
+                assert listing.count('aria-haspopup="dialog"') == 100
+                assert "<button" not in listing
+                for index in range(100):
+                    assert f'href="#job-history-{index:032x}"' in listing
                 archive_output = self.client.get(
                     "/logs/",
                     headers={"Accept-Language": locale},
@@ -142,72 +151,57 @@ class LogControlsTests(unittest.TestCase):
                 assert 'id="recent-events"' not in archive_output
                 assert 'class="system-details"' in archive_output
                 assert 'class="system-details"' not in output
-                chronology = self.client.get(
-                    "/reports/?order=asc",
-                    headers={"Accept-Language": locale},
-                ).text
-                assert self._listing(chronology).index(
-                    self.events[0]["time"],
-                ) < self._listing(chronology).index(self.events[1]["time"])
+                assert (
+                    self.client.get(
+                        "/logs/?date=2026-10-23&download=1",
+                    ).text
+                    == "diagnostic details\n"
+                )
 
-    def test_status_search_and_pagination_retain_the_current_scope(
-        self,
-    ) -> None:
-        """Retain controls and expose their matching count."""
-        parameters = {
-            "date": "2026-10-23",
-            "q": "Pageview",
-            "status": "failed",
-            "order": "asc",
-            "page": 2,
-        }
-        response = self.client.get(
-            "/reports/?" + urlencode(parameters),
-            headers={"Accept-Language": "en"},
-        )
-        assert response.status_code == 200
-        output = response.text
-        assert self._listing(output).count("<tr>") == 5
-        assert "Matching job invocations for 2026-10-23: 30." in output
-        assert 'value="failed" selected' in output
-        assert 'value="asc" selected' in output
-        assert (
-            "q=Pageview&amp;status=failed&amp;order=asc&amp;lang=en&amp;page=1"
-            in output
-        )
-        assert "Clear filters" in output
-        assert "Page 2 of 2" in output
-        assert 'href="/reports/?date=2026-10-23' in output
-        assert (
-            self.client.get(
-                "/logs/?date=2026-10-23&download=1",
-            ).text
-            == "diagnostic details\n"
-        )
+    def test_obsolete_controls_leave_complete_history_visible(self) -> None:
+        """Ignore retired history controls without changing the rows."""
+        for locale in ("en", "zh-hans", "zh-hant"):
+            headers = {"Accept-Language": locale}
+            expected = self._listing(
+                self.client.get("/reports/", headers=headers).text,
+            )
+            for query in (
+                "date=2026-10-23&q=Pageview&status=failed&order=asc&page=2",
+                "q=never-match",
+                "date=2026-01-01",
+                "order=sideways",
+                "page=0",
+                "page=5",
+                "status=private-code",
+                "order=asc&order=desc",
+                "page=-1",
+            ):
+                with self.subTest(locale=locale, query=query):
+                    response = self.client.get(
+                        "/reports/?" + query,
+                        headers=headers,
+                    )
+                    assert response.status_code == 200
+                    assert self._listing(response.text) == expected
+                    assert 'class="log-query"' not in response.text
+        assert self.client.get("/api/logs?order=asc").status_code == 400
 
-    def test_empty_filters_and_invalid_controls_are_explained(self) -> None:
-        """Localize empty search and reject invalid controls."""
+    def test_empty_history_remains_localized_without_controls(self) -> None:
+        """Describe empty history in every supported locale."""
+        (self.runtime / "state" / "job-history.json").write_text(
+            json.dumps({"schema": 1, "runs": []}),
+        )
         for locale in ("en", "zh-hans", "zh-hant"):
             response = self.client.get(
-                "/reports/?q=never-match",
+                "/reports/",
                 headers={"Accept-Language": locale},
             )
             assert response.status_code == 200
-            assert Interface(locale).text("logs.no_matches") in response.text
+            assert Interface(locale).text("reports.empty") in response.text
             assert "download=1" not in response.text
             assert " download>" not in response.text
-        for query in (
-            "order=sideways",
-            "page=0",
-            "page=5",
-            "status=private-code",
-            "order=asc&order=desc",
-            "page=-1",
-        ):
-            with self.subTest(query=query):
-                response = self.client.get("/reports/?" + query)
-                assert response.status_code == 400
-        assert self.client.get("/api/logs?order=asc").status_code == 400
+            assert '<table class="logs-table">' not in response.text
+            assert 'class="log-query"' not in response.text
 
     def test_history_is_independent_of_diagnostic_files(self) -> None:
         """Show saved invocations after diagnostic files are removed."""
@@ -215,7 +209,7 @@ class LogControlsTests(unittest.TestCase):
             path.unlink()
         response = self.client.get("/reports/")
         assert response.status_code == 200
-        assert self._listing(response.text).count("<tr>") == 25
+        assert self._listing(response.text).count("<tr>") == 100
         assert self.client.get("/logs/").status_code == 200
         (self.runtime / "state" / "job-history.json").write_text("{}")
         response = self.client.get("/reports/")

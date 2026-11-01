@@ -1,9 +1,7 @@
-"""Prepare quarterly newsletter facts from historical wiki revisions.
+"""Validate and read saved newsletter observations.
 
-The hub calls ``collect_newsletter`` during website refreshes. Public
-requests only consume its validated saved result. Missing historical
-observations remain unknown. Upcoming issues collect the elapsed part of
-their quarter, using completed UTC dates rather than future boundaries.
+Use read_newsletter_data for the latest complete prepared generation.
+Missing evidence stays unknown; this module never collects sources.
 """
 
 from __future__ import annotations
@@ -11,615 +9,40 @@ from __future__ import annotations
 import datetime as dt
 import re
 from itertools import starmap
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-import mwparserfromhell
-import polars as pl
-from pywikibot.exceptions import NoPageError
-
-from backend.website.newsletter_history import prepared_news
-from backend.website.newsletter_homepage import collect_newsletter_homepage
-from backend.website.newsletter_layout import (
-    prepare_main_layout,
-    valid_main_layout,
-)
-from backend.website.newsletter_newpages import (
-    collect_new_pages,
-    valid_new_pages,
-)
-from backend.website.newsletter_subpage_layout import (
-    prepare_subpage_layout,
-    valid_subpage_layouts,
-)
-from shared.newsletter import ROOT, SUFFIXES, Issue
-from shared.support.regions import region_content
+from backend.support.newsletter_data import OBSERVATIONS_PATH
+from backend.support.newsletter_observations import load_observation
+from backend.website.newsletter_layout import valid_main_layout
+from backend.website.newsletter_newpages import valid_new_pages
+from backend.website.newsletter_statistics import QUALITY_GRADES
+from backend.website.newsletter_subpage_layout import valid_subpage_layouts
+from backend.website.newsletter_year_review import year_quarters
+from shared.newsletter import DYK_PROJECTS, SUFFIXES, Issue
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
     from pathlib import Path
 
 _STAT_KEYS = ("total", "fa", "fl", "ga", "dyk", "bplus", "topics")
 _HOMEPAGE_KEYS = {"featured", "good", "news", "history"}
-_DYK_PAGE = "WikiProject:电子游戏/新条目推荐"
-_AWARDS_PAGE = "Module:ACGaward/list"
 _MAX_TEXT = 250_000
 _MAX_ROWS = 5000
 _MAX_SOURCES = 1600
 _MAX_ISSUES = 4
 _MAX_COUNT = 10_000_000
-_AWARD_PLACES = 5
-_AWARD_THRESHOLD = 10
-_LAYOUT_LOOKBACK = 4
-_SCORE = re.compile(
-    r'^\s*\["([^"\\\n]+)"\]\s*=\s*(\d+(?:\.5)?),?\s*$',
-    re.MULTILINE,
-)
-
-
-def _read_optional(read: Callable[[str], str], title: str) -> str | None:
-    """Read optional sources, preserving transport failures.
-
-    Returns:
-        Source text, or none when the page does not exist.
-    """
-    try:
-        return read(title)
-    except NoPageError:
-        return None
-
-
-def _dyk(
-    text: str | None,
-    issue: Issue,
-    through: dt.date,
-) -> list[dict[str, str]] | None:
-    """Extract dated DYK entries within the selected quarter.
-
-    Returns:
-        Dated article records, or none for an unavailable source.
-    """
-    if text is None or 'begin="dyk"' not in text:
-        return None
-    rows = []
-    for template in mwparserfromhell.parse(
-        region_content(text, "dyk") or "",
-    ).filter_templates():
-        if not template.name.matches("PJ:VG/DYK/item"):
-            continue
-        if not template.has("1") or not template.has("date"):
-            return None
-        title = str(template.get("1").value).strip().replace("_", " ")
-        for label in str(template.get("date").value).split("、"):
-            if label.strip() == "日期不詳":
-                continue
-            day = dt.date.fromisoformat(label.strip())
-            if issue.start <= day < through:
-                rows.append({"title": title, "date": day.isoformat()})
-    return (
-        pl
-        .DataFrame(rows, schema={"title": pl.String, "date": pl.String})
-        .unique()
-        .sort("date", "title")
-        .to_dicts()
-    )
-
-
-def _scores(text: str | None) -> pl.DataFrame | None:
-    """Read the audited Lua score table without executing it.
-
-    Returns:
-        Typed scores, or none when the literal table is invalid.
-    """
-    if text is None:
-        return None
-    stripped = re.sub(r"--[^\n]*", "", text).strip()
-    if not stripped.startswith("return {") or not stripped.endswith("}"):
-        return None
-    body = stripped[len("return {") : -1]
-    rows = [
-        {"user": name, "score": float(score)}
-        for name, score in _SCORE.findall(body)
-    ]
-    if _SCORE.sub("", body).strip():
-        return None
-    frame = pl.DataFrame(
-        rows,
-        schema={"user": pl.String, "score": pl.Float64},
-    )
-    if frame.get_column("user").n_unique() != frame.height:
-        return None
-    return frame
-
-
-def _awards(
-    before: str | None,
-    after: str | None,
-) -> tuple[list[dict[str, object]] | None, list[str] | None]:
-    """Compare award totals, retaining fifth-place ties.
-
-    Returns:
-        The quarterly ranking and first-time award recipients.
-    """
-    first, last = _scores(before), _scores(after)
-    if first is None or last is None:
-        return None, None
-    changes = (
-        last
-        .rename({"score": "total"})
-        .join(first.rename({"score": "previous"}), on="user", how="left")
-        .with_columns(pl.col("previous").fill_null(0))
-        .with_columns(
-            (pl.col("total").floor() - pl.col("previous").floor())
-            .cast(pl.Int64)
-            .alias("gained"),
-            pl.col("total").floor().cast(pl.Int64),
-        )
-    )
-    winners = (
-        changes
-        .filter(pl.col("gained") > 0)
-        .with_columns(
-            pl.col("gained").rank(method="min", descending=True).alias("rank"),
-        )
-        .filter(pl.col("rank") <= _AWARD_PLACES)
-        .sort(["gained", "user"], descending=[True, False])
-        .select("user", "gained", "total")
-    )
-    newcomers = (
-        changes
-        .filter(
-            (pl.col("previous") < _AWARD_THRESHOLD)
-            & (pl.col("total") >= _AWARD_THRESHOLD),
-        )
-        .sort("user")
-        .get_column("user")
-        .to_list()
-    )
-    return winners.to_dicts(), newcomers
-
-
-def _announcements(text: str | None) -> str | None:
-    """Preserve the existing issue's announcement section.
-
-    Returns:
-        Editable prose, or none if no section exists.
-    """
-    if text is None:
-        return None
-    code = mwparserfromhell.parse(text)
-    for section in code.get_sections(levels=[3], include_lead=False):
-        headings = section.filter_headings(recursive=False)
-        if headings and str(headings[0].title).strip() == "公告":
-            section.remove(headings[0])
-            return str(section).strip()
-    return None
-
-
-def _previous_main_layout(
-    read: Callable[[str], str],
-    issue: Issue,
-) -> dict | None:
-    """Read the nearest supported prior issue layout.
-
-    Returns:
-        Actual source preparation, or none without a supported layout.
-    """
-    candidate = issue
-    for _ in range(_LAYOUT_LOOKBACK):
-        try:
-            candidate = Issue.parse(candidate.previous)
-        except ValueError:
-            break
-        original = _read_optional(read, f"{ROOT}/{candidate.value}")
-        if original is not None:
-            layout = prepare_main_layout(original, candidate)
-            if layout is not None:
-                return layout
-    return None
-
-
-def _previous_subpage_layout(
-    read: Callable[[str], str],
-    issue: Issue,
-    suffix: str,
-    kind: str,
-) -> dict | None:
-    """Read a supported original subpage from a preceding issue.
-
-    Returns:
-        Original source preparation, or none when unavailable.
-    """
-    candidate = issue
-    for _ in range(_LAYOUT_LOOKBACK):
-        try:
-            candidate = Issue.parse(candidate.previous)
-        except ValueError:
-            break
-        original = _read_optional(read, f"{ROOT}/{candidate.value}/{suffix}")
-        if original is not None:
-            layout = prepare_subpage_layout(original, candidate, kind)
-            if layout is not None:
-                return layout
-    return None
-
-
-def _apply_article_history(
-    facts: dict,
-    events: pl.DataFrame,
-    issue: Issue,
-    through: dt.date,
-    provenance: dict,
-) -> None:
-    """Use recorded talk-page dates for quarterly newsletter facts."""
-    dated = events.filter(
-        pl.col("date").is_between(issue.start, through, closed="left"),
-    )
-    facts["quality_source"] = "article_history"
-    undated = events.filter(pl.col("date").is_null()).group_by("kind").len()
-    facts["history_undated"] = {
-        **dict.fromkeys(("dyk", "news", "history", "quality"), 0),
-        **dict(undated.iter_rows()),
-    }
-    facts["dyk"] = (
-        dated
-        .filter(pl.col("kind") == "dyk")
-        .select("title", pl.col("date").dt.to_string("%Y-%m-%d"))
-        .unique()
-        .sort("date", "title")
-        .to_dicts()
-    )
-    facts["quality_changes"] = (
-        dated
-        .filter(pl.col("kind") == "quality")
-        .select(
-            pl.col("date").dt.to_string("%Y-%m-%d"),
-            "title",
-            "grade",
-            "action",
-        )
-        .unique()
-        .sort("date", "grade", "action", "title")
-        .to_dicts()
-    )
-    for title, revision in (
-        events
-        .filter(
-            pl.col("date").is_null()
-            | pl.col("date").is_between(issue.start, through, closed="left"),
-        )
-        .select("title", "revision_id")
-        .unique()
-        .iter_rows()
-    ):
-        url = f"https://zh.wikipedia.org/w/index.php?oldid={revision}"
-        provenance[url] = {"label": f"Talk:{title}", "url": url}
-    if "homepage" in facts:
-        facts["homepage"]["news"] = prepared_news(events, issue.start, through)
-    facts["available"] = True
-
-
-def _retain_overview(
-    facts: dict,
-    prior: Mapping[str, object] | None,
-    issue: Issue,
-) -> None:
-    """Reuse saved counts and timestamps for identical periods."""
-    if not prior or prior.get("issue") != issue.value:
-        return
-    facts["previous_overview"].update(prior.get("previous_overview") or {})
-    if (
-        prior.get("observation_end") == facts["observation_end"]
-        and prior.get("complete") == facts["complete"]
-    ):
-        facts["overview"].update(prior.get("overview") or {})
-        facts["overview_observed_at"] = prior.get("overview_observed_at")
-
-
-def _new_page_assessment_options(
-    issue: Issue,
-    now: dt.datetime,
-    current: pl.DataFrame | None,
-    lookup: Callable[[dt.date], tuple[pl.DataFrame, str] | None] | None,
-) -> dict[str, object]:
-    """Select grades without rewriting closed-quarter history.
-
-    Returns:
-        Grade collection options with the actual observation timestamp.
-        An unavailable closed-quarter snapshot stays unavailable.
-    """
-    if now.date() < issue.end:
-        assessments, observed_at = current, now.isoformat(timespec="seconds")
-    else:
-        assessments, observed_at = (
-            lookup(issue.end) or (None, None)
-            if lookup is not None
-            else (None, None)
-        )
-    return {
-        "assessments": assessments,
-        "assessment_observed_at": observed_at,
-    }
-
-
-def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments]
-    read: object,
-    issue: Issue,
-    now: dt.datetime,
-    current_counts: Mapping[str, int] | None,
-    *,
-    members: set[str] | None,
-    member_ids: set[int] | None,
-    article_history: pl.DataFrame | None,
-    today_history_path: Path | None,
-    overview_at: (
-        Callable[[dt.date], tuple[Mapping[str, int | None], str] | None] | None
-    ),
-    current_assessments: pl.DataFrame | None,
-    assessments_at: (
-        Callable[[dt.date], tuple[pl.DataFrame, str] | None] | None
-    ),
-    prior: Mapping[str, object] | None,
-) -> dict:
-    """Prepare elapsed-quarter observations for one newsletter issue.
-
-    Returns:
-        Bounded facts, original drafts, and source evidence.
-    """
-    provenance = {}
-
-    def remember(title: str, text: str) -> str:
-        """Retain each revision, including both boundary reads.
-
-        Returns:
-            The unchanged source text.
-        """
-        sources = getattr(read, "sources", {})
-        if isinstance(sources, dict) and title in sources:
-            source = sources[title]
-            provenance[source["url"]] = source.copy()
-        return text
-
-    def current(title: str) -> str:
-        """Read a target's current draft and record provenance.
-
-        Returns:
-            The unchanged editorial source.
-        """
-        return remember(title, read(title))
-
-    def historical(title: str, boundary: dt.datetime) -> str:
-        """Read historical source and record its revision.
-
-        Returns:
-            The source text at the exclusive boundary.
-        """
-        return remember(title, read.at(title, boundary))
-
-    existing = {
-        suffix: _read_optional(
-            current,
-            f"{ROOT}/{issue.value}" + (f"/{suffix}" if suffix else ""),
-        )
-        for suffix in SUFFIXES
-    }
-    main_layout = _previous_main_layout(current, issue)
-    subpage_layouts = {
-        suffix: _previous_subpage_layout(current, issue, suffix, kind)
-        for suffix, kind in (
-            ("特優內容", "quality"),
-            ("宣告", "announcements"),
-        )
-    }
-    observation_end = max(issue.start, min(issue.end, now.date()))
-    facts = {
-        "issue": issue.value,
-        "period": f"{issue.start.isoformat()}/{issue.end.isoformat()}",
-        "updated_at": now.isoformat(timespec="seconds"),
-        "observation_end": observation_end.isoformat(),
-        "complete": observation_end == issue.end,
-        "available": False,
-        "overview": dict.fromkeys(_STAT_KEYS),
-        "overview_observed_at": None,
-        "previous_overview": dict.fromkeys(_STAT_KEYS),
-        "quality": None,
-        "quality_changes": None,
-        "new_pages": None,
-        "new_pages_data": None,
-        "announcements": _announcements(existing["宣告"]),
-        "dyk": None,
-        "awards": None,
-        "newcomers": None,
-        "existing": existing,
-        "main_layout": main_layout,
-        "subpage_layouts": subpage_layouts,
-        "sources": [],
-    }
-    _retain_overview(facts, prior, issue)
-    if observation_end > issue.start and callable(getattr(read, "at", None)):
-        start = dt.datetime.combine(issue.start, dt.time.min, dt.UTC)
-        end = dt.datetime.combine(observation_end, dt.time.min, dt.UTC)
-        if overview_at is not None:
-            baseline, _ = overview_at(issue.start) or ({}, None)
-            facts["previous_overview"].update(baseline)
-            latest, observed = overview_at(observation_end) or (
-                {},
-                facts["overview_observed_at"],
-            )
-            facts["overview"].update(latest)
-            facts["overview_observed_at"] = observed
-        if main_layout and main_layout["source_issue"] == issue.previous:
-            facts["previous_overview"] = {
-                key: value
-                if value is not None
-                else main_layout["baseline_counts"][key]
-                for key, value in facts["previous_overview"].items()
-            }
-        if not facts["complete"] and current_counts:
-            facts["overview"].update(current_counts)
-            facts["overview_observed_at"] = now.isoformat(timespec="seconds")
-        if article_history is None:
-            facts["dyk"] = _dyk(
-                _read_optional(
-                    lambda title: historical(title, end),
-                    _DYK_PAGE,
-                ),
-                issue,
-                observation_end,
-            )
-        facts["new_pages_data"] = collect_new_pages(
-            SimpleNamespace(at=historical),
-            issue,
-            through=observation_end,
-            resolve=getattr(read, "resolve", None),
-            resolve_many=getattr(read, "resolve_many", None),
-            resolve_page_id=getattr(read, "resolve_page_id", None),
-            **_new_page_assessment_options(
-                issue,
-                now,
-                current_assessments,
-                assessments_at,
-            ),
-        )
-        facts["awards"], facts["newcomers"] = _awards(
-            _read_optional(
-                lambda title: historical(title, start),
-                _AWARDS_PAGE,
-            ),
-            _read_optional(lambda title: historical(title, end), _AWARDS_PAGE),
-        )
-        facts["available"] = (
-            any(count is not None for count in facts["overview"].values())
-            or any(
-                facts[name] is not None
-                for name in ("dyk", "quality_changes", "awards")
-            )
-            or any(
-                row["count"] is not None
-                for row in facts["new_pages_data"]["months"]
-            )
-            or facts["new_pages_data"]["known_count"] > 0
-        )
-    elif current_counts and callable(getattr(read, "at", None)):
-        if overview_at is not None:
-            baseline, _ = overview_at(issue.start) or ({}, None)
-            facts["previous_overview"].update(baseline)
-        facts["overview"].update(current_counts)
-        facts["overview_observed_at"] = now.isoformat(timespec="seconds")
-        facts["available"] = True
-    if members is not None:
-        facts.update(
-            collect_newsletter_homepage(
-                read,
-                issue,
-                through=observation_end,
-                members=members,
-                member_ids=member_ids,
-                now=now,
-                history_path=today_history_path,
-            ),
-        )
-        facts["available"] |= any(
-            rows is not None for rows in facts["homepage"].values()
-        )
-    if article_history is not None and observation_end > issue.start:
-        _apply_article_history(
-            facts,
-            article_history,
-            issue,
-            observation_end,
-            provenance,
-        )
-    facts["sources"] = list(provenance.values())
-    return facts
-
-
-def collect_newsletter(  # ruff: ignore[too-many-arguments]
-    read: object,
-    *,
-    now: dt.datetime,
-    current_counts: Mapping[str, int] | None = None,
-    members: set[str] | None = None,
-    member_ids: set[int] | None = None,
-    article_history: pl.DataFrame | None = None,
-    today_history_path: Path | None = None,
-    overview_at: (
-        Callable[[dt.date], tuple[Mapping[str, int | None], str] | None] | None
-    ) = None,
-    current_assessments: pl.DataFrame | None = None,
-    assessments_at: (
-        Callable[[dt.date], tuple[pl.DataFrame, str] | None] | None
-    ) = None,
-    prior_facts: Mapping[str, object] | None = None,
-) -> dict:
-    """Collect drafts for the latest quarter and its successor.
-
-    Args:
-        read: Current-page reader with historical ``at`` support.
-        now: Aware collection time, separate from source dates.
-        current_counts: Fresh counts used only for open quarters.
-        members: Current article titles from the project database query.
-            When supplied, collect quarter-specific homepage history.
-        member_ids: Project article IDs for anniversary scope joins.
-        article_history: Events recorded on project talk pages.
-            Complete snapshots supply DYK and quality events directly.
-        today_history_path: Separate wiki-wide daily-source archive.
-        overview_at: Read retained database counts for an exclusive UTC
-            date boundary with their actual observation timestamp.
-            Missing snapshots leave their counts unknown.
-        current_assessments: Fresh internal grades for open-quarter new
-            articles. Closed quarters never use these observations.
-        assessments_at: Read retained assessment rows for an exact UTC
-            date with their actual observation time. Missing historical
-            snapshots leave new-article grade breakdowns unavailable.
-        prior_facts: Previously validated saved issues. Retain their
-            overview counts only for identical reporting boundaries.
-
-    Returns:
-        Saved issue facts and original editorial drafts for the website.
-
-    Raises:
-        ValueError: The clock is naive or collected data exceeds bounds.
-    """
-    if now.tzinfo is None or now.utcoffset() is None:
-        message = "Newsletter collection requires an aware timestamp."
-        raise ValueError(message)
-    if current_counts is not None and any(
-        key not in _STAT_KEYS
-        or type(value) is not int
-        or not 0 <= value <= _MAX_COUNT
-        for key, value in current_counts.items()
-    ):
-        message = "Current newsletter counts must be bounded observations."
-        raise ValueError(message)
-    now = now.astimezone(dt.UTC)
-    month = ((now.month - 1) // 3) * 3 + 1
-    current = Issue.parse(f"{now.year:04d}-{month:02d}")
-    issues = (current, Issue.parse(current.next))
-    result = {
-        "issues": {
-            issue.value: _issue_facts(
-                read,
-                issue,
-                now,
-                current_counts,
-                members=members,
-                member_ids=member_ids,
-                article_history=article_history,
-                today_history_path=today_history_path,
-                overview_at=overview_at,
-                current_assessments=current_assessments,
-                assessments_at=assessments_at,
-                prior=(prior_facts or {}).get("issues", {}).get(issue.value),
-            )
-            for issue in issues
-        },
-    }
-    if not valid_newsletter(result):
-        message = "Newsletter facts failed bounded snapshot validation."
-        raise ValueError(message)
-    return result
+_EARLIEST_GAME_YEAR = 1900
+_LATEST_GAME_YEAR = 2099
+_MAX_IDENTITIES = 100
+_MAX_STATISTIC_YEARS = 100
+_EARLIEST_STATISTIC_YEAR = 2000
+_MAX_REVISION_ROWS = 100_000
+_MONTHS = 12
+_MIN_MONTH_DAYS = 28
+_MAX_MONTH_DAYS = 31
+# Retain read access to immutable observations written before 0.7.11.
+_DYK_PROJECTS = frozenset((*DYK_PROJECTS, "音樂"))
 
 
 def _text(value: object, maximum: int = _MAX_TEXT) -> bool:
@@ -704,7 +127,27 @@ def _source(value: object) -> bool:
     )
 
 
-def _quality_row(value: object, issue: Issue, through: dt.date) -> bool:
+def _identities(value: object) -> bool:
+    """Validate optional explicit account lists without inventing names.
+
+    Returns:
+        Whether every supplied account is safe and unique.
+    """
+    return value is None or (
+        isinstance(value, list)
+        and len(value) <= _MAX_IDENTITIES
+        and all(_title(name) for name in value)
+        and len(set(value)) == len(value)
+    )
+
+
+def _quality_row(
+    value: object,
+    issue: Issue,
+    through: dt.date,
+    *,
+    start: dt.date | None = None,
+) -> bool:
     """Validate a list change inside the reporting quarter.
 
     Returns:
@@ -717,11 +160,12 @@ def _quality_row(value: object, issue: Issue, through: dt.date) -> bool:
     except TypeError, ValueError, KeyError:
         return False
     return (
-        issue.start <= day < through
+        (start or issue.start) <= day < through
         and isinstance(value.get("grade"), str)
         and value["grade"] in {"FA", "FL", "GA", "A", "Bplus"}
         and isinstance(value.get("action"), str)
         and value["action"] in {"added", "removed"}
+        and _identities(value.get("authors"))
     )
 
 
@@ -817,13 +261,13 @@ def _homepage_facts(  # ruff: ignore[too-many-return-statements]
 def _valid_observation_stamp(
     observed: object,
     stamp: dt.datetime,
-    observation_end: dt.date,
+    observation_end: dt.date | None,
 ) -> bool:
-    """Check that an actual observation belongs to its saved day.
+    """Validate observation time against capture and an optional day.
 
     Returns:
         Whether no timestamp was retained or the aware observation is
-        within its boundary's day and no later than collection.
+        within a specified boundary's day and no later than collection.
     """
     if observed is None:
         return True
@@ -836,8 +280,301 @@ def _valid_observation_stamp(
         and observation.utcoffset() is not None
         and stamp.tzinfo is not None
         and stamp.utcoffset() is not None
-        and observation.astimezone(dt.UTC).date() == observation_end
+        and (
+            observation_end is None
+            or observation.astimezone(dt.UTC).date() == observation_end
+        )
         and observation <= stamp
+    )
+
+
+def _award_row(row: object) -> bool:
+    """Check one observed award recipient and bounded score counts.
+
+    Returns:
+        Whether the row has a valid user, gain, and cumulative total.
+    """
+    return (
+        isinstance(row, dict)
+        and _title(row.get("user"))
+        and all(
+            type(row.get(field)) is int and 0 <= row[field] <= _MAX_COUNT
+            for field in ("gained", "total")
+        )
+    )
+
+
+def _year_attribution(row: dict) -> bool:
+    """Keep nominators distinct from unverified principal authors.
+
+    Returns:
+        Whether optional attribution fields contain safe observations.
+    """
+    return (
+        (row.get("nominator") is None or _title(row["nominator"]))
+        and _identities(row.get("authors"))
+        and (
+            row.get("main_author") is None
+            or (
+                type(row["main_author"]) is bool
+                and row.get("nominator") is not None
+            )
+        )
+        and (
+            row.get("nomination_link") is None
+            or _title(row["nomination_link"])
+        )
+    )
+
+
+def _valid_dyk_quarters(
+    value: object,
+    year: int,
+    through: dt.date,
+) -> bool:
+    """Validate completed quarterly DYK dates and cumulative counts.
+
+    Returns:
+        Whether observed quarters are complete, ordered, and monotonic.
+    """
+    if value is None:
+        return True
+    expected_dates = [
+        end.isoformat()
+        for quarter in year_quarters(Issue(year + 1, 1))
+        if (end := quarter.end - dt.timedelta(days=1)) < through
+    ]
+    return (
+        isinstance(value, list)
+        and all(
+            isinstance(row, dict)
+            and set(row) == {"date", "count"}
+            and type(row["count"]) is int
+            and 0 <= row["count"] <= _MAX_COUNT
+            for row in value
+        )
+        and [row["date"] for row in value] == expected_dates
+        and [row["count"] for row in value]
+        == sorted(row["count"] for row in value)
+    )
+
+
+def _valid_annual_statistics(
+    value: dict,
+    year: int,
+    through: dt.date,
+) -> bool:
+    """Validate optional annual chart and ranking observations.
+
+    Returns:
+        Whether present statistics have bounded counts and safe titles.
+    """
+
+    def count(item: object) -> bool:
+        """Accept a nonnegative measured count within signed 64 bits.
+
+        Returns:
+            Whether the value is a bounded integer.
+        """
+        return type(item) is int and 0 <= item <= 2**63 - 1
+
+    def item(row: object, metric: str) -> bool:
+        """Validate one title and its measured count.
+
+        Returns:
+            Whether the row contains a safe title and count.
+        """
+        return (
+            isinstance(row, dict)
+            and _title(row.get("title"))
+            and count(row.get(metric))
+        )
+
+    charts = value.get("quality_statistics")
+    if charts is not None and not (
+        isinstance(charts, list)
+        and len(charts) <= _MAX_STATISTIC_YEARS
+        and all(
+            isinstance(row, dict)
+            and type(row.get("year")) is int
+            and _EARLIEST_STATISTIC_YEAR <= row["year"] <= year
+            and isinstance(row.get("counts"), dict)
+            and set(row["counts"]) == set(QUALITY_GRADES)
+            and all(count(number) for number in row["counts"].values())
+            and type(row.get("provisional")) is bool
+            and (row.get("source") is None or _title(row["source"]))
+            for row in charts
+        )
+    ):
+        return False
+    revisions = value.get("revision_ranking")
+    if revisions is not None and not (
+        isinstance(revisions, list)
+        and len(revisions) <= _MAX_REVISION_ROWS
+        and all(item(row, "revisions") for row in revisions)
+    ):
+        return False
+    months = value.get("monthly_popularity")
+    if months is not None and not (
+        isinstance(months, list)
+        and len(months) <= _MONTHS
+        and all(
+            item(row, "views")
+            and type(row.get("month")) is int
+            and 1 <= row["month"] <= _MONTHS
+            and type(row.get("days")) is int
+            and _MIN_MONTH_DAYS <= row["days"] <= _MAX_MONTH_DAYS
+            and (
+                "revision_id" not in row
+                or (
+                    type(row["revision_id"]) is int
+                    and 0 < row["revision_id"] <= 2**63 - 1
+                )
+            )
+            for row in months
+        )
+    ):
+        return False
+    annual = value.get("annual_popularity")
+    if annual is not None:
+        try:
+            start, end = (
+                dt.date.fromisoformat(annual[key]) for key in ("start", "end")
+            )
+            valid = (
+                start <= end
+                and end.year == year
+                and count(annual.get("article_count"))
+                and count(annual.get("total_views"))
+                and type(annual.get("provisional")) is bool
+                and _rows(annual.get("items"), lambda row: item(row, "views"))
+            )
+        except KeyError, TypeError, ValueError:
+            return False
+        if not valid:
+            return False
+    return _valid_dyk_quarters(
+        value.get("dyk_new_quarters"),
+        year,
+        through,
+    ) and all(
+        value.get(key) is None or count(value[key])
+        for key in ("dyk_new_count", "previous_dyk_count")
+    )
+
+
+def _valid_year_review(
+    value: object,
+    issue: Issue,
+    through: dt.date,
+    stamp: dt.datetime,
+) -> bool:
+    """Validate optional annual facts while accepting older snapshots.
+
+    Returns:
+        Whether the January feature has bounded calendar-year evidence.
+    """
+    if value is None:
+        return True
+    if not isinstance(value, dict) or issue.month != 1:
+        return False
+    start = dt.date(issue.year - 1, 1, 1)
+    quarters = value.get("new_pages_quarters")
+    try:
+        dyk_valid = _rows(
+            value.get("dyk"),
+            lambda row: (
+                isinstance(row, dict)
+                and _title(row.get("title"))
+                and _identities(row.get("contributors"))
+                and _identities(row.get("projects"))
+                and (
+                    row.get("projects") is None
+                    or (
+                        set(row["projects"]) <= _DYK_PROJECTS
+                        and value.get("dyk_projects_observed_at") is not None
+                    )
+                )
+                and start <= dt.date.fromisoformat(row["date"]) < through
+                and (
+                    row.get("is_game") is None or type(row["is_game"]) is bool
+                )
+                and (
+                    row.get("release_year") is None
+                    or (
+                        row.get("is_game") is True
+                        and type(row["release_year"]) is int
+                        and _EARLIEST_GAME_YEAR
+                        <= row["release_year"]
+                        <= _LATEST_GAME_YEAR
+                    )
+                )
+                and row.get("grade")
+                in {None, "FA", "FL", "GA", "A", "AL", "Bplus"}
+            ),
+        )
+    except KeyError, TypeError, ValueError:
+        return False
+    return (
+        type(value.get("year")) is int
+        and value["year"] == start.year
+        and value.get("period") == f"{start}/{issue.end}"
+        and value.get("observation_end") == through.isoformat()
+        and type(value.get("complete")) is bool
+        and value["complete"] == (through == issue.end)
+        and _valid_annual_statistics(value, start.year, through)
+        and _counts(value.get("overview"))
+        and _counts(value.get("previous_overview"))
+        and _valid_observation_stamp(
+            value.get("overview_observed_at"),
+            stamp,
+            through,
+        )
+        and _valid_observation_stamp(
+            value.get("previous_overview_observed_at"),
+            stamp,
+            start,
+        )
+        and dyk_valid
+        and _valid_observation_stamp(
+            value.get("dyk_assessments_observed_at"),
+            stamp,
+            through,
+        )
+        and _valid_observation_stamp(
+            value.get("dyk_projects_observed_at"),
+            stamp,
+            None,
+        )
+        and _rows(
+            value.get("quality_changes"),
+            lambda row: (
+                _quality_row(row, issue, through, start=start)
+                and _year_attribution(row)
+            ),
+        )
+        and _rows(value.get("awards"), _award_row)
+        and _rows(value.get("newcomers"), _title)
+        and (
+            quarters is None
+            or (
+                isinstance(quarters, list)
+                and len(quarters) == len(year_quarters(issue))
+                and all(
+                    isinstance(data, dict)
+                    and valid_new_pages(
+                        data,
+                        quarter,
+                        through=max(quarter.start, min(quarter.end, through)),
+                    )
+                    for data, quarter in zip(
+                        quarters,
+                        year_quarters(issue),
+                        strict=True,
+                    )
+                )
+            )
+        )
     )
 
 
@@ -914,6 +651,12 @@ def _valid_issue(key: str, facts: object) -> bool:
             observation_end,
         )
         and _homepage_facts(facts, issue, observation_end)
+        and _valid_year_review(
+            facts.get("year_review"),
+            issue,
+            max(dt.date(issue.year - 1, 1, 1), min(issue.end, stamp.date())),
+            stamp,
+        )
         and all(
             facts.get(name) is None or _text(facts[name])
             for name in ("quality", "new_pages", "announcements")
@@ -922,24 +665,18 @@ def _valid_issue(key: str, facts: object) -> bool:
         and set(existing) == set(SUFFIXES)
         and all(value is None or _text(value) for value in existing.values())
         and dates_valid
-        and _rows(facts.get("dyk"), lambda row: isinstance(row, dict))
+        and _rows(
+            facts.get("dyk"),
+            lambda row: (
+                isinstance(row, dict) and _identities(row.get("contributors"))
+            ),
+        )
         and _rows(
             facts.get("quality_changes"),
             lambda row: _quality_row(row, issue, observation_end),
         )
         and _rows(facts.get("newcomers"), _title)
-        and _rows(
-            facts.get("awards"),
-            lambda row: (
-                isinstance(row, dict)
-                and _title(row.get("user"))
-                and all(
-                    type(row.get(field)) is int
-                    and 0 <= row[field] <= _MAX_COUNT
-                    for field in ("gained", "total")
-                )
-            ),
-        )
+        and _rows(facts.get("awards"), _award_row)
         and isinstance(facts.get("sources"), list)
         and len(facts["sources"]) <= _MAX_SOURCES
         and all(_source(source) for source in facts["sources"])
@@ -961,3 +698,15 @@ def valid_newsletter(value: object) -> bool:
         and len(value["issues"]) <= _MAX_ISSUES
         and all(starmap(_valid_issue, value["issues"].items()))
     )
+
+
+def read_newsletter_data(path: Path = OBSERVATIONS_PATH) -> dict | None:
+    """Read the latest complete saved facts without collecting sources.
+
+    Args:
+        path: Durable prepared-observation directory.
+
+    Returns:
+        Validated saved facts, or none before the first acquisition.
+    """
+    return load_observation(path, valid_newsletter)

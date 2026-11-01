@@ -64,6 +64,12 @@ class TestMaintenanceBacklog(TestCase):
             ],
             schema=_MEMBER_SCHEMA,
             orient="row",
+        ).with_columns(
+            pl.Series(
+                "page_length",
+                [1200, 2300, None, 0, 1200],
+                dtype=pl.Int64,
+            ),
         )
         categories = pl.DataFrame(
             [
@@ -98,6 +104,7 @@ class TestMaintenanceBacklog(TestCase):
             {
                 "page_id": 1,
                 "title": "Z Game",
+                "page_length": 1200,
                 "assessment_class": None,
                 "assessment_importance": None,
                 "issues": ["unreferenced", "references"],
@@ -115,6 +122,8 @@ class TestMaintenanceBacklog(TestCase):
             "Z Game",
         ]
         assert groups["notability"]["count"] == 1
+        assert groups["references"]["items"][0]["page_length"] == 2300  # ruff: ignore[magic-value-comparison]
+        assert groups["notability"]["items"][0]["page_length"] is None
         assert groups["notability"]["items"][0]["url"] == (
             "https://zh.wikipedia.org/wiki/"
             "%E6%98%9F%E7%A9%BA_%26_%E6%B5%B7%E6%B4%8B"

@@ -41,11 +41,11 @@ class DashboardFixture(TestCase):
             return_value={"items": []},
         )
         self.newsletter = self._patch(
-            "backend.website.collect.newsletter.collect_newsletter",
+            "backend.website.collect.newsletter_sources.collect_source_facts",
             return_value={"issues": {}},
         )
         self.article_history = self._patch(
-            "backend.website.collect.collect_article_history",
+            "backend.website.collect.article_milestones.read_events",
             return_value=pl.DataFrame(),
         )
         self.site = self._patch("backend.website.collect.pywikibot.Site")
@@ -61,6 +61,12 @@ class DashboardFixture(TestCase):
                 "full_title": ["Game", "Category:Games"],
                 "pa_class": ["GA", "NA"],
             }),
+        )
+        self.page_projects = self._patch(
+            "backend.website.collect.query_project_intersections",
+            return_value=pl.DataFrame(
+                schema={"page_id": pl.Int64, "project": pl.String},
+            ),
         )
         self.collectors = {
             key: self._patch(
@@ -130,6 +136,14 @@ class DashboardFixture(TestCase):
         """
         now = self.clock + elapsed
         kwargs.setdefault("draft_archive_path", self.cache / "drafts")
+        kwargs.setdefault(
+            "observations_path",
+            self.cache / "data/observations",
+        )
+        kwargs.setdefault(
+            "milestones_path",
+            self.cache / "data/recognition.parquet",
+        )
         return collect_dashboard(
             now.date(),
             cache_directory=self.cache,
@@ -285,6 +299,8 @@ class TestDashboardReportCache(DashboardFixture):
             call("Game", "zh-hans"),
             call("Game", "zh-hant"),
             call("Game", "zh"),
+            call("Game", "zh-tw"),
+            call("Game", "zh-hk"),
         ]
         self.reader.summary.reset_mock()
         repeated = self._collect(dt.timedelta(hours=23))
@@ -300,6 +316,8 @@ class TestDashboardReportCache(DashboardFixture):
             call("Game", "zh-hans"),
             call("Game", "zh-hant"),
             call("Game", "zh"),
+            call("Game", "zh-tw"),
+            call("Game", "zh-hk"),
         ]
 
     def test_restart_reuses_every_report_without_constructing_clients(
@@ -318,6 +336,65 @@ class TestDashboardReportCache(DashboardFixture):
         assert repeated["reports"] == first["reports"]
         assert repeated["pageviews"] == first["pageviews"]
         assert len(list(self.cache.glob("*-v2.json"))) == len(REPORT_KEYS)
+
+    def test_newsletter_observes_exact_article_project_memberships(
+        self,
+    ) -> None:
+        """Read article projects only while the newsletter is due."""
+        projects = ("虚构角色", "传记", "公司", "音乐")
+        self.page_projects.return_value = pl.DataFrame({
+            "page_id": [11, 11, 11, 11, 22, 999],
+            "project": [*projects, "公司", "音樂"],
+        })
+        first = self._collect()
+        self.membership.assert_called_once_with(self.reader.site, "电子游戏")
+        self.page_projects.assert_called_once()
+        site, scope_project, names = self.page_projects.call_args.args
+        assert site is self.reader.site
+        assert scope_project == "电子游戏"
+        assert tuple(names) == projects
+        observed = self.newsletter.call_args.kwargs["dyk_projects"]
+        assert observed.sort("project").to_dicts() == [
+            {"full_title": "Game", "project": project}
+            for project in sorted(projects)
+        ]
+        self.membership.reset_mock()
+        self.page_projects.reset_mock()
+        self.newsletter.reset_mock()
+        repeated = self._collect(dt.timedelta(minutes=30))
+        assert repeated["newsletter"] == first["newsletter"]
+        self.membership.assert_not_called()
+        self.page_projects.assert_not_called()
+        self.newsletter.assert_not_called()
+        self._collect(dt.timedelta(hours=1))
+        self.membership.assert_called_once_with(self.reader.site, "电子游戏")
+        self.page_projects.assert_not_called()
+        self.newsletter.assert_not_called()
+
+    def test_newsletter_project_failure_preserves_complete_observation(
+        self,
+    ) -> None:
+        """Keep saved facts when a topic project read fails."""
+        first = self._collect()
+        observation = self.cache / "data/observations/current.json"
+        original = observation.read_bytes()
+        self.page_projects.side_effect = RuntimeError(
+            "topic project unavailable",
+        )
+        with self.assertLogs("backend.website.collect", level="ERROR"):
+            failed = self._collect(dt.timedelta(days=1))
+        assert failed["newsletter"] == first["newsletter"]
+        assert failed["reports"]["newsletter"]["failed"] is True
+        assert (
+            failed["reports"]["newsletter"]["last_success_at"]
+            == first["reports"]["newsletter"]["last_success_at"]
+        )
+        assert observation.read_bytes() == original
+        assert self.newsletter.call_count == 1
+
+
+class TestDashboardRefreshIntervals(DashboardFixture):
+    """Refresh due reports while retaining independent observations."""
 
     def test_interval_changes_refresh_only_the_selected_report(self) -> None:
         """Change popularity without refreshing other reports."""

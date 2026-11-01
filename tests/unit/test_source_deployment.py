@@ -47,6 +47,65 @@ def _uploader() -> ModuleType:
     return module
 
 
+def _validator() -> ModuleType:
+    """Load the current bootstrap validator for older source fixtures.
+
+    Returns:
+        Current validator without running its command-line entry point.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "source_deployment_validator",
+        _ROOT / "scripts/toolforge/validate-source.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _generation_without_drain(
+    root: Path,
+    payload: dict[str, bytes],
+    version: str,
+) -> dict[str, object]:
+    """Write a complete hashed generation using the older helper layout.
+
+    Args:
+        root: Canonical isolated source directory.
+        payload: Current reviewed sources used to populate the fixture.
+        version: Version declared consistently by the fixture metadata.
+
+    Returns:
+        Deployment manifest with every retained file's actual digest.
+    """
+    files = {
+        name: content
+        for name, content in payload.items()
+        if name not in {"deployment.json", "scripts/toolforge/drain-hub.py"}
+    }
+    previous = tomllib.loads(files["pyproject.toml"].decode())["project"][
+        "version"
+    ]
+    for name in ("pyproject.toml", "uv.lock"):
+        files[name] = files[name].replace(previous.encode(), version.encode())
+    files["src/shared/version.json"] = json.dumps({
+        "schema": 1,
+        "version": version,
+    }).encode()
+    manifest = {
+        "schema": 1,
+        "version": version,
+        "files": {
+            name: hashlib.sha256(content).hexdigest()
+            for name, content in files.items()
+        },
+    }
+    _fixture(root, files)
+    (root / "deployment.json").write_text(json.dumps(manifest))
+    return manifest
+
+
 def _fixture(root: Path, payload: dict[str, bytes]) -> None:
     """Materialize reviewed source inputs in an isolated directory.
 
@@ -110,6 +169,54 @@ class TestSourcePayload(TestCase):
         """Read the actual payload without touching runtime data."""
         self.uploader = _uploader()
         self.payload = self.uploader.source_payload()
+
+    def test_validator_accepts_complete_historical_bootstrap_layout(
+        self,
+    ) -> None:
+        """Validate the original pre-drain helper set."""
+        validator = _validator()
+        for version in ("0.7.10", "0.7.10.post1", "0.7.10.post12"):
+            with (
+                self.subTest(version=version),
+                TemporaryDirectory() as directory,
+            ):
+                root = Path(directory).resolve()
+                manifest = _generation_without_drain(
+                    root,
+                    self.payload,
+                    version,
+                )
+                assert not (root / "scripts/toolforge/drain-hub.py").exists()
+                assert validator.verify(root) == manifest
+
+    def test_validator_requires_drain_in_current_source_payload(self) -> None:
+        """Reject omitted helpers despite a consistent hash manifest."""
+        current = json.loads(self.payload["deployment.json"])["version"]
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            _generation_without_drain(root, self.payload, current)
+            with self.assertRaisesRegex(ValueError, "reviewed payload"):
+                _validator().verify(root)
+
+    def test_legacy_bootstrap_exception_has_bounded_versions(self) -> None:
+        """Require the complete helper contract for other releases."""
+        validator = _validator()
+        for version in (
+            "0.7.10.post0",
+            "0.7.10.post13",
+            "0.7.10.post120",
+            "0.7.10.dev1",
+            "0.7.11",
+            "0.8.0",
+        ):
+            with (
+                self.subTest(version=version),
+                TemporaryDirectory() as directory,
+            ):
+                root = Path(directory).resolve()
+                _generation_without_drain(root, self.payload, version)
+                with self.assertRaisesRegex(ValueError, "reviewed payload"):
+                    validator.verify(root)
 
     def test_metadata_declares_locked_production_web_dependencies(
         self,

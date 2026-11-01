@@ -9,10 +9,10 @@ const source = fs.readFileSync(
     path.join(__dirname, "../../src/webservice/public_html/live.js"), "utf8",
 );
 const messages = {
-    "duration.seconds": "{seconds} s",
-    "duration.minutes": "{minutes} min {seconds} s",
-    "duration.hours": "{hours} h {minutes} min {seconds} s",
-    "duration.days": "{days} d {hours} h {minutes} min {seconds} s",
+    "duration.seconds": "{seconds} sec",
+    "duration.minutes": "{minutes} min {seconds} sec",
+    "duration.hours": "{hours} hr {minutes} min {seconds} sec",
+    "duration.days": "{days} d {hours} hr {minutes} min {seconds} sec",
     "time.minutes_ago": "({count} min ago)",
     "time.hours_ago": "({count} hr ago)",
     "time.days_ago": "({count} d ago)",
@@ -60,8 +60,9 @@ class Element {
     }
     get isConnected() { return Boolean(this.parent); }
     closest(selector) {
-        if (selector === "button[commandfor]" && this.nodeName === "BUTTON"
-            && this.hasAttribute("commandfor")) return this;
+        if (selector === 'a[aria-haspopup="dialog"],button[commandfor]'
+            && ((this.nodeName === "BUTTON" && this.hasAttribute("commandfor"))
+                || (this.nodeName === "A" && this.getAttribute("aria-haspopup") === "dialog"))) return this;
         if (selector === "dialog[open]" && this.nodeName === "DIALOG" && this.open) return this;
         return this.parent?.closest(selector) ?? null;
     }
@@ -122,8 +123,8 @@ class Element {
 
 function fixture(offset = 0, completed = false, logs = false, resources = false, footerOnly = false) {
     const subject = "Updating records for October 20, 2026";
-    const button = new Element("BUTTON", {
-        id: "status-button", commandfor: "popover", command: "show-modal",
+    const button = new Element("A", {
+        id: "status-button", href: "#popover", "aria-controls": "popover", "aria-haspopup": "dialog",
     }, "Details…");
     const statusLabel = new Element("SPAN", {
         id: "status-label",
@@ -139,7 +140,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
             "data-started-at": stamp(-10000),
             "data-duration-template": "({duration})",
         }),
-    }, completed ? "(14.30 s)" : "(10 s…)");
+    }, completed ? "(14.30 sec)" : "(10 sec…)");
     const popup = new Element("DIALOG", { id: "popover" });
     const relative = new Element("SMALL", {
         "data-clock": "relative", "data-observed-at": stamp(75000),
@@ -222,7 +223,7 @@ function browser(logs = false, resources = false, options = {}) {
         document: state.document,
         window: {
             addEventListener: (name, callback) => events.set(name, callback),
-            location: { protocol: options.protocol ?? "https:", host: "aranami.toolforge.org" },
+            location: { protocol: options.protocol ?? "https:", host: "aranami.toolforge.org", hash: options.hash ?? "" },
         },
         Node: { ELEMENT_NODE: 1, TEXT_NODE: 3 },
         Date, JSON, AbortController,
@@ -278,7 +279,7 @@ function browser(logs = false, resources = false, options = {}) {
     };
 }
 
-test("modal commands open dialogs and restore the exact invoker after dismissal", async () => {
+test("dialog links open dialogs and restore the exact invoker after dismissal", async () => {
     const page = browser();
     page.button.focus = () => { page.document.activeElement = page.button; };
     let prevented = 0;
@@ -295,6 +296,23 @@ test("modal commands open dialogs and restore the exact invoker after dismissal"
     page.fire("close", { target: page.popup });
     assert.equal(page.document.activeElement, page.button);
     assert.equal(prevented, 3);
+});
+
+test("direct report fragments open their dialog and ignore other anchors", () => {
+    const direct = browser(false, false, {hash: "#popover"});
+    assert.equal(direct.popup.open, true);
+    direct.fire("hashchange");
+    assert.equal(direct.popup.modalOpens, 1);
+    const other = browser(false, false, {hash: "#status-label"});
+    assert.equal(other.popup.open, false);
+});
+
+test("modified dialog links retain normal browser navigation", () => {
+    for (const keys of [{ctrlKey: true}, {metaKey: true}, {shiftKey: true}, {altKey: true}, {button: 1}]) {
+        const page = browser();
+        page.fire("click", { target: page.button, ...keys, preventDefault() { assert.fail("modified click intercepted"); } });
+        assert.equal(page.popup.open, false);
+    }
 });
 
 test("Escape/native close restores focus without a close-button click", () => {
@@ -346,13 +364,14 @@ test("Tab and Shift+Tab wrap within the currently open dialog", () => {
     assert.equal(prevented, 2); // Background controls are never trapped.
 });
 
-test("running clocks use whole seconds and pad seconds after minutes", () => {
+test("running clocks use whole seconds across day and hour boundaries", () => {
     for (const [seconds, expected] of [
-        [0.44, "(0 s…)"],
-        [32.89, "(32 s…)"],
-        [59.999, "(59 s…)"],
-        [60, "(1 min 00 s…)"],
-        [725.3, "(12 min 05 s…)"],
+        [0.44, "(0 sec…)"],
+        [32.89, "(32 sec…)"],
+        [59.999, "(59 sec…)"],
+        [60, "(1 min 0 sec…)"],
+        [725.3, "(12 min 5 sec…)"],
+        [90061, "(1 d 1 hr 1 min 1 sec…)"],
     ]) {
         const page = browser();
         page.clock.setAttribute("data-started-at", stamp(1000 - seconds * 1000));
@@ -427,15 +446,15 @@ test("local clocks advance by elapsed time while server requests stay periodic",
     assert.equal(page.notice.hidden, true);
     assert.equal(page.requests.length, 1);
     page.jump(1000);
-    assert.equal(page.clock.textContent, "(11 s…)");
-    assert.equal(page.uptime.textContent, "1 min 41 s");
+    assert.equal(page.clock.textContent, "(11 sec…)");
+    assert.equal(page.uptime.textContent, "1 min 41 sec");
     page.jump(3200); // A delayed callback must catch up without losing seconds.
-    assert.equal(page.clock.textContent, "(14 s…)");
+    assert.equal(page.clock.textContent, "(14 sec…)");
     assert.equal(page.requests.length, 1);
     page.jump(800);
     assert.equal(page.requests.length, 2);
     await page.respond();
-    assert.equal(page.clock.textContent, "(15 s…)");
+    assert.equal(page.clock.textContent, "(15 sec…)");
     page.jump(10000);
     assert.equal(page.requests.length, 3);
     assert.equal(page.relative.textContent, "(in 1 min)");
@@ -460,7 +479,7 @@ test("synchronization keeps existing modal dialogs and freezes completed timers"
     assert.equal(page.statusLabel.hasAttribute("data-progress-fallback"), false);
     assert.equal(page.clock.hasAttribute("data-clock"), false);
     const completed = page.clock.textContent;
-    assert.equal(completed, "(14.30 s)");
+    assert.equal(completed, "(14.30 sec)");
     page.jump(3000);
     assert.equal(page.clock.textContent, completed);
     assert.equal(page.statusLabel.textContent, "No update");
@@ -492,7 +511,7 @@ test("subject labels and phase counts synchronize without replacing buttons", as
     assert.equal(page.document.getElementById("status-button"), page.button);
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
-    assert.equal(page.button.getAttribute("commandfor"), "popover");
+    assert.equal(page.button.getAttribute("aria-controls"), "popover");
 });
 
 test("hidden tabs suspend work and resume immediately without overlapping fetches", async () => {
@@ -501,7 +520,7 @@ test("hidden tabs suspend work and resume immediately without overlapping fetche
     page.fire("visibilitychange");
     page.jump(6000);
     assert.equal(page.requests.length, 1);
-    assert.equal(page.clock.textContent, "(10 s…)");
+    assert.equal(page.clock.textContent, "(10 sec…)");
     page.document.hidden = false;
     page.fire("visibilitychange");
     assert.equal(page.requests.length, 1); // Wait for the aborted request's cleanup.
@@ -510,7 +529,7 @@ test("hidden tabs suspend work and resume immediately without overlapping fetche
     assert.equal(page.requests.length, 2);
     assert.equal(page.warnings.length, 0);
     assert.equal(page.notice.hidden, true);
-    assert.equal(page.clock.textContent, "(16 s…)");
+    assert.equal(page.clock.textContent, "(16 sec…)");
     page.fire("online");
     page.fire("pageshow");
     assert.equal(page.requests.length, 2);
@@ -525,7 +544,7 @@ test("focus synchronizes an idle visible page before delayed timers run", async 
     page.elapse(61000); // Browser sleep can delay timer delivery without hiding the tab.
     page.fire("focus");
     assert.equal(page.requests.length, 2);
-    assert.equal(page.clock.textContent, "(1 min 11 s…)");
+    assert.equal(page.clock.textContent, "(1 min 11 sec…)");
     page.fire("focus");
     assert.equal(page.requests.length, 2);
     await page.respond();
@@ -631,7 +650,7 @@ test("failed syncs retain observations, expire schedules, and recover", async ()
     assert.equal(page.button.hidden, false);
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
-    assert.equal(page.clock.textContent, "(2 min 11 s…)");
+    assert.equal(page.clock.textContent, "(2 min 11 sec…)");
     await page.respond();
     assert.equal(page.notice.hidden, true);
     assert.equal(page.schedule.hasAttribute("data-schedule-time"), true);
@@ -640,7 +659,7 @@ test("failed syncs retain observations, expire schedules, and recover", async ()
     assert.equal(page.document.getElementById("status-button"), page.button);
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
-    assert.equal(page.uptime.textContent, "3 min 41 s");
+    assert.equal(page.uptime.textContent, "3 min 41 sec");
 });
 
 test("malformed fragments do not replace received observations", async () => {
@@ -655,7 +674,7 @@ test("malformed fragments do not replace received observations", async () => {
     assert.equal(page.warnings[0][1].failure, "clock");
     assert.equal(page.root.dataset.serverTime, stamp(0));
     page.jump(1000);
-    assert.equal(page.clock.textContent, "(16 s…)");
+    assert.equal(page.clock.textContent, "(16 sec…)");
 });
 
 test("logs synchronize only compact server state and uptime", async () => {
@@ -667,7 +686,7 @@ test("logs synchronize only compact server state and uptime", async () => {
     assert.equal(page.document.getElementById("tool-status"), null);
     page.jump(5000);
     assert.equal(page.requests.length, 2);
-    assert.equal(page.uptime.textContent, "1 min 45 s");
+    assert.equal(page.uptime.textContent, "1 min 45 sec");
     await page.respond(fixture(5000)); // Missing the log page's expected fragment.
     assert.equal(page.notice.hidden, true);
     assert.equal(page.warnings[0][1].failure, "response");
@@ -700,10 +719,10 @@ test("About footer ticks, synchronizes, and expires without status panels", asyn
     for (const id of ["tool-status", "live-server-status", "server-runtime"]) {
         assert.equal(page.document.getElementById(id), null);
     }
-    assert.equal(page.uptime.textContent, "1 min 40 s");
+    assert.equal(page.uptime.textContent, "1 min 40 sec");
     await page.respond();
     page.jump(1000);
-    assert.equal(page.uptime.textContent, "1 min 41 s");
+    assert.equal(page.uptime.textContent, "1 min 41 sec");
     page.jump(4000);
     assert.equal(page.requests.length, 2);
     const next = fixture(5000, false, true, true);
@@ -711,7 +730,7 @@ test("About footer ticks, synchronizes, and expires without status panels", asyn
     await page.respond(next);
     assert.equal(page.document.getElementById("live-uptime"), page.uptime);
     assert.equal(page.uptime.dataset.serverTime, stamp(5000));
-    assert.equal(page.uptime.textContent, "3 min 25 s");
+    assert.equal(page.uptime.textContent, "3 min 25 sec");
     for (const id of ["tool-status", "live-server-status", "server-runtime"]) {
         assert.equal(page.document.getElementById(id), null);
     }
@@ -721,8 +740,8 @@ test("About footer ticks, synchronizes, and expires without status panels", asyn
 
 test("uptime clocks omit leading zero units across duration boundaries", async () => {
     for (const [seconds, expected] of [
-        [0, "0 s"], [59, "59 s"], [60, "1 min 0 s"],
-        [3600, "1 h 0 min 0 s"], [86400, "1 d 0 h 0 min 0 s"],
+        [0, "0 sec"], [59, "59 sec"], [60, "1 min 0 sec"],
+        [3600, "1 hr 0 min 0 sec"], [86400, "1 d 0 hr 0 min 0 sec"],
     ]) {
         const page = browser(false, false, { footerOnly: true });
         const next = fixture(0, false, false, false, true);
@@ -754,7 +773,7 @@ test("native WebSocket pushes preserve controls and use the page locale", async 
     assert.equal(page.document.activeElement, page.button);
     assert.equal(page.popup.open, true);
     assert.equal(page.statusLabel.textContent, "No update");
-    assert.equal(page.clock.textContent, "(14.30 s)");
+    assert.equal(page.clock.textContent, "(14.30 sec)");
     assert.equal(page.clock.hasAttribute("data-clock"), false);
     assert.equal(page.notice.hidden, true);
     assert.equal(page.requests.length, 1);
@@ -791,7 +810,7 @@ test("a delayed HTTP snapshot cannot overwrite a more recent pushed result", asy
     page.push(fixture(1000, true));
     await page.respond(fixture(0));
     assert.equal(page.statusLabel.textContent, "No update");
-    assert.equal(page.clock.textContent, "(14.30 s)");
+    assert.equal(page.clock.textContent, "(14.30 sec)");
     assert.equal(page.root.dataset.serverTime, stamp(1000));
     page.push(fixture(0)); // The same monotonic rule applies to pushed snapshots.
     assert.equal(page.statusLabel.textContent, "No update");

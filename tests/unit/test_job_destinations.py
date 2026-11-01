@@ -194,6 +194,7 @@ class TestJobDestinations(TestCase):
             context.today,
             project="电子游戏",
             report_title=target,
+            persist=True,
         )
         render.assert_called_once_with(original, prepared)
         assert context.publish.call_args.args[0].title == target
@@ -271,6 +272,7 @@ class TestJobDestinations(TestCase):
                 "job_run",
                 return_value=nullcontext(context),
             ),
+            patch.object(enwp_key_articles, "get_snapshot"),
             patch.object(
                 enwp_key_articles,
                 "read_pages",

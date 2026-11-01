@@ -329,20 +329,30 @@
     "zh-hans": "内容评审",
     "zh-hant": "內容評審"
   },
+  "reviews.link": {
+    "en": "Review",
+    "zh-hans": "评审区",
+    "zh-hant": "評審區"
+  },
   "reviews.started_days": {
     "en": "Started {count} days ago",
     "zh-hans": "{count}日前发起",
     "zh-hant": "{count}日前發起"
   },
   "reviews.replied_days": {
-    "en": "Comments within {count} days",
-    "zh-hans": "{count}日内有留言",
-    "zh-hant": "{count}日內有留言"
+    "en": "Last comment {count} days ago",
+    "zh-hans": "{count}日前最后留言",
+    "zh-hant": "{count}日前最後留言"
+  },
+  "reviews.replied_months": {
+    "en": "Last comment {count} months ago",
+    "zh-hans": "{count}月前最后留言",
+    "zh-hant": "{count}月前最後留言"
   },
   "reviews.replied_hours": {
-    "en": "Comments within {count} hours",
-    "zh-hans": "{count}小时内有留言",
-    "zh-hant": "{count}小時內有留言"
+    "en": "Last comment {count} hours ago",
+    "zh-hans": "{count}小时前最后留言",
+    "zh-hant": "{count}小時前最後留言"
   },
   "reviews.participants": {
     "en": "{count} participants",
@@ -430,9 +440,9 @@
     "zh-hant": "{routine}：頁面更新"
   },
   "ops.details_link": {
-    "en": "Details…",
-    "zh-hans": "详情…",
-    "zh-hant": "詳情…"
+    "en": "Details",
+    "zh-hans": "详细",
+    "zh-hant": "詳細"
   },
   "ops.close": {
     "en": "Close",
@@ -450,9 +460,9 @@
     "zh-hant": "狀態"
   },
   "pageviews.site_rank": {
-    "en": "Site-wide rank: {rank}",
-    "zh-hans": "全站第{rank}名",
-    "zh-hant": "全站第{rank}名"
+    "en": "{date} · Site-wide rank: {rank}",
+    "zh-hans": "{date}全站第{rank}名",
+    "zh-hant": "{date}全站第{rank}名"
   },
   "pageviews.unavailable": {
     "en": "Daily pageview data is temporarily unavailable.",
@@ -464,20 +474,10 @@
     "zh-hans": "佳作展示",
     "zh-hant": "佳作展示"
   },
-  "homepage.recognized_description": {
-    "en": "Featured and good content recently shown on the main page",
-    "zh-hans": "近期登上首页展示的典范、优良内容",
-    "zh-hant": "近期登上首頁展示的典範、優良內容"
-  },
   "homepage.dyk": {
     "en": "New article highlights",
-    "zh-hans": "新条目推荐",
-    "zh-hant": "新條目推薦"
-  },
-  "homepage.dyk_description": {
-    "en": "“Did you know?” (DYK) on the Chinese main page",
-    "zh-hans": "中文首页的“你知道吗？”（DYK）",
-    "zh-hant": "中文首頁的「你知道嗎？」（DYK）"
+    "zh-hans": "新篇推荐",
+    "zh-hant": "新篇推薦"
   },
   "homepage.news": {
     "en": "In the news",
@@ -505,7 +505,7 @@
     "zh-hant": "條目維護"
   },
   "backlog.count": {
-    "en": "Articles: {count}",
+    "en": "{count} articles",
     "zh-hans": "{count}篇",
     "zh-hant": "{count}篇"
   },
@@ -530,9 +530,9 @@
     "zh-hant": "重要度"
   },
   "backlog.column.issues": {
-    "en": "Maintenance issues",
-    "zh-hans": "维护问题",
-    "zh-hant": "維護問題"
+    "en": "Other tags",
+    "zh-hans": "其他标记",
+    "zh-hant": "其他標記"
   },
   "backlog.column.oldest": {
     "en": "Earliest tagged month",
@@ -710,32 +710,32 @@
     "zh-hant": "下次排程："
   },
   "time.minutes_ago": {
-    "en": "({count} min ago)",
+    "en": "({count} minutes ago)",
     "zh-hans": "（{count}分钟前）",
     "zh-hant": "（{count}分鐘前）"
   },
   "time.hours_ago": {
-    "en": "({count} h ago)",
+    "en": "({count} hours ago)",
     "zh-hans": "（{count}小时前）",
     "zh-hant": "（{count}小時前）"
   },
   "time.days_ago": {
-    "en": "({count} d ago)",
+    "en": "({count} days ago)",
     "zh-hans": "（{count}日前）",
     "zh-hant": "（{count}日前）"
   },
   "time.minutes_ahead": {
-    "en": "(in {count} min)",
+    "en": "({count} minutes from now)",
     "zh-hans": "（{count}分钟后）",
     "zh-hant": "（{count}分鐘後）"
   },
   "time.hours_ahead": {
-    "en": "(in {count} h)",
+    "en": "({count} hours from now)",
     "zh-hans": "（{count}小时后）",
     "zh-hant": "（{count}小時後）"
   },
   "time.days_ahead": {
-    "en": "(in {count} d)",
+    "en": "({count} days from now)",
     "zh-hans": "（{count}日后）",
     "zh-hant": "（{count}日後）"
   },
@@ -745,7 +745,7 @@
     "zh-hant": "（剛剛）"
   },
   "time.soon": {
-    "en": "(within 1 min)",
+    "en": "(within 1 minute)",
     "zh-hans": "（1分钟内）",
     "zh-hant": "（1分鐘內）"
   },
@@ -840,9 +840,9 @@
     "zh-hant": "英文維基百科條目比較"
   },
   "routine.pexbot": {
-    "en": "Database reports",
-    "zh-hans": "数据库报告",
-    "zh-hant": "資料庫報告"
+    "en": "PexBot database report launcher",
+    "zh-hans": "PexBot数据库报告更新启动器",
+    "zh-hant": "PexBot資料庫報告更新啟動器"
   },
   "state.Updated": {
     "en": "Updated",
@@ -1010,24 +1010,24 @@
     "zh-hant": "Aranami ({version}) 執行時間：未取得"
   },
   "duration.seconds": {
-    "en": "{seconds} s",
+    "en": "{seconds} sec",
     "zh-hans": "{seconds}秒",
     "zh-hant": "{seconds}秒"
   },
   "duration.minutes": {
-    "en": "{minutes} min {seconds} s",
-    "zh-hans": "{minutes}分钟{seconds}秒",
-    "zh-hant": "{minutes}分鐘{seconds}秒"
+    "en": "{minutes} min {seconds} sec",
+    "zh-hans": "{minutes}分{seconds}秒",
+    "zh-hant": "{minutes}分{seconds}秒"
   },
   "duration.hours": {
-    "en": "{hours} h {minutes} min {seconds} s",
-    "zh-hans": "{hours}小时{minutes}分钟{seconds}秒",
-    "zh-hant": "{hours}小時{minutes}分鐘{seconds}秒"
+    "en": "{hours} hr {minutes} min {seconds} sec",
+    "zh-hans": "{hours}小时{minutes}分{seconds}秒",
+    "zh-hant": "{hours}小時{minutes}分{seconds}秒"
   },
   "duration.days": {
-    "en": "{days} d {hours} h {minutes} min {seconds} s",
-    "zh-hans": "{days}日{hours}小时{minutes}分钟{seconds}秒",
-    "zh-hant": "{days}日{hours}小時{minutes}分鐘{seconds}秒"
+    "en": "{days} d {hours} hr {minutes} min {seconds} sec",
+    "zh-hans": "{days}日{hours}小时{minutes}分{seconds}秒",
+    "zh-hant": "{days}日{hours}小時{minutes}分{seconds}秒"
   },
   "logs.service.hub": {
     "en": "the data hub",
@@ -1150,9 +1150,9 @@
     "zh-hant": "主要導覽"
   },
   "nav.language": {
-    "en": "Language",
-    "zh-hans": "语言",
-    "zh-hant": "語言"
+    "en": "English",
+    "zh-hans": "简体中文",
+    "zh-hant": "繁体中文"
   },
   "assessment.dimension.class": {
     "en": "Quality",
@@ -1185,14 +1185,14 @@
     "zh-hant": "全部"
   },
   "backlog.apply": {
-    "en": "Apply filters",
-    "zh-hans": "应用筛选条件",
-    "zh-hant": "套用篩選條件"
+    "en": "Filter",
+    "zh-hans": "筛选",
+    "zh-hant": "篩選"
   },
   "backlog.clear": {
-    "en": "Clear filters",
-    "zh-hans": "清除筛选条件",
-    "zh-hant": "清除篩選條件"
+    "en": "Clear settings",
+    "zh-hans": "清除设置",
+    "zh-hant": "清除設定"
   },
   "backlog.range": {
     "en": "Articles {start}–{end} of {count}",
@@ -1310,134 +1310,134 @@
     "zh-hant": "報告執行"
   },
   "assessment.description.class.FA": {
-    "en": "Featured article",
-    "zh-hans": "典范条目",
-    "zh-hant": "典範條目"
+    "en": "FA-Class",
+    "zh-hans": "典范",
+    "zh-hant": "典範"
   },
   "assessment.description.class.FL": {
-    "en": "Featured list",
+    "en": "FL-Class",
     "zh-hans": "特色列表",
     "zh-hant": "特色列表"
   },
   "assessment.description.class.GA": {
-    "en": "Good article",
-    "zh-hans": "优良条目",
-    "zh-hant": "優良條目"
+    "en": "GA-Class",
+    "zh-hans": "优良",
+    "zh-hant": "優良"
   },
   "assessment.description.class.A": {
-    "en": "A-class article",
-    "zh-hans": "甲级条目",
-    "zh-hant": "甲級條目"
+    "en": "A-Class",
+    "zh-hans": "甲级",
+    "zh-hant": "甲級"
   },
   "assessment.description.class.AL": {
-    "en": "A-class list",
+    "en": "AL-Class",
     "zh-hans": "甲级列表",
     "zh-hant": "甲級列表"
   },
   "assessment.description.class.Bplus": {
-    "en": "B-plus-class article",
-    "zh-hans": "乙上级条目",
-    "zh-hant": "乙上級條目"
+    "en": "Bplus-Class",
+    "zh-hans": "乙上级",
+    "zh-hant": "乙上級"
   },
   "assessment.description.class.B": {
-    "en": "B-class article",
-    "zh-hans": "乙级条目",
-    "zh-hant": "乙級條目"
+    "en": "B-Class",
+    "zh-hans": "乙级",
+    "zh-hant": "乙級"
   },
   "assessment.description.class.BL": {
-    "en": "B-class list",
+    "en": "BL-Class",
     "zh-hans": "乙级列表",
     "zh-hant": "乙級列表"
   },
   "assessment.description.class.C": {
-    "en": "C-class article",
-    "zh-hans": "丙级条目",
-    "zh-hant": "丙級條目"
+    "en": "C-Class",
+    "zh-hans": "丙级",
+    "zh-hant": "丙級"
   },
   "assessment.description.class.CL": {
-    "en": "C-class list",
+    "en": "CL-Class",
     "zh-hans": "丙级列表",
     "zh-hant": "丙級列表"
   },
   "assessment.description.class.D": {
-    "en": "D-class article",
-    "zh-hans": "丁级条目",
-    "zh-hant": "丁級條目"
+    "en": "D-Class",
+    "zh-hans": "丁级",
+    "zh-hant": "丁級"
   },
   "assessment.description.class.Start": {
-    "en": "Start-class article",
-    "zh-hans": "初级条目",
-    "zh-hant": "初級條目"
+    "en": "Start-Class",
+    "zh-hans": "初级",
+    "zh-hant": "初級"
   },
   "assessment.description.class.Stub": {
-    "en": "Stub article",
-    "zh-hans": "小作品条目",
-    "zh-hant": "小作品條目"
+    "en": "Stub-Class",
+    "zh-hans": "小作品",
+    "zh-hant": "小作品"
   },
   "assessment.description.class.SL": {
-    "en": "Stub list",
+    "en": "SL-Class",
     "zh-hans": "小列表",
     "zh-hant": "小列表"
   },
   "assessment.description.class.List": {
-    "en": "List",
+    "en": "List-Class",
     "zh-hans": "列表",
     "zh-hant": "列表"
   },
   "assessment.description.class.Substub": {
-    "en": "Substub article",
-    "zh-hans": "小小作品条目",
-    "zh-hant": "小小作品條目"
+    "en": "Substub-Class",
+    "zh-hans": "小小作品",
+    "zh-hant": "小小作品"
   },
   "assessment.description.class.Disambig": {
-    "en": "Disambiguation page",
+    "en": "Disambig-Class",
     "zh-hans": "消歧义页",
     "zh-hant": "消歧義頁"
   },
   "assessment.description.class.Unassessed": {
-    "en": "Quality has not been assessed.",
-    "zh-hans": "尚未评定质量。",
-    "zh-hant": "尚未評定品質。"
+    "en": "Unassessed-Class",
+    "zh-hans": "未评级",
+    "zh-hant": "未評級"
   },
   "assessment.description.class.Unknown": {
-    "en": "Quality is unavailable or unrecognized.",
+    "en": "Unknown-Class",
     "zh-hans": "质量评级未获取或无法识别。",
     "zh-hant": "品質評級未取得或無法辨識。"
   },
   "assessment.description.importance.Top": {
-    "en": "Project importance: Top",
-    "zh-hans": "专题重要度：极高",
-    "zh-hant": "專題重要度：極高"
+    "en": "Top-importance",
+    "zh-hans": "极高重要度",
+    "zh-hant": "極高重要度"
   },
   "assessment.description.importance.High": {
-    "en": "Project importance: High",
-    "zh-hans": "专题重要度：高",
-    "zh-hant": "專題重要度：高"
+    "en": "High-importance",
+    "zh-hans": "高重要度",
+    "zh-hant": "高重要度"
   },
   "assessment.description.importance.Mid": {
-    "en": "Project importance: Mid",
-    "zh-hans": "专题重要度：中",
-    "zh-hant": "專題重要度：中"
+    "en": "Mid-importance",
+    "zh-hans": "中重要度",
+    "zh-hant": "中重要度"
   },
   "assessment.description.importance.Low": {
-    "en": "Project importance: Low",
-    "zh-hans": "专题重要度：低",
-    "zh-hant": "專題重要度：低"
+    "en": "Low-importance",
+    "zh-hans": "低重要度",
+    "zh-hant": "低重要度"
   },
   "assessment.description.importance.Bottom": {
-    "en": "Project importance: Bottom",
-    "zh-hans": "专题重要度：极低",
-    "zh-hant": "專題重要度：極低"
+    "en": "Bottom-importance",
+    "zh-hans": "极低重要度",
+    "zh-hant": "極低重要度"
   },
   "assessment.description.importance.NA": {
-    "en": "Importance does not apply.",
-    "zh-hans": "重要度评级不适用。",
-    "zh-hant": "重要度評級不適用。"
+    "en": "NA-importance",
+    "zh-hans": "不适用重要度",
+    "zh-hant": "不適用重要度"
   },
   "assessment.description.importance.Unknown": {
-    "en": "Importance is unavailable or unrecognized.",
-    "zh-hans": "重要度未获取或无法识别。",
-    "zh-hant": "重要度未取得或無法辨識。"
+    "en": "Unknown-importance",
+    "zh-hans": "未知重要度",
+    "zh-hant": "未知重要度"
   },
   "logs.pagination_label": {
     "en": "Log event pages",
@@ -1505,14 +1505,24 @@
     "zh-hant": "電子遊戲專題簡訊草稿"
   },
   "newsletter.intro": {
-    "en": "The next issue’s statistics are fetched automatically. Review the main page, quality-content changes, and announcements, then copy the collected wikitext to Wikipedia.",
-    "zh-hans": "自动获取下一期简讯的统计数据。检查主页、特优内容变动和宣告后，将已生成的维基代码复制到维基百科。",
-    "zh-hant": "自動取得下一期簡訊的統計資料。檢查主頁、特優內容變動和宣告後，將已產生的維基代碼複製到維基百科。"
+    "en": "Review the collected statistics and complete the feature and interview templates before copying the drafts to Wikipedia. January includes a year-in-review feature; unavailable data stays blank.",
+    "zh-hans": "检查已获取的统计数据并填写专题和访谈模板后，将草稿复制到维基百科。1月号提供年终回顾专题，未取得的数据留空。",
+    "zh-hant": "檢查已取得的統計資料並填寫專題和訪談模板後，將草稿複製到維基百科。1月號提供年終回顧專題，未取得的資料留空。"
   },
   "newsletter.issue": {
-    "en": "Issue month",
-    "zh-hans": "期刊月份",
-    "zh-hant": "期刊月份"
+    "en": "Issue",
+    "zh-hans": "刊号",
+    "zh-hant": "刊號"
+  },
+  "newsletter.issue_view": {
+    "en": "View issue",
+    "zh-hans": "查看本期",
+    "zh-hant": "查看本期"
+  },
+  "newsletter.load_failed": {
+    "en": "Could not load this issue. Try again.",
+    "zh-hans": "无法加载本期草稿，请重试。",
+    "zh-hant": "無法載入本期草稿，請重試。"
   },
   "newsletter.history.date": {
     "en": "Data date",
@@ -1520,9 +1530,9 @@
     "zh-hant": "資料日期"
   },
   "newsletter.history.view": {
-    "en": "View saved draft",
-    "zh-hans": "查看已保存草稿",
-    "zh-hant": "查看已儲存草稿"
+    "en": "View draft for this date",
+    "zh-hans": "查看当日草稿",
+    "zh-hant": "查看當日草稿"
   },
   "newsletter.history.through": {
     "en": "Data through",
@@ -1570,9 +1580,24 @@
     "zh-hant": "維基代碼"
   },
   "newsletter.copy": {
-    "en": "Copy wikitext",
-    "zh-hans": "复制维基代码",
-    "zh-hant": "複製維基代碼"
+    "en": "Copy code",
+    "zh-hans": "复制代码",
+    "zh-hant": "複製代碼"
+  },
+  "newsletter.copy_and_edit": {
+    "en": "Copy and open newsletter page",
+    "zh-hans": "复制并前往简讯页",
+    "zh-hant": "複製並前往簡訊頁"
+  },
+  "newsletter.edit_summary": {
+    "en": "Updated through {date}",
+    "zh-hans": "更新至{date}",
+    "zh-hant": "更新至{date}"
+  },
+  "newsletter.edit_summary_unknown": {
+    "en": "Updated newsletter draft",
+    "zh-hans": "更新简讯草稿",
+    "zh-hant": "更新簡訊草稿"
   },
   "newsletter.copied": {
     "en": "Wikitext copied.",
@@ -1599,15 +1624,25 @@
     "zh-hans": "宣告",
     "zh-hant": "宣告"
   },
+  "newsletter.page.feature": {
+    "en": "Feature",
+    "zh-hans": "专题",
+    "zh-hant": "專題"
+  },
+  "newsletter.page.interview": {
+    "en": "Interview",
+    "zh-hans": "访谈",
+    "zh-hant": "訪談"
+  },
   "newsletter.invalid_issue": {
-    "en": "Choose January, April, July, or October from 2020 through 2099.",
-    "zh-hans": "请选择2020年至2099年的1月、4月、7月或10月。",
-    "zh-hant": "請選擇2020年至2099年的1月、4月、7月或10月。"
+    "en": "Choose an available issue.",
+    "zh-hans": "请选择可用的刊号。",
+    "zh-hant": "請選擇可用的刊號。"
   },
   "newsletter.choice.current": {
     "en": "Current draft",
-    "zh-hans": "当前期刊",
-    "zh-hant": "目前期刊"
+    "zh-hans": "当前草稿",
+    "zh-hant": "當前草稿"
   },
   "newsletter.choice.previous": {
     "en": "Previous issue",
@@ -1631,8 +1666,8 @@
   },
   "about.credits": {
     "en": "Credits",
-    "zh-hans": "鸣谢与许可",
-    "zh-hant": "致謝與授權"
+    "zh-hans": "许可与鸣谢",
+    "zh-hant": "許可與鳴謝"
   },
   "about.codex": {
     "en": "Interface components:",
@@ -1666,13 +1701,13 @@
   },
   "backlog.compare.range": {
     "en": "Between (inclusive)",
-    "zh-hans": "范围（含两端）",
-    "zh-hant": "範圍（含兩端）"
+    "zh-hans": "范围（含起止）",
+    "zh-hant": "範圍（含起止）"
   },
   "backlog.compare.endpoint": {
-    "en": "Other end of range",
-    "zh-hans": "范围另一端",
-    "zh-hant": "範圍另一端"
+    "en": "to",
+    "zh-hans": "到",
+    "zh-hant": "到"
   },
   "newsletter.history.calendar": {
     "en": "Saved data dates",
@@ -1691,8 +1726,8 @@
   },
   "reviews.started_months": {
     "en": "Started {count} months ago",
-    "zh-hans": "{count}个月前发起",
-    "zh-hant": "{count}個月前發起"
+    "zh-hans": "{count}月前发起",
+    "zh-hant": "{count}月前發起"
   },
   "reviews.started_hours": {
     "en": "Started {count} hours ago",
@@ -1700,14 +1735,19 @@
     "zh-hant": "{count}小時前發起"
   },
   "reports.intro": {
-    "en": "These jobs update reports on Chinese Wikipedia.",
-    "zh-hans": "这些任务更新中文维基百科站内的报告。",
-    "zh-hant": "這些任務更新中文維基百科站內的報告。"
+    "en": "Check on-wiki report update status.",
+    "zh-hans": "检查站内报告页更新状态",
+    "zh-hant": "檢查站內報告頁更新狀態"
   },
   "reports.history_note": {
-    "en": "One row per job invocation. Select a task to read its recorded stages.",
-    "zh-hans": "每行记录一次任务执行。点击任务可查看各阶段记录。",
-    "zh-hant": "每行記錄一次任務執行。點選任務可查看各階段紀錄。"
+    "en": "The latest 100 job invocations. Select a task to read its recorded stages.",
+    "zh-hans": "最近100次任务执行。点击任务可查看各阶段记录。",
+    "zh-hant": "最近100次任務執行。點選任務可查看各階段紀錄。"
+  },
+  "reports.empty": {
+    "en": "No saved job invocations are available yet.",
+    "zh-hans": "尚无任务执行记录。",
+    "zh-hant": "尚無任務執行紀錄。"
   },
   "reports.stage.started": {
     "en": "Started",
@@ -1769,9 +1809,259 @@
     "zh-hans": "部分中间阶段因记录数量限制而省略。",
     "zh-hant": "部分中間階段因紀錄數量限制而省略。"
   },
-  "reports.count": {
-    "en": "Matching job invocations for {date}: {count}.",
-    "zh-hans": "{date}匹配的任务执行记录：{count}条。",
-    "zh-hant": "{date}符合篩選的任務執行紀錄：{count}筆。"
+  "newsletter.feature_history.heading": {
+    "en": "Annual feature history",
+    "zh-hans": "年度专题历史草稿",
+    "zh-hant": "年度專題歷史草稿"
+  },
+  "newsletter.feature_history.description": {
+    "en": "The January feature has its own daily history from January 1 through December 31 of the reviewed year. Other pages use quarterly dates. Only actually captured drafts are available.",
+    "zh-hans": "一月专题单独保存回顾年份 1 月 1 日至 12 月 31 日的每日草稿，其他页面仍使用季度日期。这里只提供实际保存过的草稿。",
+    "zh-hant": "一月專題單獨儲存回顧年份 1 月 1 日至 12 月 31 日的每日草稿，其他頁面仍使用季度日期。這裡只提供實際儲存過的草稿。"
+  },
+  "newsletter.feature_history.date": {
+    "en": "Annual feature data date",
+    "zh-hans": "年度专题数据日期",
+    "zh-hant": "年度專題資料日期"
+  },
+  "newsletter.choice.annual": {
+    "en": "Annual review",
+    "zh-hans": "年度回顾",
+    "zh-hant": "年度回顧"
+  },
+  "reviews.started_months_one": {
+    "en": "Started {count} month ago",
+    "zh-hans": "{count}月前发起",
+    "zh-hant": "{count}月前發起"
+  },
+  "reviews.started_days_one": {
+    "en": "Started {count} day ago",
+    "zh-hans": "{count}日前发起",
+    "zh-hant": "{count}日前發起"
+  },
+  "reviews.started_hours_one": {
+    "en": "Started {count} hour ago",
+    "zh-hans": "{count}小时前发起",
+    "zh-hant": "{count}小時前發起"
+  },
+  "reviews.started_minutes": {
+    "en": "Started {count} minutes ago",
+    "zh-hans": "{count}分钟前发起",
+    "zh-hant": "{count}分鐘前發起"
+  },
+  "reviews.started_minutes_one": {
+    "en": "Started {count} minute ago",
+    "zh-hans": "{count}分钟前发起",
+    "zh-hant": "{count}分鐘前發起"
+  },
+  "reviews.replied_months_one": {
+    "en": "Last comment {count} month ago",
+    "zh-hans": "{count}月前最后留言",
+    "zh-hant": "{count}月前最後留言"
+  },
+  "reviews.replied_days_one": {
+    "en": "Last comment {count} day ago",
+    "zh-hans": "{count}日前最后留言",
+    "zh-hant": "{count}日前最後留言"
+  },
+  "reviews.replied_hours_one": {
+    "en": "Last comment {count} hour ago",
+    "zh-hans": "{count}小时前最后留言",
+    "zh-hant": "{count}小時前最後留言"
+  },
+  "reviews.replied_minutes": {
+    "en": "Last comment {count} minutes ago",
+    "zh-hans": "{count}分钟前最后留言",
+    "zh-hant": "{count}分鐘前最後留言"
+  },
+  "reviews.replied_minutes_one": {
+    "en": "Last comment {count} minute ago",
+    "zh-hans": "{count}分钟前最后留言",
+    "zh-hant": "{count}分鐘前最後留言"
+  },
+  "time.months_ago": {
+    "en": "({count} months ago)",
+    "zh-hans": "（{count}月前）",
+    "zh-hant": "（{count}月前）"
+  },
+  "time.months_ahead": {
+    "en": "({count} months from now)",
+    "zh-hans": "（{count}月后）",
+    "zh-hant": "（{count}月後）"
+  },
+  "server.storage": {
+    "en": "Storage used / total",
+    "zh-hans": "存储已用／总量",
+    "zh-hant": "儲存已用／總量"
+  },
+  "time.minutes_ago_one": {
+    "en": "({count} minute ago)",
+    "zh-hans": "（{count}分钟前）",
+    "zh-hant": "（{count}分鐘前）"
+  },
+  "time.minutes_ahead_one": {
+    "en": "({count} minute from now)",
+    "zh-hans": "（{count}分钟后）",
+    "zh-hant": "（{count}分鐘後）"
+  },
+  "time.hours_ago_one": {
+    "en": "({count} hour ago)",
+    "zh-hans": "（{count}小时前）",
+    "zh-hant": "（{count}小時前）"
+  },
+  "time.hours_ahead_one": {
+    "en": "({count} hour from now)",
+    "zh-hans": "（{count}小时后）",
+    "zh-hant": "（{count}小時後）"
+  },
+  "time.days_ago_one": {
+    "en": "({count} day ago)",
+    "zh-hans": "（{count}日前）",
+    "zh-hant": "（{count}日前）"
+  },
+  "time.days_ahead_one": {
+    "en": "({count} day from now)",
+    "zh-hans": "（{count}日后）",
+    "zh-hant": "（{count}日後）"
+  },
+  "time.months_ago_one": {
+    "en": "({count} month ago)",
+    "zh-hans": "（{count}月前）",
+    "zh-hant": "（{count}月前）"
+  },
+  "time.months_ahead_one": {
+    "en": "({count} month from now)",
+    "zh-hans": "（{count}月后）",
+    "zh-hant": "（{count}月後）"
+  },
+  "backlog.count_one": {
+    "en": "1 article",
+    "zh-hans": "1篇",
+    "zh-hant": "1篇"
+  },
+  "backlog.from": {
+    "en": "From",
+    "zh-hans": "从",
+    "zh-hant": "從"
+  },
+  "backlog.unlimited": {
+    "en": "Any",
+    "zh-hans": "不限",
+    "zh-hant": "不限"
+  },
+  "backlog.inclusive": {
+    "en": "(inclusive)",
+    "zh-hans": "（含两端）",
+    "zh-hant": "（含兩端）"
+  },
+  "backlog.genre": {
+    "en": "Article type",
+    "zh-hans": "条目体裁",
+    "zh-hant": "條目體裁"
+  },
+  "backlog.genres.all": {
+    "en": "All",
+    "zh-hans": "全部",
+    "zh-hant": "全部"
+  },
+  "backlog.genres.article": {
+    "en": "Articles only",
+    "zh-hans": "仅条目",
+    "zh-hant": "僅條目"
+  },
+  "backlog.genres.list": {
+    "en": "Lists only",
+    "zh-hans": "仅列表",
+    "zh-hant": "僅列表"
+  },
+  "backlog.sort.size": {
+    "en": "Size",
+    "zh-hans": "大小",
+    "zh-hant": "大小"
+  },
+  "backlog.rows": {
+    "en": "Rows per page",
+    "zh-hans": "每页条目数",
+    "zh-hant": "每頁條目數"
+  },
+  "backlog.grade.class.FA": {
+    "en": "Featured",
+    "zh-hans": "典范",
+    "zh-hant": "典範"
+  },
+  "backlog.grade.class.A": {
+    "en": "A",
+    "zh-hans": "甲",
+    "zh-hant": "甲"
+  },
+  "backlog.grade.class.GA": {
+    "en": "Good",
+    "zh-hans": "优良",
+    "zh-hant": "優良"
+  },
+  "backlog.grade.class.Bplus": {
+    "en": "B+",
+    "zh-hans": "乙上",
+    "zh-hant": "乙上"
+  },
+  "backlog.grade.class.B": {
+    "en": "B",
+    "zh-hans": "乙",
+    "zh-hant": "乙"
+  },
+  "backlog.grade.class.C": {
+    "en": "C",
+    "zh-hans": "丙",
+    "zh-hant": "丙"
+  },
+  "backlog.grade.class.Start": {
+    "en": "Start",
+    "zh-hans": "初",
+    "zh-hant": "初"
+  },
+  "backlog.grade.class.Stub": {
+    "en": "Stub",
+    "zh-hans": "小",
+    "zh-hant": "小"
+  },
+  "backlog.grade.class.Unassessed": {
+    "en": "Unassessed",
+    "zh-hans": "未评",
+    "zh-hant": "未評"
+  },
+  "backlog.grade.importance.Top": {
+    "en": "Top",
+    "zh-hans": "极高",
+    "zh-hant": "極高"
+  },
+  "backlog.grade.importance.High": {
+    "en": "High",
+    "zh-hans": "高",
+    "zh-hant": "高"
+  },
+  "backlog.grade.importance.Mid": {
+    "en": "Mid",
+    "zh-hans": "中",
+    "zh-hant": "中"
+  },
+  "backlog.grade.importance.Low": {
+    "en": "Low",
+    "zh-hans": "低",
+    "zh-hant": "低"
+  },
+  "backlog.grade.importance.Unknown": {
+    "en": "Unknown",
+    "zh-hans": "未知",
+    "zh-hant": "未知"
+  },
+  "assessment.tooltip.class": {
+    "en": "WikiProject quality assessment: {grade}",
+    "zh-hans": "专题品质评级：{grade}",
+    "zh-hant": "專題品質評級：{grade}"
+  },
+  "assessment.tooltip.importance": {
+    "en": "WikiProject importance assessment: {grade}",
+    "zh-hans": "专题重要度评级：{grade}",
+    "zh-hant": "專題重要度評級：{grade}"
   }
 }

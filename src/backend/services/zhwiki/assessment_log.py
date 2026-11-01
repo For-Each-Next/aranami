@@ -11,15 +11,19 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 import mwparserfromhell
 import polars as pl
 from mwparserfromhell.nodes import Heading
 
-from backend.services.project_assessments import get_snapshot
+from backend.services.project_assessments import (
+    get_snapshot,
+    read_previous_snapshot,
+)
 from shared.reports import ReportResult, ReportStore, report_key
+from shared.sources.quarry.projects import page_metadata
 from shared.support.dates import parse_complete_date
 from shared.support.regions import (
     integer_option,
@@ -39,6 +43,9 @@ _MEMBERS = {
     "title": pl.String,
     "class": pl.String,
     "importance": pl.String,
+}
+_ASSESSMENTS = {
+    key: dtype for key, dtype in _MEMBERS.items() if key != "title"
 }
 _CHANGES = {
     "page_id": pl.Int64,
@@ -132,15 +139,19 @@ def _validated_members(frame: pl.DataFrame) -> pl.DataFrame:
     """
     if (
         frame.schema != pl.Schema(_MEMBERS)
-        or not frame.filter(
-            pl.col("page_id").is_null()
-            | (pl.col("page_id") <= 0)
-            | pl.col("page_id").is_duplicated()
-            | pl.col("title").is_null()
+        and frame.schema != pl.Schema(_ASSESSMENTS)
+    ) or not frame.filter(
+        pl.col("page_id").is_null()
+        | (pl.col("page_id") <= 0)
+        | pl.col("page_id").is_duplicated()
+        | (
+            pl.col("title").is_null()
             | (pl.col("title").str.strip_chars().str.len_chars() == 0)
-            | pl.col("title").is_duplicated(),
-        ).is_empty()
-    ):
+            | pl.col("title").is_duplicated()
+            if "title" in frame.columns
+            else pl.lit(value=False)
+        ),
+    ).is_empty():
         message = "Invalid assessment-log membership snapshot."
         raise ValueError(message)
     return frame.sort("page_id")
@@ -192,6 +203,152 @@ def compare_members(
     ).sort("kind", "title", "old_title", "page_id", nulls_last=True)
 
 
+def compare_assessments(
+    previous: pl.DataFrame,
+    current: pl.DataFrame,
+) -> pl.DataFrame:
+    """Compare assessment observations before resolving page names.
+
+    Args:
+        previous: Complete former page IDs, classes, and importances.
+        current: Complete current observations with the same columns.
+
+    Returns:
+        Added, removed, and reassessed IDs with both observed grades.
+        Names and revision references are resolved only for these IDs.
+    """
+    old = (
+        _validated_members(previous)
+        .select(list(_ASSESSMENTS))
+        .rename({
+            "class": "old_class",
+            "importance": "old_importance",
+        })
+        .with_columns(pl.lit(value=True).alias("_old"))
+    )
+    joined = old.join(
+        _validated_members(current)
+        .select(list(_ASSESSMENTS))
+        .with_columns(
+            pl.lit(value=True).alias("_new"),
+        ),
+        on="page_id",
+        how="full",
+        coalesce=True,
+        validate="1:1",
+    )
+    matched = pl.col("_old").is_not_null() & pl.col("_new").is_not_null()
+    conditions = {
+        "removed": pl.col("_new").is_null(),
+        "added": pl.col("_old").is_null(),
+        "reassessed": matched
+        & (
+            pl.col("old_class").ne_missing(pl.col("class"))
+            | pl.col("old_importance").ne_missing(pl.col("importance"))
+        ),
+    }
+    return pl.concat(
+        joined
+        .filter(condition)
+        .with_columns(
+            pl.lit(kind).alias("kind"),
+            pl.lit(None, dtype=pl.String).alias("old_title"),
+            pl.lit(None, dtype=pl.String).alias("title"),
+        )
+        .select(list(_CHANGES))
+        for kind, condition in conditions.items()
+    ).sort("kind", "page_id")
+
+
+def _assessment_members(source: pl.DataFrame) -> pl.DataFrame:
+    """Project compact source observations without materializing titles.
+
+    Args:
+        source: Persisted page IDs and PageAssessments dimensions.
+
+    Returns:
+        Validated report assessment rows with unknown grades retained.
+    """
+    return _validated_members(
+        source.select(
+            "page_id",
+            pl
+            .col("pa_class")
+            .str.strip_chars()
+            .replace("", None)
+            .alias("class"),
+            pl
+            .col("pa_importance")
+            .str.strip_chars()
+            .replace("", None)
+            .alias("importance"),
+        ),
+    )
+
+
+def _resolve_changes(
+    site: BaseSite,
+    changes: pl.DataFrame,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Resolve current metadata for changed IDs after comparison.
+
+    Args:
+        site: Wiki supplying current identity metadata.
+        changes: Already compared assessment rows, without titles.
+
+    Returns:
+        Enriched changes and current reference metadata. Deleted IDs
+        retain stable Special:Redirect links for unavailable titles.
+    """
+    if changes.is_empty():
+        return changes.with_columns(
+            pl.lit(None, dtype=pl.Int64).alias("page_namespace"),
+        ), pl.DataFrame(
+            schema={
+                "page_id": pl.Int64,
+                "talk_title": pl.String,
+                "page_revision": pl.Int64,
+                "talk_revision": pl.Int64,
+            },
+        )
+    metadata = page_metadata(
+        site,
+        changes.select("page_id").unique()["page_id"].to_list(),
+    )
+    resolved = (
+        changes
+        .join(
+            metadata.select("page_id", "full_title", "page_namespace"),
+            on="page_id",
+            how="left",
+            validate="m:1",
+        )
+        .with_columns(
+            pl.coalesce(
+                "full_title",
+                pl.concat_str(
+                    pl.lit("Special:Redirect/page/"),
+                    pl.col("page_id"),
+                ),
+            ).alias("_title"),
+        )
+        .with_columns(
+            pl
+            .when(pl.col("kind") != "removed")
+            .then(pl.col("_title"))
+            .otherwise(None)
+            .alias("title"),
+            pl
+            .when(pl.col("kind") != "added")
+            .then(pl.col("_title"))
+            .otherwise(None)
+            .alias("old_title"),
+        )
+        .select(*_CHANGES, "page_namespace")
+    )
+    return resolved, metadata
+
+
 def _daily_summaries(
     introductions: Mapping[dt.date, str],
     days: Mapping[dt.date, Mapping[str, str]],
@@ -210,9 +367,23 @@ def _daily_summaries(
     """
     summaries = {}
     for day, introduction in introductions.items():
-        paragraphs = introduction.strip().split("\n\n", maxsplit=1)
+        paragraphs = introduction.strip().split("\n\n")
         if re.fullmatch(r"'''总条目'''[0-9,]+篇。[^\r\n]*", paragraphs[0]):
             summaries[day] = paragraphs.pop(0)
+        elif re.fullmatch(
+            r"'''條目頁[0-9,]+篇'''\uFF1A\n\* [^\r]+",
+            paragraphs[0],
+        ):
+            summary = [paragraphs.pop(0)]
+            summary.extend(
+                paragraphs.pop(0)
+                for pattern in (
+                    r"'''非條目[0-9,]+頁'''\uFF1A[^\r\n]+",
+                    r"'''專題共計[0-9,]+頁'''。(?:\uFF08不含[0-9,]+重定向頁\uFF09)?",
+                )
+                if paragraphs and re.fullmatch(pattern, paragraphs[0])
+            )
+            summaries[day] = "\n\n".join(summary)
         if "\n\n".join(paragraphs).strip() != ("" if days[day] else "無變更"):
             message = (
                 "Assessment log needs change groups or standalone 無變更."
@@ -440,6 +611,167 @@ def _references(
     }
 
 
+def _compact_baseline(  # ruff: ignore[too-many-arguments]
+    site: BaseSite,
+    project: str,
+    source: pl.DataFrame,
+    instant: dt.datetime,
+    *,
+    previous: _LogBaseline | None,
+    body: str,
+    dry: bool,
+) -> _LogBaseline:
+    """Prefer retained publication history, then the preceding dataset.
+
+    Args:
+        site: Source wiki identity.
+        project: Exact assessment project.
+        source: Complete current compact source observations.
+        instant: Actual current observation time.
+        previous: Published/pending report baseline when retained.
+        body: Current live managed report text.
+        dry: Keep preview observations isolated.
+
+    Returns:
+        A baseline preserving pending transitions across failed saves.
+    """
+    retained = read_previous_snapshot(
+        site,
+        project,
+        instant.date() - dt.timedelta(days=1),
+        dry=dry,
+    )
+    if previous is not None:
+        if retained is not None and previous.body == body:
+            retained_at = dt.datetime.fromisoformat(
+                retained.manifest["calculated_at"],
+            )
+            if retained_at > previous.observed_at:
+                source = retained.tables["members"]
+                return replace(
+                    previous,
+                    observed_members=_assessment_members(source),
+                    observed_source=source,
+                    observed_at=retained_at,
+                )
+        return previous
+    baseline_source = retained.tables["members"] if retained else source
+    baseline_time = (
+        dt.datetime.fromisoformat(retained.manifest["calculated_at"])
+        if retained
+        else instant
+    )
+    members = _assessment_members(baseline_source)
+    return _LogBaseline(
+        members,
+        baseline_source,
+        members,
+        baseline_source,
+        body,
+        baseline_time,
+    )
+
+
+def _prepare_compact(  # ruff: ignore[too-many-arguments]
+    site: BaseSite,
+    project: str,
+    snapshot: ReportBundle,
+    previous: _LogBaseline | None,
+    body: str,
+    *,
+    days: int,
+    prefix: str,
+    history: dict[dt.date, dict[str, str]],
+    summaries: Mapping[dt.date, str],
+    pruned: bool,
+    pending: bool,
+    dry: bool,
+) -> AssessmentLogData:
+    """Compare saved assessment IDs before resolving current metadata.
+
+    Args:
+        site: Source wiki identity.
+        project: Exact project whose datasets are compared.
+        snapshot: Current saved compact daily dataset.
+        previous: Saved publication baseline when available.
+        body: Current managed report text.
+        days: Retained log duration in days.
+        prefix: Retained log introduction.
+        history: Retained dated change groups.
+        summaries: Retained daily summary paragraphs.
+        pruned: Whether expired log sections were removed.
+        pending: Whether an unsaved proposal remains pending.
+        dry: Keep preview observations isolated.
+
+    Returns:
+        Complete compact baselines and enriched changed-page records.
+
+    Raises:
+        ValueError: An empty observation cannot establish removals.
+    """
+    source = snapshot.tables["members"]
+    instant = dt.datetime.fromisoformat(snapshot.manifest["calculated_at"])
+    members = _assessment_members(source)
+    if members.is_empty():
+        message = "An empty project snapshot cannot establish removals."
+        raise ValueError(message)
+    state = _compact_baseline(
+        site,
+        project,
+        source,
+        instant,
+        previous=previous,
+        body=body,
+        dry=dry,
+    )
+    compared = compare_assessments(
+        _assessment_members(state.observed_source),
+        members,
+    )
+    changes, metadata = _resolve_changes(site, compared)
+    result = ReportResult(
+        family="assessment-log",
+        tables={
+            "members": members,
+            "baseline": state.members,
+            "changes": changes,
+            "source": source,
+            "baseline-source": state.source,
+        },
+        metadata={
+            "project": project,
+            "days": days,
+            "report_date": (instant.date() - dt.timedelta(days=1)).isoformat(),
+            "baseline_sha256": _digest(body),
+            "article_totals": snapshot.manifest["metadata"].get(
+                "article_totals",
+            ),
+        },
+        provenance={
+            "wiki": site.dbName(),
+            "sources": ["project-assessments"],
+            "snapshot_key": snapshot.manifest["report_key"],
+            "snapshot_generation": snapshot.manifest["generation"],
+        },
+        calculated_at=instant,
+    )
+    return AssessmentLogData(
+        members,
+        state.members,
+        changes,
+        prefix,
+        history,
+        pruned,
+        instant,
+        result,
+        references=_references(metadata, metadata.clear(), changes),
+        pending=pending,
+        unchanged=state.observed_at.date() < instant.date()
+        and changes.is_empty(),
+        summaries=summaries,
+    )
+
+
 def prepare_data(  # ruff: ignore[too-many-arguments, too-many-locals]
     site: BaseSite,
     project: str,
@@ -493,6 +825,21 @@ def prepare_data(  # ruff: ignore[too-many-arguments, too-many-locals]
         pruned = pruned or pending_pruned
     snapshot = get_snapshot(site, project, observed_at=instant, dry=dry)
     source = snapshot.tables["members"]
+    if "full_title" not in source.columns:
+        return _prepare_compact(
+            site,
+            project,
+            snapshot,
+            previous,
+            body,
+            days=days,
+            prefix=prefix,
+            history=history,
+            summaries=summaries,
+            pruned=pruned,
+            pending=pending,
+            dry=dry,
+        )
     instant = dt.datetime.fromisoformat(snapshot.manifest["calculated_at"])
     members = _validated_members(
         source.select(

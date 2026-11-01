@@ -73,7 +73,13 @@ The monitor coalesces triggers and allows one active invocation per routine.
 Fresh monitors normally check all routines; `run_immediately=False` waits for
 triggers, and reusing an active monitor adds no startup pass. Stop with
 `scheduler.shutdown(wait=True)` before changing output mode or clearing caches.
-Manual `run_once` calls do not alter recurring schedules. Wiki cycles and an
+On shutdown, `hub.stop_jobs` pauses scheduled dispatch and rejects queued
+website refreshes before draining running work. Output locks and diagnostics
+stay open until final status writes complete. SIGUSR1 requests the same drain
+while keeping the pod alive; the local health protocol acknowledges completion
+for that process identity. Deployment waits for this acknowledgement before
+Kubernetes pod termination begins. Manual `run_once` calls do not
+alter recurring schedules. Wiki cycles and an
 hourly callback refresh due website reports; only the monitor changes schedules.
 
 Confirmed New pages and Pageviews completion creates a disposable,
@@ -104,6 +110,14 @@ boundaries. Trimming intermediate stages preserves start and completion.
 Report-history dialogs consume these saved facts; they never parse logs or
 infer activity from service messages. Invalid saved history stays untouched
 and appears unavailable; history storage failure does not interrupt a job.
+Each live report invocation holds a process-owned lock under
+`state/executions/` through its final status writes. Before scheduling work,
+a fresh monitor marks earlier unfinished invocations without a live owner
+as failed, including legacy records without locks. Concurrent manual work
+with an active lock remains running. Recovery preserves recorded stages and
+confirmed report dates; its `Interrupted` failures leave finish time,
+duration, and edit counts null because process death supplies none of those
+observations. Completed or superseding records cannot be overwritten.
 Routine timing covers the whole invocation. Destination timing starts at its
 individual work boundary, excluding earlier reports and delegated cooldowns.
 Registered destinations remain `queued`: their registration timestamp orders
@@ -130,7 +144,8 @@ Missing facts retain generic labels; new attempts and successes clear them.
 
 Scheduler events and a thirty-second local heartbeat refresh schedule state
 without source requests. Optional validated `runtime` records Python, OS,
-architecture, cgroup memory use/limit, and observed CPU use/allocation. One fully
+architecture, cgroup memory use/limit, observed CPU use/allocation, and
+runtime-filesystem used/total bytes. One fully
 used core is 100%; unavailable resource files remain unknown. Manual one-shot
 work does not rewrite this snapshot. Read structured state for status;
 diagnostic logs are not lifecycle evidence.
@@ -144,16 +159,42 @@ calculated results; source failures leave the last complete generation selected.
 Only the backend advances membership or completion evidence. A no-change check
 is not a save, and PexBot responses do not establish an exact local edit count.
 
-`shared.reports.ReportStore` writes `reports/<safe-report-key>/<uuid>/` bundles
-with a schema-1 manifest, named Parquet tables, and `report.wikitext`. Keys
-distinguish targets without using wiki titles as paths. Manifests separate
+`reports/data/` contains collected facts and reusable source tables;
+`reports/records/` contains generated report results and original newsletter
+drafts. Daily source observations use a `YYYYMMDD` directory. Current tables
+use descriptive filenames, with schema versions and integrity digests in
+metadata rather than path suffixes.
+
+`shared.reports.ReportStore` writes timestamped bundles under
+`reports/records/<family>/<site>/<escaped-target>/`, with a schema-1 manifest,
+named Parquet tables, and `report.wikitext`. Keys reversibly escape unsafe
+characters while retaining readable destination names. Manifests separate
 application version, run/generation identity, UTC calculation/source times,
 periods, provenance, and publication state. `latest.json` atomically selects
 the newest complete generation and its predecessor. Locked ordering prevents
 older runs replacing newer results; sequential results from one run require
 the exact predecessor still selected. Readers validate hashes, schemas,
 identities, and row counts. `read(key, previous=True)` selects the predecessor;
-no selected bundle returns none. Previews use only `dry-run/reports/`.
+no selected bundle returns none. Related daily files share `YYYYMMDD`
+directories; single daily assessment tables use
+`reports/data/assessments/<site>/<project>/assessments-YYYYMMDD.parquet`.
+Previews use only `dry-run/reports/`. Staging stays in cache storage and
+publication locks in `state/`. Legacy originals remain in durable `backups/report-layout/`; requests and
+normal startup never execute migrations.
+
+New generation names use `<family>-YYYYMMDDHHMMSS` in UTC, adding an
+increasing numeric suffix when writes share a second. UUID generations remain
+readable. The complete new bundle and selector are committed before pruning
+older results; comparison reports retain their latest and previous generations.
+PexBot actions are disposable: keep only the latest per target in
+`cache/pexbot/`, with previews isolated in `dry-run/cache/pexbot/`.
+Temporary files are removed after their operation. Execution and publication
+status remain in `state/` independently of these cached actions.
+
+Assessment class and importance strings use lossless Parquet Enum declarations
+at the report-store boundary. Readers validate the stored Enum schema before
+restoring String API columns. See [Assessment fields](backend/assessment-fields.md)
+for standard labels, observed extra labels, and null semantics.
 
 Retain complete reusable facts, not just displayed rows:
 
@@ -165,9 +206,9 @@ Retain complete reusable facts, not just displayed rows:
 - DYK and assessments: complete members/nominees, dates, assessments,
   statistics, and review links.
 - English comparisons: prepared English/Chinese rows and selected lists.
-- PexBot: subscriptions/history and delegated action/result metadata, with an
-  unknown edit count. It and English comparisons represent refreshed current
-  state, not invented daily history.
+- PexBot: disposable subscription/history and delegated-action metadata, with
+  an unknown edit count. English comparisons retain refreshed observations
+  rather than invented daily history.
 
 ## Website collection and presentation
 
@@ -189,12 +230,14 @@ dated discussion remains undated; collection or category-observation times
 never stand in for nomination starts. Sort FAC, FLC, ACC, GAN, BPAN, PR, PPR,
 DYKC, reassessment, then start ascending with unknowns last and stable titles.
 
-Review cards show elapsed calendar months, days, or hours since nomination.
-Responses show an inclusive recent-activity window in days or hours since
-the latest signed response from another participant. Nominator-only follow-ups
-do not establish a response; unknown identities and dates remain null. Relative
-times expose their complete UTC instants in native hover tooltips. Older saved
-snapshots without response observations remain readable. After the response,
+Review cards show completed months, days, or hours since nomination, with a
+month fixed at 365.25 / 12 days. Responses use the same elapsed units for the latest signed reply from another
+participant in the stated recent-activity window. All review links share one localized label; a metadata
+list separates the link, start, response, and participant count with CSS bars.
+Nominator-only follow-ups do not establish a response; unknown identities and
+dates remain null. Relative times expose their complete UTC instants in native
+hover tooltips. Older saved snapshots without response observations remain
+readable. After the response,
 show the observed count of distinct identifiable participants, including the
 nominator. Unknown counts stay omitted, and nominator-only reviews show no
 response or participant annotation. Project review sections use the earliest
@@ -231,8 +274,10 @@ Machine-readable timestamps retain their original explicit offsets.
 The dashboard presents reviews and each available highlight group as peer
 second-level sections. `/maintenance/` owns the maintenance catalogue, with
 second-level task groups and existing filtered worklists selected by `task`.
-`/reports/` combines the live report-status panel and a concise run-history
-table. Raw daily diagnostic downloads remain under `/logs/`, reached from
+`/reports/` combines the live report-status panel and the newest hundred saved
+invocations across dates, without query controls or pagination. Each task
+opens its stage list with millisecond timestamps and inline wiki page links.
+Raw daily diagnostic downloads remain under `/logs/`, reached from
 About; diagnostics are never translated into narrative event summaries.
 `/api/live` reads saved status only and renders existing live
 regions, never website datasets or logs. `/api/live/ws` pushes the same
@@ -245,7 +290,10 @@ A supported `lang` query overrides the browser's one-year `aranami-language`
 cookie, which overrides `Accept-Language`.
 Language links preserve the route and valid filter/sort/page controls.
 HTML and response language tags agree; localized responses vary by language
-header and cookie. Live requests propagate the current document language.
+header and cookie. Live requests propagate the current document language. The Chinese menu
+selects the script; browser Taiwan/Hong Kong variants additionally select
+regional OpenCC conversion for saved article extracts while retaining the
+same traditional interface messages.
 Source article titles retain canonical spelling and Chinese language markup.
 Translate missing/unrecognized assessments centrally without changing facts.
 
@@ -259,7 +307,8 @@ Pageviews Analysis for thirty inclusive days ending on the actual source date,
 but the displayed count represents that single day.
 
 Introductions use the [Page Content Service summary endpoint][page-summaries].
-Prepare original `zh`, `zh-hans`, and `zh-hant` text with `Accept-Language`,
+Prepare original `zh`, script `zh-hans`/`zh-hant`, and regional `zh-tw`/`zh-hk`
+text with `Accept-Language`,
 up to three sentences and 360 characters plus an omission mark. Generic `zh`
 keeps original text; English uses simplified text. Encode literal title spaces
 as `%20` in these REST requests; underscore-equivalent URLs may yield different
@@ -330,7 +379,8 @@ Distinguish network, transport, response, clock, and rendering failures in
 bounded browser diagnostics without exposing arbitrary server or error text.
 
 Server observations include monitor state, observed hub startup,
-system/architecture, Python, memory use/allocation, and CPU use/allocation.
+system/architecture, Python, memory use/allocation, CPU use/allocation, and
+runtime-filesystem storage use/capacity.
 Startup is the recorded hub start, not an inferred operating-system boot.
 Retain static facts and startup timestamps when resource samples expire.
 Show the sample's actual UTC timestamp through seconds and its relative age;
@@ -340,176 +390,48 @@ uses its footer as the live uptime clock anchor.
 
 ## Newsletter drafts
 
-The read-only `/newsletter/` page prepares the three data-driven Chinese
-video-game newsletter pages for manual copying: overview, quality changes,
-and announcements. The next publication quarter is selected automatically;
-an explicit `issue=2027-01` selects issue 29 for October–December 2026. Quarterly
-calendar identities live in `shared.newsletter`; the public controller passes
-validated saved facts to `updater.services.newsletter` for wikitext projection
-and then to the webservice renderer for HTML. No request starts collection,
-publishes wiki text, or writes runtime data. Generated drafts appear in
-selectable read-only code blocks, enhanced with wikitext syntax highlighting.
-Copying uses the original plain wikitext, without presentation markup.
-Daily collection retains each issue's first successful draft for the inclusive
-data date `observation_end - 1 day`, skipping unelapsed quarters. The hub injects
-the updater's renderer into collection; backend storage does not import a
-frontend. `reports/newsletter-drafts-v1/<issue>/` stores validated facts, all
-three original rendered pages, an actual capture timestamp, and hash evidence
-in immutable JSON observations with an atomic, locked date catalog. These
-nested records are not tabular data. A failed archive write prevents replacing
-the latest newsletter cache while independent reports continue normally.
-Startup may retain an existing saved observation under its actual data date;
-it does not reconstruct dates for which no observation survived.
+The read-only newsletter tool prepares quarterly data pages and editorial
+scaffolds, including January's annual feature. Source acquisition belongs to
+`backend.website.newsletter_sources`; it saves complete facts through the
+durable observation store. `backend.website.newsletter` validates and reads
+those saved generations without MediaWiki requests. Updater projects saved
+facts into wikitext at query time; webservice presents drafts. Requests never
+collect, publish, or change runtime data.
 
-The calendar uses `date=YYYY-MM-DD` within the selected issue's reporting
-quarter. Requests read one retained draft and its bounded catalog, without
-enrichment from current homepage facts, source queries, or runtime writes.
-Missing dates remain unavailable; malformed selections are rejected. The
-enhanced calendar starts each week on Sunday and disables unavailable dates
-with grey text. A native date input remains usable without JavaScript. Date
-and issue selections take effect only after submitting their View control.
-The catalog's metadata identity invalidates cached calendar HTML when a new
-date is retained. Data-through dates and actual UTC generation times stay
-separate, and copying an archived draft preserves its original text after renderer
-changes. Daily drafts survive clearing disposable caches.
-The header's native Tools disclosure links to newsletter drafts; About links
-to diagnostic log downloads.
-Native issue radios and their submit button work without JavaScript.
-Copy actions use Codex primary progressive buttons.
-Source revisions remain internal provenance rather than a displayed list.
+`reports/data/newsletter/observations/` holds `current.json` and immutable
+prepared JSON generations in `YYYYMMDD` folders. Shared source
+data lives separately in `reports/data/articles/`. Migration preserves
+legacy source files and records completion receipts. Daily observations remain
+immutable in `reports/records/newsletter/` as complete independent JSON
+snapshots. No stored wikitext or predecessor is needed to render any selected
+date. January's feature uses a separate annual stream
+from 1 January through 31 December; other pages retain quarterly histories.
 
-The independent daily newsletter report in `backend.website` fetches sources
-for the current publication quarter and its successor. It prepares the next
-issue while the reporting quarter is still in progress, with an explicit
-exclusive observation cutoff through the latest completed UTC day. Historical
-reads, DYK, quality revisions, awards, curated new pages, and homepage
-appearances use that same cutoff. Quarterly completion is separate from data
-availability. The overview retains all four content links even when the linked
-pages have not been created. Supplemental current article totals use a fresh
-membership count with their own observation timestamp, rather than a historical
-quarter-end label. Assessment totals use internal project snapshots and current
-membership rather than parsing the assessment log or recognized-content pages.
-Retain each internal snapshot's actual collection time; a delayed observation
-must not be labeled as an exact quarter-end count. Reuse saved overview counts
-only for the same issue and observation boundary when no newer source exists.
-Missing daily records retain their confirmed minimum count and coverage gaps
-internally. Copied drafts retain all three quarter months, using the registered
-counts available at collection time without minimum-count or gap annotations.
-Unelapsed months therefore have zero registered articles in the draft without
-changing their unknown observation state in saved facts.
-Join curated registered titles to internal assessment observations for monthly
-grade counts and the quarterly pie chart. Prefer exact titles, then batched
-canonical titles and page IDs across renames. Current assessments apply only to
-open quarters; closed quarters require their exact retained boundary snapshot
-and its actual collection time. Registered articles without a valid project
-class count as unassessed, including subjects absent from the project snapshot.
-Older saved unknown-class counts also render as unassessed; this reporting
-category does not assert that a project banner is present.
-Copied grade summaries combine AL/A, BL/B, CL/C, List/Start, and SL/Stub at
-their common assessment level, retaining the separate source classes in saved
-facts. Featured articles and featured lists keep their distinct designations.
-Pie-chart JSON keeps each slice object on one line.
-Grade totals reconcile to registered counts even when
-daily coverage is incomplete, and missing historical observations omit the
-chart rather than borrowing later grades.
-No-data selections show collection state without copyable
-empty templates. Features and interviews are outside this numeric generator.
+Recorded nomination roles remain distinct from computed surviving-text
+authorship. Preserve source event and revision identities, actual timestamps,
+nullable evidence, all contributor statistics, and tied leading authors.
+Unknown values must not become zeroes or invented editorial commentary. See
+[Newsletter collection](backend/newsletter.md) for attribution, cutoffs,
+reference layouts, and archive contracts.
 
-Newsletter homepage lists use the current Wiki Replica PageAssessments query
-to select project articles, then collect each issue's full elapsed quarter
-independently of the dashboard's rolling 100-day window. Featured, good, and
-Today in history sources use revisions before each display day's UTC end;
-news uses article talk-page ITN notices without reading news-template histories.
-Historical display dates do not imply historical
-project membership. Resolve source titles before membership matching and retain
-revision links with each section. Missing membership or unreadable history
-fails the refresh and preserves the previous complete newsletter observation.
-Legacy snapshots may still use fully covered dashboard periods.
+`reports/data/articles/milestones.parquet` retains project-wide
+review and homepage actions across all years. DYK, FAC, FLC, GAN, ITN, and
+other recorded actions retain their dates, outcomes, questions, roles, and
+source evidence. The DYK report and newsletter share this data. Each record preserves
+field coverage and exact source revisions. Current assessment observations
+without a known listing date remain undated; their observation timestamp is
+never substituted for an award or listing date. The hourly project collector
+maintains this dataset independently of newsletter issue selection. Newsletter
+preparation reads retained credits without initiating nomination or authorship
+lookups. Versioned talk snapshots and token attribution remain in the same
+shared directory as `history.parquet` and `authorship.parquet`.
 
-`cache/today-in-history-v1.parquet` separately retains unfiltered raw OTD
-source text and exact revision IDs for the last 100 completed UTC days.
-Recurring month/day pages are keyed by the full display date, so a later year's
-overwrites cannot change an earlier observation. Daily newsletter preparation
-parses cached sources before resolving titles and applying project membership.
-Retain all bold primary article links with their resolved target titles and
-article page IDs, independently of project scope. Reuse the batched title query's
-page IDs, including normalization, Chinese conversion, and redirect mappings.
-Join current project scope by target article ID; incidental links and missing
-targets do not establish membership. Refresh this derived subject metadata at
-analysis time and retain its own observation timestamp, without changing the
-historical source evidence. Concurrent writers keep the newest subject analysis.
-Historical redirects are followed at the same daily cutoff. Retain the
-requested page identity, redirect revisions, and final target page/revision
-IDs; page ID alone never identifies historical content. Loops, missing targets,
-or unreadable revisions prevent replacing the section's saved facts.
-Older dates are read historically without extending retention. This cache is
-disposable; corrupt entries are rebuilt and cache clearing loses no report facts.
-
-Article-history candidates come from replica project membership joined with
-verified Chinese Article history categories and template transclusions.
-Include current, failed, and former FA/FL/GA statuses, A/Bplus reviews,
-past-news, DYK, and anniversary notices. Categories only select sources;
-the audited module's actions/results and explicit dates establish events.
-Preload talk pages and pair text with its actual returned revision ID.
-Recorded FA/FL/GA/A/Bplus additions and removals replace project-list edit
-dates; DYK dates come from Article history or DYKtalk. Recorded ITNtalk events
-provide newsletter news dates. OTD talk notices
-remain supplemental metadata and never replace daily display-revision proof.
-Retain unknown dates but exclude them from dated quarter lists with a caveat.
-
-`reports/newsletter-history-v1.parquet` durably retains versioned talk snapshots
-and their nested event rows. Initial collection backfills all recorded dates;
-hourly `HH:00 UTC` scans compare replica revisions and parser/alias identity,
-then preload only changed sources. Earlier observed revisions and departed
-project members stay on disk; current newsletter projection uses the latest
-snapshot under current membership and titles. Atomic locked merges prevent
-partial writes and lost concurrent updates. Incomplete batches, corrupt files,
-or exceeded bounds fail rather than replace retained history with an empty set.
-Keep this archive outside disposable caches and source payloads. The standalone
-backfill command is documented in [Usage](usage.md#prepare-a-quarterly-newsletter).
-Hourly archive scans do not regenerate the newsletter between daily refreshes.
-
-News carried into the quarter retains an unknown first-appearance date.
-Observed featured, news, and Today in history lists receive matching column
-sections even when the prior issue's layout omitted them; absent or empty new
-sections do not add headings.
-
-The numeric sections follow the October 2026 issue (main revision
-94691317; quality revision 94683150). Newsletter facts use the existing bounded
-dashboard snapshot, independent success timestamps, and hourly failure retries.
-Older schema-2 snapshots without newsletter observations remain readable.
-The collector prepares the preceding issue's actual main-page layout and source
-revision. Rendering replaces only recognized issue metadata and statistical
-slots, preserving its original markup, styling, link targets, and navigation.
-If the immediately preceding page is absent or unsupported, collection searches
-up to four preceding issues for a valid layout; older layout counts do not
-become a newer quarter's baseline. Unavailable layouts are never replaced by
-an invented plain-text design.
-Quality and announcements likewise retain their actual prior source around
-explicit data slots, including paragraph and row prototypes. Preserve the
-initial October 2026 quality page's nine ordered monthly placeholders
-(revision 93279502), filling absent entries with `（無）` while a month remains
-open or observations are unavailable. A completed month with observed zero
-changes renders only `（無變動）`; this is a rendering decision, so a later
-refresh can restore dated changes for articles newly added to the project.
-Milestone summaries show an explicit zero count. Both compact empty months
-and full placeholder rows remain reusable as the next issue's source.
-Keep every homepage subsection in its initial order: featured, DYK, good,
-news, and history
-(announcements revision 93279496). Empty sections stay present. Old notices,
-article lists, awards, and chart values are replaced, while a chart with no
-observed grade breakdown remains omitted rather than inheriting old numbers.
-Normalize excess blank lines before the announcement category. Generated
-empty placeholders remain reusable as the following issue's source layout.
-
-Native issue radios default to `Issue.upcoming()` for the UTC request date.
-The cache key includes this automatic selection so the default changes at
-the quarter boundary even if the previous page is still cached. A daily
-`00:00 UTC` cron refresh queues behind any active website pass. Date-scoped
-newsletter identities make each newly completed day due regardless of the
-last successful refresh time. Quarter-scoped homepage identities still make
-those observations due at the quarter boundary. Failures retry hourly.
-The completed issue and new draft remain separate saved observations.
+Complete membership observations maintain `scope.parquet`. A page returning
+to the project resets its absence clock. After 365 elapsed UTC days outside
+scope, active milestone, history, and authorship rows may be removed.
+Tombstones prevent delayed writes or migration from restoring removed rows;
+rejoining clears the tombstone. Failed or empty membership reads never
+establish absence. Original daily newsletter archives remain immutable.
 
 ## Polars and Parquet
 
@@ -714,15 +636,19 @@ backfills use `Updated class icons.` and describe older records.
 ### Membership and DYK changes
 
 The assessment log compares daily project assessment snapshots by subject
-page ID. The `00:00:00 UTC` trigger retains all PageAssessments rows and source
-columns as Parquet using date-specific `project-assessments` report bundles.
+page ID. The `00:00:00 UTC` trigger saves
+`reports/data/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet` with
+exactly `page_id`, `pa_class`, and `pa_importance`. The filename is the completed
+UTC date: `assessments-20260201.parquet` is captured at 2026-02-02 00:00 UTC.
 Each date keeps its first complete snapshot, independent of wiki publication;
-retries reuse it. Manifests preserve actual collection times and the scheduled
+retries reuse it. Parquet metadata preserves actual collection times and the scheduled
 midnight boundary separately. Other consumers use the backend's
 `project_assessments.read_snapshot` without starting clients or collecting.
-Previews reuse existing production snapshots or write only preview bundles.
-A missing member is a departure from the set, not proof of deletion;
-renames and assessment changes remain distinct. The first observation seeds a
+Previews reuse existing production snapshots or write only preview files.
+Compare compact datasets before looking up current titles and revision
+metadata for changed page IDs. These datasets do not observe rename-only
+events. A missing member is a departure from the set, not proof of deletion.
+The first observation seeds a
 baseline without reporting all existing pages as additions. First-time markers
 and evidence-based historical backfill are separate wiki maintenance actions.
 A newer daily observation with no changes records its date and `無變更`.
@@ -745,6 +671,9 @@ option. A snapshot collected on a UTC date labels the previous day's report;
 keep its actual collection timestamp and immutable source date unchanged.
 Daily introductions summarize mainspace article/list quality and importance
 counts in assessment order, omit zero counts, and survive failed-save recovery.
+Article-only counts are retained as aggregate Parquet metadata, without adding
+per-page titles or namespaces to the compact dataset. See
+[Saved data and Parquet fields](backend/data-storage.md) for all storage schemas.
 
 Membership snapshots use stable page IDs in Parquet, not wiki output, to track
 renames, assessments, and DYK transitions. Validate against exact destination
@@ -770,6 +699,13 @@ are separate wiki maintenance. The verified `Graph:Chart` contract accepts CSV
 and `Module:Graph` 95334515).
 
 ### English comparison reports
+
+Trigger daily at `00:00:00 UTC` and require the completed day's retained
+project assessment dataset before reading or preparing either comparison.
+Share the snapshot's existing capture lock with the assessment-log routine;
+concurrent starts reuse the same immutable data. A capture failure stops the
+comparison, while assessment-log publication remains independent. Preview
+captures stay isolated and may reuse an existing production dataset.
 
 Match English page IDs through renames; additions/removals use `[[:en:Title]]`.
 Quality combines FA/FL/GA by latest English promotion/listing date descending,

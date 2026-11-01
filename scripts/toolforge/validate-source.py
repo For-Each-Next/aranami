@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 _SCRIPTS = {
     "setup-env.sh",
     "deploy-source.sh",
+    "drain-hub.py",
     "run-hub.sh",
     "run-web.sh",
     "runtime-env.sh",
@@ -135,11 +136,12 @@ def _json(root: Path, name: str) -> dict[str, object]:
     return value
 
 
-def _expected_sources(root: Path) -> set[str]:
+def _expected_sources(root: Path, *, version: str) -> set[str]:
     """Read the reviewed source names and required deployment helpers.
 
     Args:
         root: Source root containing the reviewed file contract.
+        version: Manifest version selecting the bootstrap contract.
 
     Returns:
         Exact filenames required in the source hash manifest.
@@ -170,11 +172,18 @@ def _expected_sources(root: Path) -> set[str]:
         ):
             msg = f"Unexpected reviewed source: {name}"
             raise ValueError(msg)
+    scripts = _SCRIPTS.copy()
+    if version == "0.7.10" or re.fullmatch(
+        r"0\.7\.10\.post(?:[1-9]|1[0-2])",
+        version,
+    ):
+        # Immutable earlier generations predate the drain helper.
+        scripts -= {"drain-hub.py"}
     return set(names) | {
         "pyproject.toml",
         "uv.lock",
         ".python-version",
-        *(f"scripts/toolforge/{name}" for name in _SCRIPTS),
+        *(f"scripts/toolforge/{name}" for name in scripts),
     }
 
 
@@ -255,10 +264,11 @@ def verify(root: Path) -> dict[str, object]:
     if (
         set(manifest) != {"schema", "version", "files"}
         or manifest["schema"] != 1
+        or not isinstance(manifest["version"], str)
     ):
         msg = "Unsupported deployment manifest."
         raise ValueError(msg)
-    expected = _expected_sources(root)
+    expected = _expected_sources(root, version=manifest["version"])
     _verify_hashes(root, manifest["files"], expected)
     if _actual_sources(root) != expected | {"deployment.json"}:
         msg = "Unexpected or missing files in the source directory."

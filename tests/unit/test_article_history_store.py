@@ -14,7 +14,14 @@ from unittest.mock import patch
 
 import polars as pl
 
-from backend.support.newsletter_history import SCHEMA, load, merge_save
+from backend.support.article_data import migrate_history
+from backend.support.article_history import (
+    EVENT_SCHEMA,
+    SCHEMA,
+    load,
+    merge_save,
+    read_versions,
+)
 
 
 def _snapshot(
@@ -88,6 +95,146 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
         assert merge_save(self.path, source).equals(source)
         assert load(self.path)["events"].to_list() == [[]]
 
+    def test_legacy_events_gain_nullable_attribution(self) -> None:
+        """Preserve old versions when reading and refreshing history."""
+        legacy_fields = [
+            field
+            for field in EVENT_SCHEMA
+            if field
+            not in {
+                "nominator",
+                "main_author",
+                "nomination_link",
+                "contributors",
+            }
+        ]
+        original = _snapshot().with_columns(
+            pl.col("events").list.eval(
+                pl.struct(
+                    pl.element().struct.field(field) for field in legacy_fields
+                ),
+            ),
+        )
+        self.path.parent.mkdir()
+        original.write_parquet(self.path)
+        unchanged = self.path.read_bytes()
+        restored = load(self.path)
+        assert restored.equals(_snapshot())
+        assert self.path.read_bytes() == unchanged
+        row = _snapshot(revision=20, hour=1).to_dicts()[0]
+        row["events"] = [
+            {
+                "kind": "quality",
+                "date": dt.date(2026, 1, 2),
+                "grade": "FL",
+                "action": "added",
+                "parameter": "action1",
+                "oldid": 42,
+                "nominator": "Nominator",
+                "main_author": False,
+                "nomination_link": "#優良條目評選",
+            },
+        ]
+        refreshed = pl.DataFrame([row], schema=SCHEMA)
+        assert merge_save(self.path, refreshed).equals(refreshed)
+        archived = pl.read_parquet(self.path)
+        assert archived.height == 2
+        assert archived.filter(pl.col("revision_id") == 10).equals(restored)
+        assert (
+            load(self.path)["events"].to_list()[0][0]["main_author"] is False
+        )
+
+    def test_attribution_schema_gains_unknown_contributors(self) -> None:
+        """Keep attribution fields when upgrading older snapshots."""
+        row = _snapshot().to_dicts()[0]
+        row["events"][1].update({
+            "grade": "FL",
+            "action": "added",
+            "nominator": "Writer",
+            "main_author": False,
+            "nomination_link": "#Nomination",
+        })
+        source = pl.DataFrame([row], schema=SCHEMA)
+        original = source.with_columns(
+            pl.col("events").list.eval(
+                pl.struct(
+                    pl.element().struct.field(field)
+                    for field in EVENT_SCHEMA
+                    if field != "contributors"
+                ),
+            ),
+        )
+        self.path.parent.mkdir()
+        original.write_parquet(self.path)
+        assert load(self.path).equals(source)
+        assert pl.read_parquet(self.path).equals(original)
+
+    def test_contributors_preserve_unknown_empty_and_safe_names(self) -> None:
+        """Keep explicit lists and reject unsafe account identities."""
+        for revision, contributors in enumerate(
+            (None, [], ["Writer name", "A&B"]),
+            start=10,
+        ):
+            row = _snapshot(revision=revision).to_dicts()[0]
+            row["events"][0]["contributors"] = contributors
+            source = pl.DataFrame([row], schema=SCHEMA)
+            assert merge_save(self.path, source).equals(source)
+        for contributors in ([None], [""], ["Writer|fake"], ["<tag>"]):
+            row = _snapshot().to_dicts()[0]
+            row["events"][0]["contributors"] = contributors
+            with self.assertRaises(ValueError):
+                merge_save(self.path, pl.DataFrame([row], schema=SCHEMA))
+
+    def test_migration_preserves_every_legacy_version_idempotently(
+        self,
+    ) -> None:
+        """Preserve all source versions and bytes during migration."""
+        source = self.path.parent / "legacy.parquet"
+        versions = pl.concat([_snapshot(revision=10), _snapshot(revision=20)])
+        for omitted in (
+            {"contributors"},
+            {"contributors", "nominator", "main_author", "nomination_link"},
+        ):
+            with self.subTest(omitted=omitted):
+                self.path.parent.mkdir(exist_ok=True)
+                original = versions.with_columns(
+                    pl.col("events").list.eval(
+                        pl.struct(
+                            pl.element().struct.field(field)
+                            for field in EVENT_SCHEMA
+                            if field not in omitted
+                        ),
+                    ),
+                )
+                original.write_parquet(source)
+                original_bytes = source.read_bytes()
+                merge_save(self.path, _snapshot(2, revision=30))
+                migrate_history(source, self.path)
+                retained = read_versions(self.path)
+                assert retained.height == 3
+                assert set(retained["revision_id"]) == {10, 20, 30}
+                assert source.read_bytes() == original_bytes
+                first_bytes = self.path.read_bytes()
+                migrate_history(source, self.path)
+                assert self.path.read_bytes() == first_bytes
+                assert source.read_bytes() == original_bytes
+
+    def test_corrupt_migration_source_preserves_destination(self) -> None:
+        """Validate old evidence before replacing any new archive."""
+        merge_save(self.path, _snapshot())
+        original = self.path.read_bytes()
+        source = self.path.parent / "legacy.parquet"
+        source.write_bytes(b"invalid parquet")
+        with self.assertRaises(ValueError):
+            migrate_history(source, self.path)
+        assert self.path.read_bytes() == original
+        assert source.read_bytes() == b"invalid parquet"
+
+    def test_absent_migration_source_does_not_create_storage(self) -> None:
+        """Leave storage absent when no legacy data exists."""
+        migrate_history(self.path.parent / "missing.parquet", self.path)
+        assert not self.path.exists()
+
     def test_merge_keeps_departed_pages_and_rejects_stale_replacements(
         self,
     ) -> None:
@@ -137,7 +284,7 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
         source = _snapshot()
         merge_save(self.path, source)
         previous = self.path.read_bytes()
-        with patch("backend.support.newsletter_history._write") as writer:
+        with patch("backend.support.article_history._write") as writer:
             assert merge_save(self.path, source).equals(source)
             empty = pl.DataFrame(schema=SCHEMA)
             assert merge_save(self.path, empty).equals(source)
@@ -213,7 +360,7 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
         source = _snapshot()
         merge_save(self.path, source)
         with (
-            patch("backend.support.newsletter_history._MAX_BYTES", 1),
+            patch("backend.support.article_history._MAX_BYTES", 1),
             self.assertRaises(ValueError),
         ):
             load(self.path)

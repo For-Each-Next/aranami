@@ -34,6 +34,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from backend.support.events import event_extra
+from backend.support.interrupted_runs import recover_interrupted_runs
 from backend.support.logs import open_run_log
 from backend.support.schedule_status import write_schedule_status
 from shared.config import TASK_DEFINITIONS, TaskDefinition
@@ -242,6 +243,7 @@ def start(
                 clear_runtime_cache()
                 _LOGGER.info("Cleared disposable runtime cache.")
             started_at = dt.datetime.now(dt.UTC)
+            recover_interrupted_runs(before=started_at, dry=dry)
             scheduler = BackgroundScheduler(timezone=dt.UTC)
 
             shutdown_event = Event()

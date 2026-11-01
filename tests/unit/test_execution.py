@@ -818,3 +818,30 @@ class TestRoutineStatusLifecycle(TestCase):
             assert finished["duration_seconds"] >= 0
             assert context.tasks[0].updated == 1
             assert context.tasks[0].status == ("failed" if fail else "success")
+
+    @staticmethod
+    def test_saved_revision_is_kept_for_report_permalink() -> None:
+        """Persist the publisher's observed revision after saving."""
+        saved_revision = 12345
+        page = Mock(text="old", latest_revision_id=saved_revision)
+        with (
+            TemporaryDirectory() as temporary,
+            patch("pathlib.Path.cwd", return_value=Path(temporary)),
+            patch("updater.jobs._execution.pywikibot.Page", return_value=page),
+        ):
+            context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
+            assert context.publish(
+                ProposedEdit(
+                    context.site,
+                    "Target",
+                    "new",
+                    "summary",
+                    original_text="old",
+                ),
+            )
+            records = json.loads(
+                (Path(temporary) / "state/report-updates.json").read_text(),
+            )["reports"]
+            assert (
+                next(iter(records.values()))["revision_id"] == saved_revision
+            )

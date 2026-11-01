@@ -26,13 +26,19 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_ROWS = 10_000
 _RETENTION = 30 * 24 * 3600
-_PARSER_VERSION = 2
+_PARSER_VERSION = 3
+_MAX_QUESTION_BYTES = 16 * 1024
+_MAX_ACCOUNT_BYTES = 1000
+_BAD_ACCOUNT = r"[:#\[\]{}|<>\x00-\x1f\x7f]"
 ITEM_SCHEMA = {
     **dict.fromkeys(
         ("title", "review_type", "review_url", "started_at", "replied_at"),
         pl.String,
     ),
     "participant_count": pl.Int64,
+    "nominator": pl.String,
+    "contributors": pl.List(pl.String),
+    "question": pl.String,
 }
 _SCHEMA = {
     "parser_version": pl.Int64,
@@ -82,6 +88,28 @@ def _valid_items(frame: pl.DataFrame) -> bool:
         | (pl.col("replied_at") < pl.col("started_at"))
         | (pl.col("participant_count") < 1)
         | (pl.col("participant_count") > _MAX_ROWS)
+        | (pl.col("nominator").str.contains(_BAD_ACCOUNT)).fill_null(
+            value=False,
+        )
+        | (pl.col("nominator").str.len_bytes() > _MAX_ACCOUNT_BYTES).fill_null(
+            value=False,
+        )
+        | pl
+        .col("contributors")
+        .list.eval(
+            pl.element().is_null()
+            | pl.element().str.contains(_BAD_ACCOUNT)
+            | ~pl.element().str.len_bytes().is_between(1, _MAX_ACCOUNT_BYTES),
+        )
+        .list.any()
+        .fill_null(value=False)
+        | pl
+        .col("question")
+        .str.contains(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+        .fill_null(value=False)
+        | (pl.col("question").str.len_bytes() > _MAX_QUESTION_BYTES).fill_null(
+            value=False,
+        )
         | (
             pl.col("replied_at").is_not_null()
             & (pl.col("participant_count") <= 1)
@@ -233,6 +261,7 @@ class ReviewCache:
         requests: Mapping[tuple[str, str], Callable[[str], list[dict]]],
         *,
         required: bool = True,
+        include_sources: bool = False,
     ) -> list[dict[str, object]]:
         """Return current parsed facts for source and review-type pairs.
 
@@ -240,6 +269,7 @@ class ReviewCache:
             requests: Canonical source/type keys and their text parsers.
             required: Reject missing community sources; missing talk
                 pages instead receive the parser's empty-text fallback.
+            include_sources: Attach verified source identities.
 
         Returns:
             Complete parsed rows, including confirmed empty results.
@@ -276,7 +306,17 @@ class ReviewCache:
                     "used_at": self.now,
                 }
             self._rows[key]["used_at"] = self.now
-            result.extend(self._rows[key]["items"])
+            result.extend(
+                {
+                    **item,
+                    **(
+                        {"source_title": key[0], "source_revision": revision}
+                        if include_sources
+                        else {}
+                    ),
+                }
+                for item in self._rows[key]["items"]
+            )
         return result
 
     def save(self) -> None:

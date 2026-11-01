@@ -12,8 +12,9 @@ events, report outcomes, server status, and downloadable diagnostics.
 [About Aranami](https://aranami.toolforge.org/about/) describes the tool and
 credits its sources and artwork.
 The [newsletter generator](https://aranami.toolforge.org/newsletter/?issue=2027-01)
-automatically prepares the next quarterly issue's overview, quality changes,
-and announcements from wiki sources, with editable wikitext and copy controls.
+prepares quarterly drafts from retained observations, with editable wikitext,
+blank editorial templates, and a January annual feature. Source routines
+refresh the durable evidence separately from draft generation.
 
 ## Scheduled tasks
 
@@ -27,10 +28,10 @@ A successful check can finish with **no update needed**.
 | [Article assessments][assessments] | Hourly, `HH:31` | Six assessment and review lists: Bplus, BPAN, A, AL, ACC, and PPR. |
 | [Assessment change log][assessment-log] | Daily, `00:00:00` | A reusable full project assessment snapshot, plus removals, new assessments, reassessments, and renames grouped by observation date. |
 | [Pageview rankings][pageviews] | Daily cycle from `18:00`; normal first attempt `18:59`, retries at `HH:59` | Daily, weekly, monthly, seasonal, yearly, and monthly task-force rankings. |
-| [English Wikipedia comparisons][english] | Daily, `23:24` | Important and high-quality English articles, their Chinese counterparts, and relevant changes. |
+| [English Wikipedia comparisons][english] | Daily, `00:00:00`, after assessment capture | Important and high-quality English articles, their Chinese counterparts, and relevant changes. |
 | [Database reports][database] | Daily, `00:00` | Delegated refresh requests for subscribed PexBot reports within the configured project scope. |
-| [Newsletter drafts](https://aranami.toolforge.org/newsletter/) | Daily, `00:00` | Quarterly drafts through yesterday, with retained daily versions and date selection. |
-| Newsletter history archive | Hourly, `HH:00` | New or changed project talk-page histories, retained in Parquet for daily newsletter generation. |
+| [Newsletter drafts](https://aranami.toolforge.org/newsletter/) | Daily, `00:00` | Independent daily JSON histories for quarterly drafts and January's annual feature, rendered as wikitext on request. |
+| Article milestones | Hourly, `HH:00` | Shared project review and homepage actions, questions, nomination credits, and historical authorship. |
 
 New pages and Pageviews fill missing daily reports and retain confirmed
 completion across restarts. Pageviews uses an 18:00 UTC reporting boundary;

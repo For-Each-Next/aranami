@@ -6,6 +6,7 @@ import re
 import unittest
 from copy import deepcopy
 from html import unescape
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from shared.newsletter import Issue
 from updater.services.newsletter import render_issue
@@ -43,6 +44,32 @@ def _issue(*, available: bool = True) -> dict[str, object]:
 class NewsletterPresentationTests(unittest.TestCase):
     """Exercise selectable source displays and interface locales."""
 
+    def test_editorial_pages_have_localized_copy_controls(self) -> None:
+        """Show ordinary and January drafts in every locale."""
+        for value, suffixes in (
+            ("2027-01", ("專題",)),
+            ("2027-04", ("專題", "訪談")),
+        ):
+            issue = Issue.parse(value)
+            result = render_issue(issue, {"issue": value, "available": True})
+            assert [item["label"] for item in result["pages"][3:]] == list(
+                suffixes,
+            )
+            for locale, feature, interview in (
+                ("en", "Feature", "Interview"),
+                ("zh-hans", "专题", "访谈"),
+                ("zh-hant", "專題", "訪談"),
+            ):
+                with self.subTest(issue=value, locale=locale):
+                    output = render_newsletter(result, locale)
+                    assert f'newsletter-heading-4">{feature}</h2>' in output
+                    assert (
+                        f'newsletter-heading-5">{interview}</h2>' in output
+                    ) == (issue.month != 1)
+                    assert output.count("data-newsletter-copy=") == (
+                        2 * len(issue.draft_suffixes)
+                    )
+
     @staticmethod
     def test_evidence_is_retained_without_displaying_sources() -> None:
         """Keep internal evidence while omitting its UI section."""
@@ -61,6 +88,7 @@ class NewsletterPresentationTests(unittest.TestCase):
         facts = {
             "issue": "2027-01",
             "available": True,
+            "observation_end": "2026-10-16",
             "sources": [main],
             "homepage_sources": {
                 "news": {"sources": [news, {**main, "label": "Duplicate"}]},
@@ -70,6 +98,8 @@ class NewsletterPresentationTests(unittest.TestCase):
         original = deepcopy(facts)
         result = render_issue(Issue.parse("2027-01"), facts)
         assert result["sources"] == [main, news, history]
+        assert result["data_through"] == "2026-10-15"
+        assert render_issue(Issue.parse("2027-01"))["data_through"] is None
         output = render_newsletter(result, "en")
         for source in (main, news, history):
             assert source["url"] not in output
@@ -98,13 +128,15 @@ class NewsletterPresentationTests(unittest.TestCase):
             assert unescape(text) == page["text"]
         assert "<script>alert(1)</script>" not in output
         assert 'action="/newsletter/" method="get"' in output
-        assert 'type="radio"' in output
+        assert '<select id="newsletter-issue"' in output
+        assert 'type="radio"' not in output
         assert 'name="issue"' in output
         assert 'value="2027-01"' in output
         assert 'src="/newsletter.js" defer' in output
         assert value["period"] not in output
         assert "oldid=123" not in output
-        assert output.count("data-newsletter-copy=") == len(displays)
+        assert output.count("data-newsletter-copy=") == 2 * len(displays)
+        assert "newsletter-destination" not in output
         assert "<textarea" not in output
 
     def test_missing_data_in_all_locales(self) -> None:
@@ -124,40 +156,113 @@ class NewsletterPresentationTests(unittest.TestCase):
                 assert "source-updated" not in output
                 assert "{{模板|標題}}" not in output
 
-    def test_copy_buttons_have_translated_labels_and_primary_style(
+    def test_copy_buttons_have_labels_styles_and_safe_edit_destinations(
         self,
     ) -> None:
-        """Render copy translations instead of the dictionary method."""
-        expected_classes = {
-            "cdx-button",
-            "cdx-button--action-progressive",
-            "cdx-button--weight-primary",
-        }
-        for locale, label in (
-            ("en", "Copy wikitext"),
-            ("zh-hans", "复制维基代码"),
-            ("zh-hant", "複製維基代碼"),
+        """Distinguish copying code from opening its wiki editor."""
+        for locale, copy_label, edit_label in (
+            ("en", "Copy code", "Copy and open newsletter page"),
+            ("zh-hans", "复制代码", "复制并前往简讯页"),
+            ("zh-hant", "複製代碼", "複製並前往簡訊頁"),
         ):
             with self.subTest(locale=locale):
-                output = render_newsletter(_issue(), locale)
+                value = _issue()
+                value["pages"][0]["title"] += ' " & <Test>'
+                output = render_newsletter(value, locale)
                 buttons = re.findall(
                     r'<button\b([^>]*data-newsletter-copy="[^"]+"[^>]*)>'
                     r"(.*?)</button>",
                     output,
                     re.DOTALL,
                 )
-                assert len(buttons) == len(_issue()["pages"])
-                for attributes, text in buttons:
-                    assert unescape(text).strip() == label
-                    classes = re.search(r'class="([^"]+)"', attributes)
-                    assert classes is not None
-                    assert expected_classes <= set(classes[1].split())
+                assert len(buttons) == 2 * len(value["pages"])
+                for copy, edit, page in zip(
+                    buttons[::2],
+                    buttons[1::2],
+                    value["pages"],
+                    strict=True,
+                ):
+                    for (attributes, text), label, action, weight in (
+                        (copy, copy_label, "default", "normal"),
+                        (edit, edit_label, "progressive", "primary"),
+                    ):
+                        assert unescape(text).strip() == label
+                        classes = re.search(r'class="([^"]+)"', attributes)
+                        assert classes is not None
+                        assert {
+                            "cdx-button",
+                            f"cdx-button--action-{action}",
+                            f"cdx-button--weight-{weight}",
+                        } <= set(classes[1].split())
+                        assert "hidden" in attributes
+                    assert "data-newsletter-edit=" not in copy[0]
+                    target = re.search(
+                        r'data-newsletter-edit="([^"]+)"',
+                        edit[0],
+                    )
+                    assert target is not None
+                    url = urlsplit(unescape(target[1]))
+                    assert url.scheme == "https"
+                    assert url.netloc == "zh.wikipedia.org"
+                    assert unquote(url.path.removeprefix("/wiki/")) == (
+                        page["title"].replace(" ", "_")
+                    )
+                    assert parse_qs(url.query) == {
+                        "action": ["edit"],
+                        "summary": [
+                            {
+                                "en": "Updated newsletter draft",
+                                "zh-hans": "更新简讯草稿",
+                                "zh-hant": "更新簡訊草稿",
+                            }[locale],
+                        ],
+                    }
+                assert "newsletter-destination" not in output
                 assert "built-in method" not in unescape(output)
 
-    def test_saved_issue_navigation_requires_explicit_submission(
+    def test_edit_summary_uses_the_actual_data_date(self) -> None:
+        """Prefer archived data dates over generation timestamps."""
+        for locale, current_summary, archived_summary in (
+            (
+                "en",
+                "Updated through October 15, 2026",
+                "Updated through October 14, 2026",
+            ),
+            ("zh-hans", "更新至2026年10月15日", "更新至2026年10月14日"),
+            ("zh-hant", "更新至2026年10月15日", "更新至2026年10月14日"),
+        ):
+            for archived in (False, True):
+                with self.subTest(locale=locale, archived=archived):
+                    value = _issue()
+                    value["data_through"] = "2026-10-15"
+                    if archived:
+                        value["draft_history"] = {
+                            "dates": ["2026-10-14"],
+                            "selected_date": "2026-10-14",
+                            "generated_at": "2027-01-01T00:00:00+00:00",
+                            "missing": False,
+                        }
+                    output = render_newsletter(value, locale)
+                    targets = re.findall(
+                        r'data-newsletter-edit="([^"]+)"',
+                        output,
+                    )
+                    assert len(targets) == len(value["pages"])
+                    for target in targets:
+                        assert "&amp;summary=" in target
+                        assert parse_qs(urlsplit(unescape(target)).query) == {
+                            "action": ["edit"],
+                            "summary": [
+                                archived_summary
+                                if archived
+                                else current_summary,
+                            ],
+                        }
+
+    def test_issue_menu_preserves_native_submission_fallback(
         self,
     ) -> None:
-        """Keep issue changes pending until the reader submits them."""
+        """Keep the issue menu usable before script enhancement."""
         for locale in ("en", "zh-hans", "zh-hant"):
             with self.subTest(locale=locale):
                 value = _issue()
@@ -172,10 +277,29 @@ class NewsletterPresentationTests(unittest.TestCase):
                     "newsletter-editorial",
                     "newsletter-edit-help",
                     "newsletter-quarter-help",
-                    'class="notice"',
                 ):
                     assert removed not in output
-                assert 'name="issue" type="radio"' in output
+                assert (
+                    '<select id="newsletter-issue" class="cdx-select" '
+                    'name="issue" required>' in output
+                )
+                assert '<option value="2027-01" selected>' in output
+                issue_form = re.search(
+                    r"<form[^>]*data-newsletter-issue-form>(.*?)</form>",
+                    output,
+                    re.DOTALL,
+                )
+                assert issue_form is not None
+                submit = re.search(
+                    r'<button type="submit"([^>]*)>',
+                    issue_form[1],
+                )
+                assert submit is not None
+                assert "hidden" not in submit[1]
+                assert (
+                    '<p class="notice" role="status" hidden '
+                    "data-newsletter-load-status" in output
+                )
                 assert "newsletter-code-label" not in output
                 identifiers = set(re.findall(r'\bid="([^"]+)"', output))
                 for reference in re.findall(
@@ -216,13 +340,14 @@ class NewsletterPresentationTests(unittest.TestCase):
                 assert "hidden" not in form[1]
                 assert 'name="date" type="date"' in form[2]
                 assert 'value="2026-10-30"' in form[2]
-                assert 'min="2026-10-28" max="2026-10-30"' in form[2]
+                assert 'min="2026-01-01" max="2026-12-31"' in form[2]
                 assert 'name="issue" value="2027-01"' in form[2]
                 assert f'name="lang" value="{locale}"' in form[2]
                 assert 'type="submit"' in form[2]
                 assert label in form[2]
-                assert "data-newsletter-calendar" in form[2]
-                assert 'data-dates=\'["2026-10-28", "2026-10-30"]\'' in form[2]
+                assert "data-newsletter-calendar" not in form[2]
+                assert output.count('name="date"') == 1
+                assert 'name="feature_date"' not in output
                 assert through in output
                 assert generated in output
                 assert 'datetime="2026-10-30"' in output

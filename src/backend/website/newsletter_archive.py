@@ -1,13 +1,13 @@
-"""Retain daily newsletter facts and the original projected drafts.
+"""Retain newsletter facts for rendering when queried.
 
 Call ``save`` before replacing the latest dashboard snapshot. Each issue
-keeps its first complete observation for a reporting day. Readers return
-saved facts and actual times without fetching sources or reconstructing
-unavailable earlier days.
+keeps its first complete observation for a reporting day, with January's
+annual facts on a separate year-long calendar. Readers validate saved
+facts and capture times without fetching sources or writing files.
 """
 
-# Public readers propagate their safe filesystem helpers' exceptions.
-# ruff: file-ignore[docstring-extraneous-exception]
+# Malformed saved JSON consistently raises ValueError.
+# ruff: file-ignore[docstring-extraneous-exception, type-check-without-type-error]
 
 from __future__ import annotations
 
@@ -19,21 +19,26 @@ import os
 import re
 import stat
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from backend.website.newsletter import valid_newsletter
-from shared.newsletter import ROOT, SUFFIXES, Issue
-from shared.support.files import read_json_object
+from backend.support.newsletter_data import OBSERVATIONS_PATH
+from backend.support.newsletter_observations import migrate_observations
+from backend.website.newsletter import _valid_year_review, valid_newsletter
+from shared.newsletter import Issue
+from shared.support.files import read_json_object, staging_directory
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Iterator
 
-DEFAULT_PATH = Path("reports/newsletter-drafts-v1")
+DEFAULT_PATH = Path("reports/records/newsletter")
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_INDEX_BYTES = 64 * 1024
 _MAX_DATES = 92
 _DIGEST = re.compile(r"[0-9a-f]{64}")
+_MAX_ISSUES = 400
+_MAX_FEATURE_DATES = 366
 
 
 def _encoded(value: dict) -> bytes:
@@ -45,6 +50,19 @@ def _encoded(value: dict) -> bytes:
         separators=(",", ":"),
         allow_nan=False,
     ).encode()
+
+
+def _date_directory(directory: Path, value: str) -> Path:
+    """Resolve a compact UTC date folder with legacy read access.
+
+    Returns:
+        Existing date folder, or the new compact destination.
+    """
+    compact = directory / dt.date.fromisoformat(value).strftime("%Y%m%d")
+    if compact.exists() or compact.is_symlink():
+        return compact
+    legacy = directory / value
+    return legacy if legacy.exists() or legacy.is_symlink() else compact
 
 
 def _date(issue: Issue, value: str) -> dt.date:
@@ -59,6 +77,26 @@ def _date(issue: Issue, value: str) -> dt.date:
     day = dt.date.fromisoformat(value)
     if day.isoformat() != value or not issue.start <= day < issue.end:
         message = "The daily draft date is outside its reporting quarter."
+        raise ValueError(message)
+    return day
+
+
+def _feature_date(issue: Issue, value: str) -> dt.date:
+    """Validate an annual feature date independently of the quarter.
+
+    Returns:
+        A canonical day within the January issue's reviewed year.
+
+    Raises:
+        ValueError: The issue or day falls outside the annual span.
+    """
+    day = dt.date.fromisoformat(value)
+    if (
+        issue.month != 1
+        or day.isoformat() != value
+        or not dt.date(issue.year - 1, 1, 1) <= day < issue.end
+    ):
+        message = "The feature date must belong to its reviewed year."
         raise ValueError(message)
     return day
 
@@ -91,12 +129,15 @@ def _atomic_json(path: Path, value: dict) -> None:
     """
     payload = _encoded(value)
     if len(payload) > _MAX_BYTES:
-        message = "The daily newsletter draft exceeds its size limit."
+        message = "The daily newsletter observation exceeds its size limit."
         raise ValueError(message)
+    if path.is_symlink() or path.parent.is_symlink():
+        message = "Newsletter observations require regular paths."
+        raise OSError(message)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(
-            dir=path.parent,
+            dir=staging_directory(path),
             prefix=f".{path.name}.",
             delete=False,
         ) as stream:
@@ -110,48 +151,126 @@ def _atomic_json(path: Path, value: dict) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def _valid_rendered(issue: Issue, facts: dict, rendered: dict) -> bool:
-    """Check a captured projection against its issue and source facts.
+@contextmanager
+def _locked(directory: Path) -> Iterator[None]:
+    """Serialize capture and catalog selection in one safe directory.
+
+    Yields:
+        Control while the directory's exclusive lock is held.
+
+    Raises:
+        OSError: The lock path is unsafe or unavailable.
+    """
+    descriptor = os.open(
+        directory / ".lock",
+        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+        0o600,
+    )
+    with os.fdopen(descriptor, "a+b") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            message = "Newsletter locks must be regular files."
+            raise OSError(message)
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        yield
+
+
+def _feature_record(issue: Issue, review: dict, stamp: str) -> dict:
+    """Validate annual facts and bind their original capture metadata.
 
     Returns:
-        Whether the projection supplies complete presentation fields.
+        Structured annual observations with a source-facts digest.
+
+    Raises:
+        ValueError: Annual facts or capture dates are invalid.
     """
-    if (
-        rendered.get("issue") != issue.value
-        or rendered.get("available") is not True
-        or rendered.get("updated_at") != facts["updated_at"]
-        or rendered.get("complete") is not facts["complete"]
+    through = dt.date.fromisoformat(review["observation_end"])
+    day = _feature_date(issue, (through - dt.timedelta(days=1)).isoformat())
+    captured = dt.datetime.fromisoformat(stamp)
+    if not _stamp(stamp, day) or not _valid_year_review(
+        review,
+        issue,
+        through,
+        captured,
     ):
-        return False
-    pages = rendered.get("pages")
-    sources = rendered.get("sources")
+        message = "The annual feature capture is invalid."
+        raise ValueError(message)
+    return {
+        "schema": 2,
+        "issue": issue.value,
+        "date": day.isoformat(),
+        "generated_at": stamp,
+        "year_review": review,
+        "sha256": hashlib.sha256(_encoded(review)).hexdigest(),
+    }
+
+
+def _write_record(directory: Path, filename: str, record: dict) -> None:
+    """Write structured facts before their calendar is advanced.
+
+    Raises:
+        OSError: A date folder is unsafe or storage fails.
+    """
+    destination = _date_directory(directory, record["date"])
+    if destination.is_symlink():
+        message = "Newsletter date folders cannot be symlinks."
+        raise OSError(message)
+    destination.mkdir(mode=0o700, exist_ok=True)
+    _atomic_json(destination / filename, record)
+
+
+def _calendar_entry(record: dict) -> dict:
+    """Return the metadata used to select an immutable observation."""
+    return {key: record[key] for key in ("generated_at", "sha256")}
+
+
+def _select(directory: Path, issue: Issue, dates: dict, record: dict) -> None:
+    """Atomically select a complete observation in its date catalog."""
+    dates[record["date"]] = _calendar_entry(record)
+    _atomic_json(
+        directory / "catalog.json",
+        {"schema": 1, "issue": issue.value, "dates": dates},
+    )
+
+
+def _catalog(directory: Path, issue: Issue, *, annual: bool = False) -> dict:
+    """Read a bounded calendar without creating storage.
+
+    Returns:
+        Validated capture metadata keyed by reporting date.
+
+    Raises:
+        ValueError: Calendar identities, dates, or hashes are invalid.
+    """
+    try:
+        value = read_json_object(directory / "catalog.json", _MAX_INDEX_BYTES)
+    except FileNotFoundError:
+        return {}
+    dates = value.get("dates")
+    maximum = _MAX_FEATURE_DATES if annual else _MAX_DATES
     if (
-        not isinstance(rendered.get("period"), str)
-        or not isinstance(pages, list)
-        or len(pages) != len(SUFFIXES)
-        or not isinstance(sources, list)
+        type(value.get("schema")) is not int
+        or value["schema"] != 1
+        or value.get("issue") != issue.value
+        or not isinstance(dates, dict)
+        or len(dates) > maximum
     ):
-        return False
-    page_fields = all(
-        isinstance(page, dict)
-        and page.get("title")
-        == f"{ROOT}/{issue.value}" + (f"/{suffix}" if suffix else "")
-        and page.get("label") == (suffix or "主頁")
-        and page.get("url") == issue.page_url(suffix)
-        and isinstance(page.get("text"), str)
-        for page, suffix in zip(pages, SUFFIXES, strict=True)
-    )
-    return page_fields and all(
-        isinstance(source, dict)
-        and isinstance(source.get("label"), str)
-        and isinstance(source.get("url"), str)
-        and source["url"].startswith("https://zh.wikipedia.org/")
-        for source in sources
-    )
+        message = "The newsletter calendar is invalid."
+        raise ValueError(message)
+    for key, entry in dates.items():
+        day = _feature_date(issue, key) if annual else _date(issue, key)
+        if (
+            not isinstance(entry, dict)
+            or not _stamp(entry.get("generated_at"), day)
+            or not isinstance(entry.get("sha256"), str)
+            or _DIGEST.fullmatch(entry["sha256"]) is None
+        ):
+            message = "Newsletter calendar evidence is invalid."
+            raise ValueError(message)
+    return dates
 
 
 class NewsletterDraftArchive:
-    """Save and read each issue's immutable daily observations."""
+    """Save and read immutable daily newsletter facts as JSON."""
 
     def __init__(self, path: Path | None = DEFAULT_PATH) -> None:
         """Configure durable storage without creating files.
@@ -184,54 +303,46 @@ class NewsletterDraftArchive:
             directory.mkdir(mode=0o700, exist_ok=True)
         return directory
 
-    def _catalog(self, issue: Issue) -> dict:
-        """Read a bounded catalog without creating directories.
+    def _feature_directory(
+        self,
+        issue: Issue,
+        *,
+        create: bool = False,
+    ) -> Path:
+        """Resolve the annual stream without expanding quarters.
 
         Returns:
-            Validated observation metadata keyed by reporting date.
+            A checked annual-feature directory.
 
         Raises:
-            OSError: A present catalog is unsafe or unreadable.
-            ValueError: Catalog metadata is invalid.
+            OSError: A stream directory is unsafe.
+            ValueError: The issue is not January.
         """
-        path = self._directory(issue) / "catalog.json"
-        try:
-            catalog = read_json_object(path, _MAX_INDEX_BYTES)
-        except FileNotFoundError:
-            return {}
-        dates = catalog.get("dates")
-        if (
-            type(catalog.get("schema")) is not int
-            or catalog["schema"] != 1
-            or catalog.get("issue") != issue.value
-            or not isinstance(dates, dict)
-            or len(dates) > _MAX_DATES
-        ):
-            message = "The daily newsletter catalog is invalid."
+        if issue.month != 1:
+            message = "Only January issues have annual feature archives."
             raise ValueError(message)
-        for value, entry in dates.items():
-            day = _date(issue, value)
-            if (
-                not isinstance(entry, dict)
-                or not _stamp(entry.get("generated_at"), day)
-                or not isinstance(entry.get("sha256"), str)
-                or _DIGEST.fullmatch(entry["sha256"]) is None
-            ):
-                message = "The daily newsletter catalog has invalid evidence."
-                raise ValueError(message)
-        return dates
+        path = self._directory(issue, create=create) / "annual-feature"
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            message = "Annual feature folders must be real directories."
+            raise OSError(message)
+        if create:
+            path.mkdir(mode=0o700, exist_ok=True)
+        return path
+
+    def _catalog(self, issue: Issue) -> dict:
+        """Return the validated quarterly date catalog."""
+        return _catalog(self._directory(issue), issue)
+
+    def _feature_catalog(self, issue: Issue) -> dict:
+        """Return the validated year-long feature catalog."""
+        return _catalog(self._feature_directory(issue), issue, annual=True)
 
     @staticmethod
-    def _record(
-        issue: Issue,
-        facts: dict,
-        generated_at: str,
-        rendered: dict | None = None,
-    ) -> dict:
+    def _record(issue: Issue, facts: dict, generated_at: str) -> dict:
         """Validate facts and derive their completed reporting day.
 
         Returns:
-            An envelope with its capture time and content digest.
+            An envelope with its capture time and source-facts digest.
 
         Raises:
             ValueError: The facts lack available completed data.
@@ -247,82 +358,106 @@ class NewsletterDraftArchive:
         if not _stamp(generated_at, day) or dt.datetime.fromisoformat(
             generated_at,
         ) < dt.datetime.fromisoformat(facts["updated_at"]):
-            message = "The daily draft capture time precedes its observation."
-            raise ValueError(message)
-        if rendered is not None and not _valid_rendered(
-            issue,
-            facts,
-            rendered,
-        ):
-            message = "The projected daily newsletter draft is invalid."
+            message = "The daily capture time precedes its observation."
             raise ValueError(message)
         return {
-            "schema": 1,
+            "schema": 2,
             "issue": issue.value,
             "date": day.isoformat(),
             "generated_at": generated_at,
-            "sha256": hashlib.sha256(
-                _encoded({"facts": facts, "rendered": rendered}),
-            ).hexdigest(),
+            "sha256": hashlib.sha256(_encoded(facts)).hexdigest(),
             "facts": facts,
-            "rendered": rendered,
         }
 
     def _read_record(self, issue: Issue, day: dt.date) -> dict:
-        """Read and validate one immutable observation envelope.
+        """Validate current or legacy daily facts without using outputs.
 
         Returns:
-            The complete validated envelope.
+            A validated envelope containing facts and capture metadata.
+            Legacy output hashes remain only as catalog identities.
 
         Raises:
-            OSError: The saved observation is unsafe or unreadable.
-            ValueError: The facts, hash, or requested identity differ.
+            ValueError: Facts, hashes, or the requested identity differ.
+            OSError: A stored path is unsafe or unreadable.
         """
-        value = read_json_object(
-            self._directory(issue) / f"{day.isoformat()}.json",
-            _MAX_BYTES,
-        )
-        if type(value.get("schema")) is not int:
-            message = "The daily newsletter schema is invalid."
+        directory = self._directory(issue)
+        destination = _date_directory(directory, day.isoformat())
+        if destination.is_symlink():
+            message = "Newsletter date folders cannot be symlinks."
+            raise OSError(message)
+        path = destination / "observation.json"
+        if not path.exists() and not path.is_symlink():
+            path = directory / f"{day.isoformat()}.json"
+        value = read_json_object(path, _MAX_BYTES)
+        facts, generated = value.get("facts"), value.get("generated_at")
+        if not isinstance(facts, dict) or not isinstance(generated, str):
+            message = "The daily observation has invalid facts or time."
             raise ValueError(message)
-        facts = value.get("facts")
-        if not isinstance(facts, dict) or not facts:
-            message = "The daily newsletter observation has no valid facts."
+        expected = self._record(issue, facts, generated)
+        if type(value.get("schema")) is int and value["schema"] == 1:
+            rendered = value.get("rendered")
+            if rendered is not None and not isinstance(rendered, dict):
+                message = "Legacy newsletter output has an invalid shape."
+                raise ValueError(message)
+            digest = hashlib.sha256(
+                _encoded({"facts": facts, "rendered": rendered}),
+            ).hexdigest()
+            legacy = {
+                **expected,
+                "schema": 1,
+                "sha256": digest,
+                "rendered": rendered,
+                **(
+                    {"wikitext": True} if value.get("wikitext") is True else {}
+                ),
+            }
+            if value != legacy:
+                message = "Legacy newsletter facts failed verification."
+                raise ValueError(message)
+            expected = {
+                key: item
+                for key, item in legacy.items()
+                if key not in {"rendered", "wikitext"}
+            }
+        elif value != expected:
+            message = "Newsletter facts failed verification."
             raise ValueError(message)
-        rendered = value.get("rendered")
-        if rendered is not None and not isinstance(rendered, dict):
-            message = "The daily newsletter draft has invalid projected text."
+        if expected["date"] != day.isoformat():
+            message = "Newsletter facts belong to a different date."
             raise ValueError(message)
-        generated = value.get("generated_at")
-        if not isinstance(generated, str) or not generated:
-            message = "The daily newsletter draft has no capture time."
-            raise ValueError(message)
-        expected = self._record(issue, facts, generated, rendered)
-        if value != expected or value["date"] != day.isoformat():
-            message = "The daily newsletter observation has invalid evidence."
-            raise ValueError(message)
-        return value
+        return expected
 
     def available_dates(self, issue: Issue) -> list[str]:
-        """List saved reporting dates for an issue, oldest first.
+        """List actual quarterly reporting dates, oldest first.
 
         Args:
-            issue: Quarterly publication whose catalog is being read.
+            issue: Publication whose date catalog is being read.
 
         Returns:
-            Canonical dates, empty when none have been retained.
-
-        Raises:
-            OSError: A present catalog is unsafe or unreadable.
-            ValueError: The catalog is corrupt or out of bounds.
+            Canonical dates, empty before the first capture.
         """
         return sorted(self._catalog(issue)) if self.path is not None else []
+
+    def feature_dates(self, issue: Issue) -> list[str]:
+        """List actual annual captures from January through December.
+
+        Args:
+            issue: January publication whose preceding year is reviewed.
+
+        Returns:
+            Actual saved dates, without invented historical days.
+        """
+        return (
+            sorted(self._feature_catalog(issue))
+            if self.path is not None
+            else []
+        )
 
     def identity(self, issue: Issue) -> tuple[int, int, int, int] | None:
         """Describe the saved calendar revision for page caching.
 
         Args:
-            issue: Publication whose catalog is being observed.
+            issue: Publication whose calendar is being observed.
 
         Returns:
             Device, inode, size, modification time, or none if absent.
@@ -348,53 +483,18 @@ class NewsletterDraftArchive:
             metadata.st_mtime_ns,
         )
 
-    def read(self, issue: Issue, day: dt.date) -> dict | None:
-        """Read archived draft facts without fetching source data.
-
-        Args:
-            issue: Quarterly publication containing the reporting date.
-            day: Inclusive completed UTC reporting date.
-
-        Returns:
-            Original issue facts, or none for a date never archived.
-
-        Raises:
-            OSError: The catalog or observation is unsafe/unreadable.
-            ValueError: The date, facts, or stored evidence are invalid.
-        """
-        record = self.read_entry(issue, day)
-        return record["facts"] if record is not None else None
-
-    def read_rendered(self, issue: Issue, day: dt.date) -> dict | None:
-        """Return the original projected text when it was captured.
-
-        Args:
-            issue: Quarterly publication containing the reporting date.
-            day: Inclusive completed UTC reporting date.
-
-        Returns:
-            The original rendered draft, or none if it was not retained.
-
-        Raises:
-            OSError: The catalog or observation is unsafe/unreadable.
-            ValueError: The date, facts, or stored evidence are invalid.
-        """
-        record = self.read_entry(issue, day)
-        return record["rendered"] if record is not None else None
-
     def read_entry(self, issue: Issue, day: dt.date) -> dict | None:
-        """Read original facts and projected draft with their times.
+        """Read saved structured facts and capture evidence.
 
         Args:
             issue: Quarterly publication containing the reporting date.
             day: Inclusive completed UTC reporting date.
 
         Returns:
-            The validated envelope, or none for a date never retained.
+            Validated facts and metadata, or none for an uncaptured day.
 
         Raises:
-            OSError: The catalog or observation is unsafe/unreadable.
-            ValueError: The date, facts, or stored evidence are invalid.
+            ValueError: Date, facts, or calendar evidence is invalid.
         """
         _date(issue, day.isoformat())
         if self.path is None:
@@ -403,30 +503,172 @@ class NewsletterDraftArchive:
         if entry is None:
             return None
         record = self._read_record(issue, day)
-        if entry != {
-            "generated_at": record["generated_at"],
-            "sha256": record["sha256"],
-        }:
-            message = "The daily newsletter catalog and observation differ."
+        if entry != _calendar_entry(record):
+            message = "Newsletter calendar and observation differ."
             raise ValueError(message)
         return record
+
+    def read(self, issue: Issue, day: dt.date) -> dict | None:
+        """Read archived issue facts without fetching source data.
+
+        Args:
+            issue: Quarterly publication containing the reporting date.
+            day: Inclusive completed UTC reporting date.
+
+        Returns:
+            Original issue facts, or none for an uncaptured date.
+        """
+        record = self.read_entry(issue, day)
+        return record["facts"] if record is not None else None
+
+    def _read_feature(self, issue: Issue, day: dt.date) -> dict:
+        """Validate annual facts independently of old output files.
+
+        Returns:
+            Review facts and capture metadata without generated text.
+
+        Raises:
+            ValueError: Stored facts or identity fail verification.
+            OSError: A saved path is unsafe or unreadable.
+        """
+        directory = _date_directory(
+            self._feature_directory(issue),
+            day.isoformat(),
+        )
+        if directory.is_symlink():
+            message = "Annual feature date folders cannot be symlinks."
+            raise OSError(message)
+        value = read_json_object(directory / "metadata.json", _MAX_BYTES)
+        try:
+            expected = _feature_record(
+                issue,
+                value["year_review"],
+                value["generated_at"],
+            )
+        except KeyError, TypeError:
+            message = "Annual feature metadata is invalid."
+            raise ValueError(message) from None
+        if type(value.get("schema")) is int and value["schema"] == 1:
+            digest = value.get("sha256")
+            legacy = {
+                **expected,
+                "schema": 1,
+                "sha256": digest,
+                "facts_sha256": expected["sha256"],
+            }
+            if (
+                not isinstance(digest, str)
+                or _DIGEST.fullmatch(digest) is None
+                or value != legacy
+            ):
+                message = "Legacy annual facts failed verification."
+                raise ValueError(message)
+            expected = {
+                key: item
+                for key, item in legacy.items()
+                if key != "facts_sha256"
+            }
+        elif value != expected:
+            message = "Annual facts failed verification."
+            raise ValueError(message)
+        if expected["date"] != day.isoformat():
+            message = "Annual facts belong to a different date."
+            raise ValueError(message)
+        return expected
+
+    def read_feature(self, issue: Issue, day: dt.date) -> dict | None:
+        """Read one annual review's saved structured facts.
+
+        Args:
+            issue: January publication containing the annual feature.
+            day: Completed date within its preceding calendar year.
+
+        Returns:
+            Original review facts and capture time, or none.
+
+        Raises:
+            ValueError: The date or saved evidence is invalid.
+        """
+        _feature_date(issue, day.isoformat())
+        if self.path is None:
+            return None
+        entry = self._feature_catalog(issue).get(day.isoformat())
+        if entry is None:
+            return None
+        record = self._read_feature(issue, day)
+        if entry != _calendar_entry(record):
+            message = "Annual feature calendar and facts differ."
+            raise ValueError(message)
+        return record
+
+    def save_feature(
+        self,
+        issue: Issue,
+        review: dict,
+        *,
+        generated_at: dt.datetime,
+    ) -> None:
+        """Save the first annual fact observation for a completed day.
+
+        Args:
+            issue: January publication containing the annual feature.
+            review: Annual facts with an exclusive observation end.
+            generated_at: Actual aware capture time, retained in UTC.
+
+        Raises:
+            ValueError: Facts or capture evidence are invalid.
+            OSError: Safe locking or atomic storage fails.
+        """
+        if self.path is None:
+            return
+        if generated_at.tzinfo is None or generated_at.utcoffset() is None:
+            message = "Annual capture requires an aware timestamp."
+            raise ValueError(message)
+        record = _feature_record(
+            issue,
+            review,
+            generated_at.astimezone(dt.UTC).isoformat(timespec="seconds"),
+        )
+        directory = self._feature_directory(issue, create=True)
+        with _locked(directory):
+            dates = self._feature_catalog(issue)
+            day = dt.date.fromisoformat(record["date"])
+            if record["date"] in dates:
+                self.read_feature(issue, day)
+                return
+            try:
+                record = self._read_feature(issue, day)
+            except FileNotFoundError:
+                _write_record(directory, "metadata.json", record)
+            _select(directory, issue, dates, record)
+
+    def _capture_feature(
+        self,
+        issue: Issue,
+        facts: dict,
+        generated: dt.datetime,
+    ) -> None:
+        """Capture annual facts before the independent quarter gate."""
+        review = facts.get("year_review")
+        if issue.month != 1 or not isinstance(review, dict):
+            return
+        through = dt.date.fromisoformat(review["observation_end"])
+        if through > dt.date(issue.year - 1, 1, 1):
+            self.save_feature(issue, review, generated_at=generated)
 
     def save(
         self,
         data: dict,
         *,
-        projector: Callable[[Issue, dict], dict] | None = None,
         generated_at: dt.datetime | None = None,
     ) -> None:
-        """Retain an issue's first complete observation for each day.
+        """Retain each day's first complete structured observations.
 
         Args:
-            data: Validated newsletter result containing issue facts.
-                Unavailable issues and unelapsed quarters make no files.
-            projector: Optional caller-owned wikitext renderer, invoked
-                only when capturing a new daily observation.
-            generated_at: Actual capture time, separate from the facts'
-                source observation. Defaults to the current UTC clock.
+            data: Valid newsletter facts; unelapsed quarterly dates are
+                skipped independently of the annual feature stream.
+            generated_at: Actual aware capture time. Defaults to the
+                current UTC clock, separate from source observations.
 
         Raises:
             OSError: Safe locking or atomic storage fails.
@@ -439,11 +681,13 @@ class NewsletterDraftArchive:
             raise ValueError(message)
         generated = generated_at or dt.datetime.now(dt.UTC)
         if generated.tzinfo is None or generated.utcoffset() is None:
-            message = "Daily draft capture requires an aware UTC timestamp."
+            message = "Daily capture requires an aware timestamp."
             raise ValueError(message)
-        stamp = generated.astimezone(dt.UTC).isoformat(timespec="seconds")
+        generated = generated.astimezone(dt.UTC)
+        stamp = generated.isoformat(timespec="seconds")
         for key, facts in data["issues"].items():
             issue = Issue.parse(key)
+            self._capture_feature(issue, facts, generated)
             if (
                 not facts["available"]
                 or dt.date.fromisoformat(facts["observation_end"])
@@ -452,38 +696,407 @@ class NewsletterDraftArchive:
                 continue
             record = self._record(issue, facts, stamp)
             directory = self._directory(issue, create=True)
-            descriptor = os.open(
-                directory / ".lock",
-                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-                0o600,
-            )
-            with os.fdopen(descriptor, "a+b") as stream:
-                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                    message = "Daily newsletter locks must be regular files."
-                    raise OSError(message)
-                fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            with _locked(directory):
                 dates = self._catalog(issue)
                 day = _date(issue, record["date"])
-                if day.isoformat() in dates:
-                    self.read(issue, day)
+                if record["date"] in dates:
+                    self.read_entry(issue, day)
                     continue
-                path = directory / f"{day.isoformat()}.json"
                 try:
-                    # Recover the first copy after an incomplete write.
                     record = self._read_record(issue, day)
                 except FileNotFoundError:
-                    record = self._record(
-                        issue,
-                        facts,
-                        stamp,
-                        projector(issue, facts) if projector else None,
-                    )
-                    _atomic_json(path, record)
-                dates[day.isoformat()] = {
-                    "generated_at": record["generated_at"],
-                    "sha256": record["sha256"],
-                }
-                _atomic_json(
-                    directory / "catalog.json",
-                    {"schema": 1, "issue": issue.value, "dates": dates},
+                    _write_record(directory, "observation.json", record)
+                _select(directory, issue, dates, record)
+
+    def _saved_issues(self, issue: Issue | None) -> list[Issue]:
+        """Enumerate bounded canonical archive folders.
+
+        Returns:
+            Selected issues without inspecting unrelated files.
+
+        Raises:
+            OSError: The archive root is unsafe.
+            ValueError: Too many entries exist.
+        """
+        if self.path is None:
+            return []
+        issues = [issue] if issue is not None else []
+        if issue is None:
+            if self.path.is_symlink():
+                message = "Daily newsletter folders cannot be symlinks."
+                raise OSError(message)
+            with os.scandir(self.path) as entries:
+                for index, entry in enumerate(entries, 1):
+                    if re.fullmatch(r"[0-9]{4}-(01|04|07|10)", entry.name):
+                        issues.append(Issue.parse(entry.name))
+                    if index > _MAX_ISSUES:
+                        message = "Newsletter issue count exceeds its bound."
+                        raise ValueError(message)
+        return issues
+
+    def _migration_dates(
+        self,
+        issue: Issue,
+        *,
+        annual: bool = False,
+    ) -> set[str]:
+        """Include orphan captures left by interrupted calendar writes.
+
+        Returns:
+            Bounded dates, validated when their facts are read.
+
+        Raises:
+            ValueError: Too many dates exist in one stream.
+        """
+        directory = (
+            self._feature_directory(issue)
+            if annual
+            else self._directory(issue)
+        )
+        dates = set(
+            self.feature_dates(issue)
+            if annual
+            else self.available_dates(issue),
+        )
+        if directory.exists():
+            for path in directory.iterdir():
+                if not annual and re.fullmatch(
+                    r"\d{4}-\d{2}-\d{2}\.json",
+                    path.name,
+                ):
+                    dates.add(path.stem)
+                elif re.fullmatch(r"\d{8}", path.name):
+                    dates.add(dt.date.fromisoformat(path.name).isoformat())
+                elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", path.name):
+                    dates.add(path.name)
+        if len(dates) > (_MAX_FEATURE_DATES if annual else _MAX_DATES):
+            message = "Newsletter dates exceed their migration bound."
+            raise ValueError(message)
+        return dates
+
+    def _migrate_stream(
+        self,
+        source: NewsletterDraftArchive,
+        issue: Issue,
+        *,
+        annual: bool = False,
+    ) -> int:
+        """Copy verified facts while retaining all original source data.
+
+        Returns:
+            Number of original captures validated and copied.
+
+        Raises:
+            ValueError: Saved observations conflict with source facts.
+        """
+        dates = source._migration_dates(issue, annual=annual)
+        if not dates:
+            return 0
+        directory = (
+            self._feature_directory(issue, create=True)
+            if annual
+            else self._directory(issue, create=True)
+        )
+        with _locked(directory):
+            catalog = (
+                self._feature_catalog(issue)
+                if annual
+                else self._catalog(issue)
+            )
+            for value in sorted(dates):
+                day = (
+                    _feature_date(issue, value)
+                    if annual
+                    else _date(issue, value)
                 )
+                old = (
+                    source.read_feature(issue, day)
+                    if annual
+                    else source.read_entry(issue, day)
+                )
+                if old is None:
+                    old = (
+                        source._read_feature(issue, day)
+                        if annual
+                        else source._read_record(issue, day)
+                    )
+                expected = (
+                    _feature_record(
+                        issue,
+                        old["year_review"],
+                        old["generated_at"],
+                    )
+                    if annual
+                    else self._record(issue, old["facts"], old["generated_at"])
+                )
+                try:
+                    existing = (
+                        self._read_feature(issue, day)
+                        if annual
+                        else self._read_record(issue, day)
+                    )
+                except FileNotFoundError:
+                    existing = None
+                if existing is not None and any(
+                    existing[key] != expected[key]
+                    for key in (
+                        "issue",
+                        "date",
+                        "generated_at",
+                        "year_review" if annual else "facts",
+                    )
+                ):
+                    message = "Migrated newsletter facts conflict with source."
+                    raise ValueError(message)
+                if existing is None:
+                    _write_record(
+                        directory,
+                        "metadata.json" if annual else "observation.json",
+                        expected,
+                    )
+                    existing = expected
+                _select(directory, issue, catalog, existing)
+        return len(dates)
+
+    def needs_conversion(self) -> bool:
+        """Inspect streams for legacy records and generated output.
+
+        Returns:
+            Whether the archive still contains generated output.
+
+        Raises:
+            ValueError: A saved observation fails validation.
+            OSError: A saved path is unsafe or unreadable.
+        """
+        if self.path is None or not self.path.exists():
+            return False
+        page_names = (
+            "main.wikitext",
+            "quality.wikitext",
+            "announcements.wikitext",
+            "feature.wikitext",
+            "interview.wikitext",
+            "manifest.json",
+        )
+        needed = False
+        for issue in self._saved_issues(None):
+            for annual in (False, True) if issue.month == 1 else (False,):
+                directory = (
+                    self._feature_directory(issue)
+                    if annual
+                    else self._directory(issue)
+                )
+                for value in self._migration_dates(issue, annual=annual):
+                    day = dt.date.fromisoformat(value)
+                    record = (
+                        self._read_feature(issue, day)
+                        if annual
+                        else self._read_record(issue, day)
+                    )
+                    needed |= record["schema"] == 1
+                    folder = _date_directory(directory, value)
+                    needed |= any(
+                        (folder / name).exists()
+                        or (folder / name).is_symlink()
+                        for name in page_names
+                    )
+        return needed
+
+    def migrate_from(self, source: NewsletterDraftArchive) -> dict[str, int]:
+        """Copy legacy structured facts without generated outputs.
+
+        Args:
+            source: Original archive, left byte-for-byte intact.
+
+        Returns:
+            Counts of validated quarterly and annual captures.
+
+        Raises:
+            ValueError: Source evidence is invalid or conflicts.
+            OSError: Source or destination paths are unsafe.
+        """
+        counts = {"drafts": 0, "features": 0}
+        if source.path is None or not source.path.exists():
+            return counts
+        for issue in source._saved_issues(None):
+            counts["drafts"] += self._migrate_stream(source, issue)
+            if issue.month == 1:
+                counts["features"] += self._migrate_stream(
+                    source,
+                    issue,
+                    annual=True,
+                )
+        return counts
+
+
+def _conversion_state(path: Path) -> dict | None:
+    """Read the explicit conversion checkpoint without changing it.
+
+    Returns:
+        Validated stage evidence, or none before conversion starts.
+
+    Raises:
+        ValueError: A checkpoint has an invalid identity or stage.
+    """
+    if not path.exists() and not path.is_symlink():
+        return None
+    state = read_json_object(path, _MAX_INDEX_BYTES)
+    if (
+        type(state.get("schema")) is not int
+        or state["schema"] != 1
+        or state.get("stage") not in {"copying", "copied", "complete"}
+    ):
+        message = "Newsletter conversion checkpoint is invalid."
+        raise ValueError(message)
+    counts = state.get("counts")
+    maximum = _MAX_ISSUES * (_MAX_DATES + _MAX_FEATURE_DATES)
+    if (
+        not isinstance(counts, dict)
+        or set(counts) != {"drafts", "features"}
+        or any(
+            type(count) is not int or not 0 <= count <= maximum
+            for count in counts.values()
+        )
+    ):
+        message = "Newsletter conversion checkpoint is invalid."
+        raise ValueError(message)
+    return state
+
+
+def convert_newsletter_archive(  # ruff: ignore[complex-structure, too-many-branches]
+    runtime: Path,
+) -> dict[str, int]:
+    """Replace active legacy outputs with verified structured facts.
+
+    Run through maintenance with the hub and web service stopped.
+    Copy and validate facts first, retain the original directory under
+    ``backups/report-layout/newsletter-wikitext`` and promote staging.
+    A saved checkpoint and fixed paths resume interrupted
+    copies or promotion without losing evidence. Disposable staging
+    can be rebuilt from the retained original after interruption.
+
+    Args:
+        runtime: Toolforge home containing the active archive.
+
+    Returns:
+        Counts of converted daily and annual observations.
+
+    Raises:
+        OSError: Paths are unsafe or promotion cannot finish.
+        ValueError: Observations or checkpoints fail validation.
+    """
+    active = runtime / DEFAULT_PATH
+    staged = runtime / "cache/report-staging/newsletter-structured"
+    backup = runtime / "backups/report-layout/newsletter-wikitext"
+    checkpoint = runtime / "state/newsletter-structured.json"
+    folders = (
+        runtime,
+        runtime / "reports",
+        active.parent,
+        runtime / "cache",
+        staged.parent,
+        runtime / "backups",
+        backup.parent,
+        checkpoint.parent,
+    )
+    for directory in (*folders, active, staged, backup):
+        if directory.is_symlink() or (
+            directory.exists() and not directory.is_dir()
+        ):
+            message = "Newsletter conversion requires regular directories."
+            raise OSError(message)
+    state = _conversion_state(checkpoint)
+    if state is not None and state["stage"] == "complete":
+        if not active.exists() or not backup.exists():
+            message = "Completed newsletter conversion lost a directory."
+            raise ValueError(message)
+        if NewsletterDraftArchive(active).needs_conversion():
+            message = "The selected newsletter archive contains old output."
+            raise ValueError(message)
+        return state["counts"]
+    empty = {"drafts": 0, "features": 0}
+    if state is None:
+        if staged.exists() or backup.exists():
+            message = "Newsletter conversion has unowned staging or backup."
+            raise ValueError(message)
+        if not active.exists() or not (
+            NewsletterDraftArchive(active).needs_conversion()
+        ):
+            return empty
+        for directory in folders:
+            directory.mkdir(parents=True, exist_ok=True)
+        state = {"schema": 1, "stage": "copying", "counts": empty}
+        _atomic_json(checkpoint, state)
+    if backup.exists():
+        if not active.exists():
+            NewsletterDraftArchive(staged).migrate_from(
+                NewsletterDraftArchive(backup),
+            )
+            if NewsletterDraftArchive(staged).needs_conversion():
+                message = "Recovered staging still contains old output."
+                raise ValueError(message)
+            staged.rename(active)
+        counts = NewsletterDraftArchive(active).migrate_from(
+            NewsletterDraftArchive(backup),
+        )
+        if NewsletterDraftArchive(active).needs_conversion():
+            message = "The resumed newsletter archive contains old output."
+            raise ValueError(message)
+    else:
+        if not active.exists():
+            message = "Newsletter conversion source is unavailable."
+            raise ValueError(message)
+        counts = NewsletterDraftArchive(staged).migrate_from(
+            NewsletterDraftArchive(active),
+        )
+        if NewsletterDraftArchive(staged).needs_conversion():
+            message = "Staged newsletter archive still contains output."
+            raise ValueError(message)
+        _atomic_json(
+            checkpoint,
+            {"schema": 1, "stage": "copied", "counts": counts},
+        )
+        active.rename(backup)
+        staged.rename(active)
+    _atomic_json(
+        checkpoint,
+        {"schema": 1, "stage": "complete", "counts": counts},
+    )
+    return counts
+
+
+def migrate_newsletter_layout(runtime: Path = Path()) -> dict[str, int]:
+    """Copy validated legacy facts into the active structured archive.
+
+    The explicit layout workflow preserves original source files until
+    every selected observation has been validated. Generated wikitext is
+    never copied into the active archive.
+
+    Args:
+        runtime: Toolforge home containing old and new report roots.
+
+    Returns:
+        Counts of validated observations, quarters, and annual features.
+
+    Raises:
+        ValueError: Source evidence is invalid or conflicts with data.
+        OSError: Source or destination artifacts are unsafe.
+    """
+    counts = {
+        "observations": migrate_observations(
+            runtime / "reports/newsletter-data-v2/observations",
+            runtime / OBSERVATIONS_PATH,
+            valid_newsletter,
+        ),
+        "drafts": 0,
+        "features": 0,
+    }
+    source = NewsletterDraftArchive(runtime / "reports/newsletter-drafts-v1")
+    if source.path.exists() or source.path.is_symlink():
+        target = NewsletterDraftArchive(runtime / DEFAULT_PATH)
+        counts |= target.migrate_from(source)
+    converted = convert_newsletter_archive(runtime)
+    return counts | {
+        "converted_drafts": converted["drafts"],
+        "converted_features": converted["features"],
+    }

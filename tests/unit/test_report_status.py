@@ -83,6 +83,32 @@ def _reports(directory: Path) -> dict[str, dict[str, object]]:
 class TestReportUpdateLifecycle(TestCase):
     """Measure actual page attempts without deriving state from logs."""
 
+    @staticmethod
+    def test_saved_revision_is_optional_and_only_valid_for_updated() -> None:
+        """Preserve permalinks and reject invalid revision IDs."""
+        with TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            record = {**_record(status="updated"), "revision_id": 12345}
+            assert report_status.write_report_update(
+                record,
+                directory=destination,
+            )
+            assert (
+                next(iter(_reports(destination).values()))["revision_id"]
+                == record["revision_id"]
+            )
+            for revision in (0, -1, True, "12345"):
+                with TestCase().assertLogs(_LOGGER, level="WARNING"):
+                    assert not report_status.write_report_update(
+                        {**record, "revision_id": revision},
+                        directory=destination,
+                    )
+            with TestCase().assertLogs(_LOGGER, level="WARNING"):
+                assert not report_status.write_report_update(
+                    {**record, "status": "no_update", "confirmed_edits": 0},
+                    directory=destination,
+                )
+
     def test_failure_details_are_bounded_and_new_attempts_clear_them(
         self,
     ) -> None:

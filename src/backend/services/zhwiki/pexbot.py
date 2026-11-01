@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import polars as pl
@@ -25,6 +26,19 @@ if TYPE_CHECKING:
     from pywikibot.site import BaseSite
 
 _CATEGORY = "Category:PexBot数据库报告订阅"
+
+
+def action_store(*, dry: bool = False) -> ReportStore:
+    """Select disposable action records without changing live status.
+
+    Args:
+        dry: Keep preview records separate from live action records.
+
+    Returns:
+        A store below the runtime cache or isolated preview cache.
+    """
+    root = Path.cwd() / ("dry-run/cache/pexbot" if dry else "cache/pexbot")
+    return ReportStore(root, dry=dry, keep_previous=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +91,7 @@ def store_action(  # ruff: ignore[too-many-arguments]
     dry: bool,
     attempt: bool,
 ) -> Iterator[bool]:
-    """Retain delegated metadata and lock its publication transaction.
+    """Cache delegated metadata and lock its publication transaction.
 
     Store complete action facts before allowing intentional publication.
     A superseded generation, preview, or skip never permits a request.
@@ -97,7 +111,7 @@ def store_action(  # ruff: ignore[too-many-arguments]
         The backend retains its result lock until the caller finishes.
     """
     key = report_key("pexbot", site.dbName(), title)
-    store = ReportStore(dry=dry)
+    store = action_store(dry=dry)
     with store.locked(key):
         bundle = store.write(
             key,

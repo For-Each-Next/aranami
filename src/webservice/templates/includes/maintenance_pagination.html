@@ -1,6 +1,6 @@
-<nav class="pagination" aria-label="{{ t.nav.backlog }} · {{ pagination }}">
-  {% if previous %}<a href="{{ previous }}" rel="prev">{{ t.backlog.previous }}</a>{% endif %}
-  <p>{{ pagination }} · {{ range_label }}</p>
-  {% if following %}<a href="{{ following }}" rel="next">{{ t.backlog.next }}</a>{% endif %}
-  {% if page_count > 1 %}<form class="page-jump" action="/maintenance/" method="get">{% for name, value in selection.items() if name != 'page' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}<label for="maintenance-page-{{ position }}">{{ t.backlog.goto }}</label><input id="maintenance-page-{{ position }}" type="number" name="page" min="1" max="{{ page_count }}" value="{{ page_number }}"><button type="submit">{{ t.backlog.go }}</button></form>{% endif %}
+<nav class="pagination" aria-label="{{ t.nav.backlog }}">
+  <form class="page-size" action="/maintenance/" method="get">{% for name, value in selection.items() if name not in ['page', 'limit'] %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}<label for="maintenance-limit">{{ t.backlog.rows }}</label><select class="cdx-select" id="maintenance-limit" name="limit">{% for size in ['10', '20', '50'] %}<option value="{{ size }}"{% if size == selection.get('limit', '10') %} selected{% endif %}>{{ size }}</option>{% endfor %}</select><button class="cdx-button" type="submit">{{ t.backlog.go }}</button></form>
+  <p>{{ range_label }}</p>
+  {% if previous %}<a class="cdx-button" href="{{ previous }}" rel="prev">{{ t.backlog.previous }}</a>{% endif %}
+  {% if following %}<a class="cdx-button" href="{{ following }}" rel="next">{{ t.backlog.next }}</a>{% endif %}
 </nav>

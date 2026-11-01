@@ -7,6 +7,7 @@ Only explicit runtime and resource fields are exposed.
 
 import math
 import platform
+import shutil
 import time
 from pathlib import Path
 
@@ -17,6 +18,7 @@ _NUMBER_FIELDS = {
     "cpu_percent",
     "cpu_limit",
 }
+_STORAGE_FIELDS = {"storage_used_bytes", "storage_total_bytes"}
 _PREVIOUS_CPU: tuple[float, float, float | None] | None = None
 _MAX_TEXT = 80
 _MAX_COUNTER_DIGITS = 19
@@ -88,6 +90,7 @@ def sample_runtime() -> dict[str, object]:
         if _PREVIOUS_CPU is None or now - _PREVIOUS_CPU[0] >= 1:
             _PREVIOUS_CPU = now, seconds, percent
     return {
+        **_storage_usage(),
         "python": platform.python_version(),
         "system": platform.system(),
         "machine": platform.machine(),
@@ -95,6 +98,22 @@ def sample_runtime() -> dict[str, object]:
         "memory_limit_bytes": _positive_integer(_read(root / "memory.max")),
         "cpu_percent": percent,
         "cpu_limit": cpu_limit,
+    }
+
+
+def _storage_usage() -> dict[str, int | None]:
+    """Observe used and total bytes on the runtime filesystem.
+
+    Returns:
+        Explicit filesystem observations, or unknowns on failure.
+    """
+    try:
+        storage = shutil.disk_usage(Path.cwd())
+    except OSError:
+        storage = None
+    return {
+        "storage_used_bytes": storage.used if storage else None,
+        "storage_total_bytes": storage.total if storage else None,
     }
 
 
@@ -114,7 +133,8 @@ def validate_runtime(value: object) -> dict[str, object] | None:
         return None
     if (
         not isinstance(value, dict)
-        or set(value) != _TEXT_FIELDS | _NUMBER_FIELDS
+        or not set(value) >= _TEXT_FIELDS | _NUMBER_FIELDS
+        or set(value) - (_TEXT_FIELDS | _NUMBER_FIELDS | _STORAGE_FIELDS)
     ):
         message = "Invalid server runtime fields."
         raise ValueError(message)
@@ -123,8 +143,8 @@ def validate_runtime(value: object) -> dict[str, object] | None:
         if not isinstance(text, str) or not text or len(text) > _MAX_TEXT:
             message = "Invalid server environment value."
             raise ValueError(message)
-    for key in _NUMBER_FIELDS:
-        number = value[key]
+    for key in _NUMBER_FIELDS | _STORAGE_FIELDS:
+        number = value.get(key)
         if number is None:
             continue
         if (

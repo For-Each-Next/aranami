@@ -20,7 +20,7 @@ from webservice.pages import (
     render_dashboard,
     render_reports,
 )
-from webservice.presentation import Interface, assessment_code
+from webservice.presentation import Interface, article_extract, assessment_code
 
 # Exact HTTP codes and authored labels define these contracts.
 # ruff: file-ignore[magic-value-comparison, import-private-name]
@@ -42,7 +42,7 @@ class InterfaceLocaleTests(unittest.TestCase):
         for locale, tag in (
             ("en", "en"),
             ("zh-hans", "zh-Hans"),
-            ("zh-hant", "zh-Hant"),
+            ("zh-hant", "zh-Hant-TW"),
         ):
             self.client.cookies.clear()
             response = self.client.get(
@@ -62,7 +62,9 @@ class InterfaceLocaleTests(unittest.TestCase):
                     route,
                     headers={"Accept-Language": "en"},
                 )
-                assert next_page.headers["Content-Language"] == tag
+                assert next_page.headers["Content-Language"] == (
+                    "zh-Hant" if locale == "zh-hant" else tag
+                )
             changed = self.client.get("/about/?lang=en")
             assert changed.headers["Content-Language"] == "en"
             assert (
@@ -73,8 +75,41 @@ class InterfaceLocaleTests(unittest.TestCase):
             "/about/",
             headers={"Accept-Language": "zh-TW"},
         )
-        assert negotiated.headers["Content-Language"] == "zh-Hant"
+        assert negotiated.headers["Content-Language"] == "zh-Hant-TW"
         assert "set-cookie" not in negotiated.headers
+
+    def test_regional_chinese_keeps_native_ui_and_converts_content(
+        self,
+    ) -> None:
+        """Retain Taiwan and Hong Kong rules behind script choices."""
+        for browser, tag, variant, expected in (
+            ("zh-Hant-TW", "zh-Hant-TW", "zh-tw", "裡"),
+            ("zh-Hant-HK", "zh-Hant-HK", "zh-hk", "裏"),
+            ("zh-HK", "zh-Hant-HK", "zh-hk", "裏"),
+        ):
+            with self.subTest(browser=browser):
+                self.client.cookies.clear()
+                page = self.client.get(
+                    "/about/?lang=zh-hant",
+                    headers={"Accept-Language": browser},
+                )
+                assert page.headers["Content-Language"] == tag
+                assert 'href="/report-icons.svg#language"' in page.text
+                assert "繁体中文" in page.text
+                language, text = article_extract(
+                    {"extract_hant": "裏"},
+                    variant,
+                )
+                assert language == variant
+                assert text == expected
+                saved = {
+                    "extract_hant": "通用文字",
+                    "extract_tw": "臺灣用語",
+                    "extract_hk": "香港用語",
+                }
+                assert article_extract(saved, variant)[1] == (
+                    "臺灣用語" if variant == "zh-tw" else "香港用語"
+                )
 
     def test_language_links_retain_route_and_query(self) -> None:
         """Keep filters and page number when changing script."""
@@ -148,8 +183,8 @@ class AssessmentFallbackTests(unittest.TestCase):
             re.DOTALL,
         )
         assert heading is not None
-        assert ">6 pages</button>" in heading[1]
-        assert 'commandfor="report-details-assessment_lists"' in heading[1]
+        assert ">6 pages</a>" in heading[1]
+        assert 'aria-controls="report-details-assessment_lists"' in heading[1]
         assert "B-plus reviews" not in heading[1]
         assert "Project reviews" not in heading[1]
         dialog = re.search(

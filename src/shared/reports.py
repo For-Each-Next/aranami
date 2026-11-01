@@ -21,19 +21,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from urllib.parse import unquote
 
 import polars as pl
 
 from shared.deployment import project_version
-from shared.support.files import read_json_object
+from shared.support.assessment_encoding import (
+    decode_assessments,
+    encode_assessments,
+)
+from shared.support.files import read_json_object, staging_directory
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
 _KEY = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
-_GENERATION = re.compile(r"[0-9a-f]{32}")
+_RUN_ID = re.compile(r"[0-9a-f]{32}")
+_GENERATION = re.compile(
+    r"(?:[0-9a-f]{32}|[0-9]{8}T[0-9]{12}Z|"
+    r"[a-z0-9][a-z0-9._-]{0,127}-[0-9]{14}(?:-[1-9][0-9]*)?)",
+)
+_LEGACY_DIRECTORY = re.compile(r"[a-z0-9][a-z0-9._-]*-[0-9a-f]{16}")
 _MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+_MAX_COMPONENT_BYTES = 255
 _LOCKS_GUARD = RLock()
 _REPORT_LOCKS: dict[Path, RLock] = {}
 _PUBLICATION_STATES = {
@@ -94,23 +104,81 @@ def report_key(
     *,
     variant: str = "",
 ) -> str:
-    """Create a stable key without putting wiki titles in paths.
+    """Create a readable path with reversible title escaping.
 
     Args:
         family: Internal family slug.
         site: Wiki database identity.
-        target: Full destination title used only in a one-way digest.
+        target: Full destination title, with unsafe characters escaped.
         variant: Optional internal target or configuration slug.
 
     Returns:
         Filesystem-safe identity distinct for every report destination.
+
+    Raises:
+        ValueError: An identity is empty or unsafe for a report path.
     """
-    prefix = "-".join(value for value in (family, site, variant) if value)
-    _validate_key(prefix)
-    digest = hashlib.sha256(target.encode("utf-8")).hexdigest()[:16]
-    key = f"{prefix[:110]}-{digest}"
-    _validate_key(key)
+    _validate_key(family)
+    _validate_key(site)
+    if variant:
+        _validate_key(variant)
+    if not target:
+        message = "Report targets must not be empty."
+        raise ValueError(message)
+    title = re.sub(
+        r"[/%\\\x00-\x1f\x7f]",
+        lambda match: f"%{ord(match[0]):02X}",
+        target,
+    )
+    if title.startswith("."):
+        title = "%2E" + title[1:]
+    key = "/".join(value for value in (family, site, title, variant) if value)
+    _validate_report_key(key)
     return key
+
+
+def _validate_report_key(value: str) -> None:
+    """Reject traversal and unsafe components in a readable report path.
+
+    Args:
+        value: Caller-supplied relative report path.
+
+    Raises:
+        ValueError: The path is absolute, empty, oversized, or unsafe.
+    """
+    if (
+        not isinstance(value, str)
+        or not value
+        or any(
+            part in {"", ".", ".."}
+            or len(part.encode("utf-8")) > _MAX_COMPONENT_BYTES
+            or re.search(r"[\\\x00-\x1f\x7f]", part)
+            for part in value.split("/")
+        )
+    ):
+        message = "Report keys must be safe relative paths."
+        raise ValueError(message)
+
+
+def _legacy_key(key: str) -> str:
+    """Translate a readable path to its former digest-based identity.
+
+    Args:
+        key: Validated readable report path.
+
+    Returns:
+        The legacy single-component key, or the unchanged custom key.
+    """
+    parts = key.split("/")
+    if len(parts) not in {3, 4}:
+        return key
+    family, site, title, *variants = parts
+    variant = variants[0] if variants else ""
+    if family == "project-assessments" and re.fullmatch(r"\d{8}", variant):
+        variant = dt.date.fromisoformat(variant).isoformat()
+    prefix = "-".join(value for value in (family, site, variant) if value)
+    digest = hashlib.sha256(unquote(title).encode("utf-8")).hexdigest()[:16]
+    return f"{prefix[:110]}-{digest}"
 
 
 def _validate_key(value: str) -> None:
@@ -145,6 +213,51 @@ def _timestamp(value: dt.datetime) -> str:
     return value.astimezone(dt.UTC).isoformat(timespec="microseconds")
 
 
+def _generation_name(directory: Path, family: str, now: dt.datetime) -> str:
+    """Allocate a readable UTC identity while holding the report lock.
+
+    Args:
+        directory: Retained bundles and interrupted complete writes.
+        family: Validated report-family slug.
+        now: Actual generation time, separate from run ordering.
+
+    Returns:
+        Family and UTC second, with an increasing suffix for collisions.
+    """
+    prefix = f"{family}-{now.astimezone(dt.UTC):%Y%m%d%H%M%S}"
+    collision = re.compile(re.escape(prefix) + r"(?:-([1-9][0-9]*))?")
+    sequences = [
+        int(match[1] or 0)
+        for path in (directory.iterdir() if directory.exists() else ())
+        if (match := collision.fullmatch(path.name)) is not None
+    ]
+    return f"{prefix}-{max(sequences) + 1}" if sequences else prefix
+
+
+def _write_table(path: Path, frame: pl.DataFrame) -> dict[str, object]:
+    """Persist a complete table and describe its actual storage schema.
+
+    Args:
+        path: Parquet artifact inside the staging directory.
+        frame: Source facts with the caller's public column types.
+
+    Returns:
+        Verified-row metadata and digest for the encoded storage table.
+    """
+    frame = encode_assessments(frame)
+    frame.write_parquet(path)
+    with path.open("rb") as stream:
+        os.fsync(stream.fileno())
+    return {
+        "file": path.name,
+        "rows": frame.height,
+        "schema": {
+            column: str(dtype) for column, dtype in frame.schema.items()
+        },
+        "sha256": _digest(path),
+    }
+
+
 def _read_json(path: Path) -> dict[str, object]:
     """Read a bounded regular JSON object without following symlinks.
 
@@ -177,7 +290,7 @@ def _atomic_json(path: Path, value: Mapping[str, object]) -> None:
         raise ValueError(message)
     descriptor, temporary = tempfile.mkstemp(
         prefix=".metadata-",
-        dir=path.parent,
+        dir=staging_directory(path),
     )
     temporary_path = Path(temporary)
     try:
@@ -244,6 +357,9 @@ def _validate_generation_metadata(
     if identity != (1, key, generation, "complete"):
         message = "Invalid complete report generation."
         raise ValueError(message)
+    if _GENERATION.fullmatch(generation) is None:
+        message = "Invalid report generation identity."
+        raise ValueError(message)
     if not isinstance(manifest.get("tables"), dict):
         message = "Invalid complete report generation."
         raise TypeError(message)
@@ -273,7 +389,7 @@ def _validate_generation_metadata(
             raise ValueError(message)
     if (
         not isinstance(manifest.get("run_id"), str)
-        or _GENERATION.fullmatch(manifest["run_id"]) is None
+        or _RUN_ID.fullmatch(manifest["run_id"]) is None
         or any(
             not isinstance(manifest.get(name), dict)
             for name in ("target", "metadata", "provenance")
@@ -317,17 +433,46 @@ def _validate_publication(value: object) -> None:
 class ReportStore:
     """Keep durable report bundles separate from source caches."""
 
-    def __init__(self, root: Path | None = None, *, dry: bool = False) -> None:
+    def __init__(
+        self,
+        root: Path | None = None,
+        *,
+        dry: bool = False,
+        daily: bool = False,
+        keep_previous: bool = True,
+    ) -> None:
         """Select a durable production store or isolated preview store.
 
         Args:
             root: Explicit path, or the caller's runtime directory.
-            dry: Default to ``dry-run/reports`` rather than ``reports``.
+            dry: Use isolated preview records and staging data.
+            daily: Store an immutable snapshot directly at its key.
+            keep_previous: Retain a predecessor for durable comparisons.
+                Disable for disposable latest-only result caches.
         """
         self.root = root or Path.cwd() / (
-            "dry-run/reports" if dry else "reports"
+            "dry-run/reports/records" if dry else "reports/records"
         )
         self.dry = dry
+        self.daily = daily
+        self.keep_previous = keep_previous
+        runtime = (
+            self.root.parent.parent
+            if self.root.name
+            in {
+                "data",
+                "records",
+            }
+            or self.root.parent.name == "cache"
+            else self.root.parent
+        )
+        self.cache = runtime / "cache" / "report-staging"
+        self.lock_root = runtime / "state" / "report-locks"
+        self.legacy_root = (
+            self.root.parent
+            if self.root.name in {"data", "records"}
+            else self.root
+        )
 
     @contextmanager
     def locked(self, key: str) -> Iterator[None]:
@@ -339,8 +484,8 @@ class ReportStore:
         Yields:
             While holding the process and filesystem publication lock.
         """
-        _validate_key(key)
-        directory = self.root / key
+        _validate_report_key(key)
+        directory = self.lock_root / key
         directory.mkdir(parents=True, exist_ok=True)
         with _LOCKS_GUARD:
             process_lock = _REPORT_LOCKS.setdefault(
@@ -430,16 +575,27 @@ class ReportStore:
                     locked=True,
                     previous_generation=previous_generation,
                 )
-        _validate_key(key)
+        _validate_report_key(key)
         _validate_key(result.family)
-        if (
-            not isinstance(run_id, str)
-            or _GENERATION.fullmatch(run_id) is None
-        ):
+        if not isinstance(run_id, str) or _RUN_ID.fullmatch(run_id) is None:
             message = "Report run identity must be a UUID hex string."
             raise ValueError(message)
         order = (_timestamp(started_at), run_id)
-        latest = self._selection(key)["latest"]
+        if self.daily:
+            current = self.read(key, locked=True)
+            if current is not None:
+                return current
+            latest = None
+        else:
+            if self._selection(key)["latest"] is None:
+                old_key = _legacy_key(key)
+                if (self.legacy_root / old_key / "latest.json").exists():
+                    self._migrate_selection(
+                        key,
+                        ReportStore(self.legacy_root, dry=self.dry),
+                        old_key,
+                    )
+            latest = self._selection(key)["latest"]
         if latest is not None:
             current = self._read_bundle(key, str(latest))
             current_order = (
@@ -457,34 +613,65 @@ class ReportStore:
                     current.wikitext,
                     selected=False,
                 )
-        generation = uuid4().hex
-        directory = self.root / key
-        temporary = Path(
-            tempfile.mkdtemp(prefix=".generation-", dir=directory),
+        return self._persist(
+            key,
+            result,
+            wikitext,
+            run_id=run_id,
+            started_at=order[0],
+            target=target,
+            latest=latest,
         )
-        final = directory / generation
+
+    def _persist(  # ruff: ignore[too-many-arguments]
+        self,
+        key: str,
+        result: ReportResult,
+        wikitext: str,
+        *,
+        run_id: str,
+        started_at: str,
+        target: Mapping[str, str],
+        latest: object,
+    ) -> ReportBundle:
+        """Install a verified complete bundle before atomic selection.
+
+        Args:
+            key: Locked readable report identity.
+            result: Complete reusable calculated data.
+            wikitext: Exact rendered report text.
+            run_id: Original execution identity.
+            started_at: Canonical UTC execution start.
+            target: Original destination identity.
+            latest: Previously selected generation, when present.
+
+        Returns:
+            The newly installed validated bundle.
+        """
+        directory = self.root / key
+        now = dt.datetime.now(dt.UTC)
+        generation = _generation_name(directory, result.family, now)
+        if self.daily:
+            directory.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            directory.mkdir(parents=True, exist_ok=True)
+        self.cache.mkdir(parents=True, exist_ok=True)
+        temporary = Path(
+            tempfile.mkdtemp(prefix="generation-", dir=self.cache),
+        )
+        final = directory if self.daily else directory / generation
         try:
             tables: dict[str, object] = {}
             for name, frame in result.tables.items():
                 _validate_key(name)
-                path = temporary / f"{name}.parquet"
-                frame.write_parquet(path)
-                with path.open("rb") as stream:
-                    os.fsync(stream.fileno())
-                tables[name] = {
-                    "file": path.name,
-                    "rows": frame.height,
-                    "schema": {
-                        column: str(dtype)
-                        for column, dtype in frame.schema.items()
-                    },
-                    "sha256": _digest(path),
-                }
+                tables[name] = _write_table(
+                    temporary / f"{name}.parquet",
+                    frame,
+                )
             text_path = temporary / "report.wikitext"
             text_path.write_text(wikitext, encoding="utf-8", newline="")
             with text_path.open("rb") as stream:
                 os.fsync(stream.fileno())
-            now = dt.datetime.now(dt.UTC)
             manifest = {
                 "schema": 1,
                 "application_version": project_version(),
@@ -492,7 +679,7 @@ class ReportStore:
                 "family": result.family,
                 "generation": generation,
                 "run_id": run_id,
-                "started_at": order[0],
+                "started_at": started_at,
                 "generated_at": _timestamp(now),
                 "calculated_at": (
                     _timestamp(result.calculated_at)
@@ -520,20 +707,35 @@ class ReportStore:
             self._read_bundle_path(temporary, key, generation)
             _sync_directory(temporary)
             temporary.replace(final)
+            if self.daily:
+                _sync_directory(directory.parent)
+                return self._read_bundle_path(final, key, generation)
             _sync_directory(directory)
             _atomic_json(
                 directory / "latest.json",
                 {
                     "schema": 1,
                     "latest": generation,
-                    "previous": latest,
+                    "previous": latest if self.keep_previous else None,
                 },
             )
             _sync_directory(directory)
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
-        retained = {generation, latest}
+        self._prune(key, generation, latest)
+        return self._read_bundle(key, generation)
+
+    def _prune(self, key: str, generation: str, latest: object) -> None:
+        """Remove unselected records after durable selection.
+
+        Args:
+            key: Locked readable report identity.
+            generation: Newly selected generation.
+            latest: Retained predecessor, when present.
+        """
+        directory = self.root / key
+        retained = {generation, latest if self.keep_previous else None}
         for candidate in directory.iterdir():
             if (
                 _GENERATION.fullmatch(candidate.name)
@@ -542,7 +744,6 @@ class ReportStore:
                 and not candidate.is_symlink()
             ):
                 shutil.rmtree(candidate)
-        return self._read_bundle(key, generation)
 
     def set_publication(
         self,
@@ -611,15 +812,184 @@ class ReportStore:
         Returns:
             Validated report, or null without a selected generation.
         """
-        _validate_key(key)
+        _validate_report_key(key)
         if not (self.root / key).exists():
-            return None
+            return self._read_legacy(key, previous=previous)
         with nullcontext() if locked else self.locked(key):
+            if self.daily:
+                if previous:
+                    return None
+                manifest = _read_json(self.root / key / "manifest.json")
+                return self._read_bundle_path(
+                    self.root / key,
+                    key,
+                    str(manifest.get("generation")),
+                )
             selection = self._selection(key)
+            if selection["latest"] is None:
+                return self._read_legacy(key, previous=previous)
             generation = selection["previous" if previous else "latest"]
             return (
                 self._read_bundle(key, str(generation)) if generation else None
             )
+
+    def _read_legacy(
+        self,
+        key: str,
+        *,
+        previous: bool = False,
+    ) -> ReportBundle | None:
+        """Read retained legacy evidence without modifying its files.
+
+        Args:
+            key: New readable destination identity.
+            previous: Select the former predecessor when requested.
+
+        Returns:
+            A validated old bundle, or null without retained evidence.
+        """
+        old_key = _legacy_key(key)
+        directory = self.legacy_root / old_key
+        if directory == self.root / key or not directory.exists():
+            return None
+        store = ReportStore(self.legacy_root, dry=self.dry)
+        selection = store._selection(old_key)
+        generation = selection["previous" if previous else "latest"]
+        return (
+            store._read_bundle(old_key, str(generation))
+            if generation is not None
+            else None
+        )
+
+    def migrate_legacy(self) -> list[Path]:
+        """Copy validated legacy selections into readable report paths.
+
+        Daily stores select only project-assessment observations; record
+        stores select other families. Complete copies are verified
+        before atomic selection. Original directories remain untouched,
+        allowing interrupted workflows to resume and archive evidence.
+
+        Returns:
+            Legacy directories whose selections have readable copies.
+
+        Raises:
+            ValueError: Retained data or its identity is invalid.
+        """
+        if not self.legacy_root.exists():
+            return []
+        migrated = []
+        source = ReportStore(self.legacy_root, dry=self.dry)
+        for directory in sorted(self.legacy_root.iterdir()):
+            if (
+                directory.is_symlink()
+                or not directory.is_dir()
+                or _LEGACY_DIRECTORY.fullmatch(directory.name) is None
+            ):
+                continue
+            selection = source._selection(directory.name)
+            if selection["latest"] is None:
+                message = "Legacy report has no complete selected generation."
+                raise ValueError(message)
+            latest = source._read_bundle(
+                directory.name,
+                str(selection["latest"]),
+            )
+            manifest = latest.manifest
+            family = str(manifest["family"])
+            family = {
+                "enwp_key_articles": "english-comparisons",
+            }.get(family, family)
+            if (family == "project-assessments") != self.daily:
+                continue
+            site = str(manifest["target"]["site"])
+            title = str(manifest["target"]["title"])
+            prefix = f"{family}-{site}"
+            variant = directory.name[len(prefix) : -17].removeprefix("-")
+            if self.daily:
+                variant = dt.date.fromisoformat(
+                    str(manifest["metadata"]["snapshot_date"]),
+                ).strftime("%Y%m%d")
+            key = report_key(family, site, title, variant=variant)
+            if _legacy_key(key) != directory.name:
+                message = "Legacy report path disagrees with its identity."
+                raise ValueError(message)
+            if selection["previous"] is not None:
+                source._read_bundle(directory.name, str(selection["previous"]))
+            with self.locked(key):
+                self._migrate_selection(key, source, directory.name)
+            migrated.append(directory)
+        return migrated
+
+    def _migrate_selection(
+        self,
+        key: str,
+        source: ReportStore,
+        old_key: str,
+    ) -> None:
+        """Select verified copies of one legacy latest/predecessor pair.
+
+        Args:
+            key: New readable destination identity, already locked.
+            source: Reader for the legacy root.
+            old_key: Original digest-based destination identity.
+
+        Raises:
+            ValueError: A resumed copy conflicts with stored evidence.
+        """
+        destination = self.root / key
+        if self.daily and destination.exists():
+            self.read(key, locked=True)
+            return
+        if not self.daily and self._selection(key)["latest"] is not None:
+            self.read(key, locked=True)
+            return
+        selection = source._selection(old_key)
+        copied = {"schema": 1, "latest": None, "previous": None}
+        for name in ("previous", "latest"):
+            if selection[name] is None or (self.daily and name == "previous"):
+                continue
+            bundle = source._read_bundle(old_key, str(selection[name]))
+            instant = dt.datetime.fromisoformat(
+                str(bundle.manifest["generated_at"]),
+            )
+            prefix = f"{bundle.manifest['family']}-{instant:%Y%m%d%H%M%S}"
+            generation = prefix
+            suffix = 0
+            while generation in copied.values():
+                suffix += 1
+                generation = f"{prefix}-{suffix}"
+            final = destination if self.daily else destination / generation
+            self.cache.mkdir(parents=True, exist_ok=True)
+            temporary = Path(
+                tempfile.mkdtemp(prefix="migration-", dir=self.cache),
+            )
+            try:
+                shutil.copytree(bundle.path, temporary, dirs_exist_ok=True)
+                manifest = dict(bundle.manifest)
+                manifest.update(report_key=key, generation=generation)
+                manifest["tables"] = {
+                    name: _write_table(temporary / f"{name}.parquet", frame)
+                    for name, frame in bundle.tables.items()
+                }
+                _atomic_json(temporary / "manifest.json", manifest)
+                self._read_bundle_path(temporary, key, generation)
+                _sync_directory(temporary)
+                final.parent.mkdir(parents=True, exist_ok=True)
+                if final.exists():
+                    existing = self._read_bundle_path(final, key, generation)
+                    if existing.manifest != manifest:
+                        message = "Migrated report conflicts with saved data."
+                        raise ValueError(message)
+                else:
+                    temporary.replace(final)
+                    _sync_directory(final.parent)
+            finally:
+                if temporary.exists():
+                    shutil.rmtree(temporary)
+            copied[name] = generation
+        if not self.daily:
+            _atomic_json(destination / "latest.json", copied)
+            _sync_directory(destination)
 
     def _read_bundle(self, key: str, generation: str) -> ReportBundle:
         """Read the generation selected by a validated identity.
@@ -685,7 +1055,7 @@ class ReportStore:
             ):
                 message = "Report table schema or row count does not match."
                 raise ValueError(message)
-            tables[name] = frame
+            tables[name] = decode_assessments(frame)
         text_meta = manifest.get("wikitext")
         if (
             not isinstance(text_meta, dict)

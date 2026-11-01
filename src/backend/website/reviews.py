@@ -34,6 +34,10 @@ import polars as pl
 from mwparserfromhell.nodes import Heading, Tag, Template, Text, Wikilink
 from pywikibot import Page
 
+from backend.services.zhwiki.article_milestones import (
+    explicit_account,
+    explicit_question,
+)
 from backend.services.zhwiki.assessment_lists import review_heading
 from backend.website.review_cache import ITEM_SCHEMA, ReviewCache
 from shared.sources.quarry.projects import category_members
@@ -319,6 +323,7 @@ def _activity(
     return {
         "replied_at": replied,
         "participant_count": len(participants) if participants else None,
+        "nominator": nominator,
     }
 
 
@@ -331,6 +336,11 @@ def _row(
 ) -> dict:
     """Return a review fact with nullable activity observations."""
     activity = activity or {}
+    contributors = [
+        name
+        for value in activity.get("contributors") or []
+        if (name := explicit_account(value))
+    ]
     return {
         "title": title.replace("_", " ").strip(),
         "review_type": kind,
@@ -338,6 +348,9 @@ def _row(
         "started_at": started,
         "replied_at": activity.get("replied_at"),
         "participant_count": activity.get("participant_count"),
+        "nominator": explicit_account(activity.get("nominator") or ""),
+        "contributors": contributors or None,
+        "question": explicit_question(activity.get("question") or ""),
     }
 
 
@@ -415,7 +428,14 @@ def _dyk_reviews(code: Wikicode) -> list[dict[str, object]]:
                     _dyk_discussion(code, index),
                     started,
                     nominator=_username(values.get("nominator", "")),
-                ),
+                )
+                | {
+                    "nominator": values.get("nominator") or None,
+                    "contributors": [_username(values["author"])]
+                    if _username(values.get("author", ""))
+                    else None,
+                    "question": values.get("question") or None,
+                },
             ),
         )
     return result
@@ -515,6 +535,7 @@ def collect_reviews(  # ruff: ignore[too-many-arguments]
     resolve_many: Callable[[Iterable[str]], None],
     cache_directory: Path | None = None,
     now: dt.datetime,
+    retain: Callable[[pl.DataFrame], None] | None = None,
 ) -> dict[str, object]:
     """Collect all current nominations with revision-aware source reuse.
 
@@ -525,6 +546,7 @@ def collect_reviews(  # ruff: ignore[too-many-arguments]
         resolve_many: Batch primer for the resolver.
         cache_directory: Disposable runtime cache root, or none.
         now: Actual UTC collection time, never an inferred start date.
+        retain: Save complete source evidence before public projection.
 
     Returns:
         Complete review rows ordered by type, oldest start, then title.
@@ -544,7 +566,7 @@ def collect_reviews(  # ruff: ignore[too-many-arguments]
         )
         for kind, source in COMMUNITY_SOURCES.items()
     }
-    rows = cache.read(requests)
+    rows = cache.read(requests, include_sources=True)
     resolve_many(dict.fromkeys(row["title"] for row in rows))
     rows = [{**row, "title": resolve(row["title"])} for row in rows]
     requests = {}
@@ -564,8 +586,15 @@ def collect_reviews(  # ruff: ignore[too-many-arguments]
                 title=subject.title(),
                 talk=talk,
             )
-    rows.extend(cache.read(requests, required=False))
-    frame = pl.DataFrame(rows, schema=ITEM_SCHEMA).filter(
+    rows.extend(cache.read(requests, required=False, include_sources=True))
+    frame = pl.DataFrame(
+        rows,
+        schema=ITEM_SCHEMA
+        | {
+            "source_title": pl.String,
+            "source_revision": pl.Int64,
+        },
+    ).filter(
         pl.col("title").is_in(members),
     )
     ordered = (
@@ -596,8 +625,18 @@ def collect_reviews(  # ruff: ignore[too-many-arguments]
         .drop("_order")
     )
     cache.save()
+    if retain is not None:
+        retain(ordered)
+    public = ordered.select(
+        "title",
+        "review_type",
+        "review_url",
+        "started_at",
+        "replied_at",
+        "participant_count",
+    )
     return {
         "items": [
-            {**row, "url": _url(row["title"])} for row in ordered.to_dicts()
+            {**row, "url": _url(row["title"])} for row in public.to_dicts()
         ],
     }

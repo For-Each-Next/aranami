@@ -21,6 +21,7 @@ from html import unescape
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+import polars as pl
 from test_maintenance_controls import (
     _snapshot as maintenance_snapshot,  # ruff: ignore[import-private-name]
 )
@@ -261,9 +262,13 @@ def write_interface_fixtures(destination: Path) -> None:
                 "review_url": (
                     f"https://zh.wikipedia.org/wiki/Talk:Game#Review_{kind}"
                 ),
-                "started_at": "2026-10-07T03:04:00Z",
-                "replied_at": "2026-10-18T10:00:00Z",
-                "participant_count": 3,
+                "started_at": "2026-06-08T12:00:00Z"
+                if kind == "fac"
+                else "2026-10-07T03:04:00Z",
+                "replied_at": "2026-06-08T12:00:00Z"
+                if kind == "fac"
+                else "2026-10-18T10:00:00Z",
+                "participant_count": 9 if kind == "fac" else 3,
                 "extract": "An article introduction for this review.",
                 "extract_zh": "用于评审卡片的条目简介。",
                 "extract_hant": "用於評審卡片的條目簡介。",
@@ -333,6 +338,11 @@ def write_interface_fixtures(destination: Path) -> None:
                 "truncated": False,
                 "stages": [
                     {"kind": "started", "time": event["time"], "title": ""},
+                    {
+                        "kind": "database_updated",
+                        "time": event["time"],
+                        "title": "WikiProject:电子游戏/典范条目",
+                    },
                     {"kind": "finished", "time": event["time"], "title": ""},
                 ],
             }
@@ -340,6 +350,13 @@ def write_interface_fixtures(destination: Path) -> None:
         ],
         "query": "",
     }
+    stored = destination / "reports/data/assessments/zhwiki/Video games"
+    stored.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame({
+        "page_id": [1],
+        "pa_class": ["GA"],
+        "pa_importance": ["Mid"],
+    }).write_parquet(stored / "assessments-20260808.parquet")
     for locale in ("en", "zh-hans", "zh-hant"):
         directory = destination / locale
         directory.mkdir(parents=True, exist_ok=True)
@@ -389,7 +406,12 @@ def write_interface_fixtures(destination: Path) -> None:
                     "issue": "2027-01",
                     "available": True,
                     "draft_history": {
-                        "dates": ["2026-10-29", "2026-10-30"],
+                        "dates": [
+                            "2026-01-01",
+                            "2026-02-28",
+                            "2026-10-29",
+                            "2026-10-30",
+                        ],
                         "selected_date": "2026-10-30",
                         "generated_at": "2026-10-31T00:04:05+00:00",
                         "missing": False,
@@ -399,9 +421,10 @@ def write_interface_fixtures(destination: Path) -> None:
                             "title": "WikiProject:電子遊戲/簡訊/2027-01"
                             + suffix,
                             "url": "https://zh.wikipedia.org/wiki/Fixture",
+                            "label": suffix.lstrip("/") or "主頁",
                             "text": "{{模板|標題}}\n" + "長條目名稱" * 100,
                         }
-                        for suffix in ("", "/特優內容", "/宣告")
+                        for suffix in ("", "/特優內容", "/宣告", "/專題")
                     ],
                 },
                 locale,
@@ -527,6 +550,15 @@ class ReviewPresentationTests(unittest.TestCase):
                 assert 'class="card-grid article-list review-cards"' in section
                 assert section.count('class="review-icon-link"') == 9
                 assert section.count('class="review-icon"') == 9
+                link_label = {
+                    "en": "Review",
+                    "zh-hant": "評審區",
+                }.get(locale, "评审区")
+                for index in range(9):
+                    assert (
+                        f'href="https://zh.wikipedia.org/wiki/Talk:Game#Review_{index}">'
+                        f"{link_label}</a>" in section
+                    )
                 assert "https://commons.wikimedia.org/wiki/File:" in section
                 assert "/review-icons/featured-candidate.svg" in section
                 assert "/review-icons/peer-review.svg" in section
@@ -556,7 +588,7 @@ class ReviewPresentationTests(unittest.TestCase):
                     (
                         "2026-10-18T10:00:00Z",
                         "2026-10-18 10:00:00",
-                        interface.text("reviews.replied_hours", count=3),
+                        interface.text("reviews.replied_hours", count=2),
                     ),
                 ]
                 assert "Review 0 &lt;&amp;&gt;" in section
@@ -607,8 +639,10 @@ class ReviewPresentationTests(unittest.TestCase):
                     label = interface.text(
                         "reviews.replied_days"
                         if hours >= 24
-                        else "reviews.replied_hours",
-                        count=hours // 24 if hours >= 24 else max(1, hours),
+                        else "reviews.replied_hours"
+                        if hours
+                        else "reviews.replied_minutes",
+                        count=hours // 24 if hours >= 24 else hours,
                     )
                     assert (
                         f'<time datetime="{row["replied_at"]}" '
@@ -642,10 +676,92 @@ class ReviewPresentationTests(unittest.TestCase):
                     interface.text("reviews.started_months", count=8) in output
                 )
                 assert (
-                    interface.text("reviews.replied_days", count=2) in output
+                    interface.text("reviews.replied_days", count=1) in output
                 )
-                colon = ": " if locale == "en" else "\uff1a"
-                assert f"{label}</a>{colon}<time" in output
+                metadata = re.search(
+                    r'<ul class="[^"]*\breview-meta\b[^"]*"[^>]*>(.*?)</ul>',
+                    output,
+                    re.DOTALL,
+                )
+                assert metadata is not None
+                items = re.findall(
+                    r"<li\b[^>]*>(.*?)</li>",
+                    metadata[1],
+                    re.DOTALL,
+                )
+                assert len(items) == 4
+                link_label = {
+                    "en": "Review",
+                    "zh-hans": "评审区",
+                    "zh-hant": "評審區",
+                }[locale]
+                assert f"{link_label}</a>" in items[0]
+                assert (
+                    interface.text("reviews.started_months", count=8)
+                    in items[1]
+                )
+                assert (
+                    interface.text("reviews.replied_days", count=1) in items[2]
+                )
+                assert (
+                    interface.text("reviews.participants", count=3) in items[3]
+                )
+                assert " · " not in metadata[1]
+                assert " | " not in metadata[1]
+
+    def test_review_months_use_fixed_lengths_and_elapsed_reply_ages(
+        self,
+    ) -> None:
+        """Keep fixed month boundaries and elapsed reply ages."""
+        row = {
+            **self.data["article"],
+            "review_type": "fac",
+            "review_url": "https://zh.wikipedia.org/wiki/Talk:Game#Review",
+        }
+        snapshot = self.data["snapshot"]
+        snapshot["reviews"] = {"items": [row]}
+        month = dt.timedelta(days=365.25 / 12)
+        for locale in ("en", "zh-hans", "zh-hant", "zh"):
+            interface = Interface(locale)
+            for elapsed, unit, started_count, replied_count in (
+                (month - dt.timedelta(seconds=1), "days", 30, 30),
+                (month, "months", 1, 1),
+                (month + dt.timedelta(seconds=1), "months", 1, 1),
+                (2 * month, "months", 2, 2),
+                (dt.timedelta(days=132), "months", 4, 4),
+            ):
+                with self.subTest(locale=locale, elapsed=elapsed):
+                    instant = (self.now - elapsed).isoformat()
+                    row.update(started_at=instant, replied_at=instant)
+                    output = render_dashboard(
+                        snapshot,
+                        {},
+                        {},
+                        locale,
+                        self.now,
+                    )
+                    review_times = re.findall(
+                        rf'<time datetime="{re.escape(instant)}" '
+                        r'title="([^"]+)">([^<]+)</time>',
+                        output,
+                    )
+                    tooltip = utc_time(instant, seconds=True)
+                    assert review_times == [
+                        (
+                            tooltip,
+                            interface.text(
+                                f"reviews.started_{unit}",
+                                count=started_count,
+                            ),
+                        ),
+                        (
+                            tooltip,
+                            interface.text(
+                                f"reviews.replied_{unit}",
+                                count=replied_count,
+                            ),
+                        ),
+                    ]
 
     def test_participant_counts_follow_observed_replies(self) -> None:
         """Count signed participants and hide solo annotations."""
@@ -680,9 +796,11 @@ class ReviewPresentationTests(unittest.TestCase):
                     if replied is None or count is None:
                         assert 'class="review-participants"' not in output
                     else:
-                        assert (
-                            '</time> · <span class="review-participants">'
-                            f"{label}</span>" in output
+                        assert re.search(
+                            r"</time></li>\s*<li[^>]*>\s*"
+                            r'<span class="review-participants">'
+                            rf"{label}</span>",
+                            output,
                         )
 
     def test_empty_reviews_hide_section_and_missing_reviews_stay_unknown(
@@ -804,24 +922,24 @@ class PresentationTests(unittest.TestCase):
             "zh-CN": "zh-hans",
             "zh-SG": "zh-hans",
             "zh-MY": "zh-hans",
-            "zh-TW": "zh-hant",
-            "zh-HK": "zh-hant",
-            "zh-MO": "zh-hant",
+            "zh-TW": "zh-tw",
+            "zh-HK": "zh-hk",
+            "zh-MO": "zh-hk",
             "zh-Hans-TW": "zh-hans",
             "zh-Hant-CN": "zh-hant",
-            "en;q=0.3,zh-TW;q=0.9": "zh-hant",
-            "zh-TW;q=0.8,en;q=0.8": "zh-hant",
-            "en;q=invalid,zh-TW;q=0.5": "zh-hant",
-            "en;q=0.7;q=1,zh-TW;q=0.2": "zh-hant",
+            "en;q=0.3,zh-TW;q=0.9": "zh-tw",
+            "zh-TW;q=0.8,en;q=0.8": "zh-tw",
+            "en;q=invalid,zh-TW;q=0.5": "zh-tw",
+            "en;q=0.7;q=1,zh-TW;q=0.2": "zh-tw",
             "zh-HK;q=0,en;q=0.001": "en",
-            "../../en,zh-TW;q=0.2": "zh-hant",
+            "../../en,zh-TW;q=0.2": "zh-tw",
         }
         for header, expected in cases.items():
             with self.subTest(header=header):
                 assert select_locale(header) == expected
         assert Interface("zh-hant").language_tag == "zh-Hant"
         assert Interface("zh").text("column.article") == "条目"
-        assert self.en.text("backlog.count", count=12) == "Articles: 12"
+        assert self.en.text("backlog.count", count=12) == "12 articles"
         for translations in catalog().values():
             assert list(translations) == ["en", "zh-hans", "zh-hant"]
             parameters = sorted(
@@ -874,43 +992,61 @@ class PresentationTests(unittest.TestCase):
         assert utc_time("2026-10-18T20:00:07+08:00", seconds=True) == (
             "2026-10-18 12:00:07"
         )
+        for seconds in (False, True):
+            assert (
+                utc_time(
+                    "2026-10-18T20:00:07.123456+08:00",
+                    seconds=seconds,
+                    milliseconds=True,
+                )
+                == "2026-10-18 12:00:07.123"
+            )
+        assert utc_time("2026-10-18T12:00:07Z", milliseconds=True) == (
+            "2026-10-18 12:00:07.000"
+        )
+        assert utc_time(None, milliseconds=True) == "—"
         assert utc_time(None) == "—"
         assert timestamp("2026-02-30T12:00:00Z") is None
         assert timestamp("2026-10-18T12:00:00") is None
         assert self.en.date("2020-03", month_only=True) == "March 2020"
         assert Interface("zh-hant").date("2026-10-18") == "2026年10月18日"
-        assert duration(0.25, self.en) == "0.25 s"
-        assert duration(59.999, self.en) == "1 min 00.00 s"
-        assert duration(65.1, self.en) == "1 min 05.10 s"
+        assert duration(0.25, self.en) == "0.25 sec"
+        assert duration(59.999, self.en) == "1 min 0.00 sec"
+        assert duration(65.1, self.en) == "1 min 5.10 sec"
         for seconds, expected in (
-            (0, "0.00 s"),
-            (0.004, "0.00 s"),
-            (0.44, "0.44 s"),
-            (1, "1.00 s"),
-            (5.3, "5.30 s"),
-            (32.89, "32.89 s"),
-            (32.49, "32.49 s"),
-            (59.994, "59.99 s"),
-            (60, "1 min 00.00 s"),
-            (725.3, "12 min 05.30 s"),
-            (3600, "60 min 00.00 s"),
+            (0, "0.00 sec"),
+            (0.004, "0.00 sec"),
+            (0.44, "0.44 sec"),
+            (1, "1.00 sec"),
+            (5.3, "5.30 sec"),
+            (32.89, "32.89 sec"),
+            (32.49, "32.49 sec"),
+            (59.994, "59.99 sec"),
+            (60, "1 min 0.00 sec"),
+            (725.3, "12 min 5.30 sec"),
+            (3600, "1 hr 0 min 0.00 sec"),
+            (90061.25, "1 d 1 hr 1 min 1.25 sec"),
         ):
             for locale in ("en", "zh-hans", "zh-hant"):
                 localized = (
                     expected
                     if locale == "en"
-                    else expected.replace(
+                    else expected
+                    .replace(
                         " min ",
-                        "分钟" if locale == "zh-hans" else "分鐘",
-                    ).replace(" s", "秒")
+                        "分",
+                    )
+                    .replace(" hr ", "小时" if locale == "zh-hans" else "小時")
+                    .replace(" d ", "日")
+                    .replace(" sec", "秒")
                 )
                 assert duration(seconds, Interface(locale)) == localized
         for seconds, expected in (
-            (0.44, "0 s…"),
-            (32.89, "32 s…"),
-            (59.999, "59 s…"),
-            (60, "1 min 00 s…"),
-            (725.3, "12 min 05 s…"),
+            (0.44, "0 sec…"),
+            (32.89, "32 sec…"),
+            (59.999, "59 sec…"),
+            (60, "1 min 0 sec…"),
+            (725.3, "12 min 5 sec…"),
         ):
             assert duration(seconds, self.en, running=True) == expected
         assert duration(None, self.en) == "—"
@@ -920,7 +1056,7 @@ class PresentationTests(unittest.TestCase):
                 self.en,
                 self.now,
             )
-            == "6 min 15 s…"
+            == "6 min 15 sec…"
         )
         assert (
             event_duration(
@@ -928,7 +1064,7 @@ class PresentationTests(unittest.TestCase):
                 self.en,
                 self.now,
             )
-            == "0 s…"
+            == "0 sec…"
         )
         assert readable_size(1024) == "1.0 KiB"
         assert readable_size(10) == "10 B"
@@ -938,21 +1074,21 @@ class PresentationTests(unittest.TestCase):
         for seconds, expected in (
             (0, "(just now)"),
             (-59, "(just now)"),
-            (59, "(within 1 min)"),
-            (-60, "(1 min ago)"),
-            (60, "(in 1 min)"),
-            (-3599, "(59 min ago)"),
-            (3599, "(in 59 min)"),
-            (-3600, "(1 h ago)"),
-            (3600, "(in 1 h)"),
-            (-7199, "(1 h ago)"),
-            (7199, "(in 1 h)"),
-            (-86399, "(23 h ago)"),
-            (86399, "(in 23 h)"),
-            (-86400, "(1 d ago)"),
-            (86400, "(in 1 d)"),
-            (-172799, "(1 d ago)"),
-            (172800, "(in 2 d)"),
+            (59, "(within 1 minute)"),
+            (-60, "(1 minute ago)"),
+            (60, "(1 minute from now)"),
+            (-3599, "(59 minutes ago)"),
+            (3599, "(59 minutes from now)"),
+            (-3600, "(1 hour ago)"),
+            (3600, "(1 hour from now)"),
+            (-7199, "(1 hour ago)"),
+            (7199, "(1 hour from now)"),
+            (-86399, "(23 hours ago)"),
+            (86399, "(23 hours from now)"),
+            (-86400, "(1 day ago)"),
+            (86400, "(1 day from now)"),
+            (-172799, "(1 day ago)"),
+            (172800, "(2 days from now)"),
         ):
             with self.subTest(seconds=seconds):
                 value = (self.now + dt.timedelta(seconds=seconds)).isoformat()
@@ -963,7 +1099,7 @@ class PresentationTests(unittest.TestCase):
                 self.en,
                 self.now,
             )
-            == "(in 1 min)"
+            == "(1 minute from now)"
         )
         for invalid in (None, "", "invalid", "2026-10-18T12:00:00"):
             assert not relative_time(invalid, self.en, self.now)
@@ -1081,8 +1217,8 @@ class PresentationTests(unittest.TestCase):
         ]
         ordered = maintenance_items(many, "class", "desc")
         assert maintenance_page(ordered)["items"][0]["page_id"] == 101
-        assert maintenance_page(ordered, "2")["items"][0]["page_id"] == 50
-        assert maintenance_page(ordered, "9" * 1000)["page"] == 3
+        assert maintenance_page(ordered, "2")["items"][0]["page_id"] == 10
+        assert maintenance_page(ordered, "9" * 1000)["page"] == 11
         assert maintenance_page([])["pages"] == 1
         assert list(
             maintenance_sections([
@@ -1164,7 +1300,7 @@ class PresentationTests(unittest.TestCase):
         definitions = self.data["config"]["routines"]["routines"]
         selected = schedule_state(schedule, definitions, self.now)
         assert next_run(selected, "pageviews", self.en) == "2026-10-20 18:59"
-        assert "running for 2 d 3 h 4 min" in uptime(
+        assert "running for 2 d 3 hr 4 min" in uptime(
             selected,
             "0.6.0",
             self.en,
@@ -1189,7 +1325,7 @@ class PresentationTests(unittest.TestCase):
             self.now,
         )
         assert next_run(paused, "pageviews", self.en) == "Scheduler paused"
-        assert "2 d 3 h 4 min" in uptime(paused, "0.6.0", self.en, self.now)
+        assert "2 d 3 hr 4 min" in uptime(paused, "0.6.0", self.en, self.now)
         changed = copy.deepcopy(definitions)
         changed["pageviews"]["minute"] = 58
         assert (
@@ -1265,7 +1401,7 @@ class PresentationTests(unittest.TestCase):
     def test_status_line_labels_and_independent_timing(self) -> None:
         """Show finish times and retain durations in details."""
         for locale, finished, next_label, report_duration in (
-            ("en", "Finished at ", "Next scheduled run: ", "5.00 s"),
+            ("en", "Finished at ", "Next scheduled run: ", "5.00 sec"),
             (
                 "zh-hans",
                 "结束时间\uff1a",
@@ -1297,10 +1433,10 @@ class PresentationTests(unittest.TestCase):
             )
             details = interface.text("ops.details_link")
             assert line[1].startswith('<span class="status-label">')
-            assert f"</span>{opening}<button" in line[1]
-            assert line[1].endswith(f">{details}</button>{closing}")
+            assert f"</span>{opening}<a " in line[1]
+            assert line[1].endswith(f">{details}</a>{closing}")
             assert "data-clock" not in line[1]
-            assert '<button type="button" class="status-link"' in line[1]
+            assert '<a class="status-link" href="#report-details-' in line[1]
             assert "<div" not in line[1]
             assert "<br" not in line[1]
             assert finished in output
@@ -1332,7 +1468,7 @@ class PresentationTests(unittest.TestCase):
             duration_seconds=None,
         )
         for locale, waiting, running, completed in (
-            ("en", "Waiting to run…", "2 s…", "5.00 s"),
+            ("en", "Waiting to run…", "2 sec…", "5.00 sec"),
             (
                 "zh-hans",
                 "等待执行…",
@@ -1419,7 +1555,7 @@ class PresentationTests(unittest.TestCase):
             duration_seconds=None,
         )
         for locale, elapsed in (
-            ("en", "1 s…"),
+            ("en", "1 sec…"),
             ("zh-hans", "1秒…"),
             ("zh-hant", "1秒…"),
         ):
@@ -1440,7 +1576,7 @@ class PresentationTests(unittest.TestCase):
             "en",
             self.now + dt.timedelta(seconds=1),
         )
-        assert "2 d 3 h 4 min 31 s" in fresh
+        assert "2 d 3 hr 4 min 31 sec" in fresh
         stale = render_live_status(
             status,
             self.data["config"],
@@ -1602,6 +1738,17 @@ class LiveVisibilityTests(unittest.TestCase):
         """Create saved observations and a deterministic clock."""
         self.data = _fixtures()
         self.now = dt.datetime(2026, 10, 18, 12, 0, 30, tzinfo=dt.UTC)
+
+    def test_updated_report_status_links_the_observed_revision(self) -> None:
+        """Link saved revisions in full and live status dialogs."""
+        report = self.data["status"]["reports"]["reports"]["first"]
+        report.update(status="updated", revision_id=12345)
+        for output in self._outputs("zh-hans"):
+            assert (
+                'href="https://zh.wikipedia.org/w/index.php?oldid=12345"'
+                in output
+            )
+            assert ">已更新</a>" in output
 
     def _outputs(self, locale: str) -> tuple[str, str]:
         """Render full and live pages from the same saved observations.
@@ -1772,7 +1919,7 @@ class LiveVisibilityTests(unittest.TestCase):
                     output,
                 )
                 assert metrics is not None
-                assert metrics[1].count("<tr>") == 5
+                assert metrics[1].count("<tr>") == 6
             assert 'src="/live.js"' in initial
             assert 'id="live-server-status"' in initial
         stale = render_logs(
@@ -2285,8 +2432,8 @@ class LiveVisibilityTests(unittest.TestCase):
                 "Started at ",
                 "Finished at ",
                 "Next scheduled run: ",
-                "(2 min ago)",
-                "(in 35 min)",
+                "(2 minutes ago)",
+                "(35 minutes from now)",
             ),
             (
                 "zh-hans",
@@ -2394,9 +2541,9 @@ class ServerPresentationTests(unittest.TestCase):
     def test_uptime_sentence_omits_leading_zero_units(self) -> None:
         """Keep observed starts and natural elapsed-time sentences."""
         for locale, prefix, suffix, elapsed in (
-            ("en", "started ", ", running for ", "1 h 7 min 16 s."),
-            ("zh-hans", "自", "启动\uff0c已执行", "1小时7分钟16秒。"),
-            ("zh-hant", "自", "啟動\uff0c已執行", "1小時7分鐘16秒。"),
+            ("en", "started ", ", running for ", "1 hr 7 min 16 sec."),
+            ("zh-hans", "自", "启动\uff0c已执行", "1小时7分16秒。"),
+            ("zh-hant", "自", "啟動\uff0c已執行", "1小時7分16秒。"),
         ):
             with self.subTest(locale=locale):
                 started = self.now - dt.timedelta(
@@ -2415,11 +2562,11 @@ class ServerPresentationTests(unittest.TestCase):
                 assert "0日" not in label
                 assert "0 d" not in label
         for seconds, expected in (
-            (0, "0 s."),
-            (59, "59 s."),
-            (60, "1 min 0 s."),
-            (3600, "1 h 0 min 0 s."),
-            (86400, "1 d 0 h 0 min 0 s."),
+            (0, "0 sec."),
+            (59, "59 sec."),
+            (60, "1 min 0 sec."),
+            (3600, "1 hr 0 min 0 sec."),
+            (86400, "1 d 0 hr 0 min 0 sec."),
         ):
             started = self.now - dt.timedelta(seconds=seconds)
             label = uptime(
@@ -2515,7 +2662,7 @@ class ServerPresentationTests(unittest.TestCase):
         status["schedule"]["started_at"] = "2026-10-18T11:45:07Z"
         status["schedule"]["updated_at"] = "2026-10-18T12:00:02Z"
         for locale, prefix, age, recent in (
-            ("en", "Last updated: ", "15 min ago", "(just now)"),
+            ("en", "Last updated: ", "15 minutes ago", "(just now)"),
             ("zh-hans", "最近更新\uff1a", "15分钟前", "\uff08刚刚\uff09"),
             ("zh-hant", "最近更新\uff1a", "15分鐘前", "\uff08剛剛\uff09"),
         ):
@@ -2562,7 +2709,7 @@ class EventPresentationTests(unittest.TestCase):
                 },
                 {
                     "kind": "database_updated",
-                    "time": "2026-10-18T12:00:04Z",
+                    "time": "2026-10-18T20:00:04.123456+08:00",
                     "title": "<Long & safe destination>",
                 },
                 {"kind": "saved", "time": "2026-10-18T12:00:07Z", "title": ""},
@@ -2579,7 +2726,6 @@ class EventPresentationTests(unittest.TestCase):
         self,
         runs: list[dict[str, object]],
         locale: str = "en",
-        **controls: object,
     ) -> str:
         """Render Reports from validated invocation facts.
 
@@ -2588,10 +2734,7 @@ class EventPresentationTests(unittest.TestCase):
         """
         return render_reports(
             {
-                "dates": ["2026-10-18"],
-                "date": "2026-10-18",
                 "runs": runs,
-                **controls,
             },
             locale,
             status=self.data["status"],
@@ -2635,7 +2778,24 @@ class EventPresentationTests(unittest.TestCase):
             assert 'class="job-stages"' in output
             for stage in ("started", "database_updated", "saved", "finished"):
                 assert interface.text(f"reports.stage.{stage}") in output
-            assert "&lt;Long &amp; safe destination&gt;" in output
+            stages = re.search(
+                r'<ul class="job-stages">(.*?)</ul>',
+                output,
+                re.DOTALL,
+            )
+            assert stages is not None
+            assert "<br>" not in stages[1]
+            assert (
+                '<time datetime="2026-10-18T20:00:04.123456+08:00">'
+                "2026-10-18 12:00:04.123</time>" in stages[1]
+            )
+            assert (
+                interface.text("reports.stage.database_updated")
+                + ' · <span lang="zh"><a href="https://zh.wikipedia.org/wiki/'
+                '%3CLong_%26_safe_destination%3E">'
+                "&lt;Long &amp; safe destination&gt;</a></span>" in stages[1]
+            )
+            assert "<Long & safe destination>" not in stages[1]
             assert interface.text("reports.intro") in output
             assert output.count('<script src="/live.js" defer>') == 1
             assert 'id="live-server-status"' not in output
@@ -2683,14 +2843,14 @@ class EventPresentationTests(unittest.TestCase):
             assert rows[0][3] == "—"
         output = self._render([])
         assert not self._rows(output)
-        assert "No events match" in output
+        assert "No saved job invocations" in output
 
-    def test_search_status_order_and_query_escaping(self) -> None:
-        """Filter localized cells and preserve escaped query text."""
+    def test_history_spans_dates_without_query_controls(self) -> None:
+        """Show all retained dates without query controls."""
         runs = [
             self._run(
                 1,
-                started_at="2026-10-18T11:00:00Z",
+                started_at="2026-10-17T11:00:00Z",
                 status="running",
                 finished_at=None,
                 duration_seconds=None,
@@ -2698,28 +2858,17 @@ class EventPresentationTests(unittest.TestCase):
             self._run(2, status="failed"),
         ]
         for locale in ("en", "zh-hans", "zh-hant"):
-            interface = Interface(locale)
-            for controls, count in (
-                ({"query": interface.text("routine.pageviews").upper()}, 2),
-                ({"query": interface.text("logs.result.failed")}, 1),
-                ({"status": "running"}, 1),
-            ):
-                assert (
-                    len(self._rows(self._render(runs, locale, **controls)))
-                    == count
-                )
-        rows = self._rows(self._render(runs, order="asc"))
-        assert rows[0][0] == "2026-10-18 11:00:00"
-        assert self._rows(self._render(runs))[0][0] == rows[1][0]
-        for query in ("2026-10-18 12:00:02", "5.30 s"):
-            assert len(self._rows(self._render(runs, query=query))) == 1
-        output = self._render(runs, query='"><script>bad</script>')
-        assert not self._rows(output)
-        assert "&lt;script&gt;bad&lt;/script&gt;" in output
-        assert "<script>bad</script>" not in output
+            output = self._render(runs, locale)
+            assert [row[0] for row in self._rows(output)] == [
+                "2026-10-18 12:00:02",
+                "2026-10-17 11:00:00",
+            ]
+            assert 'class="log-query"' not in output
+            assert 'class="log-match-count"' not in output
+            assert 'class="pagination"' not in output
 
-    def test_history_is_bounded_and_paged(self) -> None:
-        """Keep one hundred invocations with twenty-five per page."""
+    def test_history_is_bounded_and_complete(self) -> None:
+        """Show all one hundred newest retained invocations together."""
         runs = [
             self._run(
                 index,
@@ -2729,14 +2878,12 @@ class EventPresentationTests(unittest.TestCase):
             )
             for index in range(105)
         ]
-        outputs = [self._render(runs, page=number) for number in range(1, 5)]
-        assert all(len(self._rows(output)) == 25 for output in outputs)
-        assert "page=2" in outputs[0]
-        assert "page=3" in outputs[-1]
-        assert self._rows(self._render(runs, page=100)) == self._rows(
-            outputs[-1],
-        )
-        assert not self._rows(self._render(runs, query="no match"))
+        output = self._render(runs)
+        rows = self._rows(output)
+        assert len(rows) == 100
+        assert rows[0][0] == "2026-10-18 13:44:30"
+        assert rows[-1][0] == "2026-10-18 12:05:30"
+        assert output.count('<dialog id="job-history-') == 100
         output = self._render([
             self._run(truncated=True),
         ])

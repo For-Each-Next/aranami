@@ -655,6 +655,7 @@ class TestDykEdit(TestCase):
             context.today,
             project="电子游戏",
             report_title=title,
+            persist=False,
         )
         [edit] = context.edits
         assert edit.site is site

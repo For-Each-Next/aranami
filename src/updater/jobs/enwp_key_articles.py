@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ from backend.services.enwiki.key_articles import (
     prepare_reports,
     record_publication,
 )
+from backend.services.project_assessments import get_snapshot
 from shared.config import TASK_DEFINITIONS
 from shared.reports import report_key
 from shared.sources.wiki import read_pages
@@ -52,7 +54,11 @@ def run(
     dry: bool = False,
     context: JobContext | None = None,
 ) -> None:
-    """Run the important and quality English article reports once.
+    """Publish English comparisons after retaining daily assessments.
+
+    Reuse or capture the completed day's project assessments before
+    preparing either comparison. Concurrent assessment-log collection
+    shares the same immutable snapshot. Wiki saves stay independent.
 
     Args:
         targets: Destination titles keyed by report kind.
@@ -71,6 +77,12 @@ def run(
         selected_targets = REPORT_TARGETS if targets is None else targets
         titles = [selected_targets[spec.name] for spec in REPORT_SPECS]
         active.register_targets(titles)
+        get_snapshot(
+            active.site,
+            "电子游戏",
+            observed_at=dt.datetime.now(dt.UTC),
+            dry=active.dry,
+        )
         existing = {
             name: page.text
             for name, page in zip(

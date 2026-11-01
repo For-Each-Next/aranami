@@ -9,7 +9,17 @@
       {% if card.extract is not none %}
         <p class="article-extract"><bdi lang="{{ card.extract_language }}">{{ card.extract }}</bdi></p>
       {% endif %}
-      <p class="card-meta">{% if card.review_link %}{{ card.review_link }}{% for date in card.review_dates %}{% if loop.first %}{% if language_tag == "en" %}: {% else %}：{% endif %}{% else %} · {% endif %}<time datetime="{{ date.value }}" title="{{ date.label }}">{{ date.elapsed }}</time>{% if date.participants %} · <span class="review-participants">{{ date.participants }}</span>{% endif %}{% endfor %}{% elif card.pageviews_url %}<a href="{{ card.pageviews_url }}" class="pageviews-number">{{ card.views }}</a>{% if card.site_rank %} · <span class="site-rank">{{ card.site_rank }}</span>{% endif %}{% else %}{{ card.scheduled }}{% if card.date %}<time datetime="{{ card.date.value }}">{{ card.date.label }}</time>{% endif %}{% if card.separator %} · {% endif %}{% if card.kind %}{{ card.kind }}{% endif %}{% if card.date_note %}<abbr class="date-note-marker" title="{{ card.date_note }}" aria-label="{{ card.date_note }}">†</abbr>{% endif %}{% endif %}</p>
+      {% if card.review_link %}
+      <ul class="card-meta review-meta" role="list">
+        <li>{{ card.review_link }}</li>
+        {% for date in card.review_dates %}
+        <li><time datetime="{{ date.value }}" title="{{ date.label }}">{{ date.elapsed }}</time></li>
+        {% if date.participants %}<li><span class="review-participants">{{ date.participants }}</span></li>{% endif %}
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="card-meta">{% if card.pageviews_url %}<a href="{{ card.pageviews_url }}" class="pageviews-number">{{ card.views }}</a>{% if card.site_rank %} · <a class="site-rank" href="{{ card.site_rank_url }}">{{ card.site_rank }}</a>{% endif %}{% else %}{{ card.scheduled }}{% if card.date %}<time datetime="{{ card.date.value }}">{{ card.date.label }}</time>{% endif %}{% if card.separator %} · {% endif %}{% if card.kind %}{{ card.kind }}{% endif %}{% if card.date_note %}<abbr class="date-note-marker" title="{{ card.date_note }}" aria-label="{{ card.date_note }}">†</abbr>{% endif %}{% endif %}</p>
+      {% endif %}
     </div>
   </li>
   {% endfor %}

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import mwparserfromhell
 import polars as pl
 
+from backend.services.zhwiki import dyk_milestones
 from backend.services.zhwiki.dyk_dates import extract_dates
 from backend.support import dyk_cache
 from backend.support.report_membership import (
@@ -75,12 +76,18 @@ class PreparedDyk:
     content_unchanged: bool = False
 
 
-def _dated_pages(site: BaseSite, pages: pl.DataFrame) -> pl.DataFrame:
+def _dated_pages(
+    site: BaseSite,
+    pages: pl.DataFrame,
+    *,
+    persist: bool = True,
+) -> pl.DataFrame:
     """Reuse matching revisions and parse only changed DYK talk pages.
 
     Args:
         site: Wiki supplying current talk-page contents and aliases.
         pages: DYK project members with talk-page identifiers.
+        persist: Whether to retain authoritative milestone facts.
 
     Returns:
         Talk-page identifiers with nonempty parsed date lists.
@@ -100,6 +107,18 @@ def _dated_pages(site: BaseSite, pages: pl.DataFrame) -> pl.DataFrame:
     )
     cached = dyk_cache.load().filter(pl.col("aliases") == alias_key)
     unchanged = cached.join(revisions, on=["talk_page_id", "oldid"])
+    shared = {"page_id", "title"} <= set(pages.columns)
+    if shared:
+        retained = dyk_milestones.load()
+        current = dyk_milestones.current_pages(retained, pages, revisions)
+        unchanged = (
+            dyk_milestones
+            .dated_pages(retained, pages)
+            .join(current, on="talk_page_id", how="semi")
+            .join(revisions, on="talk_page_id")
+            .with_columns(pl.lit(alias_key).alias("aliases"))
+            .select(list(dyk_cache.SCHEMA))
+        )
     refresh_ids = (
         pages
         .select("talk_page_id")
@@ -113,6 +132,7 @@ def _dated_pages(site: BaseSite, pages: pl.DataFrame) -> pl.DataFrame:
         unchanged.height,
         len(refresh_ids),
     )
+    snapshots = read_talk_pages(site, refresh_ids)
     rows = [
         {
             "talk_page_id": page.page_id,
@@ -125,7 +145,7 @@ def _dated_pages(site: BaseSite, pages: pl.DataFrame) -> pl.DataFrame:
                 talk_aliases,
             ),
         }
-        for page in read_talk_pages(site, refresh_ids)
+        for page in snapshots
     ]
     refreshed = pl.DataFrame(rows, schema=dyk_cache.SCHEMA)
     next_cache = pl.concat([unchanged, refreshed]).unique(
@@ -133,6 +153,15 @@ def _dated_pages(site: BaseSite, pages: pl.DataFrame) -> pl.DataFrame:
         keep="last",
     )
     dyk_cache.save(next_cache)
+    if shared:
+        retained = dyk_milestones.retain_snapshots(
+            site,
+            pages,
+            snapshots,
+            {"Article history": history_aliases, "DYKtalk": talk_aliases},
+            persist=persist,
+        )
+        return dyk_milestones.dated_pages(retained, pages)
     return next_cache.filter(pl.col("dyk_dates").list.len() > 0).select(
         "talk_page_id",
         "dyk_dates",
@@ -559,13 +588,14 @@ def prepare_tables(
     )
 
 
-def prepare_report(
+def prepare_report(  # ruff: ignore[too-many-arguments] - Preserve caller inputs and explicit preview isolation.
     original_text: str,
     site: BaseSite,
     today: date,
     *,
     project: str,
     report_title: str,
+    persist: bool = True,
 ) -> PreparedDyk:
     """Collect DYK observations and interpret retained report state.
 
@@ -575,6 +605,7 @@ def prepare_report(
         today: UTC date ending the statistics timeline.
         project: WikiProject supplying source membership.
         report_title: Destination identity for membership caches.
+        persist: Retain new authoritative facts; disable for previews.
 
     Returns:
         Complete data, identities, and change metadata for rendering.
@@ -608,7 +639,15 @@ def prepare_report(
         [("DYK", "talk", "cat", "推薦的新條目")],
     ).filter(pl.col("tags").list.len() > 0)
     completed = members.join(
-        _dated_pages(site, completed_ids),
+        _dated_pages(
+            site,
+            members.join(
+                completed_ids.select("talk_page_id").unique(),
+                on="talk_page_id",
+                how="semi",
+            ),
+            persist=persist,
+        ),
         on="talk_page_id",
         how="inner",
     )

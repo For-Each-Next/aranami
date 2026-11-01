@@ -26,6 +26,7 @@ from backend.support.report_membership import (
     load_membership,
     save_membership,
 )
+from shared.reports import ReportStore, report_key
 from shared.sources.quarry import enwp
 from shared.support.regions import region_content
 from shared.support.templates import template_page
@@ -111,6 +112,77 @@ def _page_identities(rows: pl.DataFrame) -> dict[str, int | None]:
     )
 
 
+def _stored_articles(
+    definition: ReportDefinition,
+    site: BaseSite,
+    title: str,
+    original_text: str,
+) -> dict[str, OldArticle] | None:
+    """Read production identities only for the exact published content.
+
+    Args:
+        definition: Report kind identifying its retained snapshots.
+        site: Destination wiki identity.
+        title: Destination page title.
+        original_text: Current live content, including during previews.
+
+    Returns:
+        Saved members, or none when neither snapshot matches live text.
+
+    Raises:
+        ValueError: Matching evidence has invalid identity or members.
+    """
+    database = site.dbName()
+    key = report_key(
+        "english-comparisons",
+        database,
+        title,
+        variant=definition.name,
+    )
+    store = ReportStore()
+    if not (store.root / key).exists():
+        return None
+    with store.locked(key):
+        for previous in (False, True):
+            bundle = store.read(key, previous=previous, locked=True)
+            if bundle is None or bundle.wikitext != original_text:
+                continue
+            if bundle.manifest[
+                "family"
+            ] != "enwp_key_articles" or bundle.manifest["target"] != {
+                "site": database,
+                "title": title,
+            }:
+                message = "Saved English comparison has an invalid identity."
+                raise ValueError(message)
+            members = bundle.tables.get("members")
+            if members is None:
+                continue
+            if members.is_empty():
+                return {}
+            if "en_title" not in members.columns:
+                message = "Saved English comparison members lack titles."
+                raise ValueError(message)
+            articles = {}
+            for row in members.iter_rows(named=True):
+                name = row["en_title"]
+                if not isinstance(name, str) or not name or name in articles:
+                    message = "Saved English comparison titles are invalid."
+                    raise ValueError(message)
+                articles[name] = OldArticle(
+                    name,
+                    int(row["item_id"])
+                    if row.get("item_id") is not None
+                    else None,
+                    int(row["page_id"])
+                    if row.get("page_id") is not None
+                    else None,
+                    str(row.get("en_class") or "").strip().upper() or None,
+                )
+            return articles
+    return None
+
+
 def prepare_publication(
     data: ReportData,
     definition: ReportDefinition,
@@ -131,9 +203,13 @@ def prepare_publication(
         Selected rows, differences, and publication identity metadata.
     """
     cached = load_membership(site, title, original_text)
+    stored = _stored_articles(definition, site, title, original_text)
+    baseline = (
+        stored if stored is not None else data.old_articles[definition.name]
+    )
     previous = {
-        name: replace(article, page_id=cached.get(name) or article.page_id)
-        for name, article in data.old_articles[definition.name].items()
+        name: replace(article, page_id=article.page_id or cached.get(name))
+        for name, article in baseline.items()
     }
     rows = (
         data.rows

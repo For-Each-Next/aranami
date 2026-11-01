@@ -150,11 +150,19 @@ def _validated_record(value: object) -> dict[str, object]:
     if (
         not isinstance(value, Mapping)
         or not set(value) >= _FIELDS
-        or set(value) - _FIELDS - FAILURE_FIELDS
+        or set(value) - _FIELDS - FAILURE_FIELDS - {"revision_id"}
     ):
         message = "Report update metadata requires its complete fields."
         raise ValueError(message)
     record = dict(value)
+    revision = record.get("revision_id")
+    if revision is not None and (
+        type(revision) is not int
+        or revision <= 0
+        or record.get("status") != "updated"
+    ):
+        message = "Report revision must identify a confirmed saved edit."
+        raise ValueError(message)
     validate_failure_details(record)
     report_update_key(record["site"], record["title"])
     for name, pattern in (
@@ -202,6 +210,14 @@ def _terminal_record(
     Raises:
         ValueError: Timing or confirmed edit counts are invalid.
     """
+    if record.get("failure_reason") == "Interrupted":
+        if any(
+            record[field] is not None
+            for field in ("finished_at", "duration_seconds", "confirmed_edits")
+        ):
+            message = "Interrupted reports cannot invent completion facts."
+            raise ValueError(message)
+        return record
     seconds = record["duration_seconds"]
     if (
         isinstance(seconds, bool)
@@ -336,6 +352,7 @@ def write_report_update(
     *,
     directory: Path | None = None,
     expected_attempt: tuple[str, str] | None = None,
+    only_unfinished: bool = False,
 ) -> bool:
     """Merge report metadata without changing publication behavior.
 
@@ -349,6 +366,7 @@ def write_report_update(
         directory: Defaults to ``state/`` under the working directory.
         expected_attempt: Registered update and run identities that must
             still own the destination before resetting its start time.
+        only_unfinished: Recover only a still-queued or running attempt.
 
     Returns:
         Whether the public snapshot was replaced.
@@ -361,7 +379,12 @@ def write_report_update(
             directory if directory is not None else Path.cwd() / "state"
         )
         with _LOCK:
-            return _write_record(destination, incoming, expected_attempt)
+            return _write_record(
+                destination,
+                incoming,
+                expected_attempt,
+                only_unfinished=only_unfinished,
+            )
     except Exception:
         _LOGGER.warning(
             "Could not save report update metadata.",
@@ -374,6 +397,8 @@ def _write_record(
     directory: Path,
     incoming: dict[str, object],
     expected_attempt: tuple[str, str] | None,
+    *,
+    only_unfinished: bool = False,
 ) -> bool:
     """Merge one validated destination under an exclusive process lock.
 
@@ -404,6 +429,10 @@ def _write_record(
             records = {}
         key = report_update_key(incoming["site"], incoming["title"])
         current = records.get(key)
+        if only_unfinished and (
+            current is None or current["status"] not in {"queued", "running"}
+        ):
+            return False
         if (
             expected_attempt is not None
             and current is not None
@@ -478,7 +507,7 @@ class ReportUpdate:
         self._attempt_started = True
         self.start()
 
-    def finish(
+    def finish(  # ruff: ignore[too-many-arguments] - Independent optional observations.
         self,
         outcome: str,
         confirmed_edits: int | None,
@@ -486,6 +515,7 @@ class ReportUpdate:
         failure_reason: str | None = None,
         failure_date: dt.date | None = None,
         failure_context: dict[str, int] | None = None,
+        revision_id: int | None = None,
     ) -> None:
         """Record terminal metadata using actual measured elapsed time.
 
@@ -496,6 +526,7 @@ class ReportUpdate:
             failure_reason: Safe identifier for the underlying failure.
             failure_date: Attempted report date, never a confirmed date.
             failure_context: Observed missing-data counts, if available.
+            revision_id: Revision observed after a confirmed save.
 
         Raises:
             ValueError: The supplied terminal outcome is unsupported.
@@ -515,6 +546,8 @@ class ReportUpdate:
         )
         if failure_reason is not None:
             record["failure_reason"] = failure_reason
+        if revision_id is not None and outcome == "updated" and not self.dry:
+            record["revision_id"] = revision_id
         if failure_date is not None:
             record["failure_date"] = failure_date.isoformat()
         if failure_context is not None:

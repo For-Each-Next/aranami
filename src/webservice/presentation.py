@@ -22,6 +22,7 @@ from urllib.parse import quote, urlencode, urlsplit
 
 import polars as pl
 from markupsafe import Markup, escape
+from opencc import OpenCC
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -31,8 +32,9 @@ type Record = dict[str, object]
 _MINUTE = 60
 _HOUR_MINUTES = 60
 _DAY_MINUTES = 1440
+_MONTH_MINUTES = 43830
 _SCHEDULE_MAX_AGE = 120
-_PAGE_SIZE = 50
+_PAGE_SIZE = 10
 _MAX_URL_LENGTH = 4096
 _DISPLAY_LIMIT = 6
 _FAILURE_REASONS = {
@@ -177,13 +179,22 @@ def _range_locale(value: str) -> str | None:
         return "en"
     if parts[0] != "zh":
         return None
-    if "hant" in parts:
-        return "zh-hant"
-    if "hans" in parts:
-        return "zh-hans"
-    if set(parts) & {"tw", "hk", "mo"}:
-        return "zh-hant"
-    return "zh-hans" if set(parts) & {"cn", "sg", "my"} else "zh"
+    traditional = "hant" in parts or (
+        "hans" not in parts and set(parts) & {"tw", "hk", "mo"}
+    )
+    if traditional:
+        return (
+            "zh-tw"
+            if "tw" in parts
+            else "zh-hk"
+            if set(parts) & {"hk", "mo"}
+            else "zh-hant"
+        )
+    return (
+        "zh-hans"
+        if "hans" in parts or set(parts) & {"cn", "sg", "my"}
+        else "zh"
+    )
 
 
 def _language_weight(parameters: list[str]) -> float:
@@ -237,9 +248,21 @@ class Interface:
     locale: str
 
     @property
+    def message_locale(self) -> str:
+        """Resolve a regional content preference to authored UI copy."""
+        if self.locale in {"zh-tw", "zh-hk"}:
+            return "zh-hant"
+        return "zh-hans" if self.locale == "zh" else self.locale
+
+    @property
     def language_tag(self) -> str:
         """The standard HTML and response language tag."""
-        return {"zh-hans": "zh-Hans", "zh-hant": "zh-Hant"}.get(
+        return {
+            "zh-hans": "zh-Hans",
+            "zh-hant": "zh-Hant",
+            "zh-tw": "zh-Hant-TW",
+            "zh-hk": "zh-Hant-HK",
+        }.get(
             self.locale,
             self.locale,
         )
@@ -250,8 +273,10 @@ class Interface:
         Returns:
             Localized plain text with supplied placeholders replaced.
         """
+        if parameters.get("count") == 1 and key + "_one" in catalog():
+            key += "_one"
         translations = catalog()[key]
-        locale = "zh-hans" if self.locale == "zh" else self.locale
+        locale = self.message_locale
         message = translations.get(locale, translations["en"])
         return re.sub(
             r"\{([a-z_]+)\}",
@@ -286,7 +311,7 @@ class Interface:
             return value
         if not isinstance(value, dict) or not value:
             return fallback
-        locale = "zh-hans" if self.locale == "zh" else self.locale
+        locale = self.message_locale
         return value.get(locale, value.get("en", next(iter(value.values()))))
 
 
@@ -383,8 +408,19 @@ def timestamp(value: object) -> dt.datetime | None:
     return result.astimezone(dt.UTC) if result.tzinfo is not None else None
 
 
-def utc_time(value: object, *, seconds: bool = False) -> str:
+def utc_time(
+    value: object,
+    *,
+    seconds: bool = False,
+    milliseconds: bool = False,
+) -> str:
     """Display actual source timestamps in UTC without a zone label.
+
+    Args:
+        value: An aware source timestamp, or an unavailable value.
+        seconds: Show whole seconds instead of whole minutes.
+        milliseconds: Show seconds and three fractional digits, taking
+            precedence over seconds. Finer precision is truncated.
 
     Returns:
         A date and time without a zone suffix, or an unknown marker.
@@ -392,6 +428,8 @@ def utc_time(value: object, *, seconds: bool = False) -> str:
     instant = timestamp(value)
     if instant is None:
         return "—"
+    if milliseconds:
+        return instant.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     return instant.strftime(
         "%Y-%m-%d %H:%M:%S" if seconds else "%Y-%m-%d %H:%M",
     )
@@ -410,7 +448,7 @@ def relative_time(
         now: Aware rendering time shared with the absolute timestamp.
 
     Returns:
-        Whole minutes, hours, or days, rounded down at each boundary.
+        Whole months, days, hours, or minutes, rounded down.
         Sub-minute intervals have short explicit labels. Invalid or
         missing timestamps produce no annotation.
     """
@@ -421,7 +459,9 @@ def relative_time(
     minutes = int(abs(seconds) // _MINUTE)
     if minutes == 0:
         return interface.text("time.soon" if seconds > 0 else "time.just_now")
-    if minutes >= _DAY_MINUTES:
+    if minutes >= _MONTH_MINUTES:
+        unit, count = "months", minutes // _MONTH_MINUTES
+    elif minutes >= _DAY_MINUTES:
         unit, count = "days", minutes // _DAY_MINUTES
     elif minutes >= _HOUR_MINUTES:
         unit, count = "hours", minutes // _HOUR_MINUTES
@@ -492,6 +532,8 @@ def maintenance_selection(
         "quality_to",
         "importance_op",
         "importance_to",
+        "genre",
+        "limit",
     }
     if set(parameters) - allowed or any(
         len(values) != 1 for values in parameters.values()
@@ -511,7 +553,7 @@ def maintenance_selection(
     patterns = {
         "task": r"[a-z][a-z0-9_]{0,63}",
         "page": r"[1-9][0-9]*",
-        "sort": r"oldest|title|class|importance|random",
+        "sort": r"oldest|title|class|importance|size|random",
         "order": r"asc|desc",
         "seed": r"[0-9a-f]{16}",
         "q": r"[^\x00-\x1f\x7f]{1,200}",
@@ -520,8 +562,10 @@ def maintenance_selection(
         "regex": "1",
         "quality_op": "eq|gte|lte|range",
         "importance_op": "eq|gte|lte|range",
-        "quality_to": "|".join(_RANKS["class"]),
-        "importance_to": "|".join(_RANKS["importance"]),
+        "quality_to": "|".join(code for code, *_ in _QUALITY),
+        "importance_to": "|".join(code for code, *_ in _IMPORTANCE),
+        "genre": "all|article|list",
+        "limit": "10|20|50",
     }
     if "task" not in values or any(
         not re.fullmatch(patterns[key], value) for key, value in values.items()
@@ -530,7 +574,7 @@ def maintenance_selection(
         raise ValueError(message)
     for key, dimension in (("quality", "class"), ("importance", "importance")):
         operation = values.get(f"{key}_op", "eq")
-        if operation != "eq" and (
+        if operation not in {"eq", "range"} and (
             values.get(key) not in _RANKS[dimension]
             or (operation == "range" and f"{key}_to" not in values)
         ):
@@ -566,12 +610,21 @@ def assessment_condition(
     """
     if operation == "eq":
         return code == selected
-    ranks = _RANKS[dimension]
+    ranks = {
+        **_RANKS[dimension],
+        **(
+            {"Unassessed": 0, "Unknown": 0}
+            if dimension == "class"
+            else {"Unknown": 0}
+        ),
+    }
     rank = code.replace_strict(ranks, default=None, return_dtype=pl.Int64)
     boundary = ranks[selected]
     if operation == "gte":
         return rank >= boundary
     if operation == "lte":
+        return rank <= boundary
+    if endpoint is None:
         return rank <= boundary
     lower, upper = sorted((boundary, ranks[endpoint]))
     return rank.is_between(lower, upper)
@@ -593,7 +646,17 @@ def maintenance_filter(
         expression. Missing quality is
         unassessed; unrecognized values remain unknown.
     """
-    if not any(selection.get(key) for key in ("q", "quality", "importance")):
+    if not any(
+        selection.get(key)
+        for key in (
+            "q",
+            "quality",
+            "quality_to",
+            "importance",
+            "importance_to",
+            "genre",
+        )
+    ):
         return items
     frame = pl.from_dicts(
         items,
@@ -615,7 +678,16 @@ def maintenance_filter(
             ),
         )
     for key, dimension in (("quality", "class"), ("importance", "importance")):
-        if selected := selection.get(key):
+        selected = selection.get(key)
+        endpoint = selection.get(f"{key}_to")
+        if (
+            selected
+            or endpoint
+            or (
+                dimension == "class"
+                and selection.get("genre") in {"article", "list"}
+            )
+        ):
             value = pl.col(f"assessment_{dimension}").str.strip_chars()
             fallback = (
                 pl
@@ -629,15 +701,33 @@ def maintenance_filter(
                 _ALIASES[dimension],
                 default=fallback,
             )
-            conditions.append(
-                assessment_condition(
-                    code,
-                    dimension,
-                    selected,
-                    selection.get(f"{key}_op", "eq"),
-                    selection.get(f"{key}_to"),
-                ),
-            )
+            if dimension == "class":
+                is_list = code.is_in(["FL", "AL", "BL", "CL", "List", "SL"])
+                genre = selection.get("genre")
+                if genre in {"article", "list"}:
+                    conditions.append(is_list if genre == "list" else ~is_list)
+                code = code.replace({
+                    "FL": "FA",
+                    "AL": "A",
+                    "BL": "B",
+                    "CL": "C",
+                    "List": "Start",
+                    "SL": "Stub",
+                })
+            if selected:
+                conditions.append(
+                    assessment_condition(
+                        code,
+                        dimension,
+                        selected,
+                        selection.get(f"{key}_op", "eq"),
+                        endpoint,
+                    ),
+                )
+            elif endpoint:
+                conditions.append(
+                    assessment_condition(code, dimension, endpoint, "gte"),
+                )
     positions = frame.filter(*conditions).get_column("position")
     return [items[position] for position in positions]
 
@@ -672,11 +762,13 @@ def maintenance_items(
         Returns:
             Negative, zero, or positive ordering for the two rows.
         """
-        if sort in {"oldest", "class", "importance"}:
+        if sort in {"oldest", "class", "importance", "size"}:
             a, b = (
                 (
                     item.get("oldest_issue_month")
                     if sort == "oldest"
+                    else item.get("page_length")
+                    if sort == "size"
                     else assessment_rank(item.get(f"assessment_{sort}"), sort)
                 )
                 for item in (left, right)
@@ -696,24 +788,28 @@ def maintenance_items(
     return sorted(items, key=cmp_to_key(compare))
 
 
-def maintenance_page(items: list[Record], requested: str = "1") -> Record:
-    """Select fifty rows and clamp oversized decimal pages.
+def maintenance_page(
+    items: list[Record],
+    requested: str = "1",
+    limit: int = _PAGE_SIZE,
+) -> Record:
+    """Select the requested row count and clamp oversized decimal pages.
 
     Returns:
-        Page numbers, row offset, and at most fifty articles.
+        Page numbers, row offset, and the selected article range.
     """
-    pages = max(1, (len(items) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    pages = max(1, (len(items) + limit - 1) // limit)
     page = (
         pages
         if len(requested) > len(str(pages))
         else min(int(requested), pages)
     )
-    offset = (page - 1) * _PAGE_SIZE
+    offset = (page - 1) * limit
     return {
         "page": page,
         "pages": pages,
         "offset": offset,
-        "items": items[offset : offset + _PAGE_SIZE],
+        "items": items[offset : offset + limit],
     }
 
 
@@ -807,9 +903,27 @@ def article_extract(item: Record, locale: str) -> tuple[str, str | None]:
     field = "extract"
     if language == "zh":
         field = "extract_zh"
-    elif language == "zh-hant" and "extract_hant" in item:
+    elif language in {"zh-hant", "zh-tw", "zh-hk"} and "extract_hant" in item:
         field = "extract_hant"
-    return language, item.get(field)
+    regional_field = {"zh-tw": "extract_tw", "zh-hk": "extract_hk"}.get(
+        language,
+    )
+    if regional_field in item:
+        return language, item[regional_field]
+    text = item.get(field)
+    if text and language in {"zh-tw", "zh-hk"}:
+        text = _regional_converter(language).convert(text)
+    return language, text
+
+
+@lru_cache(maxsize=2)
+def _regional_converter(language: str) -> OpenCC:
+    """Reuse a local converter for regional Chinese content.
+
+    Returns:
+        The local OpenCC converter for the requested regional variant.
+    """
+    return OpenCC("t2tw" if language == "zh-tw" else "t2hk")
 
 
 def pageviews_url(item: Record, day: str) -> str:
@@ -839,9 +953,9 @@ def duration(
     """Format execution durations with explicit localized units.
 
     Returns:
-        Seconds with an optional minute prefix. Completed values retain
-        hundredths; active work uses whole seconds and an ellipsis.
-        Unknown observations stay explicit.
+        Days, hours, minutes, and seconds, omitting leading zero units.
+        Completed values retain hundredths; active work uses whole
+        seconds and an ellipsis. Unknown observations stay explicit.
     """
     if (
         not isinstance(seconds, (int, float))
@@ -849,19 +963,29 @@ def duration(
         or seconds < 0
     ):
         return "—"
-    if running:
-        minutes, whole_seconds = divmod(math.floor(seconds), _MINUTE)
-        remainder = str(whole_seconds)
-    else:
-        minutes, hundredths = divmod(
-            math.floor(seconds * 100 + 0.5),
-            _MINUTE * 100,
-        )
-        remainder = f"{hundredths / 100:.2f}"
+    whole = (
+        math.floor(seconds)
+        if running
+        else math.floor(seconds * 100 + 0.5) / 100
+    )
+    days, rest = divmod(whole, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, remainder = divmod(rest, 60)
+    unit = (
+        "days"
+        if days
+        else "hours"
+        if hours
+        else "minutes"
+        if minutes
+        else "seconds"
+    )
     label = interface.text(
-        "duration.minutes" if minutes else "duration.seconds",
-        minutes=minutes,
-        seconds=remainder.zfill(2 if running else 5) if minutes else remainder,
+        f"duration.{unit}",
+        days=int(days),
+        hours=int(hours),
+        minutes=int(minutes),
+        seconds=str(int(remainder)) if running else f"{remainder:.2f}",
     )
     return label + ("…" if running else "")
 
@@ -1006,26 +1130,10 @@ def uptime(
     ):
         return interface.text("footer.uptime_unknown", version=version)
     seconds = int((now - started).total_seconds())
-    minutes = seconds // _MINUTE
-    unit = (
-        "days"
-        if minutes >= _DAY_MINUTES
-        else "hours"
-        if minutes >= _HOUR_MINUTES
-        else "minutes"
-        if minutes
-        else "seconds"
-    )
     return interface.text(
         "footer.uptime",
         version=version,
-        duration=interface.text(
-            f"duration.{unit}",
-            days=minutes // _DAY_MINUTES,
-            hours=minutes % _DAY_MINUTES // _HOUR_MINUTES,
-            minutes=minutes % _HOUR_MINUTES,
-            seconds=seconds % _MINUTE,
-        ),
+        duration=duration(seconds, interface, running=True).removesuffix("…"),
         since=utc_time(schedule["started_at"]),
     )
 

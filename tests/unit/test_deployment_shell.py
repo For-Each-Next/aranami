@@ -73,6 +73,13 @@ if name == "kubectl":
         assert (root / "app").is_symlink()
         if os.environ.get("FAKE_ROLLOUT_FAILURE"):
             raise SystemExit(10)
+    elif args[0] == "exec":
+        assert "drain-hub.py" in " ".join(args), args
+        if os.environ.get("FAKE_DRAIN_FAILURE"):
+            raise SystemExit(19)
+        if (os.environ.get("FAKE_DRAIN_UNSUPPORTED")
+                and "--legacy-idle-confirmed" not in args):
+            raise SystemExit(19)
     else:
         raise AssertionError(args)
     raise SystemExit(0)
@@ -138,7 +145,7 @@ def _uploader() -> ModuleType:
     return module
 
 
-class TestDeploymentShell(TestCase):
+class TestDeploymentShell(TestCase):  # ruff: ignore[too-many-public-methods]
     """Run actual deployment scripts without SSH or production paths."""
 
     @override
@@ -411,6 +418,112 @@ class TestDeploymentShell(TestCase):
         )
         backup = self.root / f"deployment-backups/source-{'b' * 32}"
         assert (backup / "app.before").readlink() == Path(first_stage.name)
+
+    def test_hub_drain_precedes_selection_and_publisher_shutdown(self) -> None:
+        """Confirm the existing publisher is idle before replacement."""
+        first_stage = self._stage()
+        assert self._deploy(first_stage).returncode == 0
+        count = len(self._commands())
+        second_stage = self._stage("b" * 32)
+        result = self._deploy(second_stage)
+        assert result.returncode == 0, result.stderr
+        commands = self._commands()[count:]
+        drain = next(
+            index
+            for index, command in enumerate(commands)
+            if command[:2] == ["kubectl", "exec"]
+        )
+        selection = next(
+            index
+            for index, command in enumerate(commands)
+            if command[0] == "python3" and "select" in command
+        )
+        shutdown = next(
+            index
+            for index, command in enumerate(commands)
+            if command[:4] == ["kubectl", "scale", "deployment", "aranami-hub"]
+            and "--replicas=0" in command
+        )
+        assert drain < selection < shutdown
+        assert (
+            str(second_stage / "scripts/toolforge/drain-hub.py")
+            in commands[drain]
+        )
+
+    def test_failed_hub_drain_preserves_source_and_running_publisher(
+        self,
+    ) -> None:
+        """Preserve live services when publisher idle is unconfirmed."""
+        first_stage = self._stage()
+        assert self._deploy(first_stage).returncode == 0
+        count = len(self._commands())
+        second_stage = self._stage("b" * 32)
+        result = self._deploy(second_stage, FAKE_DRAIN_FAILURE="1")
+        assert result.returncode != 0
+        assert (self.root / "app").resolve() == first_stage
+        assert json.loads((self.root / "fake-replicas.json").read_text()) == {
+            "aranami-hub": "1",
+            "aranami-web": "1",
+        }
+        commands = self._commands()[count:]
+        assert any(command[:2] == ["kubectl", "exec"] for command in commands)
+        assert not any(
+            command[:2] == ["kubectl", "scale"] for command in commands
+        )
+        assert not any(
+            command[:3] == ["toolforge", "jobs", "restart"]
+            for command in commands
+        )
+
+    def test_modern_selection_failure_restores_drained_old_hub(self) -> None:
+        """Restore old scheduling after drain if activation fails."""
+        first_stage = self._stage()
+        assert self._deploy(first_stage).returncode == 0
+        count = len(self._commands())
+        second_stage = self._stage("b" * 32)
+        result = self._deploy(second_stage, FAKE_SELECTION_FAILURE="1")
+        assert result.returncode != 0
+        assert (self.root / "app").resolve() == first_stage
+        commands = self._commands()[count:]
+        hub_scales = [
+            command
+            for command in commands
+            if command[:4] == ["kubectl", "scale", "deployment", "aranami-hub"]
+        ]
+        assert [
+            next(value for value in command if value.startswith("--replicas="))
+            for command in hub_scales
+        ] == ["--replicas=0", "--replicas=1"]
+        assert not any(
+            command[:3] == ["toolforge", "jobs", "restart"]
+            for command in commands
+        )
+        assert json.loads((self.root / "fake-replicas.json").read_text()) == {
+            "aranami-hub": "1",
+            "aranami-web": "1",
+        }
+
+    def test_legacy_idle_override_is_explicitly_forwarded(self) -> None:
+        """Require explicit evidence for an older hub protocol."""
+        first_stage = self._stage()
+        assert self._deploy(first_stage).returncode == 0
+        second_stage = self._stage("b" * 32)
+        result = self._deploy(second_stage, FAKE_DRAIN_UNSUPPORTED="1")
+        assert result.returncode != 0
+        assert (self.root / "app").resolve() == first_stage
+        third_stage = self._stage("c" * 32)
+        result = self._deploy(
+            third_stage,
+            FAKE_DRAIN_UNSUPPORTED="1",
+            ARANAMI_LEGACY_IDLE_CONFIRMED="1",
+        )
+        assert result.returncode == 0, result.stderr
+        assert (self.root / "app").resolve() == third_stage
+        assert any(
+            command[:2] == ["kubectl", "exec"]
+            and "--legacy-idle-confirmed" in command
+            for command in self._commands()
+        )
 
     def test_missing_and_paused_services_are_not_started(self) -> None:
         """Preserve absent jobs and deliberately paused publication."""

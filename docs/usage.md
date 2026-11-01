@@ -47,90 +47,25 @@ Inspect backend-owned metadata read-only:
 | `state/schedule-status.json` | Monitor state, actual next executions, and resource observations |
 | `state/report-updates.json` | Per-destination timing, outcome, and confirmed edits |
 
-Complete results are under `reports/<report-key>/`; `latest.json` selects a
-generation containing its manifest, Parquet tables, and `report.wikitext`.
+Collected facts are under `reports/data/`; generated reports and saved drafts
+are under `reports/records/`. Daily data uses `YYYYMMDD` folders and current
+data uses readable filenames. Report records retain timestamped complete
+bundles; `latest.json` selects their manifest, Parquet tables, and wikitext.
 Unknown edit counts are not zero. Do not modify saved observations or expose
 credentials in diagnostics; see [runtime locations](administration.md#runtime-folder-architecture).
 
 ## Prepare a quarterly newsletter
 
-Open the header's **Tools** menu and choose **Newsletter drafts**, or visit
-`/newsletter/`, for the automatically selected next quarterly issue.
-The hub fetches source data before publication and refreshes at `00:00 UTC`
-as the reporting quarter progresses. The page provides separate selectable
-wikitext for the main overview, `特優內容`, and `宣告`, with syntax highlighting
-when JavaScript is available.
-All three pages keep the preceding issue's original wikitext design, including
-their banners, headings, columns, navigation, and count-change styling.
-For example, `/newsletter/?issue=2027-01` selects issue 29, covering October
-through December 2026. The issue radios offer the latest completed issue and
-the current draft; selecting one opens its saved data immediately. Without
-JavaScript, ordinary issue links provide the same selection. The default
-advances at exactly `00:00 UTC` on the first day of January, April, July, and
-October. That day's refresh closes the completed quarter even if the previous
-refresh succeeded just before midnight.
-Copy each draft, then edit and preview it at the linked Wikipedia destination
-before saving. The code blocks are read-only; manual selection and copying also
-work without JavaScript. The website does not save or publish wiki edits.
+Open **Tools → Newsletter drafts**, or `/newsletter/`, to review and copy the
+current issue's saved wikitext. Collection refreshes daily at `00:00 UTC`;
+publication remains a manual Wikipedia edit. January also provides an annual
+feature with data to verify, while other issues have blank feature and
+interview templates.
 
-Use **Data date** to open a saved daily draft. For example, selecting
-`2026-10-30` opens the draft covering data through October 30, normally
-captured after the `2026-10-31 00:00 UTC` update. The page shows the actual
-generation time separately, including any delay. Each date retains its first
-successful draft, so later updates and formatter changes do not rewrite it.
-The calendar lists retained dates for the selected issue; changing issues
-opens that issue's latest saved day. Dates without a saved draft are explicitly
-unavailable. Daily history begins with retained observations rather than
-reconstructing earlier drafts from today's data.
-
-Requests use saved data only. Drafts retain all three reporting months and use
-the figures collected so far, including zero registered articles for months
-with no collected entries. The overview states its actual observation date.
-New-page prose uses the number of registered articles without collection-gap
-diagnostics; the saved facts retain coverage and unknown totals separately.
-Each month includes its grade breakdown, and the quarter includes the previous
-issue's pie chart. Open issues use assessments observed during collection;
-closed issues use their retained boundary snapshot. Unmatched articles remain
-in an explicit unknown-grade category. Missing historical snapshots never use
-current grades. Drafts retain every standard section and the initial issue's
-nine monthly quality placeholders, with empty slots marked `（無）`.
-A failed refresh retains the last
-successful draft. An issue without collected data shows its collection state
-instead of empty templates. Authored features and interviews
-are outside this generator. The overview always links to all four content
-pages, including the feature and interview pages before they are created.
-
-DYK and quality changes use dates recorded on article talk pages, including
-former FA, FL, and GA articles. News uses recorded `ITNtalk` dates without
-reading the homepage news bulletin. Unknown-date
-records remain retained and are identified separately from dated issue lists.
-Today in history reads each recurring daily subpage's last revision before
-the following UTC midnight; later edits to that subpage do not rewrite the day.
-
-The first collection backfills recorded project article history into
-`reports/newsletter-history-v1.parquet`. Hourly scans at `HH:00 UTC` fetch only
-changed talk-page revisions and retain earlier observations in the same file.
-The file survives cache clearing. To perform the initial backfill separately,
-run this in the configured Toolforge runtime with its pinned source and Python:
-
-```shell
-python -m backend.website.newsletter_history
-```
-
-The command reads Wiki Replicas and wiki text, writes the local Parquet archive,
-and makes no wiki edits. It can be repeated without duplicate source revisions.
-Do not run live collection from this development checkout.
-
-Today in history uses a separate `cache/today-in-history-v1.parquet` containing
-unfiltered daily source text and revision IDs for the last 100 completed UTC
-days. Daily analysis resolves each event's primary articles against current
-project membership, including redirected titles; incidental links are excluded.
-Historical source redirects use the same day-end cutoff and retain revision
-evidence. Older dates are fetched from history without extending cache
-retention. Clearing this source cache causes fresh historical reads without
-losing saved reports. See the
-[newsletter contracts](architecture.md#newsletter-drafts) for source identities,
-membership matching, and retained history rules.
+See [Newsletter drafts](webservice/newsletter.md) for issue/date selection, editing
+invitations, and annual data. [Newsletter collection](backend/newsletter.md)
+covers durable source history, listing-time attribution, prepared observations,
+and disposable source caches.
 
 ## Routine names and UTC triggers
 
@@ -143,12 +78,15 @@ Use these identifiers in `tasks`:
 | `assessment_lists` | Project assessment and review lists | Every hour at `:31` |
 | `assessment_log` | Full project assessment snapshot and observed changes | Daily at `00:00:00` |
 | `pageviews` | Rankings for each missing eligible date | Every hour at `:59` while behind/deferred |
-| `enwp_key_articles` | Current English importance/quality comparisons | Daily at `23:24` |
+| `enwp_key_articles` | Current English importance/quality comparisons | Daily at `00:00:00`, after assessment capture |
 | `pexbot` | Subscribed report refresh requests | Daily at `00:00` |
 
 Triggers do not guarantee edits: unchanged outputs are not saved. New pages
 retains 100 complete UTC dates through yesterday, then waits for its next daily
 trigger. English comparisons and PexBot refresh current state, not daily history.
+English comparisons first reuse or capture the completed day's assessment
+dataset. A failed capture prevents comparison publication; an assessment-log
+wiki save failure does not block it once the shared dataset is complete.
 
 Pageviews publishes missing dates separately and chronologically. Yesterday
 becomes eligible at the actual `18:00 UTC` boundary, first attempted at `18:59`.
@@ -238,10 +176,11 @@ complete edit history. Main page links and assessment values are bold, with
 simplified assessment labels and unbolded discussion/revision links. Entries
 sort by numeric namespace and then title within each subsection.
 
-Each UTC date retains one immutable full project PageAssessments snapshot as
-Parquet through the shared report store, with all source columns available for
-other work. Its `project-assessments` identity distinguishes the wiki, project,
-and date. Capture precedes the destination read, so a wiki read or edit failure
+Each completed UTC date retains an immutable project PageAssessments dataset
+with only `page_id`, `pa_class`, and `pa_importance`. The 00:00 UTC run saves
+`assessments-YYYYMMDD.parquet` for the day that just ended. It compares saved
+datasets by page ID before resolving titles for changed pages. Capture
+precedes the destination read, so a wiki read or edit failure
 does not discard that day's reusable source data. The manifest records the
 actual observation time; a delayed run never claims it collected at midnight.
 Repeated runs reuse that date's observation,
@@ -250,10 +189,13 @@ and a manual report anchor cannot create a historical snapshot from current data
 Other Toolforge workflows can call
 `backend.services.project_assessments.read_snapshot(site, project, day)` to read
 an existing date without querying sources. It returns a validated report bundle
-or `None` when that date has no snapshot; the full assessment table is
-`bundle.tables["members"]`. The corresponding `members.parquet` lives in that
-date's `reports/<report-key>/<generation>/` bundle. Preview snapshots stay under
+or `None` when that completed date has no snapshot; the compact assessment table
+is `bundle.tables["members"]`. Its file is
+`reports/data/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet`.
+Preview snapshots stay under
 `dry-run/reports/` and cannot replace production observations.
+See [Saved data and Parquet fields](backend/data-storage.md) for the field
+contract.
 
 Each new dated section starts with the total number of mainspace articles and
 lists, followed by quality classes and importance levels in assessment order.

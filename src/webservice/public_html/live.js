@@ -3,18 +3,20 @@
     "use strict";
 
     // Native modal dialogs supply focus containment, Escape dismissal, and an
-    // inert background. Delegation also covers buttons refreshed over HTTP.
+    // inert background. Delegation also covers links refreshed over HTTP.
     const dialogOpeners = new Map();
     document.addEventListener("click", (event) => {
-        const button = event.target.closest?.("button[commandfor]");
-        if (!button) return;
-        const dialog = document.getElementById(button.getAttribute("commandfor"));
+        const control = event.target.closest?.('a[aria-haspopup="dialog"],button[commandfor]');
+        if (!control) return;
+        const link = control.nodeName === "A";
+        if (link && (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button > 0)) return;
+        const dialog = document.getElementById(control.getAttribute(link ? "aria-controls" : "commandfor"));
         if (dialog?.nodeName !== "DIALOG" || typeof dialog.showModal !== "function") return;
-        const command = button.getAttribute("command");
+        const command = link ? "show-modal" : control.getAttribute("command");
         if (command === "show-modal") {
             event.preventDefault();
             if (!dialog.open) {
-                dialogOpeners.set(dialog, button);
+                dialogOpeners.set(dialog, control);
                 dialog.showModal();
             }
         } else if (command === "close") {
@@ -46,6 +48,16 @@
             first.focus();
         }
     });
+
+    // Fragment links also work when opened directly or in a new browser tab.
+    function openFragmentDialog() {
+        const fragment = window.location.hash?.slice(1);
+        if (!fragment) return;
+        const dialog = document.getElementById(fragment);
+        if (dialog?.nodeName === "DIALOG" && !dialog.open) dialog.showModal();
+    }
+    window.addEventListener("hashchange", openFragmentDialog);
+    openFragmentDialog();
 
     const clockId = ["tool-status", "live-server-status", "live-uptime"]
         .find((id) => document.getElementById(id));
@@ -128,15 +140,15 @@
                     const difference = Date.parse(node.dataset.observedAt) - now;
                     if (!Number.isFinite(difference)) continue;
                     const minutes = Math.floor(Math.abs(difference) / 60000);
-                    const unit = minutes >= 1440 ? "days" : minutes >= 60 ? "hours" : "minutes";
+                    const unit = minutes >= 43830 ? "months" : minutes >= 1440 ? "days" : minutes >= 60 ? "hours" : "minutes";
                     const direction = difference > 0 ? "ahead" : "ago";
                     const message = minutes === 0
                         ? (difference > 0 ? "time.soon" : "time.just_now")
                         : `time.${unit}_${direction}`;
-                    text = format(anchor.messages[message], {
-                        count: unit === "days" ? Math.floor(minutes / 1440)
-                            : unit === "hours" ? Math.floor(minutes / 60) : minutes,
-                    });
+                    const count = unit === "months" ? Math.floor(minutes / 43830) : unit === "days" ? Math.floor(minutes / 1440)
+                            : unit === "hours" ? Math.floor(minutes / 60) : minutes;
+                    const label = count === 1 && anchor.messages[`${message}_one`] ? `${message}_one` : message;
+                    text = format(anchor.messages[label], { count });
                     if (node.hasAttribute("data-relative-inline")) text = text.slice(1, -1);
                 } else {
                     const elapsed = (now - Date.parse(node.dataset.startedAt)) / 1000;
@@ -161,14 +173,14 @@
                             },
                         );
                     } else {
-                        const minutes = Math.floor(whole / 60);
-                        const duration = format(
-                            anchor.messages[minutes ? "duration.minutes" : "duration.seconds"],
-                            {
-                                minutes,
-                                seconds: minutes ? String(whole % 60).padStart(2, "0") : whole,
-                            },
-                        ) + "…";
+                        const unit = whole >= 86400 ? "days" : whole >= 3600 ? "hours"
+                            : whole >= 60 ? "minutes" : "seconds";
+                        const duration = format(anchor.messages[`duration.${unit}`], {
+                            days: Math.floor(whole / 86400),
+                            hours: Math.floor(whole / 3600) % 24,
+                            minutes: Math.floor(whole / 60) % 60,
+                            seconds: whole % 60,
+                        }) + "…";
                         text = format(node.dataset.durationTemplate, { duration });
                     }
                 }
@@ -403,7 +415,7 @@
         clearTimeout(socketTimer);
         if (!active || document.hidden || socket || typeof WebSocket !== "function") return;
         const lang = document.documentElement.lang.toLowerCase().replaceAll("_", "-");
-        const locale = ["en", "zh", "zh-hans", "zh-hant"].includes(lang) ? lang : "en";
+        const locale = ["en", "zh", "zh-hans", "zh-hant", "zh-hant-tw", "zh-hant-hk"].includes(lang) ? lang : "en";
         const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
         let current;
         try {

@@ -229,6 +229,36 @@ def prepare_main_layout(text: str, source_issue: Issue) -> dict | None:
     return layout if valid_main_layout(layout) else None
 
 
+def issue_contents(text: str, issue: Issue) -> str:
+    """Adapt the prepared contents to January's combined annual feature.
+
+    Args:
+        text: Validated main layout with issue metadata slots.
+        issue: Destination publication month.
+
+    Returns:
+        The prepared layout, omitting January's separate interview link.
+    """
+    if issue.month != 1:
+        return re.sub(
+            r"(/簡訊/@@aranami:issue@@/專題\|)"
+            r"專題報導兼訪談：\d{4}年年終回顧",
+            r"\g<1>專題報導：<待定>",
+            text,
+        )
+    text = re.sub(
+        r"^\*[^\r\n]*?/簡訊/@@aranami:issue@@/訪談\|[^\r\n]*\r?\n",
+        "",
+        text,
+        flags=re.MULTILINE,
+    )
+    return re.sub(
+        r"(/簡訊/@@aranami:issue@@/專題\|)[^\]\r\n]*",
+        rf"\g<1>專題報導兼訪談：{issue.year - 1}年年終回顧",
+        text,
+    )
+
+
 def valid_main_layout(value: object) -> bool:
     """Validate optional prepared layout data without source access.
 

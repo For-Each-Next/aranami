@@ -72,7 +72,12 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             "quality_source": "article_history",
             "history_undated": {"quality": 2},
         })[1]["text"]
-        assert "5次有明確日期的評級變動" in text
+        assert (
+            "新增典範條目1篇、特色列表0篇、甲級條目1篇、優良條目0篇、"
+            "專題乙上級條目0篇、專題優良話題0組，"
+            "撤銷典範條目0篇、特色列表1篇、優良條目1篇、"
+            "專題乙上級條目1篇、專題優良話題0組。" in text
+        )
         assert "認證條目列表變動" not in text
         assert "當選典範條目" in text
         assert "撤銷特色列表" in text
@@ -102,7 +107,8 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
             "dyk": [],
         })
         quality, announcements = pages[1]["text"], pages[2]["text"]
-        assert "共有0次有明確日期的評級變動" in quality
+        assert "新增典範條目0篇、特色列表0篇、優良條目0篇" in quality
+        assert "無特優內容變動" not in quality
         assert "（無變動）" in quality
         assert (
             "（新條目推薦2項、新聞動態3項、歷史上的今天4項）" in announcements
@@ -156,7 +162,13 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         )
         assert old_layout is not None
         assert regenerated_layout is not None
-        assert regenerated_layout["text"] == old_layout["text"]
+        assert (
+            regenerated_layout["text"].replace(
+                "專題報導兼訪談：2026年年終回顧",
+                "專題報導：<待定>",
+            )
+            == old_layout["text"]
+        )
         assert "第廿九號" in main
         assert "2026年第四季" in main
         assert "13,062篇條目" in main
@@ -174,8 +186,8 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "[[主题:电子游戏|主題]]（[[主题讨论:电子游戏|討論]]）" in main
         assert "[[維基專題討論:電子遊戲/簡訊|討論本期簡訊]]" in main
         assert "~~{{void}}~~" in main
-        assert "/2027-01/專題|專題報導：<待定>]]" in main
-        assert "/2027-01/訪談|訪談：<待定>]]" in main
+        assert "/2027-01/專題|專題報導兼訪談：2026年年終回顧]]" in main
+        assert "/2027-01/訪談" not in main
         assert "@@aranami:" not in main
 
     @staticmethod
@@ -457,9 +469,9 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         assert "==== 歷史上的今天 ====" in text
 
     @staticmethod
-    def test_article_links_keep_apostrophes_without_redundant_labels() -> None:
-        """Keep title apostrophes and meaningful user labels."""
-        title = "Let's Go!陰陽師"
+    def test_article_links_preserve_ampersands_and_apostrophes() -> None:
+        """Keep literal titles and meaningful user labels."""
+        titles = ("Let's Go!陰陽師", "N&B積木")
         pages = _render({
             "quality_changes": [
                 {
@@ -467,21 +479,28 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
                     "grade": "fa",
                     "action": "added",
                     "title": title,
-                },
+                }
+                for title in titles
             ],
-            "dyk": [{"title": title, "date": "2026-11-01"}],
-            "newcomers": ["O'Brien"],
+            "dyk": [
+                {"title": title, "date": "2026-11-01"} for title in titles
+            ],
+            "newcomers": ["O'Brien", "N&B"],
         })
-        for page in pages[1:]:
+        for page in pages[1:3]:
             text = page["text"]
             assert "[[:Let's Go!陰陽師]]" in text
+            assert "[[:N&B積木]]" in text
+            assert "N&amp;B" not in text
             assert "Let&#39;" not in text
             assert "陰陽師|" not in text
-            assert any(
-                str(link.title) == ":" + title and link.text is None
-                for link in mwparserfromhell.parse(text).filter_wikilinks()
-            )
+            for title in titles:
+                assert any(
+                    str(link.title) == ":" + title and link.text is None
+                    for link in mwparserfromhell.parse(text).filter_wikilinks()
+                )
         assert "[[:User:O'Brien|O'Brien]]" in pages[2]["text"]
+        assert "[[:User:N&B|N&B]]" in pages[2]["text"]
 
     @staticmethod
     def test_hostile_link_titles_remain_literal_wikitext() -> None:
@@ -717,6 +736,79 @@ class NewsletterObservedRenderingTests(unittest.TestCase):
         })[0]["text"]
         assert "截至2027年1月1日，[[维基专题" in text
         assert "截至2026年第四季底" not in text
+
+
+class NewsletterQualitySummaryTests(unittest.TestCase):
+    """Verify grade summaries and observed quarter completion."""
+
+    def test_quality_summary_waits_for_a_completed_observed_quarter(
+        self,
+    ) -> None:
+        """Keep zero grade counts until the quarter is complete."""
+        zeroes = (
+            "電子遊戲專題於2026年第四季間，"
+            "新增典範條目0篇、特色列表0篇、優良條目0篇、"
+            "專題乙上級條目0篇、專題優良話題0組，"
+            "撤銷典範條目0篇、特色列表0篇、優良條目0篇、"
+            "專題優良話題0組。"
+        )
+        for source in ("article_history", "list_history"):
+            for through, complete, expected in (
+                ("2026-10-31", False, zeroes),
+                ("2026-12-31", False, zeroes),
+                (
+                    "2027-01-01",
+                    True,
+                    "電子遊戲專題於2026年第四季間無特優內容變動。",
+                ),
+            ):
+                with self.subTest(source=source, through=through):
+                    text = _render({
+                        "quality_changes": [],
+                        "quality_source": source,
+                        "observation_end": through,
+                        "complete": complete,
+                    })[1]["text"]
+                    assert expected in text
+                    assert "0次有明確日期" not in text
+        unknown = _render({
+            "quality_changes": None,
+            "observation_end": "2027-01-01",
+            "complete": True,
+        })[1]["text"]
+        assert "來源資料暫未取得。" in unknown
+        assert "新增典範條目0篇" not in unknown
+        assert "無特優內容變動" not in unknown
+        missing_cutoff = _render({"quality_changes": []})[1]["text"]
+        assert zeroes in missing_cutoff
+        assert "無特優內容變動" not in missing_cutoff
+
+    @staticmethod
+    def test_quality_summary_counts_titles_and_keeps_reversals() -> None:
+        """Count titles per grade and preserve both change actions."""
+        changes = [
+            {
+                "date": date,
+                "grade": grade,
+                "action": action,
+                "title": title,
+            }
+            for date, grade, action, title in (
+                ("2026-10-02", "FA", "added", "遊戲"),
+                ("2026-10-02", "fa", "added", "遊戲"),
+                ("2026-11-02", "FA", "removed", "遊戲"),
+                ("2026-11-03", "GA", "added", "其他遊戲"),
+                ("2026-11-04", "GA", "added", "第三個遊戲"),
+            )
+        ]
+        text = _render({
+            "quality_changes": changes,
+            "observation_end": "2027-01-01",
+            "complete": True,
+        })[1]["text"]
+        assert "新增典範條目1篇、特色列表0篇、優良條目2篇" in text
+        assert "撤銷典範條目1篇、特色列表0篇、優良條目0篇" in text
+        assert "無特優內容變動" not in text
 
 
 if __name__ == "__main__":

@@ -38,7 +38,9 @@ _SCHEMA = {
     "used_at": pl.Int64,
 }
 _KEYS = ["title", "variant"]
-_VARIANTS = pl.DataFrame({"variant": ["zh-hans", "zh-hant", "zh"]})
+_VARIANTS = pl.DataFrame({
+    "variant": ["zh-hans", "zh-hant", "zh", "zh-tw", "zh-hk"],
+})
 
 
 def _intro(value: str | None) -> str | None:
@@ -88,7 +90,13 @@ def _load(path: Path | None, now: int) -> pl.DataFrame:  # ruff: ignore[too-many
         invalid = frame.filter(
             pl.col("title").is_null()
             | pl.col("variant").is_null()
-            | ~pl.col("variant").is_in(["zh", "zh-hans", "zh-hant"])
+            | ~pl.col("variant").is_in([
+                "zh",
+                "zh-hans",
+                "zh-hant",
+                "zh-tw",
+                "zh-hk",
+            ])
             | pl.col("title").str.strip_chars().eq("")
             | pl.col("title").str.contains(r"[\x00-\x1f\x7f]")
             | (pl.col("extract").str.len_bytes() > MAX_EXTRACT_BYTES)
@@ -230,6 +238,17 @@ class ExtractCache:
             .filter(pl.col("variant") == "zh")
             .first()
             .alias("extract_zh"),
+            *(
+                pl
+                .col("extract")
+                .filter(pl.col("variant") == variant)
+                .first()
+                .alias(field)
+                for variant, field in (
+                    ("zh-tw", "extract_tw"),
+                    ("zh-hk", "extract_hk"),
+                )
+            ),
         )
         extracts = (
             requested
@@ -239,7 +258,13 @@ class ExtractCache:
                 how="left",
                 maintain_order="left",
             )
-            .select("extract", "extract_hant", "extract_zh")
+            .select(
+                "extract",
+                "extract_hant",
+                "extract_zh",
+                "extract_tw",
+                "extract_hk",
+            )
             .to_dicts()
         )
         return [

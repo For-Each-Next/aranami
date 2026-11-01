@@ -186,9 +186,9 @@ class TestMonitor(TestCase):
             "enwp_key_articles": dt.datetime(
                 2026,
                 10,
-                3,
-                23,
-                24,
+                4,
+                0,
+                0,
                 tzinfo=dt.UTC,
             ),
             "pexbot": dt.datetime(2026, 10, 4, 0, 0, tzinfo=dt.UTC),

@@ -70,11 +70,15 @@ class DashboardUpdater:
         self._stop = threading.Event()
         self._state_lock = threading.Lock()
         self._refresh_lock = threading.Lock()
-        self._state: dict[str, str | bool | None] = {
+        self._state: dict[str, str | int | bool | None] = {
             "last_attempt": None,
             "last_success": None,
             "last_error": None,
             "refreshing": False,
+            "drain_protocol": 1,
+            "drain_id": f"{os.getpid()}-{time.monotonic_ns()}",
+            "pid": os.getpid(),
+            "drained": False,
         }
         self._lock_fd: int | None = None
         self._started = False
@@ -115,9 +119,22 @@ class DashboardUpdater:
             raise
         self._started = True
 
+    def request_stop(self) -> None:
+        """Reject queued refreshes while active collection finishes.
+
+        Ownership and log handles remain open until ``stop`` drains the
+        collector. This nonblocking step precedes scheduler shutdown.
+        """
+        if not self._stop.is_set():
+            self._stop.set()
+            _LOGGER.info(
+                "Website collection stopping; queued refreshes will be "
+                "skipped and active collection will finish before release.",
+            )
+
     def stop(self) -> None:
         """Finish the active refresh and release resources."""
-        self._stop.set()
+        self.request_stop()
         with self._refresh_lock:
             if self._lock_fd is not None:
                 _LOGGER.info(
@@ -128,7 +145,16 @@ class DashboardUpdater:
                 self._lock_fd = None
             self._logs.close()
 
-    def health(self) -> dict[str, str | bool | None]:
+    def confirm_drained(self) -> None:
+        """Acknowledge that the hub finished all scheduled work.
+
+        The hub calls this only after scheduler shutdown has returned.
+        The local health reader then permits deployment to stop the pod.
+        """
+        with self._state_lock:
+            self._state["drained"] = True
+
+    def health(self) -> dict[str, str | int | bool | None]:
         """Return the latest attempt and saved-refresh state.
 
         Returns:

@@ -72,6 +72,26 @@ _IMPORTANCE_NAMES = {
     "極高": "极高",
     "不適用": "不适用",
 }
+_NONARTICLE_NAMES = {
+    "category": "分類",
+    "分类": "分類",
+    "分類": "分類",
+    "disambig": "消歧義",
+    "消歧义": "消歧義",
+    "消歧義": "消歧義",
+    "file": "檔案",
+    "文件": "檔案",
+    "template": "模板",
+    "portal": "主題",
+    "主题": "主題",
+    "project": "專題",
+    "专题": "專題",
+    "redirect": "重定向",
+    "draft": "草稿",
+    "na": "不適用",
+    "n/a": "不適用",
+    "unassessed": "未評",
+}
 _SUMMARY_QUALITY = (
     ("典范级", ("fa", "典范", "典範"), ("fl", "特色列表", "典表")),
     ("优良级", ("ga", "优良", "優良"), ()),
@@ -125,13 +145,55 @@ def _summary_counts(
         .str.to_lowercase()
         .str.replace(rf"[{suffix}]$" if suffix == "级級" else f"{suffix}$", "")
     )
-    return dict(
+    counted = (
         articles
-        .select(label.replace(aliases).alias("label"))
+        .select(
+            label.replace(aliases).alias("label"),
+            pl.col("count")
+            if "count" in articles.columns
+            else pl.lit(1).alias("count"),
+        )
         .group_by("label")
-        .len()
-        .iter_rows(),
+        .agg(pl.col("count").sum())
     )
+    return dict(counted.iter_rows())
+
+
+def _total_inputs(
+    data: AssessmentLogData,
+) -> tuple[pl.DataFrame, pl.DataFrame, int] | None:
+    """Select article totals without resolving unchanged page names.
+
+    Args:
+        data: Prepared observations and saved aggregate source metadata.
+
+    Returns:
+        Weighted quality/importance rows and article count, or null
+        when older compact observations contain no article-only totals.
+    """
+    totals = data.result.metadata.get("article_totals")
+    if totals is not None:
+        schema = {"value": pl.String, "count": pl.Int64}
+        return (
+            pl.DataFrame(totals["class"], schema=schema).select(
+                pl.col("value").alias("class"),
+                "count",
+            ),
+            pl.DataFrame(totals["importance"], schema=schema).select(
+                pl.col("value").alias("importance"),
+                "count",
+            ),
+            totals["count"],
+        )
+    source = data.result.tables["source"]
+    if "page_namespace" not in source.columns:
+        return None
+    articles = data.members.join(
+        source.select("page_id", "page_namespace"),
+        on="page_id",
+        validate="1:1",
+    ).filter(pl.col("page_namespace") == 0)
+    return articles, articles, articles.height
 
 
 def _totals(data: AssessmentLogData) -> str:
@@ -143,11 +205,10 @@ def _totals(data: AssessmentLogData) -> str:
     Returns:
         A paragraph with thousands separators and no zero-count labels.
     """
-    articles = data.members.join(
-        data.result.tables["source"].select("page_id", "page_namespace"),
-        on="page_id",
-        validate="1:1",
-    ).filter(pl.col("page_namespace") == 0)
+    inputs = _total_inputs(data)
+    if inputs is None:
+        return ""
+    quality_rows, importance_rows, total_article_count = inputs
     quality_aliases = {
         alias: f"{label}{kind}"
         for label, article_aliases, list_aliases in _SUMMARY_QUALITY
@@ -155,7 +216,7 @@ def _totals(data: AssessmentLogData) -> str:
         for alias in values
     }
     quality = _summary_counts(
-        articles,
+        quality_rows,
         "class",
         quality_aliases,
         "未评",
@@ -167,10 +228,10 @@ def _totals(data: AssessmentLogData) -> str:
         list_count = quality.pop(f"{label}列表", 0)
         parts = []
         if article_count:
-            name = label if label == "未评级" else f"{label}条目"
+            name = f"'''{label}'''" + ("" if label == "未评级" else "条目")
             parts.append(f"{name}{article_count:,}篇")
         if list_count:
-            name = "列表" if article_count else f"{label}列表"
+            name = "列表" if article_count else f"'''{label}'''列表"
             parts.append(f"{name}{list_count:,}篇")
         if parts:
             quality_parts.append("、".join(parts))
@@ -178,7 +239,7 @@ def _totals(data: AssessmentLogData) -> str:
         f"{name}{count:,}篇" for name, count in sorted(quality.items())
     )
     importance = _summary_counts(
-        articles,
+        importance_rows,
         "importance",
         {
             alias: name
@@ -189,21 +250,72 @@ def _totals(data: AssessmentLogData) -> str:
         "重要度",
     )
     importance_parts = [
-        f"{name}重要度{count:,}篇"
+        f"'''{name}重要度'''{count:,}篇"
         for name, _ in _SUMMARY_IMPORTANCE
         if (count := importance.pop(name, 0))
     ]
     importance_parts.extend(
-        f"{name}重要度{count:,}篇"
+        f"'''{name}重要度'''{count:,}篇"
         for name, count in sorted(importance.items())
     )
-    paragraphs = [f"'''总条目'''{articles.height:,}篇。"]
+    paragraphs = [f"'''條目頁{total_article_count:,}篇'''："]
     paragraphs.extend(
-        "，".join(parts) + "。"
+        "* " + "，".join(parts) + "。"
         for parts in (quality_parts, importance_parts)
         if parts
     )
-    return "".join(paragraphs)
+    paragraphs.extend(_nonarticle_totals(data, total_article_count))
+    return "\n".join(paragraphs)
+
+
+def _nonarticle_totals(
+    data: AssessmentLogData,
+    total_article_count: int,
+) -> list[str]:
+    """Render observed nonarticle totals and the redirect exclusion.
+
+    Returns:
+        Separate paragraphs, or none for an older observation.
+    """
+    paragraphs = []
+    totals = data.result.metadata.get("article_totals") or {}
+    nonarticles = totals.get("nonarticles")
+    if nonarticles is not None:
+        parts = []
+        for entry in sorted(
+            nonarticles["class"],
+            key=lambda entry: (
+                str(entry["value"]).casefold()
+                not in {"disambig", "消歧义", "消歧義"},
+                str(entry["value"]),
+            ),
+        ):
+            raw = (
+                str(entry["value"] or "unassessed")
+                .removesuffix("級")
+                .removesuffix("级")
+            )
+            label = (
+                _NONARTICLE_NAMES
+                .get(raw.casefold(), _QUALITY_NAMES.get(raw.casefold(), raw))
+                .removesuffix("級")
+                .removesuffix("级")
+            )
+            parts.append(f"'''{label}級'''{entry['count']:,}頁")
+        paragraphs.extend((
+            "",
+            f"'''非條目{nonarticles['count']:,}頁'''："
+            + ("，".join(parts) if parts else "0頁")
+            + "。",
+            "",
+            f"'''專題共計{total_article_count + nonarticles['count']:,}頁'''。"
+            + (
+                f"（不含{totals['redirects']:,}重定向頁）"
+                if totals.get("redirects") is not None
+                else ""
+            ),
+        ))
+    return paragraphs
 
 
 def _label(value: object, names: Mapping[str, str], suffix: str) -> str:

@@ -77,6 +77,7 @@ def run(
             active.today,
             project="电子游戏",
             report_title=title,
+            persist=not active.dry,
         )
         text = (
             original_text

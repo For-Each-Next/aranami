@@ -5,10 +5,11 @@ from __future__ import annotations
 import datetime as dt
 import re
 from dataclasses import dataclass
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 ROOT = "WikiProject:電子遊戲/簡訊"
 SUFFIXES = ("", "特優內容", "宣告")
+DYK_PROJECTS = ("虚构角色", "传记", "公司", "音乐")
 _QUARTER_MONTHS = 3
 _LAST_QUARTER_MONTH = 10
 
@@ -96,6 +97,11 @@ class Issue:
         quarter = "一二三四"[(self.start.month - 1) // 3]
         return f"{self.start.year}年第{quarter}季"
 
+    @property
+    def draft_suffixes(self) -> tuple[str, ...]:
+        """Draft pages, combining January's interview and feature."""
+        return SUFFIXES + (("專題",) if self.month == 1 else ("專題", "訪談"))
+
     def page_url(self, suffix: str) -> str:
         """Return the Chinese Wikipedia URL for an issue page.
 
@@ -107,3 +113,34 @@ class Issue:
         """
         title = f"{ROOT}/{self.value}" + (f"/{suffix}" if suffix else "")
         return "https://zh.wikipedia.org/wiki/" + quote(title)
+
+    def edit_url(self, suffix: str, *, new_section: str | None = None) -> str:
+        """Return a manual editor URL for an issue page.
+
+        Args:
+            suffix: Subpage name, or empty for the main page.
+            new_section: Optional heading for a new contribution.
+
+        Returns:
+            The edit URL without performing a request or wiki edit.
+        """
+        parameters = {
+            "title": f"{ROOT}/{self.value}" + (f"/{suffix}" if suffix else ""),
+            "action": "edit",
+        }
+        if new_section is not None:
+            parameters.update(section="new", sectiontitle=new_section)
+        return "https://zh.wikipedia.org/w/index.php?" + urlencode(parameters)
+
+    def reflection_url(self) -> str:
+        """Return a comment-preload URL without a forced heading.
+
+        Returns:
+            A new-section editor URL using the verified H3 preload.
+        """
+        return "https://zh.wikipedia.org/w/index.php?" + urlencode({
+            "title": f"{ROOT}/{self.value}/專題",
+            "action": "edit",
+            "section": "new",
+            "preload": f"{ROOT}/preload",
+        })

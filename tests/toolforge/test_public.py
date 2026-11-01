@@ -15,6 +15,7 @@ import tempfile
 import threading
 import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -93,6 +94,23 @@ async def _exchange(
         send,
     )
     return messages
+
+
+class RetiredInspectionRoutesTests(unittest.TestCase):
+    """Keep removed maintenance tools inaccessible."""
+
+    def test_retired_inspection_routes_are_unavailable(self) -> None:
+        """Retire inspection routes without exposing runtime state."""
+        with tempfile.TemporaryDirectory() as temporary:
+            app = create_app(Path(temporary))
+            with TestClient(app) as client:
+                for path in ("/data/", "/api/data", "/tasks/", "/api/tasks"):
+                    with self.subTest(path=path):
+                        response = client.get(path)
+                        assert response.status_code == HTTPStatus.NOT_FOUND
+                about = client.get("/about/").text
+                assert 'href="/data/"' not in about
+                assert 'href="/tasks/"' not in about
 
 
 class PublicWebsiteTests(unittest.TestCase):
@@ -276,7 +294,7 @@ class PublicWebsiteTests(unittest.TestCase):
             assert head[0] == 200
             assert head[2] == b""
             translated = self.request("/about/", language="zh-TW,en;q=0.5")
-            assert translated[1]["Content-Language"] == "zh-Hant"
+            assert translated[1]["Content-Language"] == "zh-Hant-TW"
             assert self.request("/maintenance/?task=valid")[0] == 503
             assert self.request("/maintenance/?task=../private")[0] == 400
             assert self.request("/logs/?q=one&q=two")[0] == 400
@@ -393,7 +411,7 @@ class PublicWebsiteTests(unittest.TestCase):
             assert b"(33 sec)" not in body
             assert b"32.89" not in body
             translated = self.request("/api/live", language="zh-TW")
-            assert translated[1]["Content-Language"] == "zh-Hant"
+            assert translated[1]["Content-Language"] == "zh-Hant-TW"
             assert "結束時間\uff1a" in translated[2].decode()
             assert "執行時間33秒" not in translated[2].decode()
             assert self.request("/api/live", "HEAD")[2] == b""
@@ -450,6 +468,8 @@ class PublicWebsiteTests(unittest.TestCase):
         assert value["query"] == "[x]"
         state = self.runtime / "state"
         state.mkdir(exist_ok=True)
+        history_times = [event["time"] for event in events[-100:]]
+        history_times[0] = "2026-10-22T12:00:50+00:00"
         (state / "job-history.json").write_text(
             json.dumps({
                 "schema": 1,
@@ -457,7 +477,7 @@ class PublicWebsiteTests(unittest.TestCase):
                     {
                         "run_id": f"{index:032x}",
                         "routine": "pageviews",
-                        "started_at": event["time"],
+                        "started_at": instant,
                         "finished_at": None,
                         "status": "running",
                         "duration_seconds": None,
@@ -465,12 +485,12 @@ class PublicWebsiteTests(unittest.TestCase):
                         "stages": [
                             {
                                 "kind": "started",
-                                "time": event["time"],
+                                "time": instant,
                                 "title": "",
                             },
                         ],
                     }
-                    for index, event in enumerate(events[-100:])
+                    for index, instant in enumerate(history_times)
                 ],
             }),
         )
@@ -489,12 +509,17 @@ class PublicWebsiteTests(unittest.TestCase):
         _, marker, remainder = human.partition("<tbody>")
         assert marker
         rows = remainder.partition("</tbody>")[0]
-        assert rows.count("<tr>") == 25
+        assert rows.count("<tr>") == 100
         assert "Pageview rankings" in rows
         assert "Running" in rows
         assert "2026-10-23 12:02:29" in rows
-        assert '<form action="/reports/"' in human
-        assert 'href="/reports/?date=2026-10-23' in human
+        assert "2026-10-22 12:00:50" in rows
+        assert rows.index("2026-10-23 12:02:29") < rows.index(
+            "2026-10-22 12:00:50",
+        )
+        assert '<form action="/reports/"' not in human
+        assert 'class="log-pagination"' not in human
+        assert 'class="log-match-count"' not in human
         assert "the Pageview rankings task started." not in human
         assert "Line 149" not in human
         assert "<script>" not in human
@@ -519,24 +544,26 @@ class PublicWebsiteTests(unittest.TestCase):
         assert self.request("/api/logs?date=2026-10-22")[0] == 404
 
     def _assert_report_navigation(self, content: str, filename: str) -> None:
-        """Verify report controls and separate diagnostic downloads."""
+        """Keep report history separate from diagnostic downloads."""
         assert self.request("/reports/", "HEAD")[2] == b""
         assert self.request("/reports/", "POST")[0] == 405
-        filtered = self.request(
-            "/reports/?date=2026-10-23&order=asc&page=2&status=running",
-        )[2].decode()
-        assert "2026-10-23 12:01:15" in filtered
-        assert 'href="/reports/?date=2026-10-23' in filtered
-        assert "lang=zh-hant" in filtered
-        assert (
-            b"No events match"
-            in self.request(
-                "/reports/?status=failed",
-            )[2]
-        )
-        for query in ("status=other", "page=5", "order=other", "q=a&q=b"):
+        for query in (
+            "date=2026-10-23&order=asc&page=2&status=running",
+            "status=failed",
+            "date=2026-01-01",
+            "q=missing",
+        ):
             with self.subTest(query=query):
-                assert self.request("/reports/?" + query)[0] == 400
+                status, _, body = self.request("/reports/?" + query)
+                assert status == 200
+                output = body.decode()
+                rows = output.partition("<tbody>")[2].partition("</tbody>")[0]
+                assert rows.count("<tr>") == 100
+                assert "2026-10-22 12:00:50" in rows
+                assert rows.index("2026-10-23 12:02:29") < rows.index(
+                    "2026-10-22 12:00:50",
+                )
+                assert "lang=zh-hant" in output
         with patch(
             "backend.public.log_excerpt",
             side_effect=AssertionError("Archive must not read run events"),
@@ -552,6 +579,23 @@ class PublicWebsiteTests(unittest.TestCase):
             )[2]
             == content.encode()
         )
+        self._assert_unavailable_report_history()
+
+    def _assert_unavailable_report_history(self) -> None:
+        """Render missing or malformed history without rewriting it."""
+        history = self.runtime / "state" / "job-history.json"
+        history.unlink()
+        status, _, body = self.request("/reports/")
+        assert status == 200
+        assert b'id="tool-status"' in body
+        assert b'id="recent-events"' in body
+        assert b'<table class="logs-table">' not in body
+        history.write_text("invalid history")
+        status, _, body = self.request("/reports/")
+        assert status == 200
+        assert b'id="tool-status"' in body
+        assert b'<table class="logs-table">' not in body
+        assert history.read_text() == "invalid history"
 
     def test_raw_targets_and_query_bounds_remain_strict(self) -> None:
         """Reject encoded paths and oversized or invalid queries."""

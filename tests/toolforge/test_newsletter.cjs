@@ -8,7 +8,7 @@ const vm = require("node:vm");
 
 const script = fs.readFileSync(path.resolve(__dirname, "../../src/webservice/public_html/newsletter.js"), "utf8");
 
-function fixture(clipboard) {
+function fixture(clipboard, editUrl) {
     const status = {textContent: ""};
     const display = {
         focused: false,
@@ -31,6 +31,8 @@ function fixture(clipboard) {
         parentElement: {querySelector: () => status},
         addEventListener(_type, handler) { this.click = handler; },
     };
+    if (editUrl) button.dataset.newsletterEdit = editUrl;
+    const navigated = [];
     vm.runInNewContext(script, {
         document: {
             querySelector: () => null,
@@ -40,13 +42,14 @@ function fixture(clipboard) {
             getSelection: () => selection,
         },
         navigator: {clipboard},
+        location: {assign(url) { navigated.push(url); }},
     });
-    return {button, source, display, selection, status};
+    return {button, source, display, selection, status, navigated};
 }
 
 test("copy preserves literal displayed wikitext and announces completion", async () => {
     let copied;
-    const {button, source, display, status} = fixture({writeText: async value => { copied = value; }});
+    const {button, source, display, status, navigated} = fixture({writeText: async value => { copied = value; }});
     assert.equal(button.hidden, false);
     source.textContent = "{{模板|中文}}\n[[Article]]";
     await button.click();
@@ -54,117 +57,181 @@ test("copy preserves literal displayed wikitext and announces completion", async
     assert.equal(status.textContent, "Copied");
     assert.equal(button.disabled, false);
     assert.equal(display.focused, false);
-});
-
-test("issue selection has no automatic change submission", () => {
-    assert.equal(script.includes("requestSubmit"), false);
-    assert.equal(script.includes('input[name="issue"]'), false);
+    assert.deepEqual(navigated, []);
 });
 
 test("missing or rejected clipboard selects source text for manual copying", async () => {
-    for (const clipboard of [undefined, {writeText: async () => { throw new Error("Denied"); }}]) {
-        const {button, source, display, selection, status} = fixture(clipboard);
-        await button.click();
-        assert.equal(display.focused, true);
-        assert.equal(selection.source, source);
-        assert.equal(status.textContent, "Select and copy manually");
-        assert.equal(button.disabled, false);
+    for (const editUrl of [undefined, "https://zh.wikipedia.org/wiki/WikiProject:电子游戏/简讯/29?action=edit"]) {
+        for (const clipboard of [undefined, {writeText: async () => { throw new Error("Denied"); }}]) {
+            const {button, source, display, selection, status, navigated} = fixture(clipboard, editUrl);
+            await button.click();
+            assert.equal(display.focused, true);
+            assert.equal(selection.source, source);
+            assert.equal(status.textContent, "Select and copy manually");
+            assert.equal(button.disabled, false);
+            assert.deepEqual(navigated, []);
+        }
     }
 });
 
-test("highlighting preserves exact source text and never creates source HTML", () => {
-    function node(text = "") {
-        return {
-            value: text,
-            children: [],
-            append(child) { this.children.push(child); },
-            replaceChildren(fragment) { this.value = ""; this.children = fragment.children; },
-            get textContent() { return this.value + this.children.map(child => child.textContent).join(""); },
-            set textContent(value) { this.value = value; this.children = []; },
-        };
-    }
+test("copy and open waits for literal clipboard content before navigating to the editor", async () => {
+    const editUrl = "https://zh.wikipedia.org/wiki/WikiProject:%E7%94%B5%E5%AD%90%E6%B8%B8%E6%88%8F/%E7%AE%80%E8%AE%AF/29?action=edit";
+    let finishCopy;
+    let copied;
+    const view = fixture({writeText: value => {
+        copied = value;
+        return new Promise(resolve => { finishCopy = resolve; });
+    }}, editUrl);
+    view.source.textContent = "{{模板|中文}}\n[[Target]]\n<source>";
+    const complete = view.button.click();
+    assert.equal(copied, view.source.textContent);
+    assert.equal(view.button.disabled, true);
+    assert.deepEqual(view.navigated, []);
+    finishCopy();
+    await complete;
+    assert.deepEqual(view.navigated, [editUrl]);
+    assert.equal(new URL(view.navigated[0]).searchParams.get("action"), "edit");
+    assert.equal(view.status.textContent, "Copied");
+    assert.equal(view.button.disabled, false);
+});
+
+test("draft text remains literal without highlighting or HTML interpretation", () => {
     const text = "== 中文 ==\n{{模板|foo=[[條目|label]]}}\n<!-- {{hidden}} -->\n</code><script>alert(1)</script>\n''italic''\n";
-    const display = node(text);
+    const display = {textContent: text};
     const created = [];
     vm.runInNewContext(script, {
         document: {
             querySelector: () => null,
             querySelectorAll: selector => selector === "[data-newsletter-wikitext]" ? [display] : [],
-            createDocumentFragment: () => node(),
-            createTextNode: value => node(value),
-            createElement(tag) { created.push(tag); return node(); },
+            createElement(tag) { created.push(tag); return {}; },
         },
         navigator: {},
     });
     assert.equal(display.textContent, text);
-    assert.ok(created.length > 0);
-    assert.deepEqual([...new Set(created)], ["span"]);
-    const classes = display.children.map(child => child.className).filter(Boolean);
-    for (const kind of ["heading", "template", "link", "comment", "tag", "emphasis", "delimiter"]) {
-        assert.ok(classes.includes(`newsletter-token-${kind}`));
-    }
-    const comment = display.children.find(child => child.className === "newsletter-token-comment");
-    assert.equal(comment.textContent, "<!-- {{hidden}} -->");
+    assert.deepEqual(created, []);
 });
 
-function calendarFixture(locale = "en") {
-    function node() {
+function issueFixture() {
+    const issue = {value: "2027-01", handlers: {}, addEventListener(name, handler) { this.handlers[name] = handler; }};
+    const submit = {hidden: false};
+    const status = {hidden: true, textContent: "", dataset: {failure: "Unable to load this issue"}};
+    const requests = [];
+    const addresses = [];
+    let current;
+    function result(text) {
         return {
-            children: [], attrs: {}, handlers: {}, textContent: "", hidden: true,
-            append(child) { this.children.push(child); },
-            replaceChildren() { this.children = []; },
+            textContent: text, attrs: {},
+            querySelector: () => null, querySelectorAll: () => [],
             setAttribute(name, value) { this.attrs[name] = value; },
-            addEventListener(name, handler) { this.handlers[name] = handler; },
-            focus() { this.focused = true; },
+            removeAttribute(name) { delete this.attrs[name]; },
+            replaceWith(replacement) { current = replacement; },
         };
     }
-    const input = {value: "2026-10-30", hidden: false};
-    const fields = Object.fromEntries(["selected", "month", "previous", "next", "weekdays", "days"].map(key => [`[data-calendar-${key}]`, node()]));
-    fields.summary = node();
-    const calendar = node();
-    calendar.dataset = {dates: JSON.stringify(["2026-10-28", "2026-10-30", "2026-11-03"])};
-    calendar.querySelector = selector => fields[selector];
+    current = result("Original draft");
+    const form = {
+        action: "/newsletter/", handlers: {},
+        querySelector: selector => selector === '[name="issue"]' ? issue : submit,
+        addEventListener(name, handler) { this.handlers[name] = handler; },
+    };
+    const document = {
+        querySelector: selector => ({
+            "[data-newsletter-issue-form]": form,
+            "[data-newsletter-load-status]": status,
+            "[data-newsletter-result]": current,
+        })[selector] || null,
+        querySelectorAll: () => [],
+    };
+    class ResponseParser {
+        parseFromString(text) {
+            const values = JSON.parse(text);
+            return {querySelector(selector) {
+                if (selector === "[data-newsletter-result]") return values.missing ? null : result(values.text);
+                if (selector === "#newsletter-issue") return {value: values.issue};
+                return null;
+            }};
+        }
+    }
     vm.runInNewContext(script, {
-        document: {
-            documentElement: {lang: locale},
-            querySelector: () => calendar,
-            querySelectorAll: () => [],
-            getElementById: () => input,
-            createElement: () => node(),
-        },
-        Intl, Date,
+        document, URL, URLSearchParams, AbortController,
+        DOMParser: ResponseParser,
+        FormData: class { *[Symbol.iterator]() { yield ["issue", issue.value]; yield ["lang", "zh-hant"]; } },
+        location: {href: "https://example.test/newsletter/?issue=2027-01&date=2026-12-31", origin: "https://example.test"},
+        history: {replaceState(_state, _title, url) { addresses.push(String(url)); }},
+        fetch: (url, options) => new Promise((resolve, reject) => requests.push({url, options, resolve, reject})),
     });
-    const buttons = () => fields["[data-calendar-days]"].children.flatMap(row => row.children.flatMap(cell => cell.children));
-    return {input, fields, calendar, buttons};
+    function respond(index, values, ok = true) {
+        requests[index].resolve({ok, text: async () => JSON.stringify(values)});
+    }
+    return {issue, submit, status, requests, addresses, form, respond, result: () => current};
 }
 
-test("calendar starts on Sunday and disables every unavailable date", () => {
-    const {input, fields, calendar, buttons} = calendarFixture();
-    assert.equal(calendar.hidden, false);
-    assert.equal(input.hidden, true);
-    assert.equal(input.type, "hidden");
-    assert.deepEqual(fields["[data-calendar-weekdays]"].children[0].children.map(day => day.textContent), ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
-    assert.deepEqual(buttons().filter(button => !button.disabled).map(button => button.attrs["aria-label"]), ["2026-10-28", "2026-10-30"]);
-    assert.equal(buttons().find(button => button.textContent === "29").disabled, true);
-    assert.equal(fields["[data-calendar-previous]"].disabled, true);
-    assert.equal(fields["[data-calendar-next]"].disabled, false);
-    const firstRow = fields["[data-calendar-days]"].children[0].children;
-    assert.equal(firstRow.findIndex(cell => cell.children.length > 0), 4);
+test("issue selection reads the new issue and replaces its draft without submission", async () => {
+    const view = issueFixture();
+    assert.equal(view.submit.hidden, true);
+    view.issue.value = "2026-10";
+    const loaded = view.issue.handlers.change();
+    assert.equal(view.requests.length, 1);
+    assert.equal(view.requests[0].url.pathname, "/newsletter/");
+    assert.equal(view.requests[0].url.searchParams.get("issue"), "2026-10");
+    assert.equal(view.requests[0].url.searchParams.get("lang"), "zh-hant");
+    assert.equal(view.requests[0].url.searchParams.has("date"), false);
+    assert.equal(view.requests[0].options.redirect, "error");
+    assert.equal(view.result().attrs["aria-busy"], "true");
+    view.respond(0, {issue: "2026-10", text: "Previous issue draft"});
+    await loaded;
+    assert.equal(view.result().textContent, "Previous issue draft");
+    assert.equal(view.result().attrs["aria-busy"], undefined);
+    assert.equal(view.issue.value, "2026-10");
+    assert.equal(view.status.hidden, true);
+    assert.equal(view.addresses.length, 1);
 });
 
-test("calendar browses months and selects dates without submitting", () => {
-    const {input, fields, calendar, buttons} = calendarFixture("zh-Hant");
-    fields["[data-calendar-next]"].handlers.click();
-    assert.equal(fields["[data-calendar-next]"].disabled, true);
-    assert.equal(fields["[data-calendar-previous]"].disabled, false);
-    assert.deepEqual(buttons().filter(button => !button.disabled).map(button => button.attrs["aria-label"]), ["2026-11-03"]);
-    const target = buttons().find(button => button.attrs["aria-label"] === "2026-11-03");
-    target.handlers.click();
-    assert.equal(input.value, "2026-11-03");
-    assert.equal(fields["[data-calendar-selected]"].textContent, "2026-11-03");
-    assert.equal(calendar.open, false);
-    assert.equal(fields.summary.focused, true);
-    assert.equal(buttons().find(button => button.attrs["aria-label"] === "2026-11-03").attrs["aria-pressed"], "true");
-    fields["[data-calendar-previous]"].handlers.click();
-    assert.equal(fields["[data-calendar-month]"].textContent.includes("10"), true);
+test("failed or mismatched issue loads retain the displayed draft and explain recovery", async () => {
+    for (const failure of ["network", "http", "wrong-issue", "missing-result"]) {
+        const view = issueFixture();
+        view.issue.value = "2026-10";
+        const loaded = view.issue.handlers.change();
+        if (failure === "network") view.requests[0].reject(new Error("Offline"));
+        else view.respond(0, {issue: failure === "wrong-issue" ? "2027-04" : "2026-10", text: "Wrong draft", missing: failure === "missing-result"}, failure !== "http");
+        await loaded;
+        assert.equal(view.result().textContent, "Original draft", failure);
+        assert.equal(view.issue.value, "2027-01", failure);
+        assert.equal(view.result().attrs["aria-busy"], undefined, failure);
+        assert.equal(view.status.textContent, "Unable to load this issue", failure);
+        assert.equal(view.status.hidden, false, failure);
+        assert.equal(view.addresses.length, 0, failure);
+    }
+});
+
+test("late issue responses cannot replace a more recent selection", async () => {
+    const view = issueFixture();
+    view.issue.value = "2026-10";
+    const first = view.issue.handlers.change();
+    view.issue.value = "2027-04";
+    const latest = view.issue.handlers.change();
+    assert.equal(view.requests[0].options.signal.aborted, true);
+    assert.equal(view.requests[1].options.signal.aborted, false);
+    view.respond(1, {issue: "2027-04", text: "Latest requested draft"});
+    await latest;
+    view.respond(0, {issue: "2026-10", text: "Obsolete draft"});
+    await first;
+    assert.equal(view.result().textContent, "Latest requested draft");
+    assert.equal(view.issue.value, "2027-04");
+    assert.equal(view.addresses.length, 1);
+    assert.equal(view.status.hidden, true);
+});
+
+test("late failed requests cannot reset a successful current issue", async () => {
+    const view = issueFixture();
+    view.issue.value = "2026-10";
+    const first = view.issue.handlers.change();
+    view.issue.value = "2027-04";
+    const latest = view.issue.handlers.change();
+    view.respond(1, {issue: "2027-04", text: "Latest requested draft"});
+    await latest;
+    view.requests[0].reject(new Error("Late abort"));
+    await first;
+    assert.equal(view.result().textContent, "Latest requested draft");
+    assert.equal(view.issue.value, "2027-04");
+    assert.equal(view.status.hidden, true);
 });

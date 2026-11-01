@@ -19,11 +19,11 @@ from unittest.mock import Mock
 
 from pywikibot.exceptions import NoPageError
 
-from backend.website.newsletter import collect_newsletter
 from backend.website.newsletter_layout import (
     prepare_main_layout,
     valid_main_layout,
 )
+from backend.website.newsletter_sources import collect_source_facts
 from shared.newsletter import ROOT, Issue
 
 _FIXTURE = (
@@ -205,7 +205,7 @@ class NewsletterSourceLayoutTests(unittest.TestCase):
     def test_collector_keeps_reported_baseline() -> None:
         """Use prior totals only for unknown baselines."""
         reader = SourceReader({f"{ROOT}/2026-10": _original()})
-        facts = collect_newsletter(
+        facts = collect_source_facts(
             reader,
             now=dt.datetime(2026, 10, 31, tzinfo=dt.UTC),
             current_counts={"total": 13062},
@@ -234,7 +234,7 @@ class NewsletterSourceLayoutTests(unittest.TestCase):
         assert layout is not None
         older = _restore(layout, Issue.parse("2026-07"))
         reader = SourceReader({f"{ROOT}/2026-07": older})
-        facts = collect_newsletter(
+        facts = collect_source_facts(
             reader,
             now=dt.datetime(2026, 10, 31, tzinfo=dt.UTC),
             current_counts={"total": 13062},

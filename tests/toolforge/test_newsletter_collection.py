@@ -12,11 +12,48 @@ from unittest.mock import patch
 import polars as pl
 import test_section_cache
 
+from backend.support import article_milestones
 from backend.website.collect import validate_dashboard_snapshot
 
 
 class TestNewsletterCollection(test_section_cache.DashboardFixture):
     """Exercise newsletter persistence with shared offline sources."""
+
+    def test_newsletter_reads_saved_all_year_credits_without_acquisition(
+        self,
+    ) -> None:
+        """Read durable DYK credits without fetching nominations."""
+        events = pl.DataFrame(
+            {
+                "page_id": [11],
+                "title": ["Game"],
+                "talk_page_id": [12],
+                "revision_id": [101],
+                "kind": ["dyk"],
+                "date": [dt.date(2009, 1, 2)],
+                "grade": [None],
+                "action": ["appeared"],
+                "parameter": ["dyk1date"],
+                "contributors": [["Saved editor"]],
+            },
+            schema_overrides={"grade": pl.String},
+        )
+        path = self.cache / "data/recognition.parquet"
+        article_milestones.sync_events(events, path)
+        self.article_history.return_value = article_milestones.load(path)
+        with (
+            patch("backend.website.article_authorship._collect") as authors,
+            patch(
+                "backend.website.article_milestone_sources.lookup_milestone",
+            ) as lookup,
+        ):
+            snapshot = self._collect()
+        assert not snapshot["reports"]["newsletter"]["failed"]
+        observed = self.newsletter.call_args.kwargs["article_history"]
+        assert observed["date"].item() == dt.date(2009, 1, 2)
+        assert observed["contributors"].to_list() == [["Saved editor"]]
+        authors.assert_not_called()
+        lookup.assert_not_called()
 
     def test_dashboard_news_reuses_dated_talk_history(self) -> None:
         """Share dated talk notices with the newsletter collector."""
@@ -63,9 +100,7 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         snapshot = self._collect(dt.timedelta(seconds=1))
         self.newsletter.assert_called_once()
         self.article_history.assert_called_once()
-        assert self.article_history.call_args.kwargs["now"].date() == (
-            dt.date(2026, 10, 31)
-        )
+        assert self.article_history.call_args.kwargs == {"required": True}
         assert not snapshot["reports"]["newsletter"]["failed"]
         for collector in self.collectors.values():
             collector.assert_not_called()
@@ -92,12 +127,18 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         intervals = {"newsletter": 60}
         first = self._collect(refresh_intervals=intervals)
         self.membership.reset_mock()
+        self.page_projects.reset_mock()
         self.reader.summary.reset_mock()
         refreshed = self._collect(
             dt.timedelta(minutes=2),
             refresh_intervals=intervals,
         )
-        self.membership.assert_called_once()
+        self.membership.assert_called_once_with(self.reader.site, "电子游戏")
+        self.page_projects.assert_called_once()
+        site, scope_project, projects = self.page_projects.call_args.args
+        assert site is self.reader.site
+        assert scope_project == "电子游戏"
+        assert tuple(projects) == ("虚构角色", "传记", "公司", "音乐")
         self.reader.summary.assert_not_called()
         assert self.newsletter.call_args.kwargs["current_counts"] == {
             "total": 1,

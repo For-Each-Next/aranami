@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from backend.support.events import event_extra
 from backend.support.failure_status import exception_failure_details
+from backend.support.interrupted_runs import execution_lease
 from backend.support.job_history import MAX_STAGES, write_job_history
 from backend.support.logs import open_run_log
 from backend.support.report_status import ReportUpdate, report_update_key
@@ -37,6 +38,19 @@ if TYPE_CHECKING:
     from shared.reports import ReportResult
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class PublicationOutcome:
+    """Carry a confirmed save outcome and its observed revision.
+
+    Attributes:
+        outcome: Confirmed saved or unchanged status.
+        revision_id: Saved revision ID when the publisher observed one.
+    """
+
+    outcome: str
+    revision_id: int | None = None
 
 
 class Publication(Protocol):
@@ -700,7 +714,7 @@ class RuntimeContext[EditT: Publication]:
     def publish_proposal(
         self,
         edit: EditT,
-        save: Callable[[EditT], str],
+        save: Callable[[EditT], str | PublicationOutcome],
     ) -> bool:
         """Retain a complete proposal before delegating its publication.
 
@@ -736,7 +750,7 @@ class RuntimeContext[EditT: Publication]:
     def _store_and_publish(
         self,
         edit: EditT,
-        save: Callable[[EditT], str],
+        save: Callable[[EditT], str | PublicationOutcome],
     ) -> bool:
         """Persist required data before entering the save callback.
 
@@ -829,7 +843,7 @@ class RuntimeContext[EditT: Publication]:
     def _publish_edit(
         self,
         edit: EditT,
-        save: Callable[[EditT], str],
+        save: Callable[[EditT], str | PublicationOutcome],
     ) -> str:
         """Count a confirmed save returned by the updater callback.
 
@@ -843,7 +857,12 @@ class RuntimeContext[EditT: Publication]:
         update = self._report_update(edit.site.dbName(), edit.title)
         self.record_stage("saving", title=edit.title)
         try:
-            outcome = save(edit)
+            observed = save(edit)
+            outcome = (
+                observed.outcome
+                if isinstance(observed, PublicationOutcome)
+                else observed
+            )
         except BaseException as error:
             self.record_stage("save_failed", title=edit.title)
             update.finish(
@@ -860,6 +879,9 @@ class RuntimeContext[EditT: Publication]:
         update.finish(
             "updated" if outcome == "saved" else "no_update",
             confirmed_edits=int(outcome == "saved"),
+            revision_id=observed.revision_id
+            if isinstance(observed, PublicationOutcome)
+            else None,
         )
         self.confirm_report_date(_publication_date(edit))
         if (
@@ -885,9 +907,10 @@ def routine_run[EditT: Publication](
     Yields:
         Context through which the job publishes proposed edits.
     """
-    with open_run_log():
+    with open_run_log(), ExitStack() as resources:
         logger = _LOGGER
         task = active.start_task(name)
+        resources.enter_context(execution_lease(task.run_id, dry=active.dry))
         _history_stage(task, "started", dry=active.dry)
         started = task.started_monotonic
         logger.info(
@@ -907,7 +930,7 @@ def routine_run[EditT: Publication](
                 ),
             ):
                 yield active
-        except Exception as error:
+        except BaseException as error:
             task.status = "failed"
             details = exception_failure_details(error)
             task.failure_reason = details["failure_reason"]

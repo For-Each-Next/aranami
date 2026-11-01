@@ -11,6 +11,7 @@ import json
 import re
 import tempfile
 import unittest
+from copy import deepcopy
 from html import unescape
 from http import HTTPStatus
 from pathlib import Path
@@ -21,7 +22,10 @@ from fastapi.testclient import TestClient
 from newsletter_fixtures import subpage_layouts
 
 from backend.public import create_app
+from backend.support.newsletter_data import OBSERVATIONS_PATH
+from backend.support.newsletter_observations import save_observation
 from backend.website.collect import REPORT_KEYS, validate_dashboard_snapshot
+from backend.website.newsletter import valid_newsletter
 from backend.website.newsletter_archive import (
     DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
     NewsletterDraftArchive,
@@ -108,8 +112,8 @@ class NewsletterWikitextTests(unittest.TestCase):
     """Keep verified facts distinct from editorial work still to do."""
 
     @staticmethod
-    def test_exact_three_destinations_and_quarter_navigation() -> None:
-        """Generate three collected destinations with matching URLs."""
+    def test_january_destinations_and_quarter_navigation() -> None:
+        """Generate January's combined feature with matching URLs."""
         output = render_issue(
             Issue.parse("2027-01"),
             {
@@ -122,7 +126,7 @@ class NewsletterWikitextTests(unittest.TestCase):
         )
         expected = [
             f"{ROOT}/2027-01" + (f"/{suffix}" if suffix else "")
-            for suffix in SUFFIXES
+            for suffix in Issue.parse("2027-01").draft_suffixes
         ]
         assert [page["title"] for page in output["pages"]] == expected
         for page in output["pages"]:
@@ -132,6 +136,8 @@ class NewsletterWikitextTests(unittest.TestCase):
         main = output["pages"][0]["text"]
         assert "第廿九號" in main
         assert "2026年第四季" in main
+        assert "/2027-01/訪談" not in main
+        assert "專題報導兼訪談：2026年年終回顧" in main
         assert "[[維基專題:電子遊戲/簡訊/2026-10|上一期]]" in main
         assert "[[維基專題:電子遊戲/簡訊/2027-04|下一期]]" in main
 
@@ -165,8 +171,8 @@ class NewsletterWikitextTests(unittest.TestCase):
         assert "{{div col|colwidth=27em}}\n（無）\n{{div col end}}" in dyk
 
     @staticmethod
-    def test_feature_and_interview_are_excluded() -> None:
-        """Limit automatic generation to the three data-driven pages."""
+    def test_editorial_templates_do_not_reuse_authored_prose() -> None:
+        """Generate blank editorial drafts without copying old prose."""
         existing = {
             "專題": "== 手工專題 ==\n作者：[[User:編輯]]\n{{例子|原文}}\n",
             "訪談": "== 訪談 ==\n;問：為何？\n:答：保留原文。\n",
@@ -182,8 +188,10 @@ class NewsletterWikitextTests(unittest.TestCase):
                 "subpage_layouts": subpage_layouts(),
             },
         )
-        assert len(output["pages"]) == len(SUFFIXES)
-        assert all("/專題" not in page["title"] for page in output["pages"])
+        assert len(output["pages"]) == len(
+            Issue.parse("2027-01").draft_suffixes,
+        )
+        assert output["pages"][-1]["title"].endswith("/專題")
         assert all("/訪談" not in page["title"] for page in output["pages"])
         assert "手工專題" not in "\n".join(
             page["text"] for page in output["pages"]
@@ -313,7 +321,9 @@ class NewsletterRouteTests(unittest.TestCase):
         )
         assert post.status_code == HTTPStatus.METHOD_NOT_ALLOWED
         assert 'value="2027-01"' in response.text
-        assert 'type="radio"' in response.text
+        assert "<select" in response.text
+        assert 'id="newsletter-issue"' in response.text
+        assert 'type="radio"' not in response.text
         assert 'name="issue"' in response.text
         assert response.headers["Content-Language"] == "en"
         assert "<textarea " not in response.text
@@ -350,7 +360,7 @@ class NewsletterRouteTests(unittest.TestCase):
                     f"/newsletter/?{query}&lang=zh-hant",
                 )
                 assert response.status_code == HTTPStatus.BAD_REQUEST
-                assert "請選擇2020年至2099年" in response.text
+                assert "請選擇可用的刊號。" in response.text
 
     def test_default_issue_shows_automatically_collected_statistics(
         self,
@@ -363,7 +373,9 @@ class NewsletterRouteTests(unittest.TestCase):
         ) as upcoming:
             response = self.client.get("/newsletter/?lang=en")
         assert response.status_code == HTTPStatus.OK
-        assert response.text.count("data-newsletter-wikitext") == len(SUFFIXES)
+        assert response.text.count("data-newsletter-wikitext") == len(
+            Issue.parse("2027-01").draft_suffixes,
+        )
         assert "13,025篇條目" in response.text
         assert "待補" not in response.text
         upcoming.assert_called_once()
@@ -424,8 +436,12 @@ class NewsletterRouteTests(unittest.TestCase):
         assert "本期已寫好的獨有公告" not in different.text
         assert "<textarea " not in different.text
 
-    def _archive_issue(self, day: str, total: int) -> dict:
-        """Save a synthetic daily draft with its actual capture time.
+    def _archive_issue(
+        self,
+        day: str,
+        total: int,
+    ) -> dict:
+        """Save synthetic daily facts with their actual capture time.
 
         Returns:
             The validated archive envelope for the selected day.
@@ -441,7 +457,6 @@ class NewsletterRouteTests(unittest.TestCase):
         archive = NewsletterDraftArchive(self.runtime / DRAFT_ARCHIVE_PATH)
         archive.save(
             json.loads(path.read_text())["newsletter"],
-            projector=render_issue,
             generated_at=dt.datetime.combine(
                 boundary,
                 dt.time(0, 4, 5),
@@ -452,11 +467,69 @@ class NewsletterRouteTests(unittest.TestCase):
         assert entry is not None
         return entry
 
-    def test_selected_day_uses_original_text_without_current_enrichment(
+    def test_daily_facts_use_current_renderer_without_newer_data(self) -> None:
+        """Render saved facts while preserving their capture."""
+        entry = self._archive_issue("2026-10-30", 13100)
+        issue = Issue.parse("2027-01")
+        rendered = render_issue(issue, entry["facts"])
+        rendered["pages"][0]["text"] += "\nCurrent renderer output"
+        self._save_issue({"overview": {"total": 999999}})
+        before = {
+            path: path.read_bytes()
+            for path in self.runtime.rglob("*")
+            if path.is_file()
+        }
+        for selection in ("", "&date=2026-10-30"):
+            with (
+                self.subTest(selection=selection),
+                patch("pywikibot.Site") as site,
+                patch(
+                    "backend.public.render_issue",
+                    return_value=deepcopy(rendered),
+                ) as project,
+                patch("backend.public.enrich_newsletter_homepage") as enrich,
+            ):
+                response = self.client.get(
+                    "/newsletter/?issue=2027-01&lang=en" + selection,
+                )
+            assert response.status_code == HTTPStatus.OK
+            texts = [
+                unescape(text)
+                for text in re.findall(
+                    r"data-newsletter-wikitext>(.*?)</code>",
+                    response.text,
+                    re.DOTALL,
+                )
+            ]
+            assert texts == [page["text"] for page in rendered["pages"]]
+            assert len(texts) == len(Issue.parse("2027-01").draft_suffixes)
+            assert "2026年年終回顧" in texts[-1]
+            assert "待核對" not in texts[-1]
+            assert [
+                line
+                for line in texts[-1].splitlines()
+                if line.startswith("==== ")
+            ] == [
+                "==== 內容評審 ====",
+                "==== 新章推薦 ====",
+                "==== 条目报告 ====",
+                "==== 榮譽表彰 ====",
+            ]
+            assert "999,999" not in response.text
+            assert "Current renderer output" in response.text
+            assert "not part of the original draft" not in response.text
+            assert 'newsletter-heading-4">Feature</h2>' in response.text
+            assert "00:04:05" in response.text
+            site.assert_not_called()
+            project.assert_called_once_with(issue, entry["facts"])
+            enrich.assert_not_called()
+        assert all(path.read_bytes() == data for path, data in before.items())
+
+    def test_selected_day_renders_its_facts_without_current_enrichment(
         self,
     ) -> None:
-        """Read the original draft without collection or writes."""
-        self._archive_issue("2026-10-29", 13000)
+        """Render the selected facts without source reads or writes."""
+        entry = self._archive_issue("2026-10-29", 13000)
         self._archive_issue("2026-10-30", 13100)
         before = {
             path: path.read_bytes()
@@ -465,7 +538,10 @@ class NewsletterRouteTests(unittest.TestCase):
         }
         with (
             patch("pywikibot.Site") as site,
-            patch("backend.public.render_issue") as project,
+            patch(
+                "backend.public.render_issue",
+                wraps=render_issue,
+            ) as project,
             patch("backend.public.enrich_newsletter_homepage") as enrich,
         ):
             response = self.client.get(
@@ -481,7 +557,7 @@ class NewsletterRouteTests(unittest.TestCase):
             path.read_bytes() == value for path, value in before.items()
         )
         site.assert_not_called()
-        project.assert_not_called()
+        project.assert_called_once_with(Issue.parse("2027-01"), entry["facts"])
         enrich.assert_not_called()
 
     def test_missing_daily_draft_never_substitutes_latest_data(self) -> None:
@@ -504,7 +580,8 @@ class NewsletterRouteTests(unittest.TestCase):
             "date=20261030",
             "date=2026-02-30",
             "date=2027-01-01",
-            "date=2026-09-30",
+            "date=2025-12-31",
+            "date=2026-10-29&feature_date=2026-10-30",
             "date=2026-10-29&date=2026-10-30",
             "date=../../other",
         ):
@@ -547,12 +624,113 @@ class NewsletterRouteTests(unittest.TestCase):
         archive = NewsletterDraftArchive(self.runtime / DRAFT_ARCHIVE_PATH)
         archive.save(
             {"issues": {"2027-01": facts}},
-            projector=render_issue,
             generated_at=dt.datetime(2026, 10, 31, 0, 4, 5, tzinfo=dt.UTC),
         )
         second = self.client.get(url)
         assert "13,100篇條目" in second.text
-        assert 'max="2026-10-30"' in second.text
+        assert '<option value="2026-10-30">' in second.text
+
+    def _save_durable(self, total: int) -> None:
+        """Persist complete version-two fixture facts."""
+        source = self._save_issue({"overview": {"total": total}})
+        facts = json.loads(source.read_text())["newsletter"]
+        save_observation(
+            self.runtime / OBSERVATIONS_PATH,
+            facts,
+            valid_newsletter,
+        )
+
+    def test_latest_durable_facts_take_precedence_without_sources(
+        self,
+    ) -> None:
+        """Prefer durable facts over older drafts and dashboard data."""
+        self._archive_issue("2026-10-30", 13100)
+        self._save_durable(14000)
+        self._save_issue({"overview": {"total": 999999}})
+        before = {
+            path: path.read_bytes()
+            for path in self.runtime.rglob("*")
+            if path.is_file()
+        }
+        with (
+            patch("pywikibot.Site") as site,
+            patch("backend.website.collect.collect_dashboard") as collect,
+            patch("backend.public.enrich_newsletter_homepage") as enrich,
+        ):
+            response = self.client.get("/newsletter/?issue=2027-01&lang=en")
+        assert response.status_code == HTTPStatus.OK
+        assert "14,000篇條目" in response.text
+        assert "13,100篇條目" not in response.text
+        assert "999,999" not in response.text
+        assert 'type="date" value="2026-12-31"' not in response.text
+        assert 'type="date" value="2026-10-30"' in response.text
+        assert 'class="context newsletter-observation"' not in response.text
+        summaries = [
+            parse_qs(urlsplit(unescape(href)).query).get("summary", [])
+            for href in re.findall(
+                r'data-newsletter-edit="([^"]+)"',
+                response.text,
+            )
+        ]
+        assert summaries
+        assert all(
+            "December 31, 2026" in str(summary) for summary in summaries
+        )
+        assert "No saved draft is available" not in response.text
+        assert all(
+            path.read_bytes() == value for path, value in before.items()
+        )
+        site.assert_not_called()
+        collect.assert_not_called()
+        enrich.assert_not_called()
+
+    def test_explicit_date_ignores_newer_durable_facts(self) -> None:
+        """Render the selected day's facts after newer data is saved."""
+        entry = self._archive_issue("2026-10-30", 13100)
+        self._save_durable(14000)
+        with patch("backend.public.read_newsletter_data") as read:
+            response = self.client.get(
+                "/newsletter/?issue=2027-01&date=2026-10-30&lang=en",
+            )
+        read.assert_not_called()
+        texts = [
+            unescape(text)
+            for text in re.findall(
+                r"data-newsletter-wikitext>(.*?)</code>",
+                response.text,
+                re.DOTALL,
+            )
+        ]
+        assert texts == [
+            page["text"]
+            for page in render_issue(
+                Issue.parse("2027-01"),
+                entry["facts"],
+            )["pages"]
+        ]
+        assert "14,000篇條目" not in response.text
+
+    def test_durable_pointer_invalidates_same_timestamp_page(self) -> None:
+        """Refresh enriched data without advancing observation time."""
+        self._save_durable(14000)
+        url = "/newsletter/?issue=2027-01&lang=en"
+        assert "14,000篇條目" in self.client.get(url).text
+        directory = self.runtime / OBSERVATIONS_PATH
+        facts = json.loads((directory / "current.json").read_text())["facts"]
+        facts["issues"]["2027-01"]["overview"]["total"] = 15000
+        save_observation(directory, facts, valid_newsletter)
+        assert "15,000篇條目" in self.client.get(url).text
+
+    def test_corrupt_durable_data_never_falls_back_to_old_drafts(self) -> None:
+        """Report damaged data without substituting old drafts."""
+        self._archive_issue("2026-10-30", 13100)
+        self._save_durable(14000)
+        url = "/newsletter/?issue=2027-01&lang=en"
+        assert self.client.get(url).status_code == HTTPStatus.OK
+        (self.runtime / OBSERVATIONS_PATH / "current.json").write_text("{}")
+        response = self.client.get(url)
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        assert "13,100篇條目" not in response.text
 
     def test_corrupt_daily_catalog_reports_unavailable(self) -> None:
         """Keep unreadable history distinct from an unrecorded date."""

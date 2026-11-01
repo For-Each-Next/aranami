@@ -123,6 +123,7 @@ def _report_change_sources(
     )
     with (
         patch.object(job, "job_run", return_value=nullcontext(context)),
+        patch.object(job, "get_snapshot"),
         patch.object(
             job,
             "read_pages",
@@ -793,6 +794,70 @@ class TestEnglishReplicaSource(TestCase):
 class TestEnglishReportJob(TestCase):
     """Check that jobs delegate publication through their context."""
 
+    def test_daily_assessments_precede_shared_source_reads(self) -> None:
+        """Wait for the shared snapshot before either comparison."""
+        for dry in (False, True):
+            context = MagicMock(site=OfflineSite("zh", "wikipedia"), dry=dry)
+            existing = {
+                spec.name: _old_text(spec) for spec in job.REPORT_SPECS
+            }
+            order = Mock()
+            stop = RuntimeError("Stop before rendering.")
+            with (
+                self.subTest(dry=dry),
+                patch.object(
+                    job,
+                    "job_run",
+                    return_value=nullcontext(context),
+                ),
+                patch.object(job, "get_snapshot") as snapshot,
+                patch.object(
+                    job,
+                    "read_pages",
+                    return_value=[
+                        Mock(text=existing[name])
+                        for name in job.REPORT_TARGETS
+                    ],
+                ) as read,
+                patch.object(
+                    job,
+                    "prepare_reports",
+                    side_effect=stop,
+                ) as prepare,
+            ):
+                order.attach_mock(snapshot, "snapshot")
+                order.attach_mock(read, "read")
+                order.attach_mock(prepare, "prepare")
+                with self.assertRaises(RuntimeError) as raised:  # ruff: ignore[pytest-unittest-raises-assertion]
+                    job.run(dry=dry, context=context)
+            assert raised.exception is stop
+            assert [entry[0] for entry in order.mock_calls] == [
+                "snapshot",
+                "read",
+                "prepare",
+            ]
+            assert snapshot.call_args.args == (context.site, "电子游戏")
+            assert snapshot.call_args.kwargs["dry"] is dry
+            assert snapshot.call_args.kwargs["observed_at"].tzinfo is dt.UTC
+            context.publish.assert_not_called()
+
+    def test_failed_daily_assessments_prevent_comparison_reads(self) -> None:
+        """Preserve both reports when the prerequisite capture fails."""
+        context = MagicMock(site=OfflineSite("zh", "wikipedia"), dry=False)
+        failure = OSError("Daily capture could not be retained.")
+        with (
+            patch.object(job, "job_run", return_value=nullcontext(context)),
+            patch.object(job, "get_snapshot", side_effect=failure),
+            patch.object(job, "read_pages") as read,
+            patch.object(job, "prepare_reports") as prepare,
+            self.assertRaises(OSError) as raised,  # ruff: ignore[pytest-unittest-raises-assertion]
+        ):
+            job.run(context=context)
+        assert raised.exception is failure
+        read.assert_not_called()
+        prepare.assert_not_called()
+        context.publish.assert_not_called()
+
     @staticmethod
     def test_each_target_excludes_shared_reads_and_previous_target() -> None:
         """Measure independent target preparation after shared reads."""
@@ -863,6 +928,7 @@ class TestEnglishReportJob(TestCase):
                 ],
             ),
             patch.object(job, "prepare_reports", side_effect=shared_reads),
+            patch.object(job, "get_snapshot"),
             patch.object(job, "prepare_publication", side_effect=prepare),
             patch.object(reports, "build_reports", return_value=existing),
             patch.object(data_service, "load_membership", return_value={}),
@@ -909,6 +975,7 @@ class TestEnglishReportJob(TestCase):
                 return_value=nullcontext(context),
             ) as run,
             patch.object(job, "read_pages", return_value=pages) as read,
+            patch.object(job, "get_snapshot"),
             patch.object(
                 job,
                 "prepare_reports",

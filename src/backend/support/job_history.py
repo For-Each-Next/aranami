@@ -97,7 +97,11 @@ def _validate_run(value: object) -> dict[str, object]:
     Raises:
         ValueError: The record or stage observations are malformed.
     """
-    if not isinstance(value, dict) or set(value) != _FIELDS:
+    if (
+        not isinstance(value, dict)
+        or not set(value) >= _FIELDS
+        or set(value) - _FIELDS - {"failure_reason"}
+    ):
         message = "Invalid job history record fields."
         raise ValueError(message)
     valid_identity = (
@@ -119,21 +123,8 @@ def _validate_run(value: object) -> dict[str, object]:
         message = "Invalid job history identity, outcome, or stage count."
         raise ValueError(message)
     started = previous = _instant(value["started_at"])
+    _validate_timing(value, started)
     finished = value["finished_at"]
-    duration = value["duration_seconds"]
-    if value["status"] == "running":
-        if finished is not None or duration is not None:
-            message = "Active jobs cannot have a completed duration."
-            raise ValueError(message)
-    elif (
-        finished is None
-        or _instant(finished) < started
-        or type(duration) not in {int, float}
-        or not math.isfinite(duration)
-        or duration < 0
-    ):
-        message = "Completed jobs require valid observed timing."
-        raise ValueError(message)
     for stage in value["stages"]:
         if not isinstance(stage, dict) or set(stage) != {
             "time",
@@ -158,6 +149,39 @@ def _validate_run(value: object) -> dict[str, object]:
             raise ValueError(message)
         previous = observed
     return {**value, "stages": [dict(stage) for stage in value["stages"]]}
+
+
+def _validate_timing(value: dict[str, object], started: dt.datetime) -> None:
+    """Validate completed timing while leaving crash timing unknown.
+
+    Raises:
+        ValueError: Timing contradicts the saved execution outcome.
+    """
+    finished = value["finished_at"]
+    duration = value["duration_seconds"]
+    interrupted = value.get("failure_reason") == "Interrupted"
+    if "failure_reason" in value and (
+        not interrupted or value["status"] != "failed"
+    ):
+        message = "Only interrupted history retains a recovery reason."
+        raise ValueError(message)
+    if value["status"] == "running":
+        if finished is not None or duration is not None:
+            message = "Active jobs cannot have a completed duration."
+            raise ValueError(message)
+    elif interrupted:
+        if finished is not None or duration is not None:
+            message = "Interrupted history cannot invent completion facts."
+            raise ValueError(message)
+    elif (
+        finished is None
+        or _instant(finished) < started
+        or type(duration) not in {int, float}
+        or not math.isfinite(duration)
+        or duration < 0
+    ):
+        message = "Completed jobs require valid observed timing."
+        raise ValueError(message)
 
 
 def read_job_history(path: Path) -> dict[str, object]:

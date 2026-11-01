@@ -53,6 +53,19 @@ wait_stopped() {
     test -z "$remaining"
 }
 
+drain_hub() {
+    pods=$(kubectl get pods -l 'app.kubernetes.io/name=aranami-hub' -o name) || return 1
+    # Exactly one publisher must identify and acknowledge its own drain.
+    set -- $pods
+    test "$#" -eq 1 || { printf '%s\n' 'Expected exactly one running hub pod before drain.' >&2; return 1; }
+    if [ "${ARANAMI_LEGACY_IDLE_CONFIRMED:-0}" = 1 ]; then
+        kubectl exec "$1" -- python3 "$stage/scripts/toolforge/drain-hub.py" --legacy-idle-confirmed || return 1
+    else
+        kubectl exec "$1" -- python3 "$stage/scripts/toolforge/drain-hub.py" || return 1
+    fi
+    touch "$backup/aranami-hub.drained"
+}
+
 pause_service() {
     service=$1
     replicas=$(cat "$backup/$service.replicas")
@@ -67,6 +80,7 @@ resume_service() {
     replicas=$(cat "$backup/$service.replicas")
     kubectl scale deployment "$service" --current-replicas=0 --replicas="$replicas" || return 1
     rm "$backup/$service.stopped"
+    if [ "$service" = aranami-hub ]; then rm -f "$backup/aranami-hub.drained"; fi
 }
 
 finish() {
@@ -91,6 +105,15 @@ finish() {
                 for service in aranami-web aranami-hub; do
                     if [ -f "$backup/$service.stopped" ]; then resume_service "$service"; fi
                 done
+            fi
+            if [ -f "$backup/aranami-hub.drained" ]; then
+                # Work already finished; restart the old source to resume scheduling.
+                if pause_service aranami-hub; then
+                    resume_service aranami-hub
+                else
+                    release_lock=false
+                    printf '%s\n' 'Old hub recovery is unconfirmed; deployment.lock retained for inspection.' >&2
+                fi
             fi
             printf 'Deployment failed before activation; prior source retained. Inspect service state and backup: %s\n' "$backup" >&2
         else
@@ -132,6 +155,8 @@ for service in aranami-web aranami-hub; do
     if [ "$service" = aranami-hub ]; then test "$replicas" = 1; fi
     printf '%s\n' "$replicas" > "$backup/$service.replicas"
 done
+# Drain before selection or pod deletion; Kubernetes' grace timer has not begun.
+if [ -f "$backup/aranami-hub.replicas" ]; then drain_hub; fi
 if [ "$legacy" = true ]; then
     printf '%s\n' 'Migrating legacy source: briefly pausing existing services once.'
     for service in aranami-web aranami-hub; do

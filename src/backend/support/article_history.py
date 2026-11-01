@@ -21,6 +21,9 @@ from tempfile import NamedTemporaryFile
 
 import polars as pl
 
+from backend.support.article_scope import retain_active
+from shared.support.files import staging_directory
+
 EVENT_SCHEMA = {
     "kind": pl.String,
     "date": pl.Date,
@@ -28,6 +31,28 @@ EVENT_SCHEMA = {
     "action": pl.String,
     "parameter": pl.String,
     "oldid": pl.Int64,
+    "nominator": pl.String,
+    "main_author": pl.Boolean,
+    "nomination_link": pl.String,
+    "contributors": pl.List(pl.String),
+    "action_type": pl.String,
+    "question": pl.String,
+}
+_PRE_MILESTONE_EVENT_SCHEMA = {
+    key: value
+    for key, value in EVENT_SCHEMA.items()
+    if key not in {"action_type", "question"}
+}
+_LEGACY_EVENT_SCHEMA = {
+    key: value
+    for key, value in _PRE_MILESTONE_EVENT_SCHEMA.items()
+    if key
+    not in {"nominator", "main_author", "nomination_link", "contributors"}
+}
+_ATTRIBUTION_EVENT_SCHEMA = {
+    key: value
+    for key, value in _PRE_MILESTONE_EVENT_SCHEMA.items()
+    if key != "contributors"
 }
 SCHEMA = {
     "page_id": pl.Int64,
@@ -38,11 +63,19 @@ SCHEMA = {
     "contract": pl.String,
     "events": pl.List(pl.Struct(EVENT_SCHEMA)),
 }
+_LEGACY_SCHEMA = SCHEMA | {"events": pl.List(pl.Struct(_LEGACY_EVENT_SCHEMA))}
+_ATTRIBUTION_SCHEMA = SCHEMA | {
+    "events": pl.List(pl.Struct(_ATTRIBUTION_EVENT_SCHEMA)),
+}
+_PRE_MILESTONE_SCHEMA = SCHEMA | {
+    "events": pl.List(pl.Struct(_PRE_MILESTONE_EVENT_SCHEMA)),
+}
 _MAX_BYTES = 64 * 1024 * 1024
 _MAX_MEMORY_BYTES = 256 * 1024 * 1024
 _MAX_ROWS = 100_000
 _MAX_EVENTS = 1_000_000
 _MAX_PAGE_EVENTS = 1000
+_MAX_CONTRIBUTORS = 100
 _SNAPSHOT_KEY = ["talk_page_id", "revision_id", "contract"]
 
 
@@ -76,9 +109,84 @@ def _invalid_events(events: pl.DataFrame) -> bool:
         pl.any_horizontal(
             pl.col("kind", "action", "parameter").is_null(),
         )
-        | ~pl.col("kind").is_in(["quality", "dyk", "news", "history"])
+        | ~pl.col("kind").is_in([
+            "quality",
+            "dyk",
+            "news",
+            "history",
+            "review",
+        ])
         | ~pl.col("parameter").str.contains(r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
         | (pl.col("oldid") <= 0).fill_null(value=False)
+        | (pl.col("question").str.len_bytes() > 16 * 1024).fill_null(
+            value=False,
+        )
+        | pl
+        .col("question")
+        .str.contains(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+        .fill_null(value=False)
+        | (
+            (pl.col("kind") == "review")
+            & (
+                ~pl.col("action").is_in([
+                    "nominated",
+                    "passed",
+                    "failed",
+                    "pending",
+                ])
+                | pl.col("action_type").is_null()
+            )
+        )
+        | (
+            pl.col("nominator").is_not_null()
+            & (
+                ~pl.col("nominator").str.len_bytes().is_between(1, 1000)
+                | pl.col("nominator").str.strip_chars().eq("")
+                | pl.col("nominator").str.contains(r"[\[\]{}|<>\x00-\x1f\x7f]")
+            )
+        )
+        | (
+            pl.col("nomination_link").is_not_null()
+            & (
+                ~pl.col("nomination_link").str.len_bytes().is_between(2, 1000)
+                | ~pl.col("nomination_link").str.starts_with("#")
+                | pl.col("nomination_link").str.contains(r"[\x00-\x1f\x7f]")
+            )
+        )
+        | (pl.col("main_author").is_not_null() & pl.col("nominator").is_null())
+        | (
+            pl.col("contributors").is_not_null()
+            & (
+                (pl.col("kind") != "dyk")
+                | (pl.col("contributors").list.len() > _MAX_CONTRIBUTORS)
+                | pl
+                .col("contributors")
+                .list.eval(
+                    pl.element().is_null()
+                    | ~pl.element().str.len_bytes().is_between(1, 1000)
+                    | pl.element().str.strip_chars().eq("")
+                    | pl.element().str.contains(r"[\[\]{}|<>\x00-\x1f\x7f]"),
+                )
+                .list.any()
+            )
+        )
+        | (
+            pl.any_horizontal(
+                pl.col(
+                    "nominator",
+                    "main_author",
+                    "nomination_link",
+                ).is_not_null(),
+            )
+            & ~(
+                (pl.col("kind").is_in(["review", "dyk"]))
+                | (
+                    quality
+                    & pl.col("grade").is_in(["GA", "FA", "FL"])
+                    & (pl.col("action") == "added")
+                )
+            )
+        )
         | (
             quality
             & (
@@ -89,6 +197,7 @@ def _invalid_events(events: pl.DataFrame) -> bool:
         )
         | (
             ~quality
+            & (pl.col("kind") != "review")
             & (
                 (pl.col("action") != "appeared")
                 | pl.col("grade").is_not_null()
@@ -144,8 +253,11 @@ def _validate(frame: pl.DataFrame) -> None:
         raise ValueError(message)
 
 
-def _read_versions(path: Path) -> pl.DataFrame:
+def read_versions(path: Path) -> pl.DataFrame:
     """Read every retained source revision without modifying storage.
+
+    Args:
+        path: Durable archive, including older supported schemas.
 
     Returns:
         Validated archived snapshots, or an empty first-use frame.
@@ -165,6 +277,38 @@ def _read_versions(path: Path) -> pl.DataFrame:
     except pl.exceptions.PolarsError as error:
         message = "Newsletter history is not readable Parquet."
         raise ValueError(message) from error
+    event_type = frame.schema.get("events")
+    existing_fields = (
+        event_type.inner.fields
+        if isinstance(event_type, pl.List)
+        and isinstance(event_type.inner, pl.Struct)
+        else []
+    )
+    compatible = (
+        bool(existing_fields)
+        and all(
+            EVENT_SCHEMA.get(field.name) == field.dtype
+            for field in existing_fields
+        )
+        and set(_LEGACY_EVENT_SCHEMA).issubset({
+            field.name for field in existing_fields
+        })
+    )
+    if compatible and frame.schema != pl.Schema(SCHEMA):
+        existing = frame.schema["events"].inner.fields
+        missing = {
+            key: dtype
+            for key, dtype in EVENT_SCHEMA.items()
+            if key not in {field.name for field in existing}
+        }
+        frame = frame.with_columns(
+            pl.col("events").list.eval(
+                pl.element().struct.with_fields(
+                    pl.lit(None, dtype=dtype).alias(key)
+                    for key, dtype in missing.items()
+                ),
+            ),
+        ).cast(SCHEMA)
     _validate(frame)
     return frame
 
@@ -197,7 +341,7 @@ def load(path: Path) -> pl.DataFrame:
         OSError: The path is unsafe or cannot be read.
         ValueError: Existing durable data is corrupt or exceeds bounds.
     """
-    return _latest(_read_versions(path))
+    return _latest(read_versions(path))
 
 
 def _write(path: Path, frame: pl.DataFrame) -> None:
@@ -209,7 +353,7 @@ def _write(path: Path, frame: pl.DataFrame) -> None:
     """
     _safe_path(path)
     with NamedTemporaryFile(
-        dir=path.parent,
+        dir=staging_directory(path),
         prefix=f".{path.stem}-",
         suffix=".parquet",
         delete=False,
@@ -259,13 +403,14 @@ def merge_save(path: Path, refreshed: pl.DataFrame) -> pl.DataFrame:
             message = "Newsletter history lock must be a regular file."
             raise OSError(message)
         fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
-        previous = _read_versions(path)
+        previous = read_versions(path)
         merged = (
             pl
             .concat([refreshed, previous])
             .sort("observed_at", maintain_order=True)
             .unique(subset=_SNAPSHOT_KEY, keep="last", maintain_order=True)
         )
+        merged = retain_active(merged, path)
         _validate(merged)
         if not path.exists() or not previous.equals(merged):
             _write(path, merged)

@@ -56,8 +56,16 @@ Paths below are relative to `/data/project/aranami`:
 | `deployment-envs/source-<id>/` | Isolated locked Python environment for that generation |
 | `deployment.lock/` | Concurrent-deployment guard; does not block service startup |
 | `python/`, `uv-bootstrap/` | Managed Python 3.15.0 and setup tooling |
-| `reports/` | Durable result bundles, manifests, Parquet tables, and wikitext |
-| `reports/newsletter-drafts-v1/` | Immutable daily newsletter facts, original draft text, and date catalogs |
+| `reports/data/` | Collected facts, current tables, and daily `YYYYMMDD` observations |
+| `reports/records/` | Generated reports, publication metadata, and saved newsletter drafts |
+| `reports/data/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet` | Immutable completed-day page IDs, quality, and importance |
+| `reports/records/newsletter/` | Immutable daily newsletter facts, original draft text, and date catalogs |
+| `reports/data/articles/milestones.parquet` | Shared project review and homepage actions, roles, questions, and coverage |
+| `reports/data/articles/history.parquet` | Durable versioned talk snapshots and recorded events |
+| `reports/data/articles/authorship.parquet` | Durable listing-time contributor evidence and token statistics |
+| `reports/data/articles/scope.parquet` | Confirmed project presence, 365-day absence clocks, and removal tombstones |
+| `reports/data/newsletter/observations/` | Current prepared facts and immutable date-folder JSON observations |
+| `backups/report-layout/` | Original legacy reports preserved after validated layout migration |
 | `state/` | Routine, schedule, and per-destination observations |
 | `cache/` | Disposable source data, completion evidence, bytecode, and website snapshots |
 | `logs/` | UTC diagnostic logs and separate major-event records, retained for 30 dates |
@@ -69,6 +77,15 @@ these legacy paths. Preserve credentials, reports, state, and logs during
 replacement. Clearing disposable caches forces later collection/revalidation;
 it is not a normal deployment step. Inspect saved observations through the
 [terminal workflow](usage.md#inspect-results-and-logs).
+See the [newsletter storage table](backend/newsletter.md#data-cache-and-archive-lifecycle)
+and [Saved data and Parquet fields](backend/data-storage.md) for retained data.
+
+PexBot action bundles keep only the latest disposable record per report under
+`cache/pexbot/`, with isolated previews under `dry-run/cache/pexbot/`.
+Temporary files are removed after use. The cached records retain request outcomes
+for inspection; the live wiki history determines whether a refresh is due.
+Clearing these caches does not remove routine or report status under `state/`.
+Delegated requests continue to report an unknown edit count.
 
 Both jobs use Toolforge's `python3.13` image to launch the managed Python
 3.15.0 environment. Keep the image and application interpreter distinct.
@@ -117,8 +134,13 @@ and validates configuration/imports in a one-off Toolforge job. It requires a
 success receipt for that exact source/environment generation; job completion
 alone is not proof.
 
-After setup succeeds, promotion atomically switches `app` to the uploaded
-directory. Existing processes keep their original code, templates, assets, and
+After setup succeeds, promotion first asks the current hub to drain through
+its pod-local read-only health protocol. The helper sends SIGUSR1, waits for
+the same process to confirm every job finished, and only then allows pod
+termination. Kubernetes' termination grace countdown starts after this wait.
+The hub stays alive without scheduling work while the website is replaced.
+Promotion then atomically switches `app` to the uploaded directory. Existing
+processes keep their original code, templates, assets, and
 Python environment until replaced. The website uses `toolforge jobs restart`;
 promotion waits for its previous pods to disappear and the deployment to become
 available. The hub is scaled to zero, its pods must finish terminating, and its
@@ -135,6 +157,16 @@ Finish any legacy manual or preview jobs that also use `app/src` beforehand.
 Subsequent promotions leave previous source directories in place and replace
 services individually. Do not edit a selected generation or reuse its upload
 token; prepare another upload instead.
+
+Older generations without the drain protocol require a one-time idle check:
+inspect `state/routine-status.json` for running work, the hub's pod-local
+`/healthz` for `refreshing: false`, and current recognition-scan completion in
+the daily log. Only after confirming all work is idle, set
+`ARANAMI_LEGACY_IDLE_CONFIRMED=1` for that promotion. The helper sends no signal
+to an unsupported hub. Future promotions use the acknowledgement protocol.
+If source selection fails after a confirmed drain, promotion restarts the
+old source through a confirmed stop/start to resume scheduling. If recovery
+also fails, inspect its health and saved deployment markers before retrying.
 
 ## Start the applications
 
@@ -182,10 +214,19 @@ Restart the website without replacing source:
 toolforge jobs restart aranami-web
 ```
 
+SIGTERM and SIGINT pause new scheduled work, skip queued website refreshes,
+and wait for active jobs to persist their final outcomes before releasing
+output locks. Daily logs record the shutdown request, each active job result,
+and confirmation that all jobs stopped safely. Allow this drain to finish
+before starting another publisher; forced termination cannot guarantee a
+completion observation.
+
 Restart the hub without overlapping publishing processes. Run these commands
-in order and proceed only when each succeeds:
+in order and proceed only when each succeeds. The first command waits for
+active jobs before Kubernetes begins terminating the pod:
 
 ```shell
+kubectl exec deployment/aranami-hub -- python3 /data/project/aranami/app/scripts/toolforge/drain-hub.py
 kubectl scale deployment aranami-hub --current-replicas=1 --replicas=0
 kubectl wait --for=delete pod -l app.kubernetes.io/name=aranami-hub --timeout=180s
 kubectl get pods -l app.kubernetes.io/name=aranami-hub
@@ -224,7 +265,7 @@ To select a retained generation for recovery, acquire `deployment.lock/` with
 token):
 
 ```shell
-python3 app/scripts/toolforge/validate-source.py select /data/project/aranami/app-staging-<id>
+python3 /data/project/aranami/app-staging-<id>/scripts/toolforge/validate-source.py select /data/project/aranami/app-staging-<id>
 ```
 
 Restart existing services as above and remove the lock when recovery finishes.
@@ -237,6 +278,13 @@ Verify the new generation before removing recovery artifacts. Limit cleanup to
 exact obsolete paths; preserve credentials, `reports/`, `state/`, `logs/`, the
 active generation, every generation still used by a process (including manual
 jobs), and a verified recovery generation with its receipt/environment.
+Migration merges legacy talk snapshots and authorship into
+`reports/data/articles/` without replacing the original files.
+Preserve that shared data and all prepared observation generations as durable
+evidence, not disposable caches. Existing
+`reports/records/newsletter/` stores complete daily JSON observations.
+Queries render the selected facts with the current formatting; migrations
+preserve source facts and capture times without carrying generated wikitext.
 Remove a stale `deployment.lock/` only after confirming no deployment/setup
 process remains and validating the selected generation.
 

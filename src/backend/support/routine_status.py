@@ -278,6 +278,14 @@ def _validate_completion(
     if record.get("progress") is not None:
         message = "Completed routines cannot retain running activity."
         raise ValueError(message)
+    if record.get("failure_reason") == "Interrupted":
+        if any(
+            record[field] is not None
+            for field in ("finished_at", "duration_seconds", "updated")
+        ):
+            message = "Interrupted routines cannot invent completion facts."
+            raise ValueError(message)
+        return
     if (
         isinstance(duration, bool)
         or not isinstance(duration, (int, float))
@@ -390,6 +398,7 @@ def write_routine_status(
     record: Mapping[str, object],
     *,
     directory: Path | None = None,
+    only_unfinished: bool = False,
 ) -> bool:
     """Persist one live routine state without affecting its result.
 
@@ -401,6 +410,7 @@ def write_routine_status(
     Args:
         record: Complete live running or terminal lifecycle fields.
         directory: Defaults to ``state/`` under the working folder.
+        only_unfinished: Recover only a still-running saved invocation.
 
     Returns:
         Whether the snapshot was replaced. Preview activity, superseded
@@ -414,7 +424,11 @@ def write_routine_status(
             directory if directory is not None else Path.cwd() / "state"
         )
         with _STATUS_LOCK:
-            return _write_record(destination, incoming)
+            return _write_record(
+                destination,
+                incoming,
+                only_unfinished=only_unfinished,
+            )
     except Exception as error:
         _LOGGER.warning(
             "Routine status persistence failed (%s).",
@@ -427,12 +441,15 @@ def write_routine_status(
 def _write_record(
     directory: Path,
     incoming: dict[str, object],
+    *,
+    only_unfinished: bool = False,
 ) -> bool:
     """Lock and merge a validated record into the durable snapshot.
 
     Args:
         directory: Visible directory holding status and lock files.
         incoming: Validated lifecycle state with canonical timestamps.
+        only_unfinished: Require the saved invocation to remain running.
 
     Returns:
         Whether the record replaced the previously reported state.
@@ -457,6 +474,11 @@ def _write_record(
         except FileNotFoundError:
             routines = {}
         name = incoming["routine"]
+        if only_unfinished and (
+            routines.get(name, {}).get("status") != "running"
+            or routines[name]["run_id"] != incoming["run_id"]
+        ):
+            return False
         if not _newer_record(routines.get(name), incoming):
             return False
         routines[name] = incoming

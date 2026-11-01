@@ -1,4 +1,4 @@
-"""Generate three newsletter pages from automatically collected facts.
+"""Generate newsletter data pages and editable feature/interview drafts.
 
 The page structure follows the October 2026 newsletter (main revision
 94691317; quality revision 94683150). Drafts retain all three months,
@@ -16,15 +16,16 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-from html import escape
 from typing import TYPE_CHECKING
 
 import polars as pl
 
+from backend.website.newsletter_layout import issue_contents
 from backend.website.newsletter_subpage_layout import (
     complete_announcement_layout,
 )
-from shared.newsletter import ROOT, SUFFIXES, Issue
+from shared.newsletter import ROOT, Issue
+from updater.services.newsletter_editorial import render_editorial
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -65,25 +66,35 @@ _QUALITY_ROWS = (
     ("ga", "removed", "DGA", "撤銷優良條目"),
     ("gt", "removed", "GTRC", "撤銷優良話題"),
 )
+_QUALITY_SUMMARY_GRADES = (
+    ("fa", "典範條目", "篇"),
+    ("fl", "特色列表", "篇"),
+    ("a", "甲級條目", "篇"),
+    ("ga", "優良條目", "篇"),
+    ("bplus", "專題乙上級條目", "篇"),
+    ("gt", "專題優良話題", "組"),
+)
 _TEN = 10
 _HUNDRED = 100
 _LINK_ENTITIES = str.maketrans({
-    character: f"&#{ord(character)};" for character in "[]{}|\r\n"
+    **{character: f"&#{ord(character)};" for character in "[]{}|\r\n"},
+    "<": "&lt;",
+    ">": "&gt;",
 })
 
 
 def _link(target: str, label: str | None = None) -> str:
     """Return a literal wiki link without interpreting label markup.
 
-    Escape HTML and wiki delimiters even when source facts were manually
-    prepared. Keep ordinary apostrophes and omit redundant labels. The
-    leading colon prevents file embeds or categorization.
+    Escape angle brackets and wiki delimiters in saved facts. Preserve
+    ampersands and ordinary apostrophes and omit redundant labels.
+    The leading colon prevents file embeds or categorization.
     """
-    title = escape(target, quote=False).translate(_LINK_ENTITIES)
+    title = target.translate(_LINK_ENTITIES)
     title = f"{':' if not title.startswith(':') else ''}{title}"
     if label is None or label == target:
         return f"[[{title}]]"
-    text = escape(label or target, quote=False).translate(_LINK_ENTITIES)
+    text = (label or target).translate(_LINK_ENTITIES)
     text = re.sub(r"'{2,}", lambda match: "&#39;" * len(match[0]), text)
     return f"[[{title}|{text}]]"
 
@@ -144,7 +155,7 @@ def _main(issue: Issue, facts: Mapping[str, object]) -> str:
     layout = facts.get("main_layout")
     if not isinstance(layout, dict):
         return _UNAVAILABLE
-    text = layout["text"]
+    text = issue_contents(layout["text"], issue)
     observed = facts.get("overview_observed_at")
     through = (
         dt.datetime.fromisoformat(str(observed)).astimezone(dt.UTC).date()
@@ -299,6 +310,61 @@ def _quality_months(issue: Issue, facts: Mapping, layout: Mapping) -> str:
     return "".join(result).rstrip()
 
 
+def _quality_summary(issue: Issue, facts: Mapping[str, object]) -> str:
+    """Count article changes in the original draft's grade order.
+
+    The October 2026 draft (revision 93279502) lists additions and
+    removals per grade, including zero counts. A completed quarter can
+    use the compact no-change sentence only without undated events.
+
+    Returns:
+        Grade counts, a completed empty result, or unavailable text.
+    """
+    changes = facts.get("quality_changes")
+    if changes is None:
+        return _UNAVAILABLE
+    prefix = f"電子遊戲專題於{issue.quarter_label}間"
+    through = _observation_end(issue, facts)
+    if (
+        not changes
+        and not (facts.get("history_undated") or {}).get("quality", 0)
+        and facts.get("observation_end") is not None
+        and through >= issue.end
+        and facts.get("complete", through == issue.end)
+    ):
+        return prefix + "無特優內容變動。"
+    grouped = (
+        pl
+        .DataFrame(
+            changes,
+            schema={
+                "date": pl.String,
+                "grade": pl.String,
+                "action": pl.String,
+                "title": pl.String,
+            },
+        )
+        .with_columns(pl.col("grade").str.to_lowercase())
+        .group_by("grade", "action")
+        .agg(pl.col("title").n_unique().alias("count"))
+    )
+    counts = {
+        (grade, action): count for grade, action, count in grouped.iter_rows()
+    }
+    phrases = []
+    for action, verb in (("added", "新增"), ("removed", "撤銷")):
+        values = []
+        for grade, label, unit in _QUALITY_SUMMARY_GRADES:
+            count = counts.get((grade, action), 0)
+            if not count and (
+                grade == "a" or (grade == "bplus" and action == "removed")
+            ):
+                continue
+            values.append(f"{label}{count}{unit}")
+        phrases.append(verb + "、".join(values))
+    return prefix + "，" + "，".join(phrases) + "。"
+
+
 def _quality(issue: Issue, facts: Mapping[str, object]) -> str:
     """Fill the actual previous quality page with current observations.
 
@@ -308,21 +374,7 @@ def _quality(issue: Issue, facts: Mapping[str, object]) -> str:
     layout = (facts.get("subpage_layouts") or {}).get("特優內容")
     if layout is None:
         return _UNAVAILABLE
-    changes = facts.get("quality_changes")
-    if changes is None:
-        summary = _UNAVAILABLE
-    else:
-        summary = f"電子遊戲專題於{issue.quarter_label}間，"
-        if facts.get("quality_source") == "article_history":
-            summary += (
-                f"依條目里程碑記錄，共有{len(changes)}次有明確日期的評級變動。"
-            )
-        else:
-            summary += (
-                f"一共記錄了{len(changes)}次認證條目列表變動。"
-                if changes
-                else "認證條目列表無變動。"
-            )
+    summary = _quality_summary(issue, facts)
     undated = (facts.get("history_undated") or {}).get("quality", 0)
     if undated:
         summary += (
@@ -567,7 +619,7 @@ def render_issue(
     issue: Issue,
     facts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Prepare collected data for three editable wiki pages.
+    """Prepare collected data and editorial templates for wiki pages.
 
     Args:
         issue: Validated publication month.
@@ -594,8 +646,14 @@ def render_issue(
         if available
         else []
     )
+    if available:
+        editorial = render_editorial(issue, facts)
+        texts.extend(editorial[suffix] for suffix in issue.draft_suffixes[3:])
     return {
         "issue": issue.value,
+        "data_through": (end - dt.timedelta(days=1)).isoformat()
+        if available and facts.get("observation_end") and end > issue.start
+        else None,
         "period": (
             f"{issue.start} – {end - dt.timedelta(days=1)}"
             if end > issue.start
@@ -614,6 +672,10 @@ def render_issue(
                 "url": issue.page_url(suffix),
                 "text": text,
             }
-            for suffix, text in zip(SUFFIXES, texts, strict=available)
+            for suffix, text in zip(
+                issue.draft_suffixes,
+                texts,
+                strict=available,
+            )
         ],
     }

@@ -30,6 +30,7 @@ from backend.support.events import event_extra
 from backend.support.http import encoded_response, read_only_headers
 from backend.support.job_history import read_job_history
 from backend.support.logs import open_run_log
+from backend.support.newsletter_data import OBSERVATIONS_PATH
 from backend.support.page_cache import PageCache
 from backend.support.public_data import (
     MAX_LOG_BYTES,
@@ -44,14 +45,16 @@ from shared.deployment import project_version
 from shared.newsletter import Issue
 from shared.support.files import open_regular, read_json_object, read_regular
 lazy from backend.website.collect import validate_dashboard_snapshot
+lazy from backend.website.newsletter import read_newsletter_data
 lazy from backend.website.newsletter_archive import (
     DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
     NewsletterDraftArchive,
 )
 lazy from backend.website.newsletter_homepage import enrich_newsletter_homepage
 lazy from updater.services.newsletter import render_issue
+lazy from updater.services.newsletter_editorial import render_annual_feature
 lazy from webservice import pages
-lazy from webservice.presentation import local_url, select_locale
+lazy from webservice.presentation import Interface, local_url, select_locale
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
@@ -62,7 +65,6 @@ if TYPE_CHECKING:
 _ASSETS = Path(__file__).resolve().parents[1] / "webservice" / "public_html"
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_QUERY_BYTES = 4096
-_MAX_HISTORY_QUERY_BYTES = 1024
 _MAX_HEADER_BYTES = 64 * 1024
 _MAX_PORT = 65535
 _CHUNK_BYTES = 64 * 1024
@@ -73,7 +75,7 @@ _SOCKET_REFRESH_SECONDS = 60
 _SOCKET_CHECK_SECONDS = 1
 _SOCKET_SEND_SECONDS = 5
 _LOGGER = logging.getLogger(__name__)
-_LANGUAGES = {"en": "English", "zh-hans": "简体中文", "zh-hant": "繁體中文"}
+_LANGUAGES = {"en": "English", "zh-hans": "简体中文", "zh-hant": "繁体中文"}
 _LANGUAGE_COOKIE = "aranami-language"
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -94,16 +96,19 @@ def _newsletter_selection(
         The selected issue and completed data date, if supplied.
 
     Raises:
-        ValueError: Controls repeat, are malformed, or cross quarters.
+        ValueError: Controls repeat or fall outside the reporting dates.
     """
-    if set(parameters) - {"issue", "date"} or any(
+    if set(parameters) - {"issue", "date", "feature_date"} or any(
         len(values) != 1 for values in parameters.values()
     ):
         message = "Choose one newsletter issue and data date."
         raise ValueError(message)
     day = None
-    if "date" in parameters:
-        value = parameters["date"][0]
+    if "date" in parameters and "feature_date" in parameters:
+        message = "Choose only one newsletter data date."
+        raise ValueError(message)
+    if "date" in parameters or "feature_date" in parameters:
+        value = parameters.get("date", parameters.get("feature_date"))[0]
         day = dt.date.fromisoformat(value)
         if day.isoformat() != value:
             message = "Newsletter dates require YYYY-MM-DD."
@@ -111,14 +116,132 @@ def _newsletter_selection(
     issue = (
         Issue.parse(parameters["issue"][0])
         if "issue" in parameters
+        else Issue.parse(f"{day.year + 1}-01")
+        if day is not None and "feature_date" in parameters
         else Issue.upcoming(day)
         if day is not None
         else automatic_issue
     )
-    if day is not None and not issue.start <= day < issue.end:
-        message = "The saved date must belong to the selected quarter."
+    start = dt.date(issue.year - 1, 1, 1) if issue.month == 1 else issue.start
+    if day is not None and not start <= day < issue.end:
+        message = (
+            "The saved date must belong to the selected reporting period."
+        )
+        raise ValueError(message)
+    if "feature_date" in parameters and issue.month != 1:
+        message = "Annual feature dates require a January issue."
         raise ValueError(message)
     return issue, day
+
+
+def _newsletter_choices(
+    archive: NewsletterDraftArchive,
+    automatic: Issue,
+    selected: Issue,
+) -> list[str]:
+    """Expose the year-long feature before its reporting quarter.
+
+    Returns:
+        Current, previous, selected, and captured annual issue choices.
+    """
+    choices = list(
+        dict.fromkeys([automatic.previous, automatic.value, selected.value]),
+    )
+    annual = Issue.parse(f"{automatic.year + int(automatic.month != 1)}-01")
+    if annual.value not in choices and archive.feature_dates(annual):
+        choices.append(annual.value)
+    return choices
+
+
+def _newsletter_feature(
+    archive: NewsletterDraftArchive,
+    issue: Issue,
+    requested: str | None,
+    value: dict,
+    current_facts: dict | None = None,
+) -> dict | None:
+    """Select annual evidence for the shared newsletter data date.
+
+    Returns:
+        Annual selection metadata, or none for non-January issues.
+    """
+    if issue.month != 1:
+        return None
+    selected = requested
+    review = (current_facts or {}).get("year_review")
+    if (
+        selected
+        and review
+        and review["observation_end"]
+        == (dt.date.fromisoformat(selected) + dt.timedelta(days=1)).isoformat()
+    ):
+        entry = {
+            "year_review": review,
+            "generated_at": current_facts["updated_at"],
+        }
+    else:
+        entry = (
+            archive.read_feature(issue, dt.date.fromisoformat(selected))
+            if selected
+            else None
+        )
+    if entry is not None:
+        value["pages"] = [
+            page for page in value["pages"] if page["label"] != "專題"
+        ]
+        value["pages"].append({
+            "label": "專題",
+            "title": f"WikiProject:電子遊戲/簡訊/{issue.value}/專題",
+            "url": issue.page_url("專題"),
+            "text": render_annual_feature(issue, entry["year_review"]),
+            "data_through": selected,
+        })
+        value["available"] = True
+    return {
+        "selected_date": selected,
+        "generated_at": entry["generated_at"] if entry else None,
+        "missing": selected is not None and entry is None,
+    }
+
+
+def _newsletter_dates(
+    archive: NewsletterDraftArchive,
+    issue: Issue,
+) -> list[str]:
+    """List dates with saved quarterly or annual newsletter evidence.
+
+    Returns:
+        Sorted calendar choices within the issue's reporting period.
+    """
+    dates = archive.available_dates(issue)
+    if issue.month == 1:
+        dates = sorted(set(dates) | set(archive.feature_dates(issue)))
+    return dates
+
+
+def _newsletter_current_day(
+    issue: Issue,
+    facts: dict,
+    dates: list[str],
+) -> dt.date | None:
+    """Match current facts to a saved quarterly or annual date.
+
+    Returns:
+        The captured day, or an early annual archive fallback.
+    """
+    boundary = dt.date.fromisoformat(facts["observation_end"])
+    early_annual = issue.month == 1 and boundary <= issue.start
+    if early_annual:
+        boundary = dt.date.fromisoformat(
+            (facts.get("year_review") or {}).get(
+                "observation_end",
+                facts["observation_end"],
+            ),
+        )
+    day = boundary - dt.timedelta(days=1)
+    if day.isoformat() in dates:
+        return day
+    return dt.date.fromisoformat(dates[-1]) if early_annual and dates else None
 
 
 def _json(value: object, status: HTTPStatus = HTTPStatus.OK) -> Response:
@@ -247,10 +370,7 @@ def _html(
         status_code=status,
         media_type="text/html; charset=utf-8",
         headers={
-            "Content-Language": {
-                "zh-hans": "zh-Hans",
-                "zh-hant": "zh-Hant",
-            }.get(locale, locale),
+            "Content-Language": Interface(locale).language_tag,
             "Vary": "Accept-Language, Cookie",
         },
     )
@@ -278,11 +398,11 @@ def _request_locale(request: Request) -> str:
     """
     chosen = _explicit_language(request)
     saved = request.cookies.get(_LANGUAGE_COOKIE)
-    return chosen or (
-        saved
-        if saved in _LANGUAGES
-        else select_locale(request.headers.get("Accept-Language", ""))
-    )
+    browser = select_locale(request.headers.get("Accept-Language", ""))
+    selected = chosen or (saved if saved in _LANGUAGES else browser)
+    if selected == "zh-hant" and browser in {"zh-tw", "zh-hk"}:
+        return browser
+    return selected
 
 
 def _navigation(request: Request, locale: str) -> dict[str, object]:
@@ -323,7 +443,7 @@ def _navigation(request: Request, locale: str) -> dict[str, object]:
                     **parameters,
                     lang=language,
                 ),
-                "current": language == locale
+                "current": language == Interface(locale).message_locale
                 or (language == "zh-hans" and locale == "zh"),
             }
             for language, label in _LANGUAGES.items()
@@ -367,34 +487,6 @@ def _log_controls(selection: dict[str, list[str]]) -> dict[str, str]:
             raise ValueError(message)
         controls[name] = values[0]
     return controls
-
-
-def _history_selection(
-    selection: dict[str, list[str]],
-    dates: list[str],
-) -> tuple[str | None, str, dict[str, str]]:
-    """Validate a history date and filter independently of log files.
-
-    Returns:
-        The selected date, text filter, and presentation controls.
-
-    Raises:
-        ValueError: A control is repeated, unsupported, or malformed.
-    """
-    controls = _log_controls(selection)
-    if set(selection) - {"date", "q"} or any(
-        len(values) != 1 for values in selection.values()
-    ):
-        message = "Invalid report history selection."
-        raise ValueError(message)
-    day = selection.get("date", [dates[0] if dates else None])[0]
-    query = selection.get("q", [""])[0].strip()
-    if len(query.encode()) > _MAX_HISTORY_QUERY_BYTES or (
-        day is not None and dt.date.fromisoformat(day).isoformat() != day
-    ):
-        message = "Invalid report history date or query."
-        raise ValueError(message)
-    return day, query, controls
 
 
 def _page_error(key: str, locale: str, status: HTTPStatus) -> Response:
@@ -575,19 +667,58 @@ class _PublicViews:
         parameters: dict[str, list[str]],
         automatic_issue: Issue,
     ) -> tuple | None:
-        """Read daily calendar metadata for page caching.
+        """Read saved observation and calendar identities for caching.
 
         Returns:
             Catalog metadata, or none for absent or invalid selections.
             The page handler reports validation and read errors.
         """
         try:
-            issue, _ = _newsletter_selection(parameters, automatic_issue)
-            return NewsletterDraftArchive(
+            issue, day = _newsletter_selection(parameters, automatic_issue)
+            store = NewsletterDraftArchive(
                 self.runtime / DRAFT_ARCHIVE_PATH,
-            ).identity(issue)
+            )
+            archive = store.identity(issue)
+            feature_dates = (
+                tuple(store.feature_dates(issue)) if issue.month == 1 else ()
+            )
         except OSError, ValueError:
             return None
+        if day is not None:
+            return archive, feature_dates
+        pointer = self.runtime / OBSERVATIONS_PATH / "current.json"
+        try:
+            info = pointer.lstat()
+        except OSError:
+            observation = None
+        else:
+            observation = (
+                info.st_dev,
+                info.st_ino,
+                info.st_mode,
+                info.st_size,
+                info.st_mtime_ns,
+            )
+        return archive, observation, feature_dates
+
+    def _newsletter_saved_facts(
+        self,
+        issue: Issue,
+        day: dt.date | None,
+    ) -> dict | None:
+        """Select durable current facts without altering dated archives.
+
+        Returns:
+            Validated facts for an undated exact-issue request.
+        """
+        if day is not None:
+            return None
+        retained = read_newsletter_data(self.runtime / OBSERVATIONS_PATH)
+        return (
+            retained["issues"].get(issue.value)
+            if retained is not None
+            else None
+        )
 
     def _newsletter_page(
         self,
@@ -606,25 +737,34 @@ class _PublicViews:
         except ValueError:
             return _page_error(
                 "newsletter.history.invalid_date"
-                if "date" in parameters
+                if "date" in parameters or "feature_date" in parameters
                 else "newsletter.invalid_issue",
                 locale,
                 HTTPStatus.BAD_REQUEST,
             )
         archive = NewsletterDraftArchive(self.runtime / DRAFT_ARCHIVE_PATH)
         try:
-            dates = archive.available_dates(issue)
-            if day is None and dates:
+            durable_facts = self._newsletter_saved_facts(issue, day)
+            dates = _newsletter_dates(archive, issue)
+            if day is None and dates and durable_facts is None:
                 day = dt.date.fromisoformat(dates[-1])
-            entry = archive.read_entry(issue, day) if day is not None else None
+            entry = (
+                archive.read_entry(issue, day)
+                if day is not None and issue.start <= day < issue.end
+                else None
+            )
         except OSError, ValueError:
             return _page_error(
                 "newsletter.history.read_error",
                 locale,
                 HTTPStatus.SERVICE_UNAVAILABLE,
             )
-        if entry is not None:
-            value = entry["rendered"] or render_issue(issue, entry["facts"])
+        if durable_facts is not None:
+            value = render_issue(issue, durable_facts)
+            generated_at = durable_facts["updated_at"]
+            day = _newsletter_current_day(issue, durable_facts, dates)
+        elif entry is not None:
+            value = render_issue(issue, entry["facts"])
             generated_at = entry["generated_at"]
         elif day is not None:
             value = render_issue(issue)
@@ -639,9 +779,24 @@ class _PublicViews:
             )
             value = render_issue(issue, facts)
             generated_at = facts.get("updated_at")
-        choices = [automatic_issue.previous, automatic_issue.value]
-        if issue.value not in choices:
-            choices.append(issue.value)
+        try:
+            feature_history = _newsletter_feature(
+                archive,
+                issue,
+                day.isoformat() if day is not None else None,
+                value,
+                durable_facts,
+            )
+            generated_at = (feature_history or {}).get(
+                "generated_at",
+            ) or generated_at
+            choices = _newsletter_choices(archive, automatic_issue, issue)
+        except OSError, ValueError:
+            return _page_error(
+                "newsletter.history.read_error",
+                locale,
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
         value.update(
             automatic_issue=automatic_issue.value,
             issue_choices=choices,
@@ -649,13 +804,15 @@ class _PublicViews:
                 "dates": dates,
                 "selected_date": day.isoformat() if day is not None else None,
                 "generated_at": generated_at,
-                "missing": day is not None and entry is None,
+                "missing": (day is not None and not value["available"]),
             },
         )
         return _html(
             pages.render_newsletter(
                 value,
                 locale,
+                status=saved_status(self.runtime),
+                config=_configuration(),
                 navigation=navigation,
             ),
             locale,
@@ -686,6 +843,8 @@ class _PublicViews:
                 parameters,
                 locale,
                 navigation=navigation,
+                status=saved_status(self.runtime),
+                config=_configuration(),
             )
         except ValueError:
             return _page_error(
@@ -818,7 +977,7 @@ class _PublicViews:
         """Read per-job history independently of diagnostic logs.
 
         Returns:
-            A Reports page or a localized invalid-selection response.
+            A Reports page with retained invocations across all dates.
         """
         try:
             runs = read_job_history(
@@ -826,37 +985,9 @@ class _PublicViews:
             )["runs"]
         except OSError, ValueError, TypeError, OverflowError, RecursionError:
             runs = []
-        dates = sorted(
-            {row["started_at"][:10] for row in runs},
-            reverse=True,
-        )
-        try:
-            selection = parse_qs(
-                request.scope.get("query_string", b"").decode("ascii"),
-                keep_blank_values=True,
-                errors="strict",
-                max_num_fields=7,
-            )
-            day, query, controls = _history_selection(selection, dates)
-        except ValueError, UnicodeError:
-            return _page_error(
-                "logs.invalid_query",
-                locale,
-                HTTPStatus.BAD_REQUEST,
-            )
-        if day is not None and day not in dates:
-            return _page_error("logs.not_found", locale, HTTPStatus.NOT_FOUND)
         return _html(
             pages.render_reports(
-                {
-                    "runs": [
-                        row for row in runs if row["started_at"][:10] == day
-                    ],
-                    "dates": dates,
-                    "date": day,
-                    "query": query,
-                    **controls,
-                },
+                {"runs": runs},
                 locale,
                 status=saved_status(self.runtime),
                 config=_configuration(),
@@ -1086,10 +1217,23 @@ def _socket_locale(websocket: WebSocket) -> str | None:
         return None
     locale = parameters.get("lang", ["en"])
     return (
-        locale[0]
+        {"zh-hant-tw": "zh-tw", "zh-hant-hk": "zh-hk"}.get(
+            locale[0],
+            locale[0],
+        )
         if set(parameters) <= {"lang"}
         and len(locale) == 1
-        and locale[0] in {"en", "zh", "zh-hans", "zh-hant"}
+        and locale[0]
+        in {
+            "en",
+            "zh",
+            "zh-hans",
+            "zh-hant",
+            "zh-tw",
+            "zh-hk",
+            "zh-hant-tw",
+            "zh-hant-hk",
+        }
         else None
     )
 

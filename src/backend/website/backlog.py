@@ -303,6 +303,11 @@ def collect_backlog(
         .select(
             "page_id",
             pl.col("full_title").alias("title"),
+            (
+                pl.col("page_length")
+                if "page_length" in membership.columns
+                else pl.lit(None, dtype=pl.Int64)
+            ).alias("page_length"),
             *(
                 (
                     pl.col(source).cast(pl.String).str.strip_chars()
@@ -321,6 +326,7 @@ def collect_backlog(
         .group_by("page_id", maintain_order=True)
         .agg(
             pl.col("title").first(),
+            pl.col("page_length").first(),
             *(
                 pl
                 .when(pl.col(column).drop_nulls().n_unique() == 1)
@@ -360,6 +366,7 @@ def collect_backlog(
         pl.struct(
             "page_id",
             "title",
+            "page_length",
             *assessments,
             "issues",
             "oldest_issue_month",

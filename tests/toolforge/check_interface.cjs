@@ -121,7 +121,8 @@ async function main() {
             return result.result.value;
         };
         const press = async (key, virtual, modifiers = 0) => {
-            await call("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: virtual, modifiers }, sessionId);
+            // Enter needs its character event for Chromium's native summary activation.
+            await call("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: virtual, modifiers, ...(key === "Enter" ? { text: "\r" } : {}) }, sessionId);
             await call("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: virtual, modifiers }, sessionId);
         };
         const checkSemantics = async () => {
@@ -172,6 +173,73 @@ async function main() {
                 assert.equal(closed, true, "native mobile contents did not close");
             }
         };
+        const checkTools = async () => {
+            const selector = '.global-navigation .navigation-tools';
+            const isOpen = () => evaluate(`document.querySelector('${selector}').open`);
+            const move = async (selector, edge = 'center') => {
+                const point = await evaluate(`(() => {
+                    const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+                    return {x: box.left + box.width / 2, y: ${edge === 'gap' ? 'box.top - 2' : 'box.top + box.height / 2'}};
+                })()`);
+                await call('Input.dispatchMouseEvent', {type: 'mouseMoved', ...point}, sessionId);
+                return point;
+            };
+            const click = async point => {
+                await call('Input.dispatchMouseEvent', {type: 'mousePressed', button: 'left', clickCount: 1, ...point}, sessionId);
+                await call('Input.dispatchMouseEvent', {type: 'mouseReleased', button: 'left', clickCount: 1, ...point}, sessionId);
+            };
+            await evaluate("document.querySelector('h1').focus(); document.activeElement.blur()");
+            await move('h1');
+            await move(`${selector} summary`);
+            assert.equal(await isOpen(), true, 'mouse hover did not open Tools');
+            await move(`${selector} ul`, 'gap');
+            assert.equal(await isOpen(), true, 'Tools closed while crossing its popup gap');
+            await move(`${selector} a`);
+            assert.equal(await isOpen(), true, 'Tools links cannot be reached by pointer');
+            const links = await evaluate(`(() => [...document.querySelectorAll('.masthead nav a')].map(link => {
+                const style = getComputedStyle(link);
+                return {color: style.color, decoration: style.textDecorationLine};
+            }))()`);
+            assert.ok(links.every(link => link.color === 'rgb(32, 33, 34)' && link.decoration === 'none'), 'header links must stay near-black without underlines');
+            await move('h1');
+            assert.equal(await isOpen(), false, 'hover-only Tools stayed open after leaving');
+            await evaluate("document.querySelector('.brand').focus()");
+            await move(`${selector} summary`);
+            await press('Escape', 27);
+            assert.equal(await evaluate(`!document.querySelector('${selector}').open && document.activeElement === document.querySelector('.brand')`), true, 'Escape did not dismiss hover preview while preserving outside focus');
+            await move('h1');
+            const summary = await move(`${selector} summary`);
+            await click(summary);
+            assert.equal(await isOpen(), true, 'clicking a hover-open Tools menu should keep it open');
+            await move('h1');
+            assert.equal(await isOpen(), true, 'clicked Tools closed on pointer exit');
+            await click(await move(`${selector} summary`));
+            assert.equal(await isOpen(), false, 'second summary click did not close Tools');
+            await move('h1');
+            await move(`${selector} summary`);
+            await evaluate(`document.querySelector('${selector} summary').focus()`);
+            await press('ArrowDown', 40);
+            await move('h1');
+            assert.equal(await evaluate(`document.querySelector('${selector}').open && document.activeElement === document.querySelector('${selector} a')`), true, 'pointer exit hid keyboard-focused Tools links');
+            await press('Escape', 27);
+            assert.equal(await evaluate(`!document.querySelector('${selector}').open && document.activeElement === document.querySelector('${selector} summary')`), true, 'Escape did not dismiss Tools and restore summary focus');
+            await press('Enter', 13);
+            assert.equal(await isOpen(), true, 'keyboard activation did not open Tools');
+            await press('Tab', 9);
+            assert.equal(await evaluate(`document.activeElement === document.querySelector('${selector} a')`), true, 'Tab did not reach Tools links');
+            assert.equal(await evaluate("getComputedStyle(document.activeElement).outlineStyle !== 'none'"), true, 'keyboard focus outline missing');
+            await press('Tab', 9);
+            assert.equal(await isOpen(), false, 'focus leaving Tools did not close it');
+            await evaluate(`document.querySelector('${selector}').dispatchEvent(new PointerEvent('pointerenter', {pointerType: 'touch'}))`);
+            assert.equal(await isOpen(), false, 'touch pointer unexpectedly opened Tools');
+            await evaluate(`document.querySelector('${selector} summary').click()`);
+            assert.equal(await isOpen(), true, 'native click no longer opens Tools');
+            await click(await move('h1'));
+            assert.equal(await isOpen(), false, 'outside click did not close Tools');
+            await move('.language-menu summary');
+            assert.equal(await evaluate("document.querySelector('.language-menu').open"), false, 'hover behavior leaked into language menu');
+            await move('h1');
+        };
         let checked = 0;
         matrix: for (const locale of locales) for (const width of widths) for (const surface of surfaces) {
             const label = `${locale}/${surface}/${width}`;
@@ -214,6 +282,7 @@ async function main() {
                     }
                     assert.equal(await evaluate("document.querySelectorAll('.page-content h3, #tool-status, #backlog').length"), 0, "dashboard sections should have peer h2 headings");
                     if (width === 320 || width === 1440) {
+                        await checkTools();
                         await evaluate("document.querySelector('.language-menu summary').focus()");
                         await press("ArrowUp", 38);
                         const language = await evaluate(`new Promise(resolve => requestAnimationFrame(() => {
@@ -241,33 +310,83 @@ async function main() {
                 }
                 if (surface === "newsletter") {
                     const calendar = await evaluate(`(() => {
-                        const calendar = document.querySelector('[data-newsletter-calendar]');
-                        if (!calendar || calendar.hidden) return null;
-                        calendar.querySelector('summary').click();
-                        const panel = calendar.querySelector('.newsletter-calendar-panel').getBoundingClientRect();
-                        const saved = new Set(JSON.parse(calendar.dataset.dates));
-                        const buttons = [...calendar.querySelectorAll('[data-calendar-days] button')];
-                        const expectedSunday = new Intl.DateTimeFormat(document.documentElement.lang, {weekday:'short', timeZone:'UTC'}).format(new Date('2026-11-01T00:00:00Z'));
-                        const firstDay = calendar.querySelector('[data-calendar-weekdays] th')?.textContent;
-                        const result = {sunday: firstDay === expectedSunday,
-                            unavailable: buttons.some(button => button.disabled),
-                            states: buttons.every(button => button.disabled === !saved.has(button.getAttribute('aria-label'))),
-                            withinViewport: panel.left >= 0 && panel.right <= innerWidth + 1};
-                        calendar.querySelector('summary').click();
-                        const selected = document.querySelector('input[name=issue]:checked');
-                        const other = document.querySelector('input[name=issue]:not(:checked)');
-                        const url = location.href;
-                        other?.click();
-                        result.pendingIssue = location.href === url && (!other || other.checked);
-                        if (selected) selected.checked = true;
-                        return result;
+                        const input = document.querySelector('#newsletter-data-date');
+                        const box = input.getBoundingClientRect();
+                        return {type: input.type, visible: !input.hidden,
+                            count: document.querySelectorAll('input[name="date"]').length,
+                            duplicate: !!document.querySelector('[name="feature_date"]'),
+                            minimum: input.min, maximum: input.max,
+                            withinViewport: box.left >= 0 && box.right <= innerWidth + 1};
                     })()`);
-                    assert.ok(calendar, "enhanced saved-date calendar missing");
-                    assert.equal(calendar.sunday, true, "calendar should start on Sunday");
-                    assert.equal(calendar.unavailable, true, "unavailable calendar dates should be visible");
-                    assert.equal(calendar.states, true, "calendar availability disagrees with saved dates");
-                    assert.equal(calendar.withinViewport, true, "open calendar exceeds viewport");
-                    assert.equal(calendar.pendingIssue, true, "issue changes should wait for submission");
+                    assert.equal(calendar.type, "date");
+                    assert.equal(calendar.visible, true);
+                    assert.equal(calendar.count, 1);
+                    assert.equal(calendar.duplicate, false);
+                    assert.equal(calendar.minimum, "2026-01-01");
+                    assert.equal(calendar.maximum, "2026-12-31");
+                    assert.equal(calendar.withinViewport, true);
+                    if (width === 320 || width === 1440) {
+                        const switched = await evaluate(`(async () => {
+                            const form = document.querySelector('[data-newsletter-issue-form]');
+                            const select = form.querySelector('select[name=issue]');
+                            const other = [...select.options].find(option => option.value !== select.value);
+                            const page = document.documentElement;
+                            const originalFetch = window.fetch;
+                            const source = await (await originalFetch(location.href)).text();
+                            let request;
+                            let copied;
+                            const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+                            Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async text => { copied = text; }}});
+                            window.fetch = async (url, options) => {
+                                request = {url: String(url), method: options?.method || 'GET'};
+                                const response = new DOMParser().parseFromString(source, 'text/html');
+                                for (const option of response.querySelectorAll('select[name=issue] option')) option.toggleAttribute('selected', option.value === other.value);
+                                response.querySelector('input[name=issue]').value = other.value;
+                                response.querySelector('[data-newsletter-wikitext]').textContent = 'Fetched issue ' + other.value + ' {{literal|<source>}}';
+                                return new Response(response.documentElement.outerHTML, {headers: {'Content-Type': 'text/html'}});
+                            };
+                            try {
+                                select.focus();
+                                select.value = other.value;
+                                select.dispatchEvent(new Event('change', {bubbles: true}));
+                                const deadline = performance.now() + 5000;
+                                while (!document.querySelector('[data-newsletter-wikitext]')?.textContent.startsWith('Fetched issue ')) {
+                                    if (performance.now() > deadline) throw new Error('Issue selection did not replace draft content');
+                                    await new Promise(resolve => requestAnimationFrame(resolve));
+                                }
+                                const draft = document.querySelector('[data-newsletter-wikitext]');
+                                const copy = document.querySelector('[data-newsletter-copy]');
+                                const edit = document.querySelector('[data-newsletter-edit]');
+                                copy.click();
+                                await Promise.resolve();
+                                const requested = new URL(request.url, location.href);
+                                return {sameDocument: document.documentElement === page,
+                                    stableSelect: document.querySelector('select[name=issue]') === select && document.activeElement === select,
+                                    requestedIssue: requested.searchParams.get('issue'), selectedIssue: other.value,
+                                    readOnly: request.method === 'GET', noDate: !requested.searchParams.has('date'),
+                                    submitHidden: form.querySelector('button[type=submit]').hidden,
+                                    calendarReady: document.querySelector('#newsletter-data-date').type === 'date' && !document.querySelector('#newsletter-data-date').hidden,
+                                    copyReady: !copy.hidden && copied === draft.textContent,
+                                    editReady: Boolean(edit && !edit.hidden && edit.dataset.newsletterCopy === copy.dataset.newsletterCopy && new URL(edit.dataset.newsletterEdit).origin === 'https://zh.wikipedia.org' && new URL(edit.dataset.newsletterEdit).searchParams.get('action') === 'edit'),
+                                    buttonWeights: copy.classList.contains('cdx-button--weight-normal') && edit?.classList.contains('cdx-button--weight-primary'),
+                                    noDestination: !document.querySelector('.newsletter-destination'),
+                                    plainText: draft.children.length === 0};
+                            } finally {
+                                window.fetch = originalFetch;
+                                if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+                                else delete navigator.clipboard;
+                            }
+                        })()`);
+                        assert.equal(switched.sameDocument, true, "issue selection reloaded the page");
+                        assert.equal(switched.stableSelect, true, "issue update lost selector or keyboard focus");
+                        assert.equal(switched.requestedIssue, switched.selectedIssue, "wrong issue requested");
+                        assert.ok(switched.readOnly && switched.noDate, "issue selection needs a fresh read-only date scope");
+                        assert.equal(switched.submitHidden, true, "enhanced issue selection should not need a submit button");
+                        assert.ok(switched.calendarReady && switched.copyReady, "replacement draft controls were not initialized");
+                        assert.ok(switched.editReady && switched.buttonWeights, "replacement drafts need secondary copy and primary copy-and-edit controls");
+                        assert.equal(switched.noDestination, true, "standalone newsletter destination should be removed");
+                        assert.equal(switched.plainText, true, "draft text should not contain syntax highlighting spans");
+                    }
                 }
                 if (surface === "backlog") {
                     assert.ok(await evaluate("document.querySelectorAll('.backlog-section h2').length > 0"), "maintenance groups should use h2 headings");
@@ -280,26 +399,17 @@ async function main() {
                         const onSubmit = event => { event.preventDefault(); submissions++; };
                         form.addEventListener('submit', onSubmit);
                         const states = [...form.querySelectorAll('.assessment-filter')].map(field => {
-                            const [operation, grade, endpoint] = field.querySelectorAll('select');
-                            const endpointLabel = field.querySelector('label[for="' + endpoint.id + '"]');
-                            const initial = [operation.value, grade.value, endpoint.value];
-                            const change = value => {
-                                operation.value = value;
-                                operation.dispatchEvent(new Event('change', {bubbles: true}));
-                            };
-                            change('eq');
-                            const equality = endpoint.hidden && endpoint.disabled && !endpoint.required && endpointLabel.hidden && !grade.required;
-                            change('range');
-                            const range = !endpoint.hidden && !endpoint.disabled && endpoint.required && !endpointLabel.hidden && grade.required && endpoint.getBoundingClientRect().height > 0;
+                            const [grade, endpoint] = field.querySelectorAll('select');
+                            const initial = [grade.value, endpoint.value];
+                            const unlimited = [grade, endpoint].every(control =>
+                                control.options[0].value === '' && !control.required && !control.disabled && !control.hidden);
                             grade.value = grade.options[1].value;
                             grade.dispatchEvent(new Event('change', {bubbles: true}));
                             endpoint.value = endpoint.options[1].value;
                             endpoint.dispatchEvent(new Event('change', {bubbles: true}));
-                            change('gte');
-                            const threshold = endpoint.hidden && endpoint.disabled && !endpoint.required && endpointLabel.hidden && grade.required;
-                            [operation.value, grade.value, endpoint.value] = initial;
-                            operation.dispatchEvent(new Event('change', {bubbles: true}));
-                            return {equality, range, threshold};
+                            const range = grade.getBoundingClientRect().height > 0 && endpoint.getBoundingClientRect().height > 0;
+                            [grade.value, endpoint.value] = initial;
+                            return {unlimited, range};
                         });
                         const sort = form.querySelector('select[name=sort]');
                         const originalSort = sort.value;
@@ -313,7 +423,7 @@ async function main() {
                         return {states, submissions, unchangedUrl: location.href === originalUrl};
                     })()`);
                     assert.equal(filters.states.length, 2, "quality and importance range controls missing");
-                    assert.ok(filters.states.every(state => state.equality && state.range && state.threshold), "range controls do not follow selected comparison");
+                    assert.ok(filters.states.every(state => state.unlimited && state.range), "range controls must retain two optional endpoints");
                     assert.equal(filters.submissions, 0, "maintenance control changes submitted automatically");
                     assert.equal(filters.unchangedUrl, true, "maintenance control changes navigated automatically");
                 }
@@ -322,7 +432,7 @@ async function main() {
                     assert.ok(detailWeights.length > 0, "missing report details controls");
                     assert.ok(detailWeights.every(weight => weight === "400"), "report details controls should use normal font weight");
                     assert.equal(await evaluate("document.querySelectorAll('.page-content h2').length"), 2, "site reports needs status and run history sections");
-                    const opened = await evaluate(`(() => { const dialog = document.querySelector('dialog:has(.table-scroll)'); const button = document.querySelector('button[command="show-modal"][commandfor="' + dialog?.id + '"]'); if (!button) return false; button.focus(); button.click(); return document.querySelector('dialog[open]')?.contains(document.activeElement); })()`);
+                    const opened = await evaluate(`(() => { const dialog = document.querySelector('dialog:has(.table-scroll)'); const button = document.querySelector('a[aria-haspopup="dialog"][aria-controls="' + dialog?.id + '"]'); if (!button) return false; button.focus(); button.click(); return document.querySelector('dialog[open]')?.contains(document.activeElement); })()`);
                     assert.equal(opened, true, "dialog initial focus");
                     await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 8 }, sessionId);
                     await call("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 8 }, sessionId);
@@ -353,8 +463,8 @@ async function main() {
                     }
                     await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }, sessionId);
                     await call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }, sessionId);
-                    assert.equal(await evaluate("new Promise(resolve => requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('command') === 'show-modal')))"), true, "Escape or focus restoration");
-                    assert.equal(await evaluate("new Promise(resolve => { document.activeElement.click(); document.querySelector('dialog[open] button[command=close]').click(); requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('command') === 'show-modal')); })"), true, "Close or focus restoration");
+                    assert.equal(await evaluate("new Promise(resolve => requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.matches('a[aria-haspopup=dialog]'))))"), true, "Escape or focus restoration");
+                    assert.equal(await evaluate("new Promise(resolve => { document.activeElement.click(); document.querySelector('dialog[open] button[command=close]').click(); requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.matches('a[aria-haspopup=dialog]'))); })"), true, "Close or focus restoration");
                 }
                 if (surface === "reports" && (width === 320 || width === 1440)) {
                     const histories = await evaluate("[...document.querySelectorAll('dialog[id^=job-history-]')].map(dialog => dialog.id)");
@@ -362,12 +472,12 @@ async function main() {
                     for (const id of histories) {
                         const opened = await evaluate(`(() => {
                             const dialog = document.getElementById(${JSON.stringify(id)});
-                            const button = document.querySelector('button[commandfor="' + dialog.id + '"][command="show-modal"]');
+                            const button = document.querySelector('a[aria-controls="' + dialog.id + '"][aria-haspopup="dialog"]');
                             button.focus(); button.click();
                             const bounds = dialog.getBoundingClientRect();
                             const stages = [...dialog.querySelectorAll('.job-stages li')];
                             return {open: dialog.open, focused: dialog.contains(document.activeElement),
-                                stages: stages.length, dated: stages.every(stage => Boolean(stage.querySelector('time[datetime]')?.textContent.match(/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$/))),
+                                stages: stages.length, dated: stages.every(stage => Boolean(stage.querySelector('time[datetime]')?.textContent.match(/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}$/))),
                                 withinViewport: bounds.left >= -1 && bounds.right <= innerWidth + 1,
                                 contentFits: dialog.scrollWidth <= dialog.clientWidth + 1};
                         })()`);
@@ -382,11 +492,11 @@ async function main() {
                         const shot = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
                         fs.writeFileSync(path.join(outputRoot, `${locale}-${id}-${width}.png`), Buffer.from(shot.data, "base64"));
                         await press("Escape", 27);
-                        assert.equal(await evaluate(`new Promise(resolve => requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('commandfor') === ${JSON.stringify(id)})))`), true, "job history Escape did not restore trigger focus");
+                        assert.equal(await evaluate(`new Promise(resolve => requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('aria-controls') === ${JSON.stringify(id)})))`), true, "job history Escape did not restore trigger focus");
                         assert.equal(await evaluate(`new Promise(resolve => {
                             document.activeElement.click();
                             document.getElementById(${JSON.stringify(id)}).querySelector('button[command=close]').click();
-                            requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('commandfor') === ${JSON.stringify(id)}));
+                            requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('aria-controls') === ${JSON.stringify(id)}));
                         })`), true, "job history Close did not restore trigger focus");
                     }
                 }
@@ -429,6 +539,27 @@ async function main() {
                 assert.equal(available.links, true, "navigation hidden without JavaScript");
                 assert.equal(available.controls, true, "native controls unavailable without JavaScript");
                 assert.equal(available.content, true, "page content depends on JavaScript");
+                const toolsAvailable = await evaluate(`(() => {
+                    const menu = document.querySelector('.global-navigation .navigation-tools');
+                    menu.querySelector('summary').click();
+                    const opened = menu.open && menu.querySelector('a').getBoundingClientRect().height > 0;
+                    menu.querySelector('summary').click();
+                    return opened && !menu.open;
+                })()`);
+                assert.equal(toolsAvailable, true, "Tools disclosure unavailable without JavaScript");
+                if (surface === "reports") {
+                    const fallback = await evaluate(`(() => {
+                        const link = document.querySelector('a[aria-haspopup="dialog"]');
+                        const dialog = document.getElementById(link.getAttribute('aria-controls'));
+                        link.click();
+                        const visible = getComputedStyle(dialog).display !== 'none' && dialog.getBoundingClientRect().height > 0;
+                        const close = dialog.querySelector('noscript a');
+                        const closeVisible = close?.getBoundingClientRect().height > 0;
+                        close?.click();
+                        return visible && closeVisible && getComputedStyle(dialog).display === 'none';
+                    })()`);
+                    assert.equal(fallback, true, "report details need native fragment access and dismissal without JavaScript");
+                }
                 withoutJavaScript++;
             } catch (error) {
                 failures.push({ label, error: error.message });

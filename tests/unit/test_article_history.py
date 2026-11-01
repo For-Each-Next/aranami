@@ -1,7 +1,8 @@
 """Verify Chinese article history with offline source fixtures."""
 
 # Share the existing offline site fixture and unittest test conventions.
-# ruff: file-ignore[pytest-unittest-raises-assertion]
+# Chinese nomination fixtures retain their original punctuation.
+# ruff: file-ignore[pytest-unittest-raises-assertion, ambiguous-unicode-character-string, too-many-public-methods]
 
 from datetime import date
 from unittest import TestCase
@@ -21,7 +22,12 @@ class ArticleHistoryTests(TestCase):
         """Create a Chinese site using only local namespace metadata."""
         self.site = _OfflineSite("zh", "wikipedia")
 
-    def extract(self, text: str) -> list[dict[str, object]]:
+    def extract(
+        self,
+        text: str,
+        *,
+        title: str | None = None,
+    ) -> list[dict[str, object]]:
         """Parse a fixture with explicit verified template aliases.
 
         Returns:
@@ -33,6 +39,7 @@ class ArticleHistoryTests(TestCase):
             ("Template:Article history", "Template:History alias"),
             ("Template:DYKtalk",),
             ("Template:ITNtalk", "Template:ITN alias"),
+            article_title=title,
         )
 
     def test_promotions_removals_and_repromotions_survive_current_status(
@@ -57,6 +64,94 @@ class ArticleHistoryTests(TestCase):
         assert events[0]["date"] == date(2020, 1, 2)
         assert events[1]["date"] == date(2021, 2, 3)
         assert events[2]["oldid"] == 42  # ruff: ignore[magic-value-comparison]
+
+    def test_quality_nominators_follow_each_local_archive(self) -> None:
+        """Identify accounts in each linked nomination round."""
+        events = self.extract("""{{Article history
+|action1=GAN|action1result=listed|action1date=2025-01-24
+|action1link=#優良條目評選
+|action2=FAN|action2result=promoted|action2date=2025-05-13
+|action2link=#典範條目評選
+}}
+==優良條目評選==
+<p>执行者：[[User:Mover|移動者]] 2025年1月24日 (五) 09:52 (UTC)</p>
+<div>提名人：[[U:Writer_name|顯示名稱]] 2025年1月17日 (五) 09:45 (UTC)
+* 我是本文的主編。[[User:Writer_name]] 2025年1月17日 (五) 09:45 (UTC)
+</div>
+==典範條目評選==
+<div>提名人：[[User:Other|另一位]] 2025年4月29日 (二) 04:51 (UTC)
+* 非主编提名。[[User:Other]] 2025年4月29日 (二) 04:51 (UTC)
+</div>""")
+        assert [(row["nominator"], row["main_author"]) for row in events] == [
+            ("Writer name", True),
+            ("Other", False),
+        ]
+        assert events[1]["nomination_link"] == "#典範條目評選"
+
+    def test_featured_list_nomination_and_unverified_dyk_fields(self) -> None:
+        """Read FL accounts without inventing DYKtalk parameters."""
+        events = self.extract("""{{Article history
+|action1=FLC|action1result=promoted|action1date=2026-01-02
+|action1link=#Featured list}}
+{{DYKtalk|date=2026-01-02|author=Invented|authors=Another}}
+==Featured list==
+提名人：[[User:Writer_name&amp;Co|Display]] 2026年1月1日 (四) 00:00 (UTC)
+""")
+        assert events[0]["grade"] == "FL"
+        assert events[0]["nominator"] == "Writer name&Co"
+        assert events[0]["main_author"] is None
+        assert events[1]["contributors"] is None
+
+    def test_unknown_authorship_ignores_other_voters_and_quotes(self) -> None:
+        """Keep uncertain authorship separate from nomination."""
+        event = self.extract("""{{Article history
+|action1=GAN|action1result=listed|action1date=2025-01-24
+|action1link=#優良條目評選
+}}
+==優良條目評選==
+提名人：[[User:Writer]] 2025年1月17日 (五) 09:45 (UTC)
+* 我不是主編。[[User:Voter]] 2025年1月18日 (六) 09:45 (UTC)
+<blockquote>
+非主編提名。[[User:Writer]] 2025年1月17日 (五) 09:45 (UTC)
+</blockquote>
+<!-- 我是主編。[[User:Writer]] 2025年1月17日 (五) 09:45 (UTC) -->
+""")[0]
+        assert event["nominator"] == "Writer"
+        assert event["main_author"] is None
+
+    def test_missing_external_or_ambiguous_links_remain_unknown(self) -> None:
+        """Never borrow an unrelated archive's contributor identity."""
+        for link in (
+            "",
+            "Wikipedia:評選#優良條目評選",
+            "#Missing",
+            "#Duplicate",
+        ):
+            with self.subTest(link=link):
+                event = self.extract(
+                    "{{Article history|action1=GAN|action1result=listed"
+                    "|action1date=2025-01-24|action1link=" + link + "}}\n"
+                    "==Duplicate==\n"
+                    "提名人：[[User:First]] 2025年1月17日 (五) 09:45 (UTC)\n"
+                    "==Duplicate==\n"
+                    "提名人：[[User:Second]] 2025年2月17日 (一) 09:45 (UTC)",
+                )[0]
+                assert event["nominator"] is None
+                assert event["main_author"] is None
+                assert event["nomination_link"] is None
+
+    def test_conflicting_authorship_declarations_remain_unknown(self) -> None:
+        """Retain uncertainty for contradictory author declarations."""
+        event = self.extract("""{{Article history
+|action1=GAN|action1result=listed|action1date=2025-01-24|action1link=#Archive
+}}
+==Archive==
+提名人：[[User:Writer]] 2025年1月17日 (五) 09:45 (UTC)
+* 非主編提名。[[User:Writer]] 2025年1月17日 (五) 09:45 (UTC)
+* 我是主編。[[User:Writer]] 2025年1月17日 (五) 10:45 (UTC)
+""")[0]
+        assert event["nominator"] == "Writer"
+        assert event["main_author"] is None
 
     def test_featured_lists_and_project_reviews_keep_own_results(self) -> None:
         """Support FL, A, and Bplus using Chinese result semantics."""
@@ -212,3 +307,96 @@ class ArticleHistoryTests(TestCase):
         """Require the wiki whose action vocabulary was audited."""
         with self.assertRaises(ValueError):
             extract_events("", _OfflineSite("en", "wikipedia"), (), ())
+
+    def test_dyk_archive_author_matches_one_appearance(self) -> None:
+        """Keep the recorded author distinct from the nominator."""
+        events = self.extract(
+            "{{DYKtalk|date=2025-01-02}}"
+            "{{Article history|dykdate=2025-01-02}}"
+            "{{DYKEntry/archive|article=Some_Article|author=Main_Editor"
+            "|nominator=Another editor|timestamp=1735689600}}",
+            title="Some Article",
+        )
+        assert len(events) == 2  # ruff: ignore[magic-value-comparison]
+        assert all(row["contributors"] == ["Main Editor"] for row in events)
+
+    def test_dyk_attribution_requires_unambiguous_round(self) -> None:
+        """Do not guess between repeated entries or appearance dates."""
+        entry = (
+            "{{DYKEntry/archive|article=Article|author=Writer"
+            "|timestamp=1735689600}}"
+        )
+        for text in (
+            "{{DYKtalk|date=2025-01-02}}" + entry + entry,
+            "{{DYKtalk|date=2025-01-02}}{{DYKtalk|date=2025-02-02}}" + entry,
+            "{{DYKtalk}}" + entry,
+        ):
+            with self.subTest(text=text):
+                events = self.extract(text, title="Article")
+                assert all(row["contributors"] is None for row in events)
+
+    def test_dyk_rejects_unverified_author_sources(self) -> None:
+        """Reject wrong targets, future entries and unsafe names."""
+        values = (
+            "article=Other|author=Writer|timestamp=1735689600",
+            "article=Article|author=Writer|timestamp=1735862400",
+            "article=Article|author=Writer|timestamp=1735689600|result=-",
+            "article=Article|author=Writer|timestamp=1735689600|result=!",
+            "article=Article|author=|nominator=Nominator|timestamp=1735689600",
+            "article=Article|author=[[User:Writer]]|timestamp=1735689600",
+            "article=Article|author={{User|Writer}}|timestamp=1735689600",
+            "article=Article|author=Writer|timestamp={{subst:#time:U}}",
+            "article=Article|author=192.0.2.1|timestamp=1735689600",
+        )
+        for value in values:
+            with self.subTest(value=value):
+                events = self.extract(
+                    "{{DYKtalk|date=2025-01-02}}"
+                    "{{DYKEntry/archive|" + value + "}}",
+                    title="Article",
+                )
+                assert events[0]["contributors"] is None
+
+    def test_dyk_requires_title_and_ignores_quoted_examples(self) -> None:
+        """Read real inline templates without using quoted examples."""
+        entry = (
+            "{{DYKEntry|article=Article|author=Writer|timestamp=1735689600}}"
+        )
+        notice = "{{DYKtalk|date=2025-01-02}}"
+        assert self.extract(notice + entry)[0]["contributors"] is None
+        for wrapper in (
+            "<blockquote>" + entry + "</blockquote>",
+            "{{Example|" + entry + "}}",
+        ):
+            assert (
+                self.extract(notice + wrapper, title="Article")[0][
+                    "contributors"
+                ]
+                is None
+            )
+        assert self.extract(notice + entry, title="Article")[0][
+            "contributors"
+        ] == ["Writer"]
+
+    def test_milestone_mode_keeps_review_outcomes_separate(self) -> None:
+        """Retain review results separately from promotions."""
+        events = extract_events(
+            "{{Article history|action1=FAC|action1result=not promoted"
+            "|action1date=2023-01-02|action2=GAN|action2result=listed"
+            "|action2date=2024-01-02|action3=FLC|action3result=failed"
+            "|action3date=2025-01-02}}",
+            self.site,
+            ("Template:Article history",),
+            ("Template:DYKtalk",),
+            include_reviews=True,
+        )
+        reviews = [row for row in events if row["kind"] == "review"]
+        assert [(row["action_type"], row["action"]) for row in reviews] == [
+            ("FAC", "failed"),
+            ("GAN", "passed"),
+            ("FLC", "failed"),
+        ]
+        assert [
+            row["grade"] for row in events if row["kind"] == "quality"
+        ] == ["GA"]
+        assert reviews[0]["date"] == date(2023, 1, 2)

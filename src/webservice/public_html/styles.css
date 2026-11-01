@@ -263,7 +263,21 @@ img, svg {
 
 .navigation-tools-list a[aria-current] {
     background: var(--background-color-progressive-subtle);
-    color: var(--color-progressive);
+    color: var(--color-base);
+}
+
+/* Keep the pointer inside Tools while crossing the visual gap to its popup. */
+.global-navigation .navigation-tools-list::before {
+    content: "";
+    position: absolute;
+    inset-inline: -1px;
+    inset-block-end: 100%;
+    block-size: calc(.25rem + 1px);
+}
+
+.masthead nav a, .masthead nav a:hover, .masthead nav a:active {
+    color: var(--color-base);
+    text-decoration: none;
 }
 
 .language-switcher {
@@ -279,8 +293,6 @@ img, svg {
 .language-switcher a[aria-current] {
     color: var(--color-base);
     font-weight: 700;
-    text-decoration: underline;
-    text-underline-offset: .25em;
 }
 
 .page-layout {
@@ -495,6 +507,26 @@ main {
     font-size: var(--font-size-small);
 }
 
+.review-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem 0;
+    padding-inline-start: 0;
+    list-style: none;
+}
+
+.review-meta > li {
+    display: flex;
+    align-items: center;
+}
+
+.review-meta > li + li::before {
+    content: "";
+    block-size: .875em;
+    margin-inline: .5em;
+    border-inline-start: 1px solid currentColor;
+}
+
 .date-note-marker {
     cursor: help;
     text-decoration: none;
@@ -529,10 +561,6 @@ main {
     white-space: nowrap;
 }
 
-.routine-rows {
-    border-block-start: 1px solid var(--border-color-subtle);
-}
-
 .routine-row {
     display: grid;
     grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr);
@@ -540,7 +568,6 @@ main {
     gap: .5rem 2rem;
     min-inline-size: 0;
     padding-block: .75rem;
-    border-block-end: 1px solid var(--border-color-subtle);
 }
 
 .routine-row h3 {
@@ -588,7 +615,7 @@ main {
     margin: 0;
 }
 
-.routine-row .status-link {
+.routine-row .status-link, .logs-table .status-link {
     padding-inline: 0;
     border: 0;
     border-radius: 0;
@@ -790,7 +817,7 @@ summary:hover {
     margin-block: .5rem;
 }
 
-.maintenance-controls, .log-query {
+.maintenance-controls {
     display: flex;
     flex-wrap: wrap;
     align-items: end;
@@ -815,6 +842,7 @@ summary:hover {
 
 .visually-hidden {
     position: absolute;
+    inset-inline-start: 0;
     inline-size: 1px;
     block-size: 1px;
     overflow: hidden;
@@ -892,11 +920,7 @@ summary:hover {
     background-image: url("/codex-select-disabled.svg");
 }
 
-.log-query .search {
-    flex-basis: 16rem;
-}
-
-.maintenance-controls > a, .log-query > a {
+.maintenance-controls > a {
     display: inline-flex;
     align-items: center;
     min-block-size: 2.75rem;
@@ -923,7 +947,7 @@ summary:hover {
     margin-block: 1rem 1.5rem;
 }
 
-.sort-controls, .pagination, .page-jump, .log-pagination {
+.sort-controls, .pagination, .page-jump {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -935,18 +959,17 @@ summary:hover {
     margin-block: 1rem;
 }
 
-.pagination, .log-pagination {
+.pagination {
     margin-block: 1.25rem;
 }
 
-.sort-controls a, .pagination a, .log-pagination a {
+.sort-controls a, .pagination a {
     display: inline-flex;
     align-items: center;
     min-block-size: 2.75rem;
 }
 
-.sort-controls a[aria-current], .pagination a[aria-current],
-.log-pagination a[aria-current] {
+.sort-controls a[aria-current], .pagination a[aria-current] {
     color: var(--color-base);
     font-weight: 700;
     text-decoration: underline;
@@ -1067,6 +1090,19 @@ caption {
 
 .page-updates::backdrop {
     background: rgb(255 255 255 / 65%);
+}
+
+@media (scripting: none) {
+    .page-updates:target {
+        display: block;
+        position: relative;
+        max-block-size: none;
+        margin-block: 1rem;
+    }
+
+    .page-updates .popup-heading button {
+        display: none;
+    }
 }
 
 .popup-heading {
@@ -1195,15 +1231,11 @@ footer nav {
     }
 
     .page-toc > ul {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0 1.25rem;
+        display: block;
     }
 
     .page-toc ul ul {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0 1rem;
+        display: block;
         padding-inline-start: .75rem;
         border-inline-start: 1px solid var(--border-color-subtle);
     }
@@ -1268,9 +1300,14 @@ footer nav {
         margin-block: 2rem;
     }
 
+    .routine-rows {
+        border-block-start: 1px solid var(--border-color-subtle);
+    }
+
     .routine-row {
         grid-template-columns: minmax(0, 1fr);
         gap: .25rem;
+        border-block-end: 1px solid var(--border-color-subtle);
     }
 
     .routine-meta {
@@ -1283,11 +1320,11 @@ footer nav {
         grid-row: auto;
     }
 
-    .maintenance-controls, .log-query {
+    .maintenance-controls {
         padding: 1rem;
     }
 
-    .maintenance-controls > .field, .log-query > .field {
+    .maintenance-controls > .field {
         flex-basis: 100%;
     }
 
@@ -1382,4 +1419,58 @@ footer nav {
     .page-updates {
         border-color: CanvasText;
     }
+}
+
+/* Registered schema inspection stays readable at narrow viewport widths. */
+.schema-dataset { margin-block: 2rem; }
+.schema-metadata { margin-block: 1rem; }
+.schema-metadata dt { font-weight: 600; }
+.schema-metadata dd { margin: 0 0 .75rem; overflow-wrap: anywhere; }
+.schema-fields { border-top: 1px solid #a2a9b1; }
+.schema-field { padding: .75rem 0; border-bottom: 1px solid #eaecf0; min-width: 0; }
+.schema-field-name { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: baseline; }
+.schema-field code, .schema-type { overflow-wrap: anywhere; min-width: 0; }
+.schema-type { color: #54595d; }
+.schema-field .context { margin-block: .25rem; }
+.schema-nested { margin-top: .5rem; }
+.schema-nested summary { cursor: pointer; }
+.schema-nested .schema-fields { margin: .5rem 0 0 .75rem; }
+.schema-progress { display: flex; flex-wrap: wrap; gap: 1rem 2rem; }
+.schema-progress dd { margin: .25rem 0 0; font-size: 1.25rem; font-weight: 600; }
+.task-run { margin-block: 2rem; }
+.task-stages { padding-inline-start: 1.5rem; }
+.task-stages li { padding-inline-start: .25rem; margin-block: 1rem; overflow-wrap: anywhere; }
+.task-stages h3 { margin-bottom: .25rem; }
+.task-stages p { margin-block: .25rem; }
+.schema-tree { padding-inline-start: 1rem; list-style: none; }
+.schema-tree li { margin-block: .5rem; min-width: 0; }
+.schema-tree summary { cursor: pointer; overflow-wrap: anywhere; }
+.schema-tree code { white-space: normal; overflow-wrap: anywhere; }
+
+.language-icon { fill: currentColor; flex: none; }
+.footer-links a[href^="https://"]::after {
+    content: "↗";
+    display: inline-block;
+    margin-inline-start: .2em;
+    font-size: .85em;
+}
+
+/* Maintenance uses compact labeled rows and native GET controls. */
+.maintenance-controls { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+.maintenance-row, .maintenance-controls .assessment-filter,
+.maintenance-controls .genre-filter, .maintenance-controls .order-filter,
+.pagination .page-size { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.maintenance-row > label { font-weight: 700; }
+.maintenance-controls fieldset { min-inline-size: 0; padding: 0; border: 0; margin: 0; }
+.maintenance-controls legend { float: inline-start; font-weight: 700; margin-inline-end: .5rem; }
+.maintenance-controls .cdx-select { inline-size: auto; max-inline-size: 100%; min-inline-size: 5rem; }
+.maintenance-controls .cdx-text-input { flex: 1 1 12rem; }
+.maintenance-controls .choice { white-space: nowrap; }
+.maintenance-controls .form-actions { margin: 0; }
+.pagination .page-size .cdx-select { inline-size: 5rem; }
+@media (max-width: 639px) {
+  .maintenance-row { align-items: flex-start; }
+  .maintenance-row > .genre-filter { flex-basis: 100%; }
+  .maintenance-controls .assessment-filter { gap: .35rem; }
+  .maintenance-controls .assessment-filter > span { flex-basis: 100%; }
 }

@@ -33,6 +33,7 @@ _SUFFIXES = {".py", ".html", ".css", ".js", ".json", ".svg", ".png"}
 _SCRIPTS = (
     "setup-env.sh",
     "deploy-source.sh",
+    "drain-hub.py",
     "run-hub.sh",
     "run-web.sh",
     "runtime-env.sh",

@@ -66,8 +66,8 @@ TASK_DEFINITIONS: dict[str, TaskDefinition] = {
             ),
             "quality": "WikiProject:电子游戏/数据库报告/英文维基百科优质条目",
         },
-        hour="23",
-        minute=24,
+        hour="0",
+        minute=0,
     ),
     "pexbot": TaskDefinition(
         pages={},

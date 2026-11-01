@@ -2,7 +2,7 @@
 
 Call ``collect_article_history`` during newsletter collection to reuse
 unchanged talk-page revisions and fetch changed sources in batches. Run
-``python -m backend.website.newsletter_history`` on Toolforge to
+``python -m backend.website.article_history`` on Toolforge to
 populate the durable Parquet file before the next newsletter refresh.
 Imports and command-line help perform no collection or file writes.
 """
@@ -29,7 +29,8 @@ from backend.services.zhwiki.article_history import (
     CATEGORY_CANDIDATES,
     extract_events,
 )
-from backend.support.newsletter_history import (
+from backend.support.article_data import HISTORY_PATH
+from backend.support.article_history import (
     EVENT_SCHEMA,
     SCHEMA,
     load,
@@ -48,8 +49,11 @@ if TYPE_CHECKING:
 
     from pywikibot.site import BaseSite
 
-DEFAULT_PATH = Path("reports/newsletter-history-v1.parquet")
-_PARSER_CONTRACT = "zh-article-history-v2:92259335:83226002:76273693"
+DEFAULT_PATH = HISTORY_PATH
+_PARSER_CONTRACT = (
+    "zh-article-history-v6:92259335:83226002:76273693:94343077:88772603:"
+    "reviews"
+)
 _LOGGER = logging.getLogger(__name__)
 _FLAT_SCHEMA = {
     key: value
@@ -174,6 +178,7 @@ def _refresh(
     if not ids:
         return pl.DataFrame(schema=SCHEMA)
     pages = read_talk_pages(site, ids)
+    titles = dict(members.select("talk_page_id", "title").iter_rows())
     if len(pages) != len(ids) or {page.page_id for page in pages} != set(ids):
         message = (
             "Newsletter history preload omitted or duplicated talk pages."
@@ -184,7 +189,13 @@ def _refresh(
             {
                 "talk_page_id": page.page_id,
                 "revision_id": page.revision_id,
-                "events": extract_events(page.text, site, *aliases),
+                "events": extract_events(
+                    page.text,
+                    site,
+                    *aliases,
+                    article_title=titles[page.page_id],
+                    include_reviews=True,
+                ),
             }
             for page in pages
         ],

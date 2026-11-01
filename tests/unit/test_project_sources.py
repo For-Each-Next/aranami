@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     MetaData,
+    String,
     Table,
     create_engine,
 )
@@ -67,6 +68,7 @@ class TestProjectTags(TestCase):
                 [("N", "main", "cat", "Needs attention")],
             )
             revisions = projects.latest_revisions(site, [])
+            metadata = projects.page_metadata(site, [])
             memberships = projects._tag_rows(  # ruff: ignore[private-member-access]
                 site,
                 ["Needs_attention"],
@@ -74,6 +76,8 @@ class TestProjectTags(TestCase):
                 category=True,
             )
             categories = projects.page_categories(site, [])
+            project_memberships = projects.page_projects(site, [], ["公司"])
+            unselected_projects = projects.page_projects(site, [1], [])
             maintenance = projects.maintenance_tags(
                 site,
                 [],
@@ -86,13 +90,137 @@ class TestProjectTags(TestCase):
             "page_id": pl.Int64,
             "page_latest": pl.Int64,
         }
+        assert metadata.is_empty()
+        assert metadata.schema["full_title"] == pl.String
         assert memberships.schema == {"page_id": pl.Int64, "name": pl.String}
         assert categories.schema == {"page_id": pl.Int64, "name": pl.String}
+        assert project_memberships.schema == {
+            "page_id": pl.Int64,
+            "project": pl.String,
+        }
+        assert project_memberships.is_empty()
+        assert unselected_projects.schema == project_memberships.schema
+        assert unselected_projects.is_empty()
         assert maintenance.schema == categories.schema
 
 
 class TestProjectStatements(TestCase):
     """Verify actual QueryFrame bindings and metadata restrictions."""
+
+    @staticmethod
+    def test_page_projects_bind_exact_names_and_batch_page_ids() -> None:
+        """Bound project queries by page IDs and exact names."""
+        site = OfflineSite("zh", "wikipedia")
+        identifiers = [*range(1, 1002), 1, 2]
+        with patch(
+            "shared.sources.quarry.query._fetch",
+            return_value=(("page_id", "project"), []),
+        ) as fetch:
+            result = projects.page_projects(
+                site,
+                iter(identifiers),
+                iter(["虚构角色", "公司", "传记", "音樂", "公司"]),
+            )
+        batches = []
+        for call in fetch.call_args_list:
+            replica, statement, _ = call.args
+            compiled = statement.compile()
+            query = str(compiled)
+            assert replica.project == "zhwiki"
+            assert statement.is_select
+            assert tuple(statement.selected_columns.keys()) == (
+                "page_id",
+                "project",
+            )
+            assert (
+                "page_assessments.pa_project_id = "
+                "page_assessments_projects.pap_project_id"
+            ) in query
+            assert "JOIN page ON" not in query
+            assert "pa_class" not in query
+            assert compiled.params["pap_project_title_1"] == [
+                "虚构角色",
+                "公司",
+                "传记",
+                "音樂",
+            ]
+            assert (
+                "ORDER BY page_assessments.pa_page_id, "
+                "page_assessments_projects.pap_project_title"
+            ) in query
+            batches.append(compiled.params["pa_page_id_1"])
+        assert [len(batch) for batch in batches] == [500, 500, 1]
+        assert [value for batch in batches for value in batch] == list(
+            range(1, 1002),
+        )
+        assert result.schema == {"page_id": pl.Int64, "project": pl.String}
+
+    @staticmethod
+    def test_page_projects_exclude_unrequested_names_and_ids() -> None:
+        """Exclude unrequested page IDs and project names."""
+        metadata = MetaData()
+        assessments = Table(
+            "page_assessments",
+            metadata,
+            Column("pa_page_id", Integer),
+            Column("pa_project_id", Integer),
+        )
+        project_names = Table(
+            "page_assessments_projects",
+            metadata,
+            Column("pap_project_id", Integer),
+            Column("pap_project_title", String(255)),
+        )
+        engine = create_engine("sqlite://")
+        replica = Replica("zhwiki")
+        replica._engine = engine  # ruff: ignore[private-member-access]
+        try:
+            with engine.begin() as connection:
+                metadata.create_all(connection)
+                connection.execute(
+                    project_names.insert(),
+                    [
+                        {
+                            "pap_project_id": identifier,
+                            "pap_project_title": title,
+                        }
+                        for identifier, title in (
+                            (1, "公司"),
+                            (2, "传记"),
+                            (3, "音樂"),
+                            (4, "音樂/流行音樂"),
+                        )
+                    ],
+                )
+                connection.execute(
+                    assessments.insert(),
+                    [
+                        {"pa_page_id": page_id, "pa_project_id": project_id}
+                        for page_id, project_id in (
+                            (1, 3),
+                            (1, 4),
+                            (1, 2),
+                            (2, 1),
+                            (3, 1),
+                            (99, 3),
+                        )
+                    ],
+                )
+            with patch(
+                "shared.sources.quarry.projects._replica",
+                return_value=replica,
+            ):
+                result = projects.page_projects(
+                    OfflineSite("zh", "wikipedia"),
+                    [3, 1, 1],
+                    ["公司", "音樂"],
+                )
+            assert result.to_dicts() == [
+                {"page_id": 1, "project": "音樂"},
+                {"page_id": 3, "project": "公司"},
+            ]
+        finally:
+            engine.dispose()
 
     @staticmethod
     def test_maintenance_tags_bound_subject_ids_in_every_scope() -> None:
@@ -440,6 +568,8 @@ class TestProjectStatements(TestCase):
             "page_namespace",
             "page_title",
             "page_revision",
+            "page_length",
+            "page_is_redirect",
             "talk_page_id",
             "talk_revision",
             "pa_class",
@@ -468,6 +598,8 @@ class TestProjectStatements(TestCase):
             "page_namespace": pl.Int64,
             "page_title": pl.String,
             "page_revision": pl.Int64,
+            "page_length": pl.Int64,
+            "page_is_redirect": pl.Int64,
             "talk_page_id": pl.Int64,
             "talk_revision": pl.Int64,
             "pa_class": pl.String,
@@ -475,6 +607,51 @@ class TestProjectStatements(TestCase):
             "full_title": pl.String,
             "talk_title": pl.String,
         }
+
+    @staticmethod
+    def test_compact_assessments_never_resolve_page_titles() -> None:
+        """Fetch assessment IDs and totals without resolving titles."""
+        site = OfflineSite("zh", "wikipedia")
+        name = "Project with ' quotes"
+        columns = (
+            "page_id",
+            "page_namespace",
+            "page_is_redirect",
+            "pa_class",
+            "pa_importance",
+        )
+        with (
+            patch(
+                "shared.sources.quarry.query._fetch",
+                return_value=(
+                    columns,
+                    [(7, 0, 0, "B", None), (8, 14, 0, None, None)],
+                ),
+            ) as fetch,
+            patch.object(projects, "_with_titles") as titles,
+            patch.object(projects, "read_membership") as shared_members,
+        ):
+            result = projects.query_project_assessments(site, name)
+        statement = fetch.call_args.args[1]
+        compiled = statement.compile()
+        assert statement.is_select
+        assert tuple(statement.selected_columns.keys()) == columns
+        assert name in compiled.params.values()
+        assert name not in str(compiled)
+        assert "page_title" not in str(compiled)
+        assert "page_latest" not in str(compiled)
+        assert "talk" not in str(compiled)
+        assert result.schema == {
+            "page_id": pl.Int64,
+            "page_namespace": pl.Int64,
+            "page_is_redirect": pl.Int64,
+            "pa_class": pl.String,
+            "pa_importance": pl.String,
+        }
+        assert result["page_id"].to_list() == [7, 8]
+        assert result["pa_importance"].null_count() == result.height
+        titles.assert_not_called()
+        shared_members.assert_not_called()
 
     @staticmethod
     def test_project_references_use_the_same_membership_observation() -> None:
@@ -564,6 +741,31 @@ class TestProjectStatements(TestCase):
             range(1001),
         )
         assert result.is_empty()
+
+    @staticmethod
+    def test_page_metadata_binds_only_changed_ids_and_current_titles() -> None:
+        """Read selected IDs without repeating membership queries."""
+        site = OfflineSite("zh", "wikipedia")
+        columns = (
+            "page_id",
+            "page_namespace",
+            "page_title",
+            "page_revision",
+            "talk_page_id",
+            "talk_revision",
+        )
+        with patch(
+            "shared.sources.quarry.query._fetch",
+            return_value=(columns, [(7, 0, "Current_name", 81, 17, 82)]),
+        ) as fetch:
+            result = projects.page_metadata(site, [7, 9, 7])
+        statement = fetch.call_args.args[1]
+        assert statement.is_select
+        assert statement.compile().params["page_id_1"] == [7, 9]
+        assert "page_assessments" not in str(statement)
+        assert result["full_title"].to_list() == ["Current name"]
+        assert result["talk_title"].to_list() == ["Talk:Current name"]
+        assert result["page_revision"].to_list() == [81]
 
     @staticmethod
     def test_new_page_query_uses_utc_bounds_and_content_filters() -> None:

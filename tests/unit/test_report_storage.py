@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
@@ -90,6 +92,70 @@ class TestReportStore(TestCase):
     """Exercise atomic selection, retention, and validated readers."""
 
     @staticmethod
+    def test_timestamped_comparisons_keep_two_with_a_frozen_clock() -> None:
+        """Keep distinct results when writes share a second."""
+        clock = Mock(UTC=dt.UTC)
+        clock.datetime = Mock(wraps=dt.datetime)
+        clock.datetime.now.return_value = _START
+        with (
+            TemporaryDirectory() as directory,
+            patch("shared.reports.dt", clock),
+        ):
+            store = ReportStore(Path(directory))
+            key = report_key("english-comparisons", "zhwiki", "Report")
+            bundles = [
+                store.write(
+                    key,
+                    replace(_result(day), family="enwp_key_articles"),
+                    f"comparison {day}",
+                    run_id=f"{day:032x}",
+                    started_at=_START + dt.timedelta(days=day),
+                    target={"site": "zhwiki", "title": "Report"},
+                )
+                for day in range(1, 5)
+            ]
+            prefix = "enwp_key_articles-20261020000000"
+            assert [bundle.path.name for bundle in bundles] == [
+                prefix,
+                f"{prefix}-1",
+                f"{prefix}-2",
+                f"{prefix}-3",
+            ]
+            assert not bundles[0].path.exists()
+            assert not bundles[1].path.exists()
+            latest = store.read(key)
+            previous = store.read(key, previous=True)
+            assert latest.wikitext == "comparison 4"
+            assert previous.wikitext == "comparison 3"
+            assert not latest.tables["members"].equals(
+                previous.tables["members"],
+            )
+
+    @staticmethod
+    def test_legacy_uuid_predecessor_remains_readable_until_pruned() -> None:
+        """Read old selected evidence through the naming transition."""
+        with TemporaryDirectory() as directory:
+            store = ReportStore(Path(directory))
+            bundle = _write(store, 1)
+            legacy_name = "a" * 32
+            legacy = bundle.path.with_name(legacy_name)
+            bundle.path.rename(legacy)
+            manifest = dict(bundle.manifest, generation=legacy_name)
+            (legacy / "manifest.json").write_text(json.dumps(manifest))
+            (legacy.parent / "latest.json").write_text(
+                json.dumps({
+                    "schema": 1,
+                    "latest": legacy_name,
+                    "previous": None,
+                }),
+            )
+            assert store.read("test-zhwiki-main").path == legacy
+            _write(store, 2)
+            assert store.read("test-zhwiki-main", previous=True).path == legacy
+            _write(store, 3)
+            assert not legacy.exists()
+
+    @staticmethod
     def test_complete_tables_and_source_timestamps_round_trip() -> None:
         """Retain rows beyond displayed limits, zeroes, and unknowns."""
         with TemporaryDirectory() as directory:
@@ -106,6 +172,38 @@ class TestReportStore(TestCase):
             assert saved.manifest["provenance"] == _result().provenance
             assert saved.manifest["publication"]["state"] == "unattempted"
             assert bundle.path == saved.path
+
+    @staticmethod
+    def test_assessment_enums_are_stored_and_decoded_after_validation() -> (
+        None
+    ):
+        """Validate stored Enums before restoring String columns."""
+        with TemporaryDirectory() as directory:
+            store = ReportStore(Path(directory))
+            result = replace(
+                _result(),
+                tables={
+                    "members": pl.DataFrame({
+                        "pa_class": ["FA", None, "FutureClass"],
+                        "pa_importance": ["极高", "无", None],
+                    }),
+                },
+            )
+            bundle = store.write(
+                "test-zhwiki-main",
+                result,
+                "report",
+                run_id="1" * 32,
+                started_at=_START,
+                target={"site": "zhwiki", "title": "Report"},
+            )
+            schema = pl.read_parquet_schema(bundle.path / "members.parquet")
+            assert isinstance(schema["pa_class"], pl.Enum)
+            assert isinstance(schema["pa_importance"], pl.Enum)
+            assert bundle.tables["members"].equals(result.tables["members"])
+            assert bundle.manifest["tables"]["members"]["schema"][
+                "pa_class"
+            ] == str(schema["pa_class"])
 
     @staticmethod
     def test_retains_latest_and_predecessor_and_rejects_older_run() -> None:
@@ -226,6 +324,47 @@ class TestReportStore(TestCase):
             assert store.read("test-zhwiki-main").path == first.path
             assert not list(first.path.parent.glob(".generation-*"))
 
+    def test_failed_selector_keeps_both_prior_generations(self) -> None:
+        """Keep both inputs until the new selector commits."""
+        with TemporaryDirectory() as directory:
+            store = ReportStore(Path(directory))
+            first = _write(store, 1)
+            second = _write(store, 2)
+            replace_path = Path.replace
+
+            def fail_selector(path: Path, target: Path) -> Path:
+                """Fail after installing the complete bundle.
+
+                Returns:
+                    The installed path for writes outside the selector.
+
+                Raises:
+                    OSError: The new selector cannot be committed.
+                """
+                if target.name == "latest.json":
+                    message = "Selector replacement failed."
+                    raise OSError(message)
+                return replace_path(path, target)
+
+            with (
+                patch.object(Path, "replace", fail_selector),
+                self.assertRaises(OSError),
+            ):
+                _write(store, 3)
+            assert first.path.exists()
+            assert second.path.exists()
+            assert store.read("test-zhwiki-main").path == second.path
+            assert (
+                store.read("test-zhwiki-main", previous=True).path
+                == first.path
+            )
+            newest = _write(store, 4)
+            assert store.read("test-zhwiki-main").path == newest.path
+            assert (
+                len(list(newest.path.parent.glob("*/manifest.json")))
+                == _RETAINED_GENERATIONS
+            )
+
     def test_reader_rejects_tampered_artifact_and_unsafe_keys(self) -> None:
         """Reject incomplete data and titles used as paths."""
         with TemporaryDirectory() as directory:
@@ -242,7 +381,173 @@ class TestReportStore(TestCase):
             first = report_key("assessment-lists", "zhwiki", "../../Unsafe")
             second = report_key("assessment-lists", "zhwiki", "Other")
             assert first != second
-            assert "/" not in first
+            assert first == "assessment-lists/zhwiki/%2E.%2F..%2FUnsafe"
+
+    @staticmethod
+    def test_readable_records_and_isolated_staging() -> None:
+        """Keep source names and UTC record times visible."""
+        with (
+            TemporaryDirectory() as directory,
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+        ):
+            store = ReportStore()
+            key = report_key(
+                "assessment-lists",
+                "zhwiki",
+                "專題:電子遊戲/列表",
+            )
+            bundle = store.write(
+                key,
+                _result(),
+                "report",
+                run_id="1" * 32,
+                started_at=_START,
+                target={"site": "zhwiki", "title": "專題:電子遊戲/列表"},
+            )
+            assert store.root == Path(directory) / "reports/records"
+            assert key == "assessment-lists/zhwiki/專題:電子遊戲%2F列表"
+            generated = dt.datetime.fromisoformat(
+                str(bundle.manifest["generated_at"]),
+            )
+            assert bundle.path.name == f"test-report-{generated:%Y%m%d%H%M%S}"
+            assert (bundle.path / "members.parquet").exists()
+            assert not list(store.root.rglob(".generation-*"))
+            assert store.lock_root.is_relative_to(Path(directory) / "state")
+
+    @staticmethod
+    def test_english_legacy_family_migrates_without_changing_evidence() -> (
+        None
+    ):
+        """Preserve the historical family under its readable key."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / "reports"
+            title = "Wikipedia:Quality"
+            digest = hashlib.sha256(title.encode()).hexdigest()[:16]
+            old_key = f"english-comparisons-zhwiki-quality-{digest}"
+            source = ReportStore(root).write(
+                old_key,
+                replace(_result(), family="enwp_key_articles"),
+                "original",
+                run_id="1" * 32,
+                started_at=_START,
+                target={"site": "zhwiki", "title": title},
+            )
+            store = ReportStore(root / "records")
+            assert store.migrate_legacy() == [root / old_key]
+            key = report_key(
+                "english-comparisons",
+                "zhwiki",
+                title,
+                variant="quality",
+            )
+            migrated = store.read(key)
+            assert migrated.wikitext == source.wikitext
+            assert migrated.manifest["family"] == "enwp_key_articles"
+            assert (
+                migrated.manifest["generated_at"]
+                == (source.manifest["generated_at"])
+            )
+
+    @staticmethod
+    def test_daily_observation_installs_named_files_once() -> None:
+        """Retain the first observation directly in its date folder."""
+        with TemporaryDirectory() as directory:
+            store = ReportStore(Path(directory) / "reports/data", daily=True)
+            key = report_key(
+                "project-assessments",
+                "zhwiki",
+                "電子遊戲",
+                variant="20261020",
+            )
+            first = store.write(
+                key,
+                _result(1),
+                "first",
+                run_id="1" * 32,
+                started_at=_START,
+                target={"site": "zhwiki", "title": "電子遊戲"},
+            )
+            again = store.write(
+                key,
+                _result(2),
+                "second",
+                run_id="2" * 32,
+                started_at=_START + dt.timedelta(hours=1),
+                target={"site": "zhwiki", "title": "電子遊戲"},
+            )
+            assert first.path == store.root / key
+            assert first.path.name == "20261020"
+            assert (first.path / "members.parquet").exists()
+            assert again.wikitext == "first"
+            assert store.read(key).wikitext == "first"
+            assert store.read(key, previous=True) is None
+
+    @staticmethod
+    def test_legacy_selection_migrates_with_predecessor_and_evidence() -> None:
+        """Validate both records before selecting readable copies."""
+        with TemporaryDirectory() as directory:
+            reports = Path(directory) / "reports"
+            target = "Wikipedia:Report"
+            digest = hashlib.sha256(target.encode()).hexdigest()[:16]
+            old_key = f"test-report-zhwiki-{digest}"
+            source = ReportStore(reports)
+            for index in (1, 2):
+                source.write(
+                    old_key,
+                    _result(index),
+                    f"report {index}",
+                    run_id=f"{index:032x}",
+                    started_at=_START + dt.timedelta(days=index),
+                    target={"site": "zhwiki", "title": target},
+                )
+            store = ReportStore(reports / "records")
+            key = report_key("test-report", "zhwiki", target)
+            assert store.read(key).wikitext == "report 2"
+            assert store.migrate_legacy() == [reports / old_key]
+            latest = store.read(key)
+            assert latest.wikitext == "report 2"
+            assert latest.manifest["report_key"] == key
+            assert store.read(key, previous=True).wikitext == "report 1"
+            assert source.read(old_key).wikitext == "report 2"
+            (store.root / key / "latest.json").unlink()
+            assert store.read(key).wikitext == "report 2"
+            assert store.migrate_legacy() == [reports / old_key]
+            assert (store.root / key / "latest.json").exists()
+
+    def test_migration_rejects_corrupt_predecessor_without_selection(
+        self,
+    ) -> None:
+        """Preserve original data when either record is corrupt."""
+        with TemporaryDirectory() as directory:
+            reports = Path(directory) / "reports"
+            target = "Wikipedia:Report"
+            digest = hashlib.sha256(target.encode()).hexdigest()[:16]
+            old_key = f"test-report-zhwiki-{digest}"
+            source = ReportStore(reports)
+            for index in (1, 2):
+                source.write(
+                    old_key,
+                    _result(index),
+                    f"report {index}",
+                    run_id=f"{index:032x}",
+                    started_at=_START + dt.timedelta(days=index),
+                    target={"site": "zhwiki", "title": target},
+                )
+            previous = source.read(old_key, previous=True)
+            (previous.path / "report.wikitext").write_text("corrupt")
+            store = ReportStore(reports / "records")
+            with self.assertRaises(ValueError):
+                store.migrate_legacy()
+            assert not (
+                store.root
+                / report_key(
+                    "test-report",
+                    "zhwiki",
+                    target,
+                )
+                / "latest.json"
+            ).exists()
+            assert source.read(old_key).wikitext == "report 2"
 
 
 class TestStoredPublication(TestCase):

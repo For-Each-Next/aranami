@@ -26,7 +26,7 @@ def fetch_summary(title: str, *, variant: str = "zh") -> str | None:
 
     Args:
         title: Canonical Chinese Wikipedia title, without URL encoding.
-        variant: Original or script-specific Chinese preference.
+        variant: Original, script-specific, or regional Chinese.
 
     Returns:
         The plain-text lead, or none for missing/non-article pages and
@@ -41,7 +41,7 @@ def fetch_summary(title: str, *, variant: str = "zh") -> str | None:
     if not title.strip() or re.search(r"[\x00-\x1f\x7f]", title):
         message = "A summary requires a nonempty article title."
         raise ValueError(message)
-    if variant not in {"zh", "zh-hans", "zh-hant"}:
+    if variant not in {"zh", "zh-hans", "zh-hant", "zh-tw", "zh-hk"}:
         message = "A summary requires a supported Chinese script variant."
         raise ValueError(message)
     request = urllib.request.Request(  # ruff: ignore[suspicious-url-open-usage] - Fixed HTTPS origin and encoded title.

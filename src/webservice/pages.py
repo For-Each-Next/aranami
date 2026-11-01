@@ -9,16 +9,17 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import math
 import operator
 import secrets
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlencode
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import escape
 
+from shared.deployment import project_version
 from shared.newsletter import Issue
 from webservice.job_history import history_context
 from webservice.presentation import (
@@ -83,6 +84,9 @@ _REVIEW_ICONS = {
     "ppr": ("project-peer-review.svg", "Cvg_peerreview_icon.png"),
     "dykc": ("dyk-candidate.svg", "DYK_candidate.svg"),
 }
+_HOUR_SECONDS = 3600
+_DAY_SECONDS = 24 * _HOUR_SECONDS
+_MONTH_SECONDS = 365.25 / 12 * _DAY_SECONDS
 
 
 @lru_cache(maxsize=1)
@@ -138,7 +142,7 @@ def _completed_daily_report(routine: str, event: Record | None) -> bool:
         Whether the saved outcome supports a dated completion label.
     """
     return (
-        routine in {"new_pages", "pageviews"}
+        routine in {"new_pages", "pageviews", "assessment_log"}
         and event is not None
         and event.get("status") in {"updated", "no_update"}
         and bool(event.get("report_date"))
@@ -175,6 +179,17 @@ class _Page:
             "language_tag": self.interface.language_tag,
             "t": _messages(self.interface.locale),
             "live": live,
+            "footer": {
+                "label": self.text(
+                    "footer.uptime_unknown",
+                    version=project_version(),
+                ),
+                "unknown": self.text(
+                    "footer.uptime_unknown",
+                    version=project_version(),
+                ),
+            },
+            "clock": self.clock({}, dt.datetime.now(dt.UTC)),
             "extract_attribution": {"before": before, "after": after},
             "project_link": wiki_link(
                 "https://zh.wikipedia.org/wiki/WikiProject:电子游戏",
@@ -223,6 +238,8 @@ class _Page:
                     "duration.minutes",
                     "duration.hours",
                     "duration.days",
+                    "time.months_ago",
+                    "time.months_ahead",
                     "time.minutes_ago",
                     "time.hours_ago",
                     "time.days_ago",
@@ -231,6 +248,14 @@ class _Page:
                     "time.days_ahead",
                     "time.soon",
                     "time.just_now",
+                    "time.minutes_ago_one",
+                    "time.minutes_ahead_one",
+                    "time.hours_ago_one",
+                    "time.hours_ahead_one",
+                    "time.days_ago_one",
+                    "time.days_ahead_one",
+                    "time.months_ago_one",
+                    "time.months_ahead_one",
                 )
             }),
         }
@@ -338,6 +363,12 @@ class _Page:
                 "description": self.text(
                     f"assessment.description.{dimension}.{code}",
                 ),
+                "tooltip": self.text(
+                    f"assessment.tooltip.{dimension}",
+                    grade=self.text(
+                        f"assessment.description.{dimension}.{code}",
+                    ),
+                ),
             })
         language, extract = article_extract(item, self.interface.locale)
         return {
@@ -365,10 +396,17 @@ class _Page:
                 views=self.text("pageviews.views", count=f"{item['views']:,}"),
                 site_rank=self.text(
                     "pageviews.site_rank",
+                    date=self.interface.date(pageviews["date"]),
                     rank=f"{item['site_rank']:,}",
                 )
                 if item.get("site_rank") is not None
                 else None,
+                site_rank_url=local_url(
+                    "https://pageviews.wmcloud.org/topviews/",
+                    project="zh.wikipedia.org",
+                    date=pageviews["date"],
+                    search=item["title"],
+                ).replace("+", "%20"),
             )
             return card
         date = item.get("date")
@@ -424,33 +462,26 @@ class _Page:
         now: dt.datetime,
         event: str,
     ) -> str:
-        """Describe whole opening ages and inclusive reply intervals.
+        """Describe elapsed opening and latest-reply ages.
 
         Returns:
-            A localized month, day, or hour label. Starts use complete
-            calendar months; reply intervals round up to include the
-            observed comment in the stated time window.
+            A localized complete month, day, hour, or minute count.
+            Months use 365.25 / 12 days for both starts and replies.
         """
         seconds = (now - instant).total_seconds()
-        hours = int(seconds // 3600)
-        days = hours // 24
-        months = (
-            (now.year - instant.year) * 12
-            + now.month
-            - instant.month
-            - ((now.day, now.time()) < (instant.day, instant.time()))
-        )
-        unit = (
-            "months"
-            if event == "started" and months > 0
-            else "days"
-            if days
-            else "hours"
-        )
-        count = months if unit == "months" else days or hours
-        if event == "replied":
-            count = max(1, math.ceil(seconds / (86400 if days else 3600)))
-        return self.text(f"reviews.{event}_{unit}", count=count)
+        if seconds >= _MONTH_SECONDS:
+            unit, divisor = "months", _MONTH_SECONDS
+        elif seconds >= _DAY_SECONDS:
+            unit, divisor = "days", _DAY_SECONDS
+        else:
+            unit, divisor = "hours", _HOUR_SECONDS
+        if seconds < _HOUR_SECONDS:
+            unit, divisor = "minutes", 60
+        count = int(seconds // divisor)
+        key = f"reviews.{event}_{unit}"
+        if count == 1:
+            key += "_one"
+        return self.text(key, count=count)
 
     def reviews(self, snapshot: Record, now: dt.datetime) -> Record | None:
         """Prepare complete review cards with observed elapsed time.
@@ -501,7 +532,7 @@ class _Page:
                 ),
                 review_link=wiki_link(
                     item["review_url"],
-                    review_label,
+                    self.text("reviews.link"),
                 ),
                 review_dates=dates,
             )
@@ -529,31 +560,6 @@ class _Page:
             key = section["key"]
             views = snapshot.get("pageviews") if key == "pageviews" else None
             description = None
-            if key == "pageviews":
-                before, remainder = self.text("pageviews.description").split(
-                    "{date}",
-                )
-                middle, after = remainder.split("{top}")
-                description = {
-                    "before": before,
-                    "middle": middle,
-                    "after": after,
-                    "top": self.text("pageviews.top"),
-                    "date": self.interface.date(views["date"])
-                    if views
-                    else None,
-                    "day": views["date"] if views else None,
-                    "separator": " · "
-                    if self.interface.locale == "en"
-                    else "",
-                    "url": local_url(
-                        "https://pageviews.wmcloud.org/topviews",
-                        project="zh.wikipedia.org",
-                        date=views["date"],
-                    )
-                    if views
-                    else None,
-                }
             updated = (
                 snapshot.get("reports", {}).get(key, {}).get("last_success_at")
             )
@@ -565,7 +571,7 @@ class _Page:
                     else f"homepage.{key}",
                 ),
                 "description": self.text(f"homepage.{key}_description")
-                if key != "pageviews"
+                if key not in {"pageviews", "recognized", "dyk"}
                 else None,
                 "pageviews_description": description,
                 "empty": self.text("pageviews.unavailable")
@@ -609,7 +615,9 @@ class _Page:
                                 group["category"],
                             ),
                             "count": self.text(
-                                "backlog.count",
+                                "backlog.count_one"
+                                if group["count"] == 1
+                                else "backlog.count",
                                 count=f"{group['count']:,}",
                             ),
                             "url": local_url(
@@ -673,7 +681,15 @@ class _Page:
                 title_url(record["title"], record["site"]),
                 record["title"],
             ),
-            "outcome": self._outcome_label(record),
+            "outcome": wiki_link(
+                "https://"
+                + ("zh" if record["site"] == "zhwiki" else "en")
+                + ".wikipedia.org/w/index.php?oldid="
+                + str(record["revision_id"]),
+                self._outcome_label(record),
+            )
+            if record.get("revision_id") and record["status"] == "updated"
+            else self._outcome_label(record),
             "started": _time(
                 None
                 if record["status"] == "queued"
@@ -854,6 +870,12 @@ class _Page:
         limit = runtime.get("memory_limit_bytes") if fresh else None
         cpu = runtime.get("cpu_percent") if fresh else None
         cpu_limit = runtime.get("cpu_limit") if fresh else None
+        storage = " / ".join(
+            readable_size(runtime[key])
+            if fresh and runtime.get(key) is not None
+            else unknown
+            for key in ("storage_used_bytes", "storage_total_bytes")
+        )
         used_memory = readable_size(memory) if memory is not None else unknown
         allocated_memory = (
             readable_size(limit) if limit is not None else unknown
@@ -882,6 +904,7 @@ class _Page:
             ("python", runtime.get("python") or unknown, False),
             ("memory", f"{used_memory} / {allocated_memory}", True),
             ("cpu", f"{cpu_use}{separator}{cpu_cores}", True),
+            ("storage", storage, True),
         )
         return [
             {
@@ -893,7 +916,12 @@ class _Page:
             for key, value, usage in rows
         ]
 
-    def worklist_card(self, item: Record, groups: Record) -> Record:
+    def worklist_card(
+        self,
+        item: Record,
+        groups: Record,
+        task: str = "",
+    ) -> Record:
         """Prepare exact issue sources and the earliest observed month.
 
         Returns:
@@ -911,7 +939,7 @@ class _Page:
                     ),
                 )
                 for key in item.get("issues", [])
-                if key in groups
+                if key in groups and key != task
             ],
             month={
                 "value": month,
@@ -1042,12 +1070,15 @@ def render_maintenance_overview(  # ruff: ignore[too-many-arguments]
     return _render("backlog.html", context)
 
 
-def render_maintenance(
+def render_maintenance(  # ruff: ignore[too-many-arguments]
     snapshot: Record | None,
     params: Mapping[str, list[str]],
     locale: str,
     *,
     navigation: Record | None = None,
+    status: Record | None = None,
+    config: Record | None = None,
+    now: dt.datetime | None = None,
 ) -> str:
     """Render a maintenance list after sorting all saved observations.
 
@@ -1056,6 +1087,9 @@ def render_maintenance(
         params: Parsed controls with repeated values retained.
         locale: Negotiated interface language.
         navigation: Request-specific language links and active location.
+        status: Saved service state for the shared uptime footer.
+        config: Source version and routine definitions.
+        now: Optional clock for deterministic uptime.
 
     Returns:
         Complete escaped HTML with stable sorting and pagination links.
@@ -1084,7 +1118,11 @@ def render_maintenance(
         selection["order"],
         selection.get("seed", ""),
     )
-    portion = maintenance_page(items, selection["page"])
+    portion = maintenance_page(
+        items,
+        selection["page"],
+        int(selection.get("limit", "10")),
+    )
     if navigation:
         navigation = {
             **navigation,
@@ -1102,7 +1140,14 @@ def render_maintenance(
         }
     page = _Page(locale)
     heading = page.interface.label(selected.get("label"), selected["category"])
-    context = page.context(heading)
+    context = page.context(heading, live=True)
+    context.update(
+        page.live_status(
+            status or {},
+            config or {},
+            now or dt.datetime.now(dt.UTC),
+        ),
+    )
     context.update(
         navigation=navigation,
         count=page.text("backlog.count", count=f"{selected['count']:,}"),
@@ -1121,27 +1166,38 @@ def render_maintenance(
         assessment_choices={
             control: [
                 {
-                    "value": key.rsplit(".", 1)[1],
-                    "label": page.text(key),
-                    "current": key.rsplit(".", 1)[1] == selection.get(control),
+                    "value": code,
+                    "label": page.text(f"backlog.grade.{dimension}.{code}"),
+                    "current": code == selection.get(control),
                 }
-                for key in catalog()
-                if key.startswith(f"assessment.{dimension}.")
+                for code in codes
             ]
-            for control, dimension in (
-                ("quality", "class"),
-                ("importance", "importance"),
+            for control, dimension, codes in (
+                (
+                    "quality",
+                    "class",
+                    (
+                        "FA",
+                        "A",
+                        "GA",
+                        "Bplus",
+                        "B",
+                        "C",
+                        "Start",
+                        "Stub",
+                        "Unassessed",
+                    ),
+                ),
+                (
+                    "importance",
+                    "importance",
+                    ("Top", "High", "Mid", "Low", "Unknown"),
+                ),
             )
         },
-        assessment_operations=[
-            {"value": code, "label": page.text(f"backlog.compare.{code}")}
-            for code in ("eq", "gte", "lte", "range")
-        ],
         clear_url=local_url(
             "/maintenance/",
             task=selection["task"],
-            sort=selection["sort"],
-            order=selection["order"],
         ),
         range_label=page.text(
             "backlog.range",
@@ -1164,6 +1220,7 @@ def render_maintenance(
                 ("importance", "backlog.column.importance"),
                 ("oldest", "backlog.sort.time"),
                 ("random", "backlog.sort.random"),
+                ("size", "backlog.sort.size"),
             )
         ],
         direction_choices=[
@@ -1176,7 +1233,10 @@ def render_maintenance(
             }
             for order in ("asc", "desc")
         ],
-        cards=[page.worklist_card(item, groups) for item in portion["items"]],
+        cards=[
+            page.worklist_card(item, groups, selection["task"])
+            for item in portion["items"]
+        ],
         start=portion["offset"] + 1,
         previous=local_url(
             "/maintenance/",
@@ -1200,10 +1260,13 @@ def render_maintenance(
     return _render("maintenance.html", context)
 
 
-def render_newsletter(
+def render_newsletter(  # ruff: ignore[too-many-arguments]
     value: Record,
     locale: str,
     *,
+    status: Record | None = None,
+    config: Record | None = None,
+    now: dt.datetime | None = None,
     navigation: Record | None = None,
 ) -> str:
     """Present saved newsletter drafts by issue and data date.
@@ -1212,14 +1275,30 @@ def render_newsletter(
         value: Issue, reporting period, drafts, source observations,
             and optional daily draft history.
         locale: Negotiated interface language; wikitext stays Chinese.
+        status: Saved monitor observations for the shared footer.
+        config: Current application version and routine definitions.
+        now: Optional server clock for observed uptime.
         navigation: Request route and language choices, when available.
 
     Returns:
         Escaped HTML with native issue/date selection and copy controls.
     """
     page = _Page(locale)
-    context = page.context(page.text("newsletter.heading"))
-    labels = ("main", "quality", "announcements")
+    context = page.context(page.text("newsletter.heading"), live=True)
+    context.update(
+        page.live_status(
+            status or {},
+            config or {},
+            now or dt.datetime.now(dt.UTC),
+        ),
+    )
+    labels = {
+        "主頁": "main",
+        "特優內容": "quality",
+        "宣告": "announcements",
+        "專題": "feature",
+        "訪談": "interview",
+    }
     automatic = value.get("automatic_issue", value["issue"])
     previous = Issue.parse(str(automatic)).previous
     choices = value.get("issue_choices") or [
@@ -1227,7 +1306,18 @@ def render_newsletter(
         automatic,
     ]
     history = value.get("draft_history") or {}
+    issue = Issue.parse(str(value["issue"]))
     dates = sorted(history.get("dates") or [])
+    data_through = history.get("selected_date") or value.get("data_through")
+    edit_query = urlencode({
+        "action": "edit",
+        "summary": page.text(
+            "newsletter.edit_summary",
+            date=page.interface.date(data_through),
+        )
+        if data_through
+        else page.text("newsletter.edit_summary_unknown"),
+    })
     context.update(
         navigation=navigation,
         available=value["available"],
@@ -1238,8 +1328,10 @@ def render_newsletter(
             "selected": history.get("selected_date"),
             "form_date": history.get("selected_date")
             or (dates[-1] if dates else ""),
-            "minimum": dates[0] if dates else None,
-            "maximum": dates[-1] if dates else None,
+            "minimum": f"{issue.year - 1}-01-01"
+            if issue.month == 1
+            else issue.start.isoformat(),
+            "maximum": (issue.end - dt.timedelta(days=1)).isoformat(),
             "generated": _time(history.get("generated_at"), seconds=True),
             "missing": history.get("missing", False),
         },
@@ -1257,6 +1349,8 @@ def render_newsletter(
                     if choice == automatic
                     else "newsletter.choice.previous"
                     if choice == previous
+                    else "newsletter.choice.annual"
+                    if str(choice).endswith("-01") and choice != value["issue"]
                     else "newsletter.choice.selected",
                 ),
             }
@@ -1265,14 +1359,24 @@ def render_newsletter(
         drafts=[
             {
                 **draft,
-                "heading": page.text(f"newsletter.page.{label}"),
-                "link": wiki_link(draft["url"], draft["title"]),
+                "heading": page.text(
+                    "newsletter.page."
+                    + labels[draft["label"].lstrip("/") or "主頁"],
+                ),
+                "edit_url": f"{title_url(draft['title'])}?"
+                + (
+                    urlencode({
+                        "action": "edit",
+                        "summary": page.text(
+                            "newsletter.edit_summary",
+                            date=page.interface.date(draft["data_through"]),
+                        ),
+                    })
+                    if draft.get("data_through")
+                    else edit_query
+                ),
             }
-            for label, draft in zip(
-                labels,
-                value["pages"],
-                strict=value["available"],
-            )
+            for draft in value["pages"]
             if value["available"]
         ],
     )
@@ -1376,7 +1480,7 @@ def render_reports(  # ruff: ignore[too-many-arguments]
     """Render saved update status and per-invocation report history.
 
     Args:
-        data: Validated independent invocations and history controls.
+        data: Validated independent invocations.
         locale: Negotiated interface language.
         status: Validated routine and scheduler observations.
         config: Current source version and routine definitions.
@@ -1384,7 +1488,7 @@ def render_reports(  # ruff: ignore[too-many-arguments]
         navigation: Request route and language choices.
 
     Returns:
-        A status panel and filterable history with stage dialogs.
+        A status panel and recent invocation history with stage dialogs.
     """
     page = _Page(locale)
     context = page.context(page.text("reports.heading"), live=True)

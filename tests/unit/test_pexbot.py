@@ -21,7 +21,7 @@ from pywikibot.site import BaseSite, Namespace
 
 from backend.services.zhwiki import pexbot as service
 from backend.support.report_status import read_report_status
-from shared.reports import ReportStore, report_key
+from shared.reports import ReportResult, report_key
 from updater.jobs import JobContext, pexbot as job
 
 
@@ -336,6 +336,31 @@ class TestPexbotJob(TestCase):
         self.addCleanup(history.stop)
 
     @staticmethod
+    def test_action_cache_keeps_only_latest_generation() -> None:
+        """Replace disposable records without retaining predecessors."""
+        store = service.action_store()
+        key = report_key("pexbot", "zhwiki", "Wikipedia:Report")
+        bundles = [
+            store.write(
+                key,
+                ReportResult("pexbot", {}),
+                "",
+                run_id=f"{index:032x}",
+                started_at=dt.datetime(2026, 10, index, tzinfo=dt.UTC),
+                target={"site": "zhwiki", "title": "Wikipedia:Report"},
+            )
+            for index in (1, 2, 3)
+        ]
+        assert [bundle.path.exists() for bundle in bundles] == [
+            False,
+            False,
+            True,
+        ]
+        assert store.read(key).path == bundles[-1].path
+        assert store.read(key, previous=True) is None
+        assert len(list((store.root / key).glob("*/manifest.json"))) == 1
+
+    @staticmethod
     def test_backend_retains_action_before_delegated_publication() -> None:
         """Persist complete metadata before delegated publication."""
         context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
@@ -345,7 +370,7 @@ class TestPexbotJob(TestCase):
 
         def inspect_saved_action(_site: object, _title: str) -> None:
             """Observe retained facts before the external write."""
-            directory = Path.cwd() / "reports" / key
+            directory = Path.cwd() / "cache" / "pexbot" / key
             selected = json.loads((directory / "latest.json").read_text())
             generation = directory / selected["latest"]
             manifest = json.loads((generation / "manifest.json").read_text())
@@ -360,10 +385,11 @@ class TestPexbotJob(TestCase):
         ):
             job.run(context=context)
         assert observations == ["unconfirmed"]
-        saved = ReportStore().read(key)
+        saved = service.action_store().read(key)
         assert saved is not None
         assert saved.manifest["publication"]["state"] == "delegated"
         assert saved.manifest["publication"]["confirmed_edits"] is None
+        assert not (Path.cwd() / "reports").exists()
 
     def test_individual_timings_include_request_completion_not_cooldown(
         self,
@@ -523,6 +549,14 @@ class TestPexbotJob(TestCase):
         pause.assert_not_called()
         assert "Target" in context.notes[0]
         assert "Another target" in context.notes[1]
+        key = report_key("pexbot", context.site.dbName(), "Target")
+        preview = service.action_store(dry=True).read(key)
+        assert preview is not None
+        assert preview.path.is_relative_to(Path.cwd() / "dry-run/cache/pexbot")
+        assert preview.manifest["publication"]["state"] == "preview"
+        assert service.action_store().read(key) is None
+        assert not (Path.cwd() / "reports").exists()
+        assert not (Path.cwd() / "dry-run/reports").exists()
 
     @staticmethod
     def test_explicit_prefix_override_including_disable() -> None:
@@ -610,8 +644,12 @@ class TestPexbotJob(TestCase):
             call.pause(15),
             call.refresh(context.site, "B"),
         ]
-        failed = ReportStore().read(report_key("pexbot", "zhwiki", "A"))
-        completed = ReportStore().read(report_key("pexbot", "zhwiki", "B"))
+        failed = service.action_store().read(
+            report_key("pexbot", "zhwiki", "A"),
+        )
+        completed = service.action_store().read(
+            report_key("pexbot", "zhwiki", "B"),
+        )
         assert failed is not None
         assert completed is not None
         assert failed.manifest["publication"]["state"] == "unconfirmed"

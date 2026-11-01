@@ -21,4 +21,9 @@ The interface follows the [Wikimedia Codex style guide][codex], with local
 CSS-only components, neutral surfaces, accessible contrast, native controls,
 and a collapsible contents button on small screens.
 
+Header navigation uses near-black text without underlines, with visible focus
+outlines and current-page markers. The Tools menu opens on mouse hover; clicking
+keeps it open, and clicking again closes it. Keyboard and touch users can use
+the native disclosure, which also works without JavaScript.
+
 [codex]: https://doc.wikimedia.org/codex/latest/style-guide/overview.html

@@ -4,6 +4,7 @@
 # ruff: file-ignore[private-member-access, pytest-unittest-raises-assertion, magic-value-comparison]
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -63,6 +64,32 @@ class TestServerStatus(TestCase):
         )
         assert server_status.validate_runtime(None) is None
         assert not server_status._read(Path("/unavailable/aranami-cgroup"))
+
+    @staticmethod
+    def test_storage_observations_and_older_snapshots() -> None:
+        """Accept older snapshots and expose measured storage."""
+        with patch.object(
+            server_status.shutil,
+            "disk_usage",
+            return_value=SimpleNamespace(used=1024, total=4096),
+        ):
+            observation = server_status.sample_runtime()
+        assert observation["storage_used_bytes"] == 1024
+        assert observation["storage_total_bytes"] == 4096
+        legacy = {
+            key: value
+            for key, value in observation.items()
+            if not key.startswith("storage_")
+        }
+        assert server_status.validate_runtime(legacy) == legacy
+        with patch.object(
+            server_status.shutil,
+            "disk_usage",
+            side_effect=OSError,
+        ):
+            unavailable = server_status.sample_runtime()
+        assert unavailable["storage_used_bytes"] is None
+        assert unavailable["storage_total_bytes"] is None
 
     def test_invalid_saved_measurements_are_rejected(self) -> None:
         """Reject invalid fields, strings, and resource values."""

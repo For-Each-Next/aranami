@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import datetime as dt
 import tempfile
+from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import TestCase
 from unittest.mock import Mock, patch
 from urllib.parse import unquote
 
 import polars as pl
 
+from backend.support import article_milestones
 from backend.website.collect import WikiReader
 from backend.website.review_cache import ReviewCache
+from backend.website.review_milestones import retain_review_milestones
 from backend.website.reviews import (
     COMMUNITY_SOURCES,
     PROJECT_CATEGORIES,
@@ -25,6 +29,9 @@ from backend.website.reviews import (
     community_reviews,
     talk_review,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _NOW = dt.datetime(2026, 10, 25, 12, tzinfo=dt.UTC)
 _START = "2026-10-07T03:04:00+00:00"
@@ -435,7 +442,11 @@ class CollectionTests(TestCase):
         )
         return pl.DataFrame({"page_title": [title]})
 
-    def _collect(self) -> dict[str, object]:
+    def _collect(
+        self,
+        *,
+        retain: Callable[[pl.DataFrame], None] | None = None,
+    ) -> dict[str, object]:
         """Collect with a fresh resolver, as after a process restart.
 
         Returns:
@@ -449,6 +460,7 @@ class CollectionTests(TestCase):
             resolve_many=reader.resolve_many,
             now=_NOW,
             cache_directory=self.cache,
+            retain=retain,
         )
 
     def test_canonical_titles_original_anchors_order_and_categories(
@@ -625,3 +637,130 @@ class CollectionTests(TestCase):
         self.site.simple_request.side_effect = None
         with self.assertRaisesRegex(ValueError, "omitted"):
             ReviewCache(self.site, None, _NOW).read(requests)
+
+    def test_fresh_and_cached_sources_retain_nomination_milestones(
+        self,
+    ) -> None:
+        """Retain evidence without changing public projection."""
+        membership = pl.DataFrame({
+            "full_title": ["游戏 正名", "Game list"],
+            "page_id": [101, 102],
+            "talk_page_id": [201, 202],
+            "page_namespace": [0, 0],
+        })
+        self.texts[COMMUNITY_SOURCES["fac"]] = (
+            1,
+            "== 遊戲 舊名 ==\n提名者：[[User:Nominator]] " + _SIGNATURE,
+        )
+        path = self.cache / "milestones.parquet"
+        retain = partial(
+            retain_review_milestones,
+            membership=membership,
+            path=path,
+        )
+        first = self._collect(retain=retain)
+        stored = article_milestones.load(path)
+        assert stored.height == 2
+        row = stored.filter(pl.col("action_type") == "FAC").row(0, named=True)
+        assert row["nominator"] == "Nominator"
+        assert row["occurred_at"].isoformat() == _START
+        assert row["date"] == dt.date(2026, 10, 7)
+        assert row["revision_id"] is None
+        assert row["sources"] == [
+            {
+                "title": COMMUNITY_SOURCES["fac"],
+                "revision_id": 1,
+                "url": "https://zh.wikipedia.org/w/index.php?oldid=1",
+            },
+        ]
+        assert "nominator" not in first["items"][0]
+        path.unlink()
+        self.site.simple_request.reset_mock()
+        with patch(
+            "backend.website.reviews.community_reviews",
+            side_effect=AssertionError("reparsed"),
+        ):
+            assert self._collect(retain=retain) == first
+        assert article_milestones.load(path).height == 2
+        assert all(
+            call.kwargs["prop"] == "info"
+            for call in self.site.simple_request.call_args_list
+            if not call.kwargs.get("redirects")
+        )
+
+    @staticmethod
+    def test_disabled_retention_does_not_touch_authoritative_data() -> None:
+        """Allow development collection with no durable destination."""
+        with patch.object(article_milestones, "sync_events") as sync:
+            retain_review_milestones(
+                pl.DataFrame(),
+                membership=pl.DataFrame(),
+                path=None,
+            )
+        sync.assert_not_called()
+
+    def test_dyk_nomination_retains_explicit_question_and_separate_roles(
+        self,
+    ) -> None:
+        """Retain nominations separately from appearances."""
+        self.texts[COMMUNITY_SOURCES["dykc"]] = (
+            5,
+            (
+                "{{DYKEntry|article=游戏 正名|timestamp=1791342240"
+                "|nominator=Proposer|author=Writer|question=Which [[Game]]?}}"
+            ),
+        )
+        membership = pl.DataFrame({
+            "title": ["游戏 正名"],
+            "page_id": [101],
+            "talk_page_id": [201],
+        })
+        path = self.cache / "milestones.parquet"
+        self._collect(
+            retain=partial(
+                retain_review_milestones,
+                membership=membership,
+                path=path,
+            ),
+        )
+        row = (
+            article_milestones
+            .load(path)
+            .filter(pl.col("action_type") == "DYK")
+            .row(0, named=True)
+        )
+        assert row["kind"] == "review"
+        assert row["action"] == "nominated"
+        assert row["question"] == "Which [[Game]]?"
+        assert row["contributors"] == ["Writer"]
+        assert row["nominator"] == "Proposer"
+
+    @staticmethod
+    def test_unknown_dyk_nominator_never_borrows_a_comment_signature() -> None:
+        """Blank roles stay unknown despite signed discussion."""
+        row = community_reviews(
+            "{{DYKEntry|article=Game|timestamp=1791342240|author=127.0.0.1"
+            "|question=Which [[Game]]?}}\n"
+            "[[User:Commenter]] 2026年10月7日 (三) 03:04 (UTC)",
+            "dykc",
+        )[0]
+        assert row["nominator"] is None
+        assert row["contributors"] is None
+
+    def test_invalid_cached_credit_fields_force_source_reparse(self) -> None:
+        """Reject unsafe cached attribution before durable retention."""
+        first = self._collect()
+        path = self.cache / "review-sources-v1.parquet"
+        frame = pl.read_parquet(path)
+        rows = frame.to_dicts()
+        for source in rows:
+            for item in source["items"]:
+                item["question"] = "invalid\x00question"
+        pl.DataFrame(rows, schema=frame.schema).write_parquet(path)
+        self.site.simple_request.reset_mock()
+        assert self._collect() == first
+        assert any(
+            call.kwargs["prop"] == "revisions"
+            for call in self.site.simple_request.call_args_list
+            if not call.kwargs.get("redirects")
+        )

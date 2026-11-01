@@ -9,35 +9,23 @@
   <script src="/newsletter.js" defer></script>
 {% endblock %}
 {% block content %}
+<div data-newsletter-content>
 <p>{{ t.newsletter.intro }}</p>
 <form class="newsletter-controls" action="/newsletter/" method="get" data-newsletter-issue-form>
-  <fieldset class="newsletter-issues">
-    <legend>{{ t.newsletter.issue }}</legend>
-    <div class="newsletter-issue-options">
-      {% for choice in issue_choices %}<label class="newsletter-issue-option" for="newsletter-issue-{{ loop.index }}"><input id="newsletter-issue-{{ loop.index }}" name="issue" type="radio" value="{{ choice.value }}"{% if choice.checked %} checked{% endif %} required><span>{{ choice.value }} <span class="newsletter-issue-state">({{ choice.label }})</span></span></label>{% endfor %}
-    </div>
-  </fieldset>
-  <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.history.view }}</button>
+  <label for="newsletter-issue">{{ t.newsletter.issue }}</label>
+  <select id="newsletter-issue" class="cdx-select" name="issue" required>
+    {% for choice in issue_choices %}<option value="{{ choice.value }}"{% if choice.checked %} selected{% endif %}>{{ choice.value }} ({{ choice.label }})</option>{% endfor %}
+  </select>
+  <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.issue_view }}</button>
   <input type="hidden" name="lang" value="{{ locale }}">
 </form>
+<p class="notice" role="status" hidden data-newsletter-load-status data-failure="{{ t.newsletter.load_failed }}"></p>
+<div data-newsletter-result>
 {% if draft_history.dates or draft_history.selected %}
 <form class="newsletter-date-controls" action="/newsletter/" method="get">
   <label id="newsletter-date-label" for="newsletter-data-date">{{ t.newsletter.history.date }}</label>
   <div class="newsletter-date-selection">
     <input id="newsletter-data-date" name="date" type="date" value="{{ draft_history.form_date }}"{% if draft_history.minimum %} min="{{ draft_history.minimum }}" max="{{ draft_history.maximum }}" list="newsletter-saved-dates"{% endif %} required>
-    {% if draft_history.dates %}
-    <details class="newsletter-calendar" hidden data-newsletter-calendar data-dates='{{ draft_history.dates | tojson }}'>
-      <summary class="cdx-button cdx-button--action-default cdx-button--weight-normal" aria-labelledby="newsletter-date-label newsletter-selected-date"><span id="newsletter-selected-date" data-calendar-selected>{{ draft_history.form_date }}</span></summary>
-      <div class="newsletter-calendar-panel">
-        <div class="newsletter-calendar-navigation">
-          <button type="button" class="cdx-button cdx-button--weight-quiet" data-calendar-previous aria-label="{{ t.newsletter.history.previous_month }}">‹</button>
-          <strong data-calendar-month aria-live="polite"></strong>
-          <button type="button" class="cdx-button cdx-button--weight-quiet" data-calendar-next aria-label="{{ t.newsletter.history.next_month }}">›</button>
-        </div>
-        <table class="newsletter-calendar-grid" aria-label="{{ t.newsletter.history.calendar }}"><thead data-calendar-weekdays></thead><tbody data-calendar-days></tbody></table>
-      </div>
-    </details>
-    {% endif %}
     <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.history.view }}</button>
   </div>
   <input type="hidden" name="issue" value="{{ selected_issue }}">
@@ -53,13 +41,15 @@
 {% for draft in drafts %}
 <section class="newsletter-draft" id="newsletter-page-{{ loop.index }}" aria-labelledby="newsletter-heading-{{ loop.index }}">
   <h2 id="newsletter-heading-{{ loop.index }}">{{ draft.heading }}</h2>
-  <p class="newsletter-destination"><bdi lang="zh">{{ draft.link }}</bdi></p>
   <pre class="newsletter-text" tabindex="0" aria-labelledby="newsletter-heading-{{ loop.index }}" lang="zh" dir="ltr"><code id="newsletter-text-{{ loop.index }}" data-newsletter-wikitext>{{ draft.text }}</code></pre>
   <div class="newsletter-copy-controls">
-    <button type="button" class="cdx-button cdx-button--action-progressive cdx-button--weight-primary" hidden data-newsletter-copy="newsletter-text-{{ loop.index }}" data-copy-success="{{ t.newsletter.copied }}" data-copy-failure="{{ t.newsletter.copy_fallback }}" aria-describedby="newsletter-copy-status-{{ loop.index }}">{{ t.newsletter['copy'] }}</button>
+    <button type="button" class="cdx-button cdx-button--action-default cdx-button--weight-normal" hidden data-newsletter-copy="newsletter-text-{{ loop.index }}" data-copy-success="{{ t.newsletter.copied }}" data-copy-failure="{{ t.newsletter.copy_fallback }}" aria-describedby="newsletter-copy-status-{{ loop.index }}">{{ t.newsletter['copy'] }}</button>
+    <button type="button" class="cdx-button cdx-button--action-progressive cdx-button--weight-primary" hidden data-newsletter-copy="newsletter-text-{{ loop.index }}" data-newsletter-edit="{{ draft.edit_url }}" data-copy-success="{{ t.newsletter.copied }}" data-copy-failure="{{ t.newsletter.copy_fallback }}" aria-describedby="newsletter-copy-status-{{ loop.index }}">{{ t.newsletter.copy_and_edit }}</button>
     <span id="newsletter-copy-status-{{ loop.index }}" role="status" aria-live="polite" data-newsletter-status></span>
   </div>
 </section>
 {% endfor %}
 {% endif %}
+</div>
+</div>
 {% endblock %}

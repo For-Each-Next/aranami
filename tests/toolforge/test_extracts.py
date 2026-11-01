@@ -58,13 +58,15 @@ class TestArticleExtractCache(TestCase):
             call("Game", "zh-hans"),
             call("Game", "zh-hant"),
             call("Game", "zh"),
+            call("Game", "zh-tw"),
+            call("Game", "zh-hk"),
         ]
         self.fetch.return_value = "更新的简介。"
         assert (
             self._cache(hours=24).enrich(self.records)[0]["extract"]
             == "更新的简介。"
         )
-        assert self.fetch.call_count == 6
+        assert self.fetch.call_count == 10
 
     def test_empty_extracts_are_cached_without_repeated_requests(self) -> None:
         """Cache confirmed absent leads for a day."""
@@ -73,7 +75,7 @@ class TestArticleExtractCache(TestCase):
         assert cache.enrich(self.records)[0]["extract"] is None
         cache.save()
         assert self._cache(hours=20).enrich(self.records)[0]["extract"] is None
-        assert self.fetch.call_count == 3
+        assert self.fetch.call_count == 5
 
     def test_original_variant_reuses_cached_scripts(self) -> None:
         """Fetch only original text from a two-script cache."""
@@ -102,9 +104,9 @@ class TestArticleExtractCache(TestCase):
         assert retry.enrich(self.records) == saved
         retry.save()
         assert self._cache(hours=24.5).enrich(self.records) == saved
-        assert self.fetch.call_count == 6
+        assert self.fetch.call_count == 10
         assert self._cache(hours=25).enrich(self.records) == saved
-        assert self.fetch.call_count == 9
+        assert self.fetch.call_count == 15
 
     def test_initial_failures_persist_unavailable_text(self) -> None:
         """Keep initial failures null and throttle retries."""
@@ -115,7 +117,7 @@ class TestArticleExtractCache(TestCase):
         assert (
             self._cache(hours=0.5).enrich(self.records)[0]["extract"] is None
         )
-        assert self.fetch.call_count == 3
+        assert self.fetch.call_count == 5
 
     def test_long_and_markup_bearing_leads_stay_bounded_plain_text(
         self,
@@ -154,7 +156,7 @@ class TestArticleExtractCache(TestCase):
         ):
             cache.save()
         assert cache.enrich(self.records) == saved
-        assert self.fetch.call_count == 3
+        assert self.fetch.call_count == 5
 
     def test_one_failure_does_not_discard_other_article_text(self) -> None:
         """Retain successful articles despite another failed request."""
@@ -173,7 +175,7 @@ class TestArticleExtractCache(TestCase):
         assert enriched[1]["extract"] == "Other article."
         cache.save()
         assert self._cache(hours=0.5).enrich(records) == enriched
-        assert self.fetch.call_count == 6
+        assert self.fetch.call_count == 10
 
     def test_future_or_invalid_cache_metadata_forces_a_fresh_read(
         self,
@@ -200,6 +202,8 @@ class TestArticleExtractCache(TestCase):
                     call("Game", "zh-hans"),
                     call("Game", "zh-hant"),
                     call("Game", "zh"),
+                    call("Game", "zh-tw"),
+                    call("Game", "zh-hk"),
                 ]
 
     def test_scripts_have_separate_cached_text_and_failure_state(self) -> None:
@@ -208,17 +212,23 @@ class TestArticleExtractCache(TestCase):
             "zh-hans": "游戏与音乐。",
             "zh-hant": "遊戲與音樂。",
             "zh": "原文游戏與音樂。",
+            "zh-tw": "臺灣遊戲與音樂。",
+            "zh-hk": "香港遊戲與音樂。",
         }[variant]
         cache = self._cache()
         first = cache.enrich(self.records)[0]
         assert first["extract"] == "游戏与音乐。"
         assert first["extract_hant"] == "遊戲與音樂。"
         assert first["extract_zh"] == "原文游戏與音樂。"
+        assert first["extract_tw"] == "臺灣遊戲與音樂。"
+        assert first["extract_hk"] == "香港遊戲與音樂。"
         cache.save()
         self.fetch.side_effect = [
             OSError("simplified offline"),
             "更新的遊戲與音樂。",
             OSError("original offline"),
+            OSError("Taiwan offline"),
+            OSError("Hong Kong offline"),
         ]
         refreshed = self._cache(hours=24).enrich(self.records)[0]
         assert refreshed["extract"] == first["extract"]

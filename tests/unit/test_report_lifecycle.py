@@ -181,7 +181,7 @@ class TestReportLifecycle(TestCase):
                     Explicit saved or unchanged publication evidence.
                 """
                 assert self._status(edit.title)["status"] == "running"
-                directory = self.root / "reports" / edit.report_key
+                directory = self.root / "reports/records" / edit.report_key
                 selected = json.loads((directory / "latest.json").read_text())
                 generation = directory / selected["latest"]
                 manifest = json.loads(

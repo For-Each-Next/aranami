@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING
 
 import pywikibot
 
-from backend.support.execution import RuntimeContext, routine_run
+from backend.support.execution import (
+    PublicationOutcome,
+    RuntimeContext,
+    routine_run,
+)
 from backend.support.logs import open_run_log
 from updater.jobs._edits import ProposedEdit
 from updater.support.edit_summary import EditSummary
@@ -45,7 +49,7 @@ class JobContext(RuntimeContext[ProposedEdit]):
         return self.publish_proposal(edit, self._save_edit)
 
     @staticmethod
-    def _save_edit(edit: ProposedEdit) -> str:
+    def _save_edit(edit: ProposedEdit) -> str | PublicationOutcome:
         """Save a proposal after checking its original wiki content.
 
         Args:
@@ -85,7 +89,11 @@ class JobContext(RuntimeContext[ProposedEdit]):
         page.text = edit.text
         page.save(summary=edit.summary)
         _LOGGER.info("Saved %s on %s.", edit.title, edit.site.dbName())
-        return "saved"
+        revision = page.latest_revision_id
+        return PublicationOutcome(
+            "saved",
+            revision if type(revision) is int and revision > 0 else None,
+        )
 
 
 @contextmanager

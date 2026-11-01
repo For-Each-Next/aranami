@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from threading import Event
+from time import monotonic
 from typing import TYPE_CHECKING
 
 import pywikibot
@@ -28,8 +29,17 @@ from backend.server import (
     DashboardUpdater,
     collect_dashboard_pass,
 )
+from backend.support.article_data import MILESTONES_PATH
+from backend.support.article_milestones import sync_current_assessments
+from backend.support.article_scope import reconcile_scope
 from backend.support.events import event_extra
 from backend.support.logs import open_run_log
+from backend.website.article_authorship import enrich_authorship
+from backend.website.article_history import (
+    DEFAULT_PATH,
+    collect_article_history,
+)
+from backend.website.article_milestones import enrich_milestones
 from backend.website.collect import (
     add_refresh_arguments,
     collect_dashboard,
@@ -37,18 +47,15 @@ from backend.website.collect import (
     report_intervals,
     save_snapshot,
 )
-from backend.website.newsletter_history import (
-    DEFAULT_PATH,
-    collect_article_history,
-)
 from shared.deployment import project_version
 from shared.sources.cycle import source_cycle
 from shared.sources.quarry.projects import query_pages_by_wikiproject
-lazy from updater.services.newsletter import render_issue
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from types import FrameType
+
+    from apscheduler.schedulers.background import BackgroundScheduler
 
 _MAX_DAYS = 365
 _MAX_PORT = 65535
@@ -160,23 +167,94 @@ def refresh_newsletter(updater: DashboardUpdater) -> None:
 
 
 def refresh_article_history() -> None:
-    """Archive changed project talk pages in an independent hourly pass.
+    """Maintain project recognition evidence in an hourly pass.
 
-    This callback refreshes source evidence only. Newsletter generation
-    continues to use completed UTC days through the website collector.
+    Preserve all recorded years and fill missing credits incrementally.
+    Newsletter preparation reads the saved evidence separately.
     """
     with source_cycle():
         site = pywikibot.Site("zh", "wikipedia")
+        membership = query_pages_by_wikiproject(site, "电子游戏")
+        reconcile_scope(
+            membership,
+            MILESTONES_PATH.parent,
+            observed_at=dt.datetime.now(dt.UTC),
+        )
         events = collect_article_history(
             site,
-            query_pages_by_wikiproject(site, "电子游戏"),
+            membership,
             now=dt.datetime.now(dt.UTC),
             path=DEFAULT_PATH,
         )
+        events = enrich_authorship(events, site, max_requests=10)
+        enrich_milestones(events, site, max_requests=10)
+        sync_current_assessments(
+            membership,
+            MILESTONES_PATH,
+            observed_at=dt.datetime.now(dt.UTC),
+        )
         _LOGGER.info(
-            "Hourly article-history scan retained %d project events.",
+            "Hourly recognition scan retained %d project events.",
             events.height,
         )
+
+
+def stop_jobs(
+    scheduler: BackgroundScheduler,
+    updater: DashboardUpdater | None,
+) -> None:
+    """Drain running jobs before releasing service resources.
+
+    Pause new scheduled dispatches and reject queued website refreshes.
+    Active work retains its locks, logs, and publication observations
+    until it finishes. Existing report completion logs identify each
+    invocation's outcome; the final message confirms completion.
+
+    Args:
+        scheduler: Scheduler owned by the stopping hub.
+        updater: Website output owner, absent in preview mode.
+    """
+    if not scheduler.running:
+        return
+    started = monotonic()
+    scheduler.pause()
+    if updater is not None:
+        updater.request_stop()
+    _LOGGER.info(
+        "Scheduled dispatch paused; waiting for running jobs to finish "
+        "and persist their final status.",
+    )
+    scheduler.shutdown(wait=True)
+    _LOGGER.info(
+        "All running jobs stopped safely after %.2f seconds; "
+        "final job status and logs are saved.",
+        monotonic() - started,
+    )
+
+
+def _serve_until_stopped(
+    server: DashboardHTTPServer | None,
+    scheduler: BackgroundScheduler,
+    updater: DashboardUpdater | None,
+    stopped: Event,
+    control: dict[str, bool],
+) -> None:
+    """Serve observations while honoring drain and stop signals."""
+    if server is None:
+        stopped.wait()
+        return
+    drained = False
+    while not stopped.is_set():
+        if control["drain"] and not drained:
+            _LOGGER.info(
+                "Deployment requested a safe hub drain; "
+                "keeping the pod alive until work is saved.",
+            )
+            stop_jobs(scheduler, updater)
+            updater.confirm_drained()
+            drained = True
+            _LOGGER.info("Hub drain confirmed; waiting for termination.")
+        server.handle_request()
 
 
 def run(config: HubConfig) -> None:
@@ -192,10 +270,14 @@ def run(config: HubConfig) -> None:
     """
     stopped = Event()
     shutdown_reason = "HTTP loop ended"
+    control = {"drain": False}
 
     def stop(signum: int, _frame: FrameType | None) -> None:
         """Request graceful shutdown from the process's main thread."""
         nonlocal shutdown_reason
+        if signum == signal.SIGUSR1:
+            control["drain"] = True
+            return
         shutdown_reason = signal.Signals(signum).name
         stopped.set()
 
@@ -220,7 +302,7 @@ def run(config: HubConfig) -> None:
                 dry=config.dry,
             ),
         )
-        for kind in (signal.SIGINT, signal.SIGTERM):
+        for kind in (signal.SIGINT, signal.SIGTERM, signal.SIGUSR1):
             previous = signal.signal(kind, stop)
             resources.callback(signal.signal, kind, previous)
 
@@ -231,7 +313,7 @@ def run(config: HubConfig) -> None:
                 config.output,
                 lambda: collect_dashboard_pass(
                     updater,
-                    partial(collect_dashboard, draft_projector=render_issue),
+                    collect_dashboard,
                     save_snapshot,
                     config.days,
                     config.refresh_intervals,
@@ -251,7 +333,7 @@ def run(config: HubConfig) -> None:
             run_immediately=config.run_immediately,
             dispatch=partial(dispatch_report, updater=updater),
         )
-        resources.callback(scheduler.shutdown, wait=True)
+        resources.callback(stop_jobs, scheduler, updater)
         if updater is not None:
             scheduler.add_job(
                 refresh_article_history,
@@ -293,11 +375,7 @@ def run(config: HubConfig) -> None:
                 **startup,
             )
         try:
-            if server is None:
-                stopped.wait()
-            else:
-                while not stopped.is_set():
-                    server.handle_request()
+            _serve_until_stopped(server, scheduler, updater, stopped, control)
         except KeyboardInterrupt:
             shutdown_reason = "KeyboardInterrupt"
             stopped.set()

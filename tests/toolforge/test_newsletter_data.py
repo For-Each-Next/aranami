@@ -14,8 +14,9 @@ from unittest.mock import Mock, patch
 import polars as pl
 from pywikibot.exceptions import NoPageError
 
-from backend.website.newsletter import collect_newsletter, valid_newsletter
+from backend.website.newsletter import valid_newsletter
 from backend.website.newsletter_newpages import collect_new_pages
+from backend.website.newsletter_sources import collect_source_facts
 from shared.newsletter import ROOT, Issue
 from updater.services.newsletter import render_issue
 
@@ -95,6 +96,22 @@ class Reader:
 class NewsletterDataTests(unittest.TestCase):
     """Keep historical observations and editorial drafts distinct."""
 
+    def test_annual_feature_is_prepared_before_its_quarter(self) -> None:
+        """Start annual history in January without quarter data."""
+        for year in (2026, 2028):
+            with self.subTest(year=year):
+                now = dt.datetime(year, 1, 2, tzinfo=dt.UTC)
+                result = collect_source_facts(Reader(), now=now)
+                facts = result["issues"][f"{year + 1}-01"]
+                assert facts["observation_end"] == f"{year}-10-01"
+                assert facts["year_review"]["observation_end"] == (
+                    f"{year}-01-02"
+                )
+                assert facts["year_review"]["period"] == (
+                    f"{year}-01-01/{year + 1}-01-01"
+                )
+                assert valid_newsletter(result)
+
     def test_news_uses_talk_notices_instead_of_template_history(self) -> None:
         """Use recorded talk-page dates for news appearances."""
         now = dt.datetime(2026, 10, 31, tzinfo=dt.UTC)
@@ -144,10 +161,10 @@ class NewsletterDataTests(unittest.TestCase):
             }
 
         with patch(
-            "backend.website.newsletter.collect_newsletter_homepage",
+            "backend.website.newsletter_sources.collect_newsletter_homepage",
             side_effect=homepage,
         ):
-            result = collect_newsletter(
+            result = collect_source_facts(
                 Reader(),
                 now=now,
                 members={"Template subject", "Past news"},
@@ -192,7 +209,7 @@ class NewsletterDataTests(unittest.TestCase):
             },
             orient="row",
         )
-        result = collect_newsletter(
+        result = collect_source_facts(
             reader,
             now=dt.datetime(2026, 10, 31, tzinfo=dt.UTC),
             article_history=events,
@@ -200,7 +217,13 @@ class NewsletterDataTests(unittest.TestCase):
         facts = result["issues"]["2027-01"]
         assert valid_newsletter(result)
         assert facts["quality_source"] == "article_history"
-        assert facts["dyk"] == [{"title": "DYK", "date": "2026-10-05"}]
+        assert facts["dyk"] == [
+            {
+                "title": "DYK",
+                "date": "2026-10-05",
+                "contributors": None,
+            },
+        ]
         assert facts["history_undated"]["dyk"] == 1
         assert [
             (row["grade"], row["action"]) for row in facts["quality_changes"]
@@ -256,10 +279,10 @@ class NewsletterDataTests(unittest.TestCase):
             }
 
         with patch(
-            "backend.website.newsletter.collect_newsletter_homepage",
+            "backend.website.newsletter_sources.collect_newsletter_homepage",
             side_effect=homepage,
         ) as collector:
-            result = collect_newsletter(
+            result = collect_source_facts(
                 Reader(),
                 now=now,
                 members={"Game"},
@@ -308,7 +331,7 @@ class NewsletterDataTests(unittest.TestCase):
     ) -> None:
         """Separate final data from the new issue's current counters."""
         reader = Reader()
-        result = collect_newsletter(
+        result = collect_source_facts(
             reader,
             now=dt.datetime(2027, 1, 1, tzinfo=dt.UTC),
             current_counts={"total": 13053},
@@ -337,7 +360,7 @@ class NewsletterDataTests(unittest.TestCase):
     def test_closed_quarter_uses_historical_boundaries(self) -> None:
         """Retain boundary sources and editor-written text."""
         reader = Reader()
-        result = collect_newsletter(
+        result = collect_source_facts(
             reader,
             now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
         )
@@ -360,7 +383,12 @@ class NewsletterDataTests(unittest.TestCase):
             "https://zh.wikipedia.org/w/index.php?oldid=1",
             "https://zh.wikipedia.org/w/index.php?oldid=2",
         }
-        assert {boundary for _, boundary in reader.calls} == {
+        assert {
+            boundary
+            for title, boundary in reader.calls
+            if title != "WikiProject:电子游戏/热门条目"
+        } == {
+            dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
             dt.datetime(2026, 10, 1, tzinfo=dt.UTC),
             dt.datetime(2027, 1, 1, tzinfo=dt.UTC),
             dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
@@ -370,7 +398,7 @@ class NewsletterDataTests(unittest.TestCase):
         """Populate the next issue without future source reads."""
         reader = Reader()
         reader.dyk_text = _DYK.replace("2026-12-31", "2026-10-15")
-        result = collect_newsletter(
+        result = collect_source_facts(
             reader,
             now=dt.datetime(2026, 10, 31, tzinfo=dt.UTC),
         )
@@ -399,7 +427,7 @@ class NewsletterDataTests(unittest.TestCase):
     ) -> None:
         """Wait for a completed UTC day before reading events."""
         reader = Reader()
-        result = collect_newsletter(
+        result = collect_source_facts(
             reader,
             now=dt.datetime(
                 2027,
@@ -411,7 +439,7 @@ class NewsletterDataTests(unittest.TestCase):
         )
         assert set(result["issues"]) == {"2026-10", "2027-01"}
         assert result["issues"]["2027-01"]["observation_end"] == "2026-12-31"
-        result = collect_newsletter(
+        result = collect_source_facts(
             Reader(),
             now=dt.datetime(2027, 1, 1, tzinfo=dt.UTC),
         )
@@ -423,7 +451,7 @@ class NewsletterDataTests(unittest.TestCase):
 
     def test_validation_rejects_future_events_in_progress_issue(self) -> None:
         """Reject observations after the partial-quarter cutoff."""
-        result = collect_newsletter(
+        result = collect_source_facts(
             Reader(),
             now=dt.datetime(2026, 10, 31, tzinfo=dt.UTC),
         )
@@ -439,7 +467,7 @@ class NewsletterDataTests(unittest.TestCase):
 
     def test_current_counts_fill_only_an_open_issue(self) -> None:
         """Use fresh project totals without rewriting closed history."""
-        result = collect_newsletter(
+        result = collect_source_facts(
             Reader(),
             now=dt.datetime(2026, 10, 31, 12, tzinfo=dt.UTC),
             current_counts={"total": 13_053},
@@ -471,7 +499,7 @@ class NewsletterDataTests(unittest.TestCase):
                 "2027-01-01T18:37:12+00:00",
             ),
         }
-        result = collect_newsletter(
+        result = collect_source_facts(
             reader,
             now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
             overview_at=snapshots.get,
@@ -502,7 +530,7 @@ class NewsletterDataTests(unittest.TestCase):
 
     def test_retained_overview_requires_matching_endpoint(self) -> None:
         """Reuse saved counts only for the same reporting boundary."""
-        prior = collect_newsletter(
+        prior = collect_source_facts(
             Reader(),
             now=dt.datetime(2027, 1, 2, tzinfo=dt.UTC),
             overview_at=lambda boundary: (
@@ -515,7 +543,7 @@ class NewsletterDataTests(unittest.TestCase):
                 ),
             ),
         )
-        repeated = collect_newsletter(
+        repeated = collect_source_facts(
             Reader(),
             now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
             prior_facts=prior,
@@ -525,7 +553,7 @@ class NewsletterDataTests(unittest.TestCase):
             "2027-01-01T18:00:00+00:00"
         )
         assert repeated["issues"]["2027-04"]["overview"]["ga"] is None
-        changed = collect_newsletter(
+        changed = collect_source_facts(
             Reader(),
             now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
             prior_facts=prior,
@@ -546,10 +574,10 @@ class NewsletterDataTests(unittest.TestCase):
         lookup = Mock(return_value=(previous, observed))
         now = dt.datetime(2026, 10, 31, 12, tzinfo=dt.UTC)
         with patch(
-            "backend.website.newsletter.collect_new_pages",
+            "backend.website.newsletter_sources.collect_new_pages",
             wraps=collect_new_pages,
         ) as collect:
-            result = collect_newsletter(
+            result = collect_source_facts(
                 Reader(),
                 now=now,
                 current_assessments=current,
@@ -577,7 +605,7 @@ class NewsletterDataTests(unittest.TestCase):
     ) -> None:
         """Leave an unobserved closed-quarter breakdown unavailable."""
         current = pl.DataFrame({"full_title": ["Game"], "pa_class": ["GA"]})
-        result = collect_newsletter(
+        result = collect_source_facts(
             Reader(),
             now=dt.datetime(2026, 10, 31, tzinfo=dt.UTC),
             current_assessments=current,
@@ -594,7 +622,7 @@ class NewsletterDataTests(unittest.TestCase):
             'return {\n["A"] = 15,\n["B"] = 14,\n["C"] = 13,\n'
             '["D"] = 12,\n["E"] = 11,\n["F"] = 11,\n["G"] = 9.5,\n}'
         )
-        facts = collect_newsletter(
+        facts = collect_source_facts(
             reader,
             now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
         )["issues"]["2027-01"]
@@ -603,7 +631,7 @@ class NewsletterDataTests(unittest.TestCase):
 
     def test_validation_rejects_malformed_or_unsafe_fields(self) -> None:
         """Reject unsafe links and malformed payloads."""
-        original = collect_newsletter(
+        original = collect_source_facts(
             Reader(),
             now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
         )
@@ -642,7 +670,7 @@ class NewsletterDataTests(unittest.TestCase):
             },
             orient="row",
         )
-        facts = collect_newsletter(
+        facts = collect_source_facts(
             reader,
             now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
             article_history=events,
@@ -665,7 +693,7 @@ class NewsletterDataTests(unittest.TestCase):
         """Keep changes unknown without a pre-quarter baseline."""
         reader = Reader()
         reader.history = Mock(return_value=[])
-        facts = collect_newsletter(
+        facts = collect_source_facts(
             reader,
             now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
         )["issues"]["2027-01"]
@@ -675,7 +703,7 @@ class NewsletterDataTests(unittest.TestCase):
         """Preserve prior observations after source failures."""
         reader = Mock(side_effect=ConnectionError("offline"))
         with self.assertRaises(ConnectionError):
-            collect_newsletter(
+            collect_source_facts(
                 reader,
                 now=dt.datetime(2027, 1, 5, tzinfo=dt.UTC),
             )

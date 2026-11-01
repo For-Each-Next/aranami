@@ -159,7 +159,7 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
                 },
             )["pages"]
             for page, kind in zip(
-                pages[1:],
+                pages[1:3],
                 ("quality", "announcements"),
                 strict=True,
             ):
@@ -226,7 +226,7 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
             "}}\n\n"
             "{{noteTA-lite\n| G1 = 電子遊戲\n}}\n\n"
         )
-        for page in _pages()[1:]:
+        for page in _pages()[1:3]:
             assert page["text"].startswith(prefix)
             assert "2026年10月出刊" not in page["text"]
 
@@ -301,7 +301,7 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
         layouts = subpage_layouts()
         for suffix, page in zip(
             ("特優內容", "宣告"),
-            _pages()[1:],
+            _pages()[1:3],
             strict=True,
         ):
             layout = layouts[suffix]
@@ -351,7 +351,7 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
     def test_old_facts_and_chart_values_are_not_reused() -> None:
         """Replace old observations and retain chart settings."""
         layouts = subpage_layouts()
-        quality, announcements = (page["text"] for page in _pages()[1:])
+        quality, announcements = (page["text"] for page in _pages()[1:3])
         for old_title in ("超执刀2", "Unhinged", "ZywOo"):
             assert old_title not in quality
         for old_text in (
@@ -385,7 +385,7 @@ class NewsletterSubpageLayoutTests(unittest.TestCase):
                 "quality_changes": [],
             },
         )["pages"]
-        for page in pages[1:]:
+        for page in pages[1:3]:
             assert "來源" in page["text"]
             assert "{{mbox" not in page["text"]
             assert "== 宣告 ==" not in page["text"]

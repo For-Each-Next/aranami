@@ -20,6 +20,7 @@ from webservice.pages import render_maintenance
 from webservice.presentation import (
     Interface,
     maintenance_filter,
+    maintenance_items,
     maintenance_selection,
 )
 
@@ -65,6 +66,57 @@ def _snapshot() -> dict[str, object]:
 
 class TestMaintenanceControls(unittest.TestCase):
     """Preserve filter state and native GET controls across pages."""
+
+    @staticmethod
+    def test_unlimited_ranges_keep_list_genre_and_size() -> None:
+        """Combine open endpoints, list grades, and byte size."""
+        rows = _snapshot()["backlog"]["groups"][0]["items"][:4]
+        for row, grade, length in zip(
+            rows,
+            ("FA", "FL", "CL", None),
+            (100, 300, 200, None),
+            strict=True,
+        ):
+            row.update(assessment_class=grade, page_length=length)
+        selected = maintenance_selection({
+            "task": ["references"],
+            "quality_op": ["range"],
+            "quality_to": ["C"],
+            "genre": ["list"],
+            "sort": ["size"],
+            "order": ["desc"],
+        })
+        assert (
+            maintenance_items(
+                maintenance_filter(rows, selected),
+                "size",
+                "desc",
+            )
+            == rows[1:3]
+        )
+        assert (
+            maintenance_filter(rows, {"quality": "C", "quality_op": "range"})
+            == rows[2:]
+        )
+        assert (
+            maintenance_filter(
+                rows,
+                {"quality_op": "range", "importance_op": "range"},
+            )
+            == rows
+        )
+        output = render_maintenance(
+            _snapshot(),
+            {"task": ["references"]},
+            "zh-hant",
+        )
+        assert '<option value="D"' not in output
+        assert '<option value="FL"' not in output
+        assert '<option value="Substub"' not in output
+        assert 'id="maintenance-quality-to"' in output
+        assert 'name="genre" value="list"' in output
+        assert output.count('class="pagination"') == 1
+        assert output.count('class="source-updated"') == 1
 
     @staticmethod
     def test_title_and_assessment_filters() -> None:
@@ -164,12 +216,11 @@ class TestMaintenanceControls(unittest.TestCase):
                 "importance": "Mid",
                 "importance_op": "lte",
             },
-        ) == [rows[0], rows[3]]
+        ) == [rows[0], rows[3], rows[4], rows[5]]
         for invalid in (
             {"q": ["["], "regex": ["1"]},
             {"q": [r"(a)\1"], "regex": ["1"]},
             {"quality": ["Unknown"], "quality_op": ["gte"]},
-            {"importance": ["High"], "importance_op": ["range"]},
         ):
             with (
                 self.subTest(invalid=invalid),
@@ -188,19 +239,19 @@ class TestMaintenanceControls(unittest.TestCase):
             ),
             "en",
         )
-        assert output.count('class="pagination"') == 2
-        assert output.count('class="page-jump"') == 2
-        assert "Articles 51\u2013100 of 103" in output
-        assert ">51</td>" in output
-        assert "Game 051" in output
-        assert "Game 050" not in output
+        assert output.count('class="pagination"') == 1
+        assert output.count('class="page-jump"') == 0
+        assert "Articles 11\u201320 of 103" in output
+        assert ">11</td>" in output
+        assert "Game 011" in output
+        assert "Game 010" not in output
         assert (
             '<option value="title" selected>Article title</option>' in output
         )
         assert 'class="sort-controls"' not in output
         assert 'type="radio" name="order" value="asc" checked' in output
         links = re.findall(r'href="([^"]+)"[^>]*rel="(?:prev|next)"', output)
-        assert len(links) == 4
+        assert len(links) == 2
         for link in links:
             values = parse_qs(urlsplit(unescape(link)).query)
             assert values["q"] == ["Game"]
@@ -266,7 +317,7 @@ class TestMaintenanceHttpControls(unittest.TestCase):
             assert response.status_code == 200
             row_pattern = r'<th scope="row".*?>(Game \d+)</a>'
             expected = re.findall(row_pattern, response.text)
-            assert len(expected) == 50
+            assert len(expected) == 10
             links = re.findall(
                 r'<a href="([^"]+)" lang="(?:en|zh-Hans|zh-Hant)" hreflang=',
                 response.text,
@@ -293,7 +344,7 @@ class TestMaintenanceHttpControls(unittest.TestCase):
         )
         response = self.client.get(original)
         assert response.status_code == 200
-        assert "Game 051" in response.text
+        assert "Game 011" in response.text
         assert Interface("en").text("backlog.clear") in response.text
         for locale, tag in (
             ("en", "en"),
@@ -318,19 +369,19 @@ class TestMaintenanceHttpControls(unittest.TestCase):
                 assert changed.status_code == 200
                 assert changed.headers["Content-Language"] == tag
                 assert f'<html lang="{tag}">' in changed.text
-                assert "Game 051" in changed.text
-                assert "Game 050" not in changed.text
-                assert ">51</td>" in changed.text
+                assert "Game 011" in changed.text
+                assert "Game 010" not in changed.text
+                assert ">11</td>" in changed.text
                 next_link = re.search(
-                    r'<a href="([^"]+)" rel="next">',
+                    r'<a[^>]+href="([^"]+)" rel="next">',
                     changed.text,
                 )
                 assert next_link is not None
                 next_page = self.client.get(unescape(next_link[1]))
                 assert next_page.status_code == 200
                 assert next_page.headers["Content-Language"] == tag
-                assert "Game 101" in next_page.text
-                assert "Game 100" not in next_page.text
+                assert "Game 021" in next_page.text
+                assert "Game 020" not in next_page.text
 
     def test_unknown_empty_and_malformed_filters_over_http(self) -> None:
         """Accept empty filters and reject malformed input."""

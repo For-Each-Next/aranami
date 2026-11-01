@@ -38,8 +38,8 @@ class TestHubDispatch(TestCase):
     """Share one disposable source cycle between both outputs."""
 
     @staticmethod
-    def test_hourly_history_only_archives_in_a_fresh_source_cycle() -> None:
-        """Archive current members without regenerating drafts."""
+    def test_hourly_recognition_uses_a_fresh_source_cycle() -> None:
+        """Retain project evidence without regenerating drafts."""
         stamp = dt.datetime(2026, 10, 31, 13, tzinfo=dt.UTC)
         clock = Mock(UTC=dt.UTC)
         clock.datetime.now.return_value = stamp
@@ -67,7 +67,9 @@ class TestHubDispatch(TestCase):
                 Synthetic recorded events without writing files.
             """
             assert now is stamp
-            assert path == Path("reports/newsletter-history-v1.parquet")
+            assert path == Path(
+                "reports/data/articles/history.parquet",
+            )
             assert observed.equals(members)
             assert read_membership("zhwiki", "电子游戏", fetch).equals(members)
             return pl.DataFrame({"kind": ["dyk", "news"]})
@@ -85,6 +87,14 @@ class TestHubDispatch(TestCase):
                 "collect_article_history",
                 side_effect=collect,
             ) as archive,
+            patch.object(
+                hub,
+                "enrich_authorship",
+                side_effect=lambda events, _site, **_options: events,
+            ) as authorship,
+            patch.object(hub, "enrich_milestones") as recognition,
+            patch.object(hub, "sync_current_assessments") as assessments,
+            patch.object(hub, "reconcile_scope") as scope,
             patch.object(hub, "refresh_newsletter") as newsletter,
             patch.object(hub, "refresh_website") as website,
             patch.object(hub._LOGGER, "info") as logged,
@@ -97,9 +107,19 @@ class TestHubDispatch(TestCase):
             query.call_args_list == [call(site.return_value, "电子游戏")] * 2
         )
         assert archive.call_count == 2  # ruff: ignore[magic-value-comparison]
+        assert authorship.call_count == recognition.call_count == 2  # ruff: ignore[magic-value-comparison]
+        assert assessments.call_count == 2  # ruff: ignore[magic-value-comparison]
+        assert authorship.call_args.kwargs == {"max_requests": 10}
+        assert recognition.call_args.kwargs == {"max_requests": 10}
+        assert assessments.call_args.args[0].equals(members)
+        assert assessments.call_args.args[1] == hub.MILESTONES_PATH
+        assert assessments.call_args.kwargs == {"observed_at": stamp}
+        assert scope.call_args.args[0].equals(members)
+        assert scope.call_args.args[1] == hub.MILESTONES_PATH.parent
+        assert scope.call_args.kwargs == {"observed_at": stamp}
         clock.datetime.now.assert_called_with(dt.UTC)
         logged.assert_called_with(
-            "Hourly article-history scan retained %d project events.",
+            "Hourly recognition scan retained %d project events.",
             2,
         )
         newsletter.assert_not_called()
@@ -378,6 +398,7 @@ class TestHubLifecycle(TestCase):
         assert handlers == {
             signal.SIGINT: signal.SIG_DFL,
             signal.SIGTERM: signal.SIG_DFL,
+            signal.SIGUSR1: signal.SIG_DFL,
         }
 
     def test_http_failure_finishes_jobs_and_releases_ownership(self) -> None:

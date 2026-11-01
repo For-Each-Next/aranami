@@ -159,6 +159,28 @@ class TestAssessmentChanges(TestCase):
             == "FA"
         )
 
+    @staticmethod
+    def test_compact_assessments_compare_without_titles() -> None:
+        """Compare stable IDs and grades before resolving names."""
+        previous = _members(
+            (1, "Removed", None, None),
+            (2, "Same", "C", "Low"),
+            (3, "Unchanged", "B", "High"),
+        ).drop("title")
+        current = _members(
+            (2, "Renamed", "B", "High"),
+            (3, "Unchanged", "B", "High"),
+            (4, "Added", None, None),
+        ).drop("title")
+        changes = source.compare_assessments(previous, current)
+        assert dict(changes.select("page_id", "kind").iter_rows()) == {
+            1: "removed",
+            2: "reassessed",
+            4: "added",
+        }
+        assert changes["title"].null_count() == changes.height
+        assert changes["old_title"].null_count() == changes.height
+
 
 class _AssessmentLogFixture(TestCase):
     """Prepare isolated bundles and offline wiki observations."""
@@ -292,7 +314,8 @@ class TestAssessmentLogEmptyDays(_AssessmentLogFixture):
         rendered = update_text(_TEXT, prepared)
         assert "=== 2026年10月25日 ===\n\n" in rendered
         assert (
-            "'''总条目'''1篇。乙级条目1篇。高重要度1篇。\n\n無變更" in rendered
+            "'''條目頁1篇'''：\n* '''乙级'''条目1篇。\n"
+            "* '''高重要度'''1篇。\n\n無變更" in rendered
         )
         assert "2026年10月24日" not in rendered
         assert "====" not in rendered
@@ -781,14 +804,15 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         prepared = self._prepare(members)
         rendered = update_text(_TEXT, prepared)
         assert (
-            "'''总条目'''1,241篇。典范级条目1,234篇、列表2篇，"
-            "优良级条目1篇，乙上级条目1篇，乙级条目1篇、列表1篇，未评级1篇。"
-            "极高重要度1,234篇，高重要度2篇，中重要度1篇，低重要度3篇，未知重要度1篇。"
+            "'''條目頁1,241篇'''：\n* '''典范级'''条目1,234篇、列表2篇，"
+            "'''优良级'''条目1篇，'''乙上级'''条目1篇，'''乙级'''条目1篇、列表1篇，'''未评级'''1篇。\n"
+            "* '''极高重要度'''1,234篇，'''高重要度'''2篇，"
+            "'''中重要度'''1篇，'''低重要度'''3篇，'''未知重要度'''1篇。"
         ) in rendered
         totals = next(
             line
             for line in rendered.splitlines()
-            if line.startswith("'''总条目'''")
+            if line.startswith("'''條目頁")
         )
         assert "甲级条目" not in totals
         assert "不适用重要度" not in totals
@@ -811,8 +835,11 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         rendered = update_text(_TEXT, second)
         older = rendered[rendered.index("=== 2026年10月25日 ===") :]
         newer = rendered[: rendered.index("=== 2026年10月25日 ===")]
-        assert "'''总条目'''2篇。乙级条目1篇，丙级条目1篇。" in older
-        assert "'''总条目'''1篇。乙级条目1篇。" in newer
+        assert (
+            "'''條目頁2篇'''：\n* '''乙级'''条目1篇，'''丙级'''条目1篇。"
+            in older
+        )
+        assert "'''條目頁1篇'''：\n* '''乙级'''条目1篇。" in newer
         self._retain(second, rendered, 3)
         retry = self._prepare(
             seed,
@@ -856,7 +883,7 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         groups = ("重命名", "變更評級", "新增評級", "移除評級")
         positions = [rendered.index(f"==== {group} ====") for group in groups]
         assert positions == sorted(positions)
-        assert "=== 2026年10月24日 ===\n\n'''总条目'''2篇。" in rendered
+        assert "=== 2026年10月24日 ===\n\n'''條目頁2篇'''：" in rendered
         for group in groups:
             assert f"==== {group} ====\n\n* " in rendered
         assert "。\n\n==== 變更評級 ====" in rendered
@@ -1155,3 +1182,254 @@ class TestAssessmentLogJob(_AssessmentLogFixture):
         assert context.edits[0].summary.endswith(
             "([[toolforge:Aranami|Aranami]])",
         )
+
+
+class TestCompactAssessmentLog(_AssessmentLogFixture):
+    """Compare compact datasets before resolving changed page names."""
+
+    @staticmethod
+    def _snapshot(members: pl.DataFrame, instant: dt.datetime) -> Mock:
+        """Build a compact saved dataset with article-only aggregates.
+
+        Args:
+            members: Complete deterministic assessment observations.
+            instant: Actual saved observation time.
+
+        Returns:
+            Snapshot containing no per-page titles or revision columns.
+        """
+        return Mock(
+            tables={
+                "members": members.select(
+                    "page_id",
+                    pl.col("class").alias("pa_class"),
+                    pl.col("importance").alias("pa_importance"),
+                ),
+            },
+            manifest={
+                "calculated_at": instant.isoformat(),
+                "report_key": "data/zhwiki/电子游戏",
+                "generation": "1" * 32,
+                "metadata": {
+                    "article_totals": {
+                        "count": members.height,
+                        "class": members
+                        .group_by("class")
+                        .len(name="count")
+                        .rename({"class": "value"})
+                        .to_dicts(),
+                        "importance": members
+                        .group_by("importance")
+                        .len(name="count")
+                        .rename({"importance": "value"})
+                        .to_dicts(),
+                    },
+                },
+            },
+        )
+
+    def test_resolves_only_changed_ids_after_comparing_saved_datasets(
+        self,
+    ) -> None:
+        """Resolve only the IDs whose assessments changed."""
+        prior = _members(
+            (1, "Former", "C", "Low"),
+            (2, "Old name", "C", "Low"),
+            (3, "Same", "B", "High"),
+        )
+        current = _members(
+            (2, "Current name", "B", "High"),
+            (3, "Same", "B", "High"),
+            (4, "Added", "Stub", None),
+        )
+        metadata = _replica_rows(
+            _members(
+                (1, "Current departed name", "C", "Low"),
+                (2, "Current name", "B", "High"),
+                (4, "Added", "Stub", None),
+            ),
+        ).with_columns(
+            pl.concat_str(pl.lit("Talk:"), pl.col("full_title")).alias(
+                "talk_title",
+            ),
+            (pl.col("page_id") * 10).alias("page_revision"),
+            (pl.col("page_id") * 10 + 1).alias("talk_revision"),
+        )
+        with (
+            patch.object(
+                source,
+                "get_snapshot",
+                return_value=self._snapshot(current, _NOW),
+            ),
+            patch.object(
+                source,
+                "read_previous_snapshot",
+                return_value=self._snapshot(
+                    prior,
+                    _NOW - dt.timedelta(days=1),
+                ),
+            ) as previous,
+            patch.object(
+                source,
+                "page_metadata",
+                return_value=metadata,
+            ) as lookup,
+        ):
+            prepared = source.prepare_data(
+                self.site,
+                "电子游戏",
+                _TITLE,
+                _TEXT,
+                observed_at=_NOW,
+            )
+        previous.assert_called_once()
+        assert set(lookup.call_args.args[1]) == {1, 2, 4}
+        assert prepared.result.tables["source"].columns == [
+            "page_id",
+            "pa_class",
+            "pa_importance",
+        ]
+        assert "title" not in prepared.members.columns
+        assert set(prepared.changes["kind"]) == {
+            "added",
+            "removed",
+            "reassessed",
+        }
+        removed = prepared.changes.filter(pl.col("kind") == "removed")
+        assert removed.item(0, "old_title") == "Current departed name"
+        rendered = update_text(_TEXT, prepared)
+        assert "'''條目頁3篇'''：" in rendered
+        assert "[[:Current name]]" in rendered
+        assert "重命名" not in rendered
+
+    def test_unchanged_or_first_dataset_does_not_resolve_titles(self) -> None:
+        """Avoid name reads for initial and unchanged datasets."""
+        members = _members((1, "Irrelevant name", "C", None))
+        for previous in (
+            None,
+            self._snapshot(members, _NOW - dt.timedelta(days=1)),
+        ):
+            with (
+                self.subTest(previous=previous is not None),
+                patch.object(
+                    source,
+                    "get_snapshot",
+                    return_value=self._snapshot(members, _NOW),
+                ),
+                patch.object(
+                    source,
+                    "read_previous_snapshot",
+                    return_value=previous,
+                ),
+                patch.object(source, "page_metadata") as lookup,
+            ):
+                prepared = source.prepare_data(
+                    self.site,
+                    "电子游戏",
+                    _TITLE,
+                    _TEXT,
+                    observed_at=_NOW,
+                )
+            assert prepared.changes.is_empty()
+            lookup.assert_not_called()
+
+    def test_deleted_ids_keep_stable_links_without_inventing_titles(
+        self,
+    ) -> None:
+        """Keep removed IDs visible when no current page exists."""
+        prior = _members((1, "Deleted", "B", "High"), (2, "Same", "C", None))
+        current = _members((2, "Same", "C", None))
+        metadata = pl.DataFrame(
+            schema={
+                "page_id": pl.Int64,
+                "full_title": pl.String,
+                "page_namespace": pl.Int64,
+                "talk_title": pl.String,
+                "page_revision": pl.Int64,
+                "talk_revision": pl.Int64,
+            },
+        )
+        with (
+            patch.object(
+                source,
+                "get_snapshot",
+                return_value=self._snapshot(current, _NOW),
+            ),
+            patch.object(
+                source,
+                "read_previous_snapshot",
+                return_value=self._snapshot(
+                    prior,
+                    _NOW - dt.timedelta(days=1),
+                ),
+            ),
+            patch.object(source, "page_metadata", return_value=metadata),
+        ):
+            prepared = source.prepare_data(
+                self.site,
+                "电子游戏",
+                _TITLE,
+                _TEXT,
+                observed_at=_NOW,
+            )
+        assert (
+            prepared.changes.item(0, "old_title") == "Special:Redirect/page/1"
+        )
+        assert prepared.changes.item(0, "page_namespace") is None
+
+    def test_failed_compact_proposal_retains_reversed_grade_changes(
+        self,
+    ) -> None:
+        """Keep daily transitions after an unconfirmed publication."""
+        original = _members((1, "Subject", "B", "High"))
+        changed = _members((1, "Subject", "C", "Low"))
+        observed = _NOW
+        with (
+            patch.object(source, "read_previous_snapshot", return_value=None),
+            patch.object(
+                source,
+                "get_snapshot",
+                return_value=self._snapshot(original, observed),
+            ),
+        ):
+            initial = source.prepare_data(
+                self.site,
+                "电子游戏",
+                _TITLE,
+                _TEXT,
+                observed_at=observed,
+            )
+        self._retain(initial, _TEXT, 1)
+        for sequence, members in ((2, changed), (3, original)):
+            observed = _NOW + dt.timedelta(days=sequence - 1)
+            with (
+                patch.object(
+                    source,
+                    "read_previous_snapshot",
+                    return_value=None,
+                ),
+                patch.object(
+                    source,
+                    "get_snapshot",
+                    return_value=self._snapshot(members, observed),
+                ),
+                patch.object(
+                    source,
+                    "page_metadata",
+                    return_value=_replica_rows(members),
+                ),
+            ):
+                prepared = source.prepare_data(
+                    self.site,
+                    "电子游戏",
+                    _TITLE,
+                    _TEXT,
+                    observed_at=observed,
+                )
+            rendered = update_text(_TEXT, prepared)
+            self._retain(prepared, rendered, sequence, state="unconfirmed")
+        assert prepared.pending
+        assert prepared.changes.item(0, "old_class") == "C"
+        assert prepared.changes.item(0, "class") == "B"
+        expected_transitions = 2
+        assert rendered.count("重新評級") == expected_transitions

@@ -19,6 +19,53 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 
+def staging_directory(path: Path) -> Path:
+    """Locate disposable staging space outside durable report folders.
+
+    Runtime report writers share ``cache/report-staging`` on the same
+    filesystem as ``reports`` for atomic file replacement.
+    Custom storage uses a cache beneath its parent directory.
+    Preview report trees resolve to their own preview cache.
+
+    Args:
+        path: Intended durable artifact or report directory.
+
+    Returns:
+        Existing, regular staging directory under the matching cache.
+
+    Raises:
+        OSError: A cache path is unsafe or cannot be created.
+    """
+    existing = next(
+        (
+            parent
+            for parent in (path, *path.parents)
+            if parent.name == "report-staging"
+            and parent.parent.name == "cache"
+        ),
+        None,
+    )
+    if existing is not None:
+        return existing
+    reports = next(
+        (
+            parent
+            for parent in (path, *path.parents)
+            if parent.name == "reports"
+        ),
+        None,
+    )
+    root = reports.parent if reports is not None else path.parent
+    cache = root / "cache"
+    staging = cache / "report-staging"
+    for directory in (cache, staging):
+        if directory.is_symlink():
+            message = "Report staging directories cannot be symlinks."
+            raise OSError(message)
+        directory.mkdir(parents=True, exist_ok=True)
+    return staging
+
+
 @contextmanager
 def open_regular(path: Path, max_bytes: int) -> Iterator[BinaryIO]:
     """Open a regular file through its containing directory descriptor.
