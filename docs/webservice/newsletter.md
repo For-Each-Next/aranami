@@ -8,8 +8,9 @@ opening the tool never fetches source pages or publishes edits.
 ## Prepare an issue
 
 Open **Tools → Newsletter drafts**, or `/newsletter/`. The issue menu selects
-an unpublished issue and loads it in place. The issue submit button stays
-visible after loading. Native form submission works without JavaScript.
+an unpublished issue and loads it in place as soon as its value changes.
+The date picker also applies a selected date automatically. Submit buttons
+appear only when JavaScript is disabled, retaining native GET navigation.
 The default is the next scheduled quarterly issue: in November 2026 it is
 `2027-01`, while an unpublished `2026-10` remains selectable. Saved publication
 metadata removes published and cancelled issues from the menu; a closed next
@@ -63,8 +64,8 @@ option also corrects older saved layouts: without it,
 [Module:Piechart 91397381](https://zh.wikipedia.org/w/index.php?oldid=91397381)
 treats small totals as percentages.
 
-Use **Copy** to copy the draft, **View newsletter page** to read its destination,
-and **Edit newsletter page** to open the wiki editor. The edit link prefills a
+Use **Copy** to copy the draft, **View page** to read its destination,
+and **Edit page** to open the wiki editor. The edit link prefills a
 source-linked summary such as `[[toolforge:aranami/newsletter/|2026年10月30日资料]]`
 using the draft's data date, including the annual feature's own date. Undated
 drafts use `简讯资料`. Both links work without JavaScript and leave copying

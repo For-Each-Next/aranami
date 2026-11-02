@@ -51,7 +51,10 @@ mask, retain their expansion rotation, and use a system color in forced-color
 mode.
 
 `frontend/components.ts` enhances maintenance and newsletter buttons with
-Vue Codex components. Only those pages load the component bundle. Use Codex's
+Vue Codex components. Its maintenance controller updates saved tables in place
+for sorting, categories, title searches, and pagination, preserving URL history
+and keyboard focus. Failed requests fall back to native navigation. Only those
+pages load the component bundle. Use Codex's
 supported package entry and Vue's runtime-only build for these render functions.
 Each component owns its small host; do not mount Vue
 over the page root or a region owned by live-status reconciliation.
@@ -59,13 +62,28 @@ Newsletter issue changes validate the response, unmount the old components,
 replace the saved result, enhance the inserted controls, and initialize copy
 handlers. Stale or invalid responses must not create component instances.
 
-Report dialogs and live status use Codex CSS buttons with native HTML dialog
-behavior. `frontend/live.ts` owns those regions and preserves open dialogs
-and focused controls while reconciling saved status. Native disclosures keep
+Report dialogs compile `CdxDialog` into a shared server-rendered shell with
+Codex headers, close buttons, and scrollable bodies. A checked build adapter
+replaces Vue's backdrop and focus sentinels with native HTML dialog behavior;
+closed dialogs stay hidden and fragment links remain usable without scripts.
+Report tables use Codex's CSS markup, fill the dialog body, and scroll
+horizontally on narrow screens. `frontend/live.ts` owns those regions and
+preserves open dialogs and focused controls while reconciling saved status. Native disclosures keep
 Tools, language selection, and the mobile contents list usable without scripts.
 Report and log tables use row headers; execution stages retain ordered-list
 semantics. Status messages use Codex's separate icon and content regions.
 Download controls remain ordinary links even when styled as Codex buttons.
+About presents Aranami's state, startup, versions, memory, and CPU in one
+Codex-styled table with localized row headers. Live refresh retains its table
+and state IDs; expired resource observations become unavailable while versions
+and the observed startup remain visible.
+
+Maintenance tables use native GET controls in Codex sortable column headers,
+ordering the complete saved category before pagination. A category menu sits
+above the table; title search shares its visible caption header. All controls
+remain usable without scripts. The Codex table pager retains native navigation links
+and a page-size submit button without JavaScript; enhancement submits size
+changes immediately. Sort and pagination arrows use the local Codex SVG sprite.
 
 Keep GET form names, IDs, labels, date bounds, and native validation intact.
 Newsletter wikitext remains literal text. Use existing translated labels for
@@ -80,9 +98,9 @@ source/author attribution and the About-page credit.
 
 ## Dashboard cards
 
-Dashboard, report-status, server-status, and maintenance cards are authored
+Dashboard, report-status, and maintenance cards are authored
 as actual `CdxCard` Vue single-file components in `frontend/cards/`. The local
-build uses Vue's SFC compiler and server renderer to emit four small card templates
+build uses Vue's SFC compiler and server renderer to emit three small card templates
 under `dist/webservice/templates/includes/generated/`. Edit the `.vue`
 sources and rebuild; generated HTML is not an authoring surface.
 
@@ -91,9 +109,16 @@ contains interface icons, numbered medals, and their attribution notices;
 `images/` contains the logo and browser artwork. Templates use content-hashed
 asset URLs, and the build preserves this directory structure in the payload.
 
-The report monitor stacks normal outlined cards with space between them.
-Each card's title names the work, its description shows status and progress,
-and its supporting text gives the execution and next scheduled times.
+The report monitor uses the dashboard's responsive grid of normal outlined
+cards, fitting up to three columns. Each card's title names the work, its
+description shows a status label and progress, and its supporting
+text puts execution and next scheduled times on separate lines. These fields
+inherit Codex's card typography and spacing, including normal-sized progress
+in the description and smaller supporting text. Only failures are highlighted.
+Details links use the site's default link colors and inherit the surrounding
+text size. All cards share the border hover and focus treatment.
+Page and section introductions share the `page-description` helper style;
+timestamps and compact status metadata retain their smaller text.
 
 Each component declares Codex props and named slots. Its custom `<jinja
 name="...">` blocks contain trusted server-side slot templates. The build
@@ -104,6 +129,11 @@ block content remain valid. Linked maintenance cards retain their anchor.
 Unexpected upstream wrapper changes fail the build instead of silently
 changing semantics. No Vue hydration markers, card JavaScript, compiler,
 or Node runtime are included in the source deployment.
+
+Maintenance cards use Codex's leading icon layout with `forceThumbnail` disabled.
+Their 22-pixel icons match the Chinese Wikipedia maintenance templates and are
+served locally with source revisions and attribution in the maintenance icon
+credits. Text-only templates and unknown tasks render without an icon.
 
 `NewsletterDraft.vue` also compiles actual `CdxAccordion` and `CdxTextArea`
 components into a generated partial. Their native `details`, `summary`, heading,
@@ -127,12 +157,17 @@ the same DYK icon. These attributed Commons images link to their source pages.
 Popularity cards show numbered gold, silver, and bronze medals for ranks 1–3
 and matching white medals for 4–6, retaining the ordered list's observed rank values.
 
-Supporting metadata uses semantic lists with CSS middot separators. Review
+Supporting metadata uses semantic lists with CSS pipe separators. Review
 cards lead with the review link and a colon; popularity cards lead with their
 observed date and a colon. Showcase cards put the appearance kind before its
 date. Scheduled markers and date-evidence notes stay beside that date.
 Separators follow their preceding item, so wrapping never adds a separator
 prefix to a new line. Missing ranks and dates remain omitted.
+English dashboard-card dates use `Oct 31` in the current UTC year and retain
+the year otherwise, such as `Oct 31, 2025`. Full ISO dates remain available
+on hover; other date displays keep their existing formats.
+Review ages use compact `mo`, `d`, `h`, and `m` units in
+English, retaining their fixed unit boundaries and full timestamps on hover.
 
 Use a neutral card wrapper when article, review, source, and traffic links
 have different destinations. A whole-card link is appropriate for a

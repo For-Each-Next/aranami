@@ -1,8 +1,7 @@
 """Store disposable revision-keyed DYK dates under the caller's cache.
 
-Cache failures always fall back to rebuilding data. Version the filename
-when date-extraction semantics change so cached parsing cannot survive a
-parser update.
+Cache failures always fall back to rebuilding data. The embedded parser
+contract invalidates revision-keyed dates when extraction rules change.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from pathlib import Path
 
 import polars as pl
 
-from shared.support.cache import write_parquet_cache
+from shared.support.cache import ParquetCache
 
 SCHEMA = {
     "talk_page_id": pl.Int64,
@@ -20,6 +19,12 @@ SCHEMA = {
     "aliases": pl.String,
     "dyk_dates": pl.List(pl.Date),
 }
+_CACHE = ParquetCache(
+    schema=SCHEMA,
+    contract="dyk-talk-dates:2",
+    max_rows=1_000_000,
+    max_bytes=64 * 1024 * 1024,
+)
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -29,16 +34,8 @@ def load() -> pl.DataFrame:
     Returns:
         The cached revision, alias fingerprint, and date list per page.
     """
-    path = Path.cwd() / "cache" / "vg_dyks_talk_pages-v2.parquet"
-    if not path.exists():
-        return pl.DataFrame(schema=SCHEMA)
-    try:
-        frame = pl.read_parquet(path).select(
-            pl.col(name).cast(dtype) for name, dtype in SCHEMA.items()
-        )
-    except OSError, pl.exceptions.PolarsError:
-        _LOGGER.warning("Ignoring unreadable DYK cache: %s", path)
-        return pl.DataFrame(schema=SCHEMA)
+    path = Path.cwd() / "cache" / "vg_dyks_talk_pages.parquet"
+    frame = _CACHE.read(path)
     return frame.drop_nulls().unique(subset="talk_page_id", keep="last")
 
 
@@ -48,11 +45,11 @@ def save(frame: pl.DataFrame) -> None:
     Args:
         frame: Validated cache rows for the current DYK talk pages.
     """
-    path = Path.cwd() / "cache" / "vg_dyks_talk_pages-v2.parquet"
+    path = Path.cwd() / "cache" / "vg_dyks_talk_pages.parquet"
     try:
-        write_parquet_cache(
+        _CACHE.write(
             path,
             frame.select(list(SCHEMA)).sort("talk_page_id"),
         )
-    except OSError, pl.exceptions.PolarsError:
+    except OSError, ValueError, pl.exceptions.PolarsError:
         _LOGGER.warning("Could not write disposable DYK cache: %s", path)

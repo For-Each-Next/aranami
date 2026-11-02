@@ -8,18 +8,23 @@ from __future__ import annotations
 
 # Chinese report typography intentionally uses full-width punctuation.
 # ruff: file-ignore[ambiguous-unicode-character-string]
+from html import escape
 from typing import TYPE_CHECKING
 
 import polars as pl
 from mwparserfromhell.nodes import Heading, Wikilink
 
+from backend.services.project_assessments import summary_totals
 from shared.support.regions import replace_by_tag
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import date
 
-    from backend.services.zhwiki.assessment_log import AssessmentLogData
+    from backend.services.zhwiki.assessment_log import (
+        AssessmentLogData,
+        AssessmentSummaryMigration,
+    )
 
 _SECTIONS = (
     ("renamed", "重命名"),
@@ -91,7 +96,13 @@ _NONARTICLE_NAMES = {
     "na": "不適用",
     "n/a": "不適用",
     "unassessed": "未評",
+    "setindex": "同类索引",
+    "同类索引": "同类索引",
+    "同類索引": "同类索引",
+    "重定向": "重定向",
 }
+_COUNT_SCHEMA = {"value": pl.String, "count": pl.Int64}
+_SUMMARY_MARKER = "aranami-assessment-totals:v2"
 _SUMMARY_QUALITY = (
     ("典范级", ("fa", "典范", "典範"), ("fl", "特色列表", "典表")),
     ("优良级", ("ga", "优良", "優良"), ()),
@@ -117,6 +128,52 @@ _SUMMARY_IMPORTANCE = (
         ("unknown", "unassessed", "未知", "未评", "未評", "未评级", "未評級"),
     ),
 )
+_QUALITY_ORDER = (
+    "典范",
+    "特色列表",
+    "甲",
+    "甲级列表",
+    "优良",
+    "乙上",
+    "乙",
+    "乙级列表",
+    "丙",
+    "丙级列表",
+    "丁",
+    "初",
+    "列表",
+    "小作品",
+    "小作品列表",
+    "小小作品",
+    "未评",
+)
+_QUALITY_ALIASES = {
+    alias: ("未评" if label == "未评级" else label.removesuffix("级"))
+    for label, article_aliases, _ in _SUMMARY_QUALITY
+    for alias in article_aliases
+} | {
+    alias: {
+        "典范级": "特色列表",
+        "初级": "列表",
+        "小作品级": "小作品列表",
+    }.get(
+        label,
+        f"{label}列表",
+    )
+    for label, _, list_aliases in _SUMMARY_QUALITY
+    for alias in list_aliases
+}
+_IMPORTANCE_ORDER = tuple(f"{name}重要度" for name, _ in _SUMMARY_IMPORTANCE)
+_IMPORTANCE_ALIASES = {
+    alias: f"{name}重要度"
+    for name, aliases in _SUMMARY_IMPORTANCE
+    for alias in aliases
+}
+_NONARTICLE_ALIASES = {
+    label: f"{name}级"
+    for alias, name in (_QUALITY_NAMES | _NONARTICLE_NAMES).items()
+    for label in (alias, name)
+} | {"未评": "未评级"}
 
 
 def _summary_counts(
@@ -142,6 +199,7 @@ def _summary_counts(
         pl
         .col(field)
         .fill_null(default)
+        .str.strip_chars()
         .str.to_lowercase()
         .str.replace(rf"[{suffix}]$" if suffix == "级級" else f"{suffix}$", "")
     )
@@ -163,312 +221,289 @@ def _total_inputs(
     data: AssessmentLogData,
     *,
     previous: bool = False,
-) -> tuple[pl.DataFrame, pl.DataFrame, int] | None:
-    """Select article totals without resolving unchanged page names.
-
-    Args:
-        data: Prepared observations and saved aggregate source metadata.
-        previous: Select the preceding observation instead of current.
+) -> dict | None:
+    """Select prepared totals for the current or preceding observation.
 
     Returns:
-        Weighted quality/importance rows and article count, or null
-        when older compact observations contain no article-only totals.
+        Comparable aggregate facts, or null for unobserved membership.
     """
-    totals = (
-        data.previous_totals
-        if previous
-        else data.result.metadata.get("article_totals")
+    return summary_totals(
+        data.previous_source if previous else data.result.tables.get("source"),
+        saved=(
+            data.previous_totals
+            if previous
+            else data.result.metadata.get("article_totals")
+        ),
     )
-    if totals is not None:
-        schema = {"value": pl.String, "count": pl.Int64}
-        return (
-            pl.DataFrame(totals["class"], schema=schema).select(
-                pl.col("value").alias("class"),
-                "count",
-            ),
-            pl.DataFrame(totals["importance"], schema=schema).select(
-                pl.col("value").alias("importance"),
-                "count",
-            ),
-            totals["count"],
-        )
-    source = data.previous_source if previous else data.result.tables["source"]
-    if source is None or "page_namespace" not in source.columns:
+
+
+def _display_counts(
+    entries: list[dict] | None,
+    aliases: Mapping[str, str],
+    default: str,
+    suffix: str,
+) -> dict[str, int] | None:
+    """Translate weighted labels while combining equivalent spellings.
+
+    Returns:
+        Display counts, or null for an unobserved distribution.
+    """
+    if entries is None:
         return None
-    articles = source.filter(pl.col("page_namespace") == 0).select(
-        pl.col("pa_class").str.strip_chars().replace("", None).alias("class"),
-        pl
-        .col("pa_importance")
-        .str.strip_chars()
-        .replace("", None)
-        .alias("importance"),
+    return _summary_counts(
+        pl.DataFrame(entries, schema=_COUNT_SCHEMA),
+        "value",
+        aliases,
+        default,
+        suffix,
     )
-    return articles, articles, articles.height
 
 
-def _delta(current: int, previous: int | None) -> str:
-    """Annotate an observed count change without inventing a baseline.
-
-    Args:
-        current: Count in the current source observation.
-        previous: Comparable prior count, or unknown.
-
-    Returns:
-        Gray signed change suffix, or empty text for unchanged/unknown.
-    """
-    if previous is None or current == previous:
-        return ""
-    return f'<small style="color: gray;">（{current - previous:+,}）</small>'
-
-
-def _count_delta(
-    current: int,
+def _changed_counts(
+    current: Mapping[str, int] | None,
     previous: Mapping[str, int] | None,
-    name: str,
+    order: tuple[str, ...],
 ) -> str:
-    """Compare a named count with a complete prior dimension.
+    """Render nonzero changes, including labels that disappeared.
 
     Returns:
-        A signed suffix, treating absent labels in known totals as zero.
+        Ordered delta phrases, or empty text without comparable facts.
     """
-    return _delta(
-        current,
-        previous.get(name, 0) if previous is not None else None,
+    if current is None or previous is None:
+        return ""
+    labels = (*order, *sorted((current.keys() | previous.keys()) - set(order)))
+    return " · ".join(
+        f"{name}{change:+,}"
+        for name in labels
+        if (change := current.get(name, 0) - previous.get(name, 0))
     )
 
 
-def _quality_totals(
-    quality_rows: pl.DataFrame,
-    previous: pl.DataFrame | None,
-) -> list[str]:
-    """Render article and list counts in quality order.
-
-    Args:
-        quality_rows: Weighted current quality observations.
-        previous: Comparable prior observations, or unknown.
+def _count_change(
+    label: str,
+    current: int | None,
+    previous: int | None,
+    *,
+    details: str = "",
+) -> str:
+    """Render comparable changes without zero or unknown totals.
 
     Returns:
-        Count phrases with signed changes and no zero-count labels.
+        A changed group, including detail changes with a zero net total,
+        or empty text when no comparable change is available.
     """
-    quality_aliases = {
-        alias: f"{label}{kind}"
-        for label, article_aliases, list_aliases in _SUMMARY_QUALITY
-        for kind, values in (("条目", article_aliases), ("列表", list_aliases))
-        for alias in values
-    }
-    quality = _summary_counts(
-        quality_rows,
-        "class",
-        quality_aliases,
-        "未评",
-        "级級",
+    if current is None or previous is None:
+        return ""
+    return _changed_group(label, current - previous, details)
+
+
+def _changed_group(label: str, change: int | None, details: str) -> str:
+    """Render a changed group, omitting empty and unknown groups.
+
+    Returns:
+        A signed group with optional dimension changes, or empty text.
+    """
+    if change is None:
+        return ""
+    if not change and not details:
+        return ""
+    return (
+        label
+        + (f"{change:+,}" if change else "")
+        + (f"（{details}）" if details else "")
     )
-    previous_quality = (
-        _summary_counts(previous, "class", quality_aliases, "未评", "级級")
-        if previous is not None
-        else None
-    )
-    quality_parts = []
-    for label, _, _ in _SUMMARY_QUALITY:
-        article_count = quality.pop(f"{label}条目", 0)
-        list_count = quality.pop(f"{label}列表", 0)
-        parts = []
-        if article_count:
-            name = f"'''{label}'''" + ("" if label == "未评级" else "条目")
-            parts.append(
-                f"{name}{article_count:,}篇"
-                + _count_delta(
-                    article_count,
-                    previous_quality,
-                    f"{label}条目",
-                ),
+
+
+def _migrated_totals(migration: AssessmentSummaryMigration) -> str:
+    """Reformat prepared historical deltas without comparing new facts.
+
+    Returns:
+        The original day's comparable changes and retained full totals.
+    """
+    project = ""
+    parts = []
+    for change in migration.changes:
+        dimensions = (
+            " · ".join(
+                f"{label}{delta:+,}" for label, delta in values if delta
             )
-        if list_count:
-            name = "列表" if article_count else f"'''{label}'''列表"
-            parts.append(
-                f"{name}{list_count:,}篇"
-                + _count_delta(list_count, previous_quality, f"{label}列表"),
-            )
-        if parts:
-            quality_parts.append("、".join(parts))
-    quality_parts.extend(
-        f"{name}{count:,}篇" + _count_delta(count, previous_quality, name)
-        for name, count in sorted(quality.items())
-    )
-    return quality_parts
-
-
-def _importance_totals(
-    importance_rows: pl.DataFrame,
-    previous: pl.DataFrame | None,
-) -> list[str]:
-    """Render importance counts in assessment order.
-
-    Args:
-        importance_rows: Weighted current importance observations.
-        previous: Comparable prior observations, or unknown.
-
-    Returns:
-        Count phrases with signed changes and no zero-count labels.
-    """
-    importance_aliases = {
-        alias: name
-        for name, aliases in _SUMMARY_IMPORTANCE
-        for alias in aliases
-    }
-    importance = _summary_counts(
-        importance_rows,
-        "importance",
-        importance_aliases,
-        "未知",
-        "重要度",
-    )
-    previous_importance = (
-        _summary_counts(
-            previous,
-            "importance",
-            importance_aliases,
-            "未知",
-            "重要度",
+            for values in change.dimensions
         )
-        if previous is not None
+        group = _changed_group(
+            change.label,
+            change.change,
+            " ｜ ".join(filter(None, dimensions)),
+        )
+        if change.label == "专题页面":
+            project = group
+        elif group:
+            parts.append(group)
+    groups = " · ".join(parts)
+    return (
+        project
+        + ("：" if project and groups else "")
+        + groups
+        + f"<!-- {_SUMMARY_MARKER} {migration.totals} -->"
+    )
+
+
+def _project_count(totals: Mapping) -> int | None:
+    """Count project pages excluding actual redirects when known.
+
+    Returns:
+        Project pages, or null for partial legacy totals.
+    """
+    nonarticles = totals.get("nonarticles")
+    return (
+        totals["count"] + nonarticles["count"]
+        if nonarticles is not None
         else None
     )
-    importance_parts = [
-        f"'''{name}重要度'''{count:,}篇"
-        + _count_delta(count, previous_importance, name)
-        for name, _ in _SUMMARY_IMPORTANCE
-        if (count := importance.pop(name, 0))
+
+
+def _totals_comment(
+    totals: Mapping,
+    quality: Mapping[str, int],
+    importance: Mapping[str, int] | None,
+    nonarticles: Mapping[str, int] | None,
+) -> str:
+    """Retain complete current counts in an inert readable HTML comment.
+
+    Returns:
+        Escaped labels and totals, including zeroes and unknowns.
+    """
+    facts = [
+        f"{name}{quality.get(name, 0):,}"
+        for name in (
+            *_QUALITY_ORDER,
+            *sorted(quality.keys() - set(_QUALITY_ORDER)),
+        )
     ]
-    importance_parts.extend(
-        f"'''{name}重要度'''{count:,}篇"
-        + _count_delta(count, previous_importance, name)
-        for name, count in sorted(importance.items())
-    )
-    return importance_parts
+    if importance is None:
+        facts.append("重要度未知")
+    else:
+        facts.extend(
+            f"{name}{importance.get(name, 0):,}"
+            for name in (
+                *_IMPORTANCE_ORDER,
+                *sorted(importance.keys() - set(_IMPORTANCE_ORDER)),
+            )
+        )
+    if nonarticles is not None:
+        facts.extend(
+            f"{name}{count:,}" for name, count in sorted(nonarticles.items())
+        )
+    for name, count in (
+        ("条目", totals["count"]),
+        ("非条目", (totals.get("nonarticles") or {}).get("count")),
+        ("重定向", totals.get("redirects")),
+        ("专题页面", _project_count(totals)),
+    ):
+        facts.append(
+            f"{name}{count:,}" if count is not None else f"{name}未知",
+        )
+    text = escape(" ".join(facts), quote=False).replace("--", "&#45;&#45;")
+    return f"<!-- {_SUMMARY_MARKER} {text} -->"
 
 
 def _totals(data: AssessmentLogData) -> str:
-    """Render current article and list totals in assessment order.
-
-    Args:
-        data: Complete members and their retained source namespaces.
+    """Render one daily delta line with complete totals in a comment.
 
     Returns:
-        Count paragraphs with signed changes and no zero-count labels.
+        Visible changes with no invented baselines, or empty text when
+        the current observation cannot distinguish article membership.
     """
-    inputs = _total_inputs(data)
-    if inputs is None:
+    current = _total_inputs(data)
+    if current is None:
         return ""
-    quality_rows, importance_rows, total_article_count = inputs
-    previous = _total_inputs(data, previous=True)
-    paragraphs = [
-        f"'''條目頁{total_article_count:,}篇'''"
-        + _delta(total_article_count, previous[2] if previous else None)
-        + "：",
-    ]
-    paragraphs.extend(
-        "* " + "，".join(parts) + "。"
-        for parts in (
-            _quality_totals(quality_rows, previous[0] if previous else None),
-            _importance_totals(
-                importance_rows,
-                previous[1] if previous else None,
-            ),
-        )
-        if parts
+    previous = _total_inputs(data, previous=True) or {}
+    quality = _display_counts(
+        current["class"],
+        _QUALITY_ALIASES,
+        "未评",
+        "级級",
     )
-    paragraphs.extend(_nonarticle_totals(data, total_article_count))
-    return "\n".join(paragraphs)
-
-
-def _nonarticle_totals(
-    data: AssessmentLogData,
-    total_article_count: int,
-) -> list[str]:
-    """Render observed nonarticle totals and the redirect exclusion.
-
-    Returns:
-        Separate paragraphs, or none for an older observation.
-    """
-    paragraphs = []
-    totals = data.result.metadata.get("article_totals") or {}
-    previous = data.previous_totals or {}
-    nonarticles = totals.get("nonarticles")
-    if nonarticles is not None:
-        previous_nonarticles = previous.get("nonarticles")
-        previous_count = (
-            previous_nonarticles["count"]
-            if previous_nonarticles is not None
-            else None
-        )
-        previous_classes = (
-            {
-                _nonarticle_label(entry["value"]): entry["count"]
-                for entry in previous_nonarticles["class"]
-            }
-            if previous_nonarticles is not None
-            else {}
-        )
-        parts = []
-        for entry in sorted(
-            nonarticles["class"],
-            key=lambda entry: (
-                str(entry["value"]).casefold()
-                not in {"disambig", "消歧义", "消歧義"},
-                str(entry["value"]),
-            ),
-        ):
-            label = _nonarticle_label(entry["value"])
-            parts.append(
-                f"'''{label}級'''{entry['count']:,}頁"
-                + _delta(
-                    entry["count"],
-                    previous_classes.get(label, 0)
-                    if previous_nonarticles is not None
-                    else None,
+    previous_quality = _display_counts(
+        previous.get("class"),
+        _QUALITY_ALIASES,
+        "未评",
+        "级級",
+    )
+    importance = _display_counts(
+        current["importance"],
+        _IMPORTANCE_ALIASES,
+        "未知重要度",
+        "重要度",
+    )
+    previous_importance = _display_counts(
+        previous.get("importance"),
+        _IMPORTANCE_ALIASES,
+        "未知重要度",
+        "重要度",
+    )
+    details = " ｜ ".join(
+        filter(
+            None,
+            (
+                _changed_counts(quality, previous_quality, _QUALITY_ORDER),
+                _changed_counts(
+                    importance,
+                    previous_importance,
+                    _IMPORTANCE_ORDER,
                 ),
-            )
-        project_count = total_article_count + nonarticles["count"]
-        previous_project = (
-            previous["count"] + previous_count
-            if previous_count is not None
-            else None
-        )
-        paragraphs.extend((
-            "",
-            f"'''非條目{nonarticles['count']:,}頁'''"
-            + _delta(nonarticles["count"], previous_count)
-            + "："
-            + ("，".join(parts) if parts else "0頁")
-            + "。",
-            "",
-            f"'''專題共計{project_count:,}頁'''"
-            + _delta(project_count, previous_project)
-            + "。"
-            + (
-                f"（不含{totals['redirects']:,}重定向頁"
-                + _delta(totals["redirects"], previous.get("redirects"))
-                + "）"
-                if totals.get("redirects") is not None
-                else ""
             ),
-        ))
-    return paragraphs
-
-
-def _nonarticle_label(value: object) -> str:
-    """Normalize a nonarticle quality label for display and comparison.
-
-    Returns:
-        A Traditional Chinese grade without its suffix.
-    """
-    raw = str(value or "unassessed").removesuffix("級").removesuffix("级")
+        ),
+    )
+    parts = [
+        _count_change(
+            "条目",
+            current["count"],
+            previous.get("count"),
+            details=details,
+        ),
+    ]
+    nonarticles = current.get("nonarticles")
+    previous_nonarticles = previous.get("nonarticles") or {}
+    classes = _display_counts(
+        nonarticles["class"] if nonarticles is not None else None,
+        _NONARTICLE_ALIASES,
+        "未评级",
+        "级級",
+    )
+    if nonarticles is not None:
+        previous_classes = _display_counts(
+            previous_nonarticles.get("class"),
+            _NONARTICLE_ALIASES,
+            "未评级",
+            "级級",
+        )
+        details = _changed_counts(classes, previous_classes, ())
+        label = _count_change(
+            "非条目",
+            nonarticles["count"],
+            previous_nonarticles.get("count"),
+            details=details,
+        )
+        parts.append(label)
+    if current.get("redirects") is not None:
+        parts.append(
+            _count_change(
+                "重定向",
+                current["redirects"],
+                previous.get("redirects"),
+            ),
+        )
+    project = _count_change(
+        "专题页面",
+        _project_count(current),
+        _project_count(previous),
+    )
+    groups = " · ".join(filter(None, parts))
     return (
-        _NONARTICLE_NAMES
-        .get(raw.casefold(), _QUALITY_NAMES.get(raw.casefold(), raw))
-        .removesuffix("級")
-        .removesuffix("级")
+        project
+        + ("：" if project and groups else "")
+        + groups
+        + _totals_comment(current, quality or {}, importance, classes)
     )
 
 
@@ -607,6 +642,36 @@ def _render_days(
     return "".join(parts)
 
 
+def _repaired_days(data: AssessmentLogData) -> dict[date, dict[str, str]]:
+    """Copy history and repair verified generated removal links.
+
+    Args:
+        data: Retained bodies and exact lines identified by the backend.
+
+    Returns:
+        Dated groups with available subject and discussion links.
+    """
+    days = {day: dict(sections) for day, sections in data.days.items()}
+    replacements = {
+        original: _change_line(
+            {"kind": "removed", "title": None, "old_title": title},
+            (talk, None, None),
+        )
+        for original, (title, talk) in data.removed_links.items()
+    }
+    for sections in days.values():
+        if "移除評級" not in sections:
+            continue
+        repaired = []
+        for line in sections["移除評級"].splitlines(keepends=True):
+            content = line.rstrip("\r\n")
+            repaired.append(
+                replacements.get(content, content) + line[len(content) :],
+            )
+        sections["移除評級"] = "".join(repaired)
+    return days
+
+
 def update_text(original_text: str, data: AssessmentLogData) -> str:
     """Append observed changes and retain selected daily records.
 
@@ -620,15 +685,34 @@ def update_text(original_text: str, data: AssessmentLogData) -> str:
     """
     observation_date = data.report_date
     new_unchanged_day = data.unchanged and observation_date not in data.days
-    if (
-        data.changes.is_empty()
-        and not data.pruned
-        and not data.pending
-        and not new_unchanged_day
-    ):
+    existing_summary = data.summaries.get(observation_date, "")
+    migration = data.summary_migrations.get(observation_date)
+    summary = (
+        (_migrated_totals(migration) if migration else _totals(data))
+        if observation_date in data.days
+        and f"<!-- {_SUMMARY_MARKER} " not in existing_summary
+        and (
+            migration is not None
+            or not existing_summary.startswith("专题页面")
+        )
+        else ""
+    )
+    summary_changed = bool(summary) and (
+        data.summaries.get(observation_date) != summary
+    )
+    if not any((
+        not data.changes.is_empty(),
+        data.pruned,
+        data.pending,
+        new_unchanged_day,
+        data.removed_links,
+        summary_changed,
+    )):
         return original_text
-    days = {day: dict(sections) for day, sections in data.days.items()}
+    days = _repaired_days(data)
     summaries = dict(data.summaries)
+    if summary_changed:
+        summaries[observation_date] = summary
     if new_unchanged_day:
         days[observation_date] = {}
     if not data.changes.is_empty():

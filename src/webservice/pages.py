@@ -13,6 +13,7 @@ import operator
 import secrets
 from functools import lru_cache
 from hashlib import sha256
+from itertools import chain
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
@@ -88,6 +89,46 @@ _HIGHLIGHT_ICONS = {
     "featured": ("featured.svg", "Cscr-featured.svg"),
     "good": ("good.svg", "Symbol_support_vote.svg"),
     "dyk": ("dyk.svg", "Symbol_question.svg"),
+}
+# Chinese Wikipedia template images; provenance is in the credits.
+_MAINTENANCE_ICONS = {
+    "afd": "icono-aviso-borrar.svg",
+    "csd": "icono-archivo-borrar.png",
+    "copyvio": "copyright-problem.svg",
+    "notability": "ambox-important.svg",
+    "unreferenced": "tango-nosources.svg",
+    "references": "tango-nosources.svg",
+    "footnotes": "text-document-with-red-question-mark.svg",
+    "unreliable": "text-document-with-red-question-mark.svg",
+    "blp_sources": "ambox-important.svg",
+    "accuracy": "system-search.svg",
+    "neutrality": "emblem-scales.svg",
+    "update": "ambox-outdated-serious.svg",
+    "original_research": "ambox-important.svg",
+    "fiction": "ambox-important.svg",
+    "globalize": "ambox-globe-content.svg",
+    "trivia": "edit-clear.svg",
+    "expand_english": "translation-to-zh-arrow.svg",
+    "expand_japanese": "translation-to-zh-arrow.svg",
+    "translation": "translation-to-zh-arrow.svg",
+    "proofread_translation": "translation-to-zh-arrow.svg",
+    "orphan": "arrows-orphan.svg",
+    "underlinked": "ambox-wikify.svg",
+    "expand": "antistub.svg",
+    "lead": "edit-clear.svg",
+    "merge": "merge-arrows.svg",
+    "split": "split-arrows.svg",
+    "copyedit": "ambox-spelling.svg",
+    "rewrite": "ambox-rewrite.svg",
+    "style": "edit-clear.svg",
+    "weasel": "ambox-important.svg",
+    "advert": "ambox-pr-orange.svg",
+    "selfpromotion": "ambox-important.svg",
+    "coi": "ambox-scales.svg",
+    "cleanup": "edit-clear.svg",
+    "wikify": "ambox-wikify.svg",
+    "uncategorized": "wiki-letter-w.svg",
+    "expert": "ambox-important.svg",
 }
 _HOUR_SECONDS = 3600
 _DAY_SECONDS = 24 * _HOUR_SECONDS
@@ -421,6 +462,7 @@ class _Page:
         item: Record,
         pageviews: Record | None,
         section: str,
+        now: dt.datetime,
     ) -> Record:
         """Prepare date, appearance, and popularity observations.
 
@@ -428,6 +470,7 @@ class _Page:
             item: Saved observations, including the appearance kind.
             pageviews: Observed metadata for the popularity section.
             section: Source section for DYK or showcase appearances.
+            now: Dashboard clock used to identify the current year.
 
         Returns:
             An article card preserving each observation's meaning.
@@ -461,7 +504,11 @@ class _Page:
                 rank=item["rank"],
                 date={
                     "value": pageviews["date"],
-                    "label": self.interface.date(pageviews["date"]),
+                    "label": self.interface.date(
+                        pageviews["date"],
+                        compact=True,
+                        reference_year=now.year,
+                    ),
                 },
                 date_separator=": "
                 if self.interface.locale == "en"
@@ -503,7 +550,14 @@ class _Page:
             "observed": "date.observed",
         }.get(item.get("date_kind"))
         card.update(
-            date={"value": date, "label": self.interface.date(date)}
+            date={
+                "value": date,
+                "label": self.interface.date(
+                    date,
+                    compact=True,
+                    reference_year=now.year,
+                ),
+            }
             if date is not None
             else None,
             scheduled=(
@@ -625,8 +679,12 @@ class _Page:
             ),
         }
 
-    def highlights(self, snapshot: Record) -> list[Record]:
+    def highlights(self, snapshot: Record, now: dt.datetime) -> list[Record]:
         """Prepare visible article sections, omitting confirmed empties.
+
+        Args:
+            snapshot: Saved dashboard observations.
+            now: Dashboard clock used to label current-year dates.
 
         Returns:
             Ordered sections retaining unavailable and empty states.
@@ -656,7 +714,7 @@ class _Page:
                 if not section["items"]
                 else None,
                 "cards": [
-                    self.article_card(item, views, key)
+                    self.article_card(item, views, key, now)
                     for item in section["items"] or []
                 ],
                 "updated": self.source_updated(updated),
@@ -693,6 +751,12 @@ class _Page:
                                 if group["count"] == 1
                                 else "backlog.count",
                                 count=f"{group['count']:,}",
+                            ),
+                            "image": (
+                                "assets/icons/maintenance/"
+                                + _MAINTENANCE_ICONS[group["key"]]
+                                if group["key"] in _MAINTENANCE_ICONS
+                                else None
                             ),
                             "url": local_url(
                                 "/maintenance/",
@@ -778,6 +842,49 @@ class _Page:
             else None,
         }
 
+    def _latest_update_label(
+        self,
+        identifier: str,
+        pages: list[Record],
+        history: Record,
+    ) -> str:
+        """Describe the last confirmed save without using a check time.
+
+        Args:
+            identifier: Routine whose live outcomes are displayed.
+            pages: Live destination observations for this routine.
+            history: Validated retained invocations keyed by identity.
+
+        Returns:
+            Localized update time or the generic updated label.
+        """
+        updated = max(
+            filter(
+                None,
+                chain(
+                    (timestamp(page.get("last_updated_at")) for page in pages),
+                    (
+                        timestamp(stage["time"])
+                        for run in history.values()
+                        if run["routine"] == identifier
+                        for stage in run["stages"]
+                        if stage["kind"] == "saved"
+                    ),
+                ),
+            ),
+            default=None,
+        )
+        return (
+            self.text(
+                "state.UpdatedAt",
+                time=self.interface.date(updated.date().isoformat())
+                + (" " if self.interface.locale == "en" else "")
+                + updated.strftime("%H:%M"),
+            )
+            if updated is not None
+            else self.text("state.Updated")
+        )
+
     def routine_rows(
         self,
         status: Record,
@@ -792,6 +899,11 @@ class _Page:
         """
         events = (status.get("routines") or {}).get("routines", {})
         records = (status.get("reports") or {}).get("reports", {}).values()
+        history = {
+            run["run_id"]: run
+            for run in (status.get("history") or {}).get("runs", [])
+            if run.get("dry") is not True
+        }
         rows = []
         for identifier, definition in definitions.items():
             name = self.text(f"routine.{identifier}")
@@ -837,6 +949,11 @@ class _Page:
                 ),
                 key=operator.itemgetter("title"),
             )
+            if not completed_daily and (event or {}).get("status") in {
+                "updated",
+                "no_update",
+            }:
+                label = self._latest_update_label(identifier, pages, history)
             rows.append({
                 "identifier": identifier,
                 "icon": _REPORT_ICONS.get(identifier, "article"),
@@ -849,6 +966,10 @@ class _Page:
                 "progress": self._progress_note(progress),
                 "fallback": fallback,
                 "observed": _time(observed),
+                "history_popup_id": f"job-history-{event['run_id']}"
+                if history.get((event or {}).get("run_id"), {}).get("routine")
+                == identifier
+                else None,
                 "relative": self.relative_note(observed, now),
                 "next_run": next_run(schedule, identifier, self.interface),
                 "upcoming": self.relative_note(upcoming, now),
@@ -881,7 +1002,17 @@ class _Page:
             if timestamp(observed_start) is not None
             else None
         )
+        events = (status.get("routines") or {}).get("routines", {})
         return {
+            **history_context(
+                self.interface,
+                status.get("history") or {},
+                required_run_ids={
+                    event["run_id"]
+                    for identifier, event in events.items()
+                    if identifier in definitions and event.get("run_id")
+                },
+            ),
             "clock": self.clock(schedule, now),
             "routines": self.routine_rows(status, definitions, schedule, now),
             "footer": {
@@ -943,7 +1074,7 @@ class _Page:
         """Prepare version details and fresh resource observations.
 
         Returns:
-            Card values with unknowns for missing resource facts.
+            Table rows with unknowns for missing resource facts.
         """
         runtime = (status.get("schedule") or {}).get("runtime") or {}
         unknown = self.text("ops.unavailable")
@@ -966,46 +1097,24 @@ class _Page:
             else self.text("server.cpu_cores_unknown")
         )
         separator = " " if self.interface.locale == "en" else ""
-        groups = (
+        rows = (
+            ("web_version", version, False),
             (
-                "application",
-                (
-                    ("web_version", version, False),
-                    (
-                        "hub_version",
-                        runtime.get("aranami_version") or unknown,
-                        False,
-                    ),
-                ),
+                "hub_version",
+                runtime.get("aranami_version") or unknown,
+                False,
             ),
-            (
-                "memory",
-                (("memory", f"{used_memory} / {allocated_memory}", True),),
-            ),
-            (
-                "cpu",
-                (("cpu", f"{cpu_use}{separator}{cpu_cores}", True),),
-            ),
+            ("memory", f"{used_memory} / {allocated_memory}", True),
+            ("cpu", f"{cpu_use}{separator}{cpu_cores}", True),
         )
         return [
             {
-                "key": group,
-                "label": self.text(
-                    "server.group.application"
-                    if group == "application"
-                    else f"server.{group}",
-                ),
-                "rows": [
-                    {
-                        "label": self.text(f"server.{key}"),
-                        "value": value,
-                        "fresh": usage and fresh,
-                        "stale": unknown if usage else None,
-                    }
-                    for key, value, usage in rows
-                ],
+                "label": self.text(f"server.{key}"),
+                "value": value,
+                "fresh": usage and fresh,
+                "stale": unknown if usage else None,
             }
-            for group, rows in groups
+            for key, value, usage in rows
         ]
 
     def worklist_card(
@@ -1068,6 +1177,7 @@ def render_dashboard(  # ruff: ignore[too-many-arguments]
     Returns:
         Complete escaped HTML document, including unavailable states.
     """
+    now = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
     page = _Page(locale)
     context = page.context(page.text("page.heading"), live=True)
     context["navigation"] = navigation
@@ -1075,7 +1185,7 @@ def render_dashboard(  # ruff: ignore[too-many-arguments]
         page.live_status(
             status or {},
             config or {},
-            now or dt.datetime.now(dt.UTC),
+            now,
         ),
     )
     context.update(
@@ -1084,8 +1194,8 @@ def render_dashboard(  # ruff: ignore[too-many-arguments]
         else page.text("notice.partial")
         if snapshot.get("errors")
         else None,
-        sections=page.highlights(snapshot or {}),
-        reviews=page.reviews(snapshot or {}, now or dt.datetime.now(dt.UTC)),
+        sections=page.highlights(snapshot or {}, now),
+        reviews=page.reviews(snapshot or {}, now),
     )
     return _render("dashboard.html", context)
 
@@ -1232,7 +1342,7 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
         }
     page = _Page(locale)
     heading = page.interface.label(selected.get("label"), selected["category"])
-    context = page.context(heading, live=True)
+    context = page.context(page.text("nav.backlog"), live=True)
     context.update(
         page.live_status(
             status or {},
@@ -1244,9 +1354,13 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
         navigation=navigation,
         count=page.text("backlog.count", count=f"{selected['count']:,}"),
         selection=selection,
+        category_heading=heading,
         task_choices=[
             {
-                "value": key,
+                "url": local_url(
+                    "/maintenance/",
+                    **{**selection, "task": key, "page": "1"},
+                ),
                 "label": page.interface.label(
                     group.get("label"),
                     group["category"],
@@ -1255,38 +1369,6 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
             }
             for key, group in groups.items()
         ],
-        assessment_choices={
-            control: [
-                {
-                    "value": code,
-                    "label": page.text(f"backlog.grade.{dimension}.{code}"),
-                    "current": code == selection.get(control),
-                }
-                for code in codes
-            ]
-            for control, dimension, codes in (
-                (
-                    "quality",
-                    "class",
-                    (
-                        "FA",
-                        "A",
-                        "GA",
-                        "Bplus",
-                        "B",
-                        "C",
-                        "Start",
-                        "Stub",
-                        "Unassessed",
-                    ),
-                ),
-                (
-                    "importance",
-                    "importance",
-                    ("Top", "High", "Mid", "Low", "Unknown"),
-                ),
-            )
-        },
         clear_url=local_url(
             "/maintenance/",
             task=selection["task"],
@@ -1302,32 +1384,33 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
             {
                 "label": page.text(key),
                 "value": sort,
-                "current": sort == selection["sort"],
+                "current": selection["order"]
+                if sort == selection["sort"]
+                else None,
+                "order": ("desc" if selection["order"] == "asc" else "asc")
+                if sort == selection["sort"]
+                else "desc"
+                if sort in {"class", "importance"}
+                else "asc",
             }
             for sort, key in (
                 ("title", "backlog.sort.title"),
                 ("class", "backlog.sort.class"),
                 ("importance", "backlog.column.importance"),
                 ("oldest", "backlog.sort.time"),
-                ("random", "backlog.sort.random"),
-                ("size", "backlog.sort.size"),
             )
-        ],
-        direction_choices=[
-            {
-                "value": order,
-                "label": page.text(
-                    f"backlog.direction.{order}",
-                ),
-                "current": order == selection["order"],
-            }
-            for order in ("asc", "desc")
         ],
         cards=[
             page.worklist_card(item, groups, selection["task"])
             for item in portion["items"]
         ],
         start=portion["offset"] + 1,
+        first=local_url(
+            "/maintenance/",
+            **{**selection, "page": 1},
+        )
+        if portion["page"] > 1
+        else None,
         previous=local_url(
             "/maintenance/",
             **{**selection, "page": portion["page"] - 1},
@@ -1337,6 +1420,12 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
         following=local_url(
             "/maintenance/",
             **{**selection, "page": portion["page"] + 1},
+        )
+        if portion["page"] < portion["pages"]
+        else None,
+        last=local_url(
+            "/maintenance/",
+            **{**selection, "page": portion["pages"]},
         )
         if portion["page"] < portion["pages"]
         else None,
@@ -1411,6 +1500,12 @@ def render_newsletter(  # ruff: ignore[too-many-arguments]
     dates = sorted(history.get("dates") or [])
     data_through = history.get("selected_date") or value.get("data_through")
     context.update(
+        introduction=escape(page.text("newsletter.intro")).format(
+            newsletter=wiki_link(
+                title_url("WikiProject:电子游戏/简讯"),
+                page.text("newsletter.name"),
+            ),
+        ),
         navigation=navigation,
         available=value["available"],
         locale=page.interface.locale,
@@ -1579,10 +1674,12 @@ def render_reports(  # ruff: ignore[too-many-arguments]
     page = _Page(locale)
     context = page.context(page.text("reports.heading"), live=True)
     context.update(navigation=navigation)
-    context.update(history_context(page.interface, data))
     context.update(
         page.live_status(
-            status or {},
+            {
+                **(status or {}),
+                "history": (status or {}).get("history") or data,
+            },
             config or {},
             now or dt.datetime.now(dt.UTC),
         ),

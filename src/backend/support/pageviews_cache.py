@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, cast
 
 import polars as pl
 
-from shared.support.cache import write_parquet_cache
+from shared.support.cache import ParquetCache
 
 if TYPE_CHECKING:
     import datetime as dt
@@ -31,6 +31,12 @@ SCHEMA = {
     "coverage_start": pl.Date,
     "coverage_stop": pl.Date,
 }
+_CACHE = ParquetCache(
+    schema=SCHEMA,
+    contract="pageviews-observations:1",
+    max_rows=20_000_000,
+    max_bytes=1024 * 1024 * 1024,
+)
 
 
 def _valid_snapshot(frame: pl.DataFrame) -> bool:
@@ -42,8 +48,6 @@ def _valid_snapshot(frame: pl.DataFrame) -> bool:
     Returns:
         Whether every article has consistent coverage and daily rows.
     """
-    if frame.schema != SCHEMA:
-        return False
     invalid = frame.filter(
         pl.col("page").is_null()
         | (pl.col("page").str.len_chars() == 0)
@@ -83,15 +87,10 @@ def _read_snapshot(path: Path) -> pl.DataFrame:
     Returns:
         Valid data, or an empty typed frame for missing or damaged data.
     """
-    try:
-        frame = pl.read_parquet(path)
-        if _valid_snapshot(frame):
-            return frame
-        logger.warning("Ignoring malformed Pageviews cache: %s", path)
-    except FileNotFoundError:
-        pass
-    except OSError, pl.exceptions.PolarsError:
-        logger.warning("Ignoring unreadable Pageviews cache: %s", path)
+    frame = _CACHE.read(path)
+    if _valid_snapshot(frame):
+        return frame
+    logger.warning("Ignoring malformed Pageviews cache: %s", path)
     return pl.DataFrame(schema=SCHEMA)
 
 
@@ -106,8 +105,8 @@ def _write_snapshot(path: Path, frame: pl.DataFrame) -> bool:
         Whether the snapshot was atomically committed.
     """
     try:
-        write_parquet_cache(path, frame)
-    except OSError, pl.exceptions.PolarsError:
+        _CACHE.write(path, frame)
+    except OSError, ValueError, pl.exceptions.PolarsError:
         logger.warning("Could not write Pageviews cache: %s", path)
         return False
     return True
@@ -120,7 +119,7 @@ def _snapshot_path(project: str) -> Path:
         Production cache path for the normalized Wikimedia hostname.
     """
     identity = sha256(project.strip().lower().encode()).hexdigest()[:16]
-    return Path.cwd() / "cache" / f"pageviews-{identity}-v1.parquet"
+    return Path.cwd() / "cache" / f"pageviews-{identity}.parquet"
 
 
 def read_pageviews_snapshot(project: str) -> pl.DataFrame:

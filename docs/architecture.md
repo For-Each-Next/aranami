@@ -133,7 +133,7 @@ The backend persists bounded, atomic status and history snapshots:
 |---|---|
 | `state/routine-status.json` | Routine starts/results, measured durations, confirmed saves, and active progress |
 | `state/schedule-status.json` | Actual next executions, configuration identity, monitor state/session, and optional runtime resources |
-| `state/report-updates.json` | Per-destination attempts, publication outcomes, durations, and confirmed edits |
+| `state/report-updates.json` | Per-destination attempts, publication outcomes, durations, confirmed edits, and retained actual-update timestamps |
 | `state/job-history.json` | Independent report invocations and their observed execution stages |
 
 Older attempts cannot overwrite newer observations. Preview activity never
@@ -145,6 +145,12 @@ diagnostics, with at most sixty-four explicit stages per invocation and a
 duration, and observed data-read, preparation, durable-data, and publication
 boundaries. Trimming intermediate stages preserves start and completion.
 The Reports page shows the newest twenty invocations with stage dialogs.
+Routine cards distinguish the last confirmed update from the latest check and
+next scheduled check. Check timestamps link to their retained invocation's
+execution dialog; daily reports retain their completed report-date label.
+No-change checks never advance the saved actual-update timestamp. Missing
+historical evidence stays unknown, with retained save stages used only when
+they confirm the relevant destination or routine.
 Report-history dialogs consume these saved facts; they never parse logs or
 infer activity from service messages. Invalid saved history stays untouched
 and appears unavailable; history storage failure does not interrupt a job.
@@ -217,8 +223,9 @@ no selected bundle returns none. Related daily files share `YYYYMMDD`
 directories; single daily assessment tables use
 `reports/data/assessments/<site>/<project>/assessments-YYYYMMDD.parquet`.
 Previews use only `dry-run/reports/`. Staging stays in cache storage and
-publication locks in `state/`. Legacy originals remain in durable `backups/report-layout/`; requests and
-normal startup never execute migrations.
+publication locks in `state/`. Preserved originals under
+`backups/report-layout/` remain recovery evidence; retired layout converters
+are no longer part of the runtime.
 
 New generation names use `<family>-YYYYMMDDHHMMSS` in UTC, adding an
 increasing numeric suffix when writes share a second. UUID generations remain
@@ -282,7 +289,7 @@ response or participant annotation. Project review sections use the earliest
 signed discussion across their subsections; appended archived `DYKEntry` vote
 blocks do not establish that review's start or activity.
 
-`review-sources-v1.parquet` caches parsed facts keyed by canonical source title,
+`review-sources.parquet` caches parsed facts keyed by canonical source title,
 review type, and revision ID. Parser versions invalidate old extracted
 observations when parsing contracts change. Each due refresh checks current
 IDs in batches of fifty and downloads only changed exact revisions, including
@@ -364,7 +371,7 @@ as `%20` in these REST requests; underscore-equivalent URLs may yield different
 cached extracts. Renderers escape saved plain text and show linked upstream
 CC BY-SA 4.0 attribution separately from the source-code license.
 
-The title/script-keyed `article-extracts-v2.parquet` cache is shared across a
+The title/script-keyed `article-extracts.parquet` cache is shared across a
 refresh pass. Request each script once per distinct title, not per card.
 Successful/confirmed-empty text lasts 24 hours; failures retain old text and
 wait at least an hour. Bound size and rows, retain UTC source/attempt/use times,
@@ -374,17 +381,25 @@ maintenance data.
 
 Preserve ordering, assessments, source metadata, and all three languages.
 Popularity/DYK show at most six actual rows; other lists render supplied rows
-directly. Display limits do not trim collected data. Maintenance filters titles
-and assessments, then sorts the complete
-matching group before fifty-row pagination, with
-stable page-ID ties and unknown dates/grades last in either direction. Seeded
+directly. Display limits do not trim collected data. Maintenance sorts the
+complete matching group before pagination at 10, 20, or 50 rows, with stable
+title/page-ID ties and unknown dates/grades last in either direction. Quality
+uses the assessment hierarchy, distinguishing article and list grades:
+FA, FL, A, AL, GA, Bplus, B, BL, C, CL, D, Start, Stub, List, SL, Substub,
+Disambig, Unassessed. Seeded
 random order remains stable across pages. Use saved source/category links and
 the verified definitions/evidence in `backend/website/maintenance.json`;
 requests never query wiki sources.
 
-Title search is literal and case-insensitive by default; the optional regular
-expression mode uses Polars' Rust regex engine and validates patterns before
-filtering. Quality and importance share exact, minimum, maximum, and inclusive
+Category navigation sits above the table. Its header contains literal,
+case-insensitive title search beside the current category caption. Sortable
+column headers replace the former assessment, genre, and sorting panel.
+Browser enhancement replaces saved table content without reloading the page,
+preserves URL history, and ignores superseded requests. Native GET controls
+remain available without scripts. Saved URLs retain optional
+regular-expression and assessment filters for compatibility. Regex uses
+Polars' Rust engine and validates patterns before filtering. Quality and
+importance share exact, minimum, maximum, and inclusive
 range comparisons using established assessment ranks. Range endpoints work in
 either order; unranked observations never satisfy a range. Controls and locale
 links retain the full selection through pagination.
@@ -431,9 +446,9 @@ require process replacement.
 Distinguish network, transport, response, clock, and rendering failures in
 bounded browser diagnostics without exposing arbitrary server or error text.
 
-About shows separate Codex cards for Aranami, memory, and CPU usage. Show the
+About shows one flat status table for Aranami, memory, and CPU usage. Show the
 serving application's version separately from the saved hub version, state,
-and startup. Resource cards show measured use and allocation; missing optional
+and startup. Resource rows show measured use and allocation; missing optional
 observations remain unknown. Operating-system, interpreter, architecture, and
 filesystem details stay outside the public panel.
 
@@ -461,8 +476,7 @@ independent retries, and public requests never read that checkpoint.
 
 `reports/data/newsletter/observations/` holds `current.json` and immutable
 prepared JSON generations in `YYYYMMDD` folders. Shared source
-data lives separately in `reports/data/articles/`. Migration preserves
-legacy source files and records completion receipts. Daily observations remain
+data lives separately in `reports/data/articles/`. Daily observations remain
 immutable in `reports/records/newsletter/` as complete independent JSON
 snapshots. No stored wikitext or predecessor is needed to render any selected
 date. January's feature uses a separate annual stream
@@ -490,7 +504,7 @@ shared directory as `history.parquet` and `authorship.parquet`.
 Complete membership observations maintain `scope.parquet`. A page returning
 to the project resets its absence clock. After 365 elapsed UTC days outside
 scope, active milestone, history, and authorship rows may be removed.
-Tombstones prevent delayed writes or migration from restoring removed rows;
+Tombstones prevent delayed writes from restoring removed rows;
 rejoining clears the tombstone. Failed or empty membership reads never
 establish absence. Original daily newsletter archives remain immutable.
 
@@ -502,6 +516,13 @@ without changing eager source-adapter contracts. Python iteration belongs at
 request/parser boundaries or small scalar mappings, not joins or aggregation.
 Disposable tabular caches use Parquet. See the [Polars API][1],
 [Pandas migration guide][2], and repository conventions in [AGENTS.md](../AGENTS.md).
+
+`shared.support.cache.ParquetCache` defines each disposable table's exact
+schema, embedded extraction contract, and row/byte limits. Stable filenames
+do not carry schema versions. Incompatible or damaged files become typed
+cache misses; writes replace only complete bounded files. Dataset owners keep
+freshness, source checks, retention, and semantic validation. See
+[Disposable caches](backend/caching.md) for the API and upgrade behavior.
 
 ## Logs, caches, and dry runs
 
@@ -697,16 +718,20 @@ backfills use `Updated class icons.` and describe older records.
 The assessment log compares daily project assessment snapshots by subject
 page ID. The `00:00:00 UTC` trigger saves
 `reports/data/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet` with
-exactly `page_id`, `pa_class`, and `pa_importance`. The filename is the completed
+`page_id`, `page_title`, `page_namespace`, `pa_class`, `pa_importance`, and
+`page_is_redirect`. The filename is the completed
 UTC date: `assessments-20260201.parquet` is captured at 2026-02-02 00:00 UTC.
 Each date keeps its first complete snapshot, independent of wiki publication;
 retries reuse it. Parquet metadata preserves actual collection times and the scheduled
 midnight boundary separately. Other consumers use the backend's
 `project_assessments.read_snapshot` without starting clients or collecting.
 Previews reuse existing production snapshots or write only preview files.
-Compare compact datasets before looking up current titles and revision
-metadata for changed page IDs. These datasets do not observe rename-only
-events. A missing member is a departure from the set, not proof of deletion.
+Compare datasets by page ID before resolving revision metadata for changed
+members. Retain observed source titles and namespaces for removed-page links;
+legacy three-column files remain readable with identity unknown. Never replace
+historical identity with an invented title. Assessment comparisons do not
+report rename-only events. A missing member is a departure from the set, not
+proof of deletion.
 The first observation seeds a
 baseline without reporting all existing pages as additions. First-time markers
 and evidence-based historical backfill are separate wiki maintenance actions.
@@ -728,13 +753,16 @@ Dates/times describe observations, not inferred edit times. Retain thirty UTC
 report dates by default, configurable with the `assessment-log` range's `days`
 option. A snapshot collected on a UTC date labels the previous day's report;
 keep its actual collection timestamp and immutable source date unchanged.
-Daily introductions summarize mainspace article/list quality and importance
-counts in assessment order, omit zero counts, and survive failed-save recovery.
-Displayed counts show gray signed changes when comparable prior observations
-are known; unchanged or unknown comparisons omit the suffix. Keep prior
-aggregate evidence aligned with observations rather than confirmed wiki saves.
-Article-only counts are retained as aggregate Parquet metadata, without adding
-per-page titles or namespaces to the compact dataset. See
+Daily introductions show only comparable, nonzero changes in mainspace
+article/list quality and importance, in assessment order. Separate those
+dimensions with a full-width `｜`; omit the visible summary when no comparable
+values changed. Preserve complete current counts in a hidden metadata comment.
+Unknown prior observations remain distinct from confirmed zero changes in
+saved facts. Keep prior aggregate evidence aligned with observations rather
+than confirmed wiki saves, and preserve each day's comparison across retries.
+Article-only counts are retained as aggregate Parquet metadata alongside
+per-page identities and redirect flags. Redirects, disambiguation pages, and
+set-index pages do not contribute to article totals. See
 [Saved data and Parquet fields](backend/data-storage.md) for all storage schemas.
 
 Membership snapshots use stable page IDs in Parquet, not wiki output, to track

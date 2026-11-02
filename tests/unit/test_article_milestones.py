@@ -17,7 +17,6 @@ from backend.articles import (
     history_store,
     milestone_store as store,
 )
-from backend.articles.storage import migrate_milestones
 
 
 def events() -> pl.DataFrame:
@@ -251,19 +250,8 @@ class RecognitionStoreTests(TestCase):
         assert saved["sources"].to_list() == [[source]] * 3
         assert store.read_events(self.path).height == 3
 
-    def test_migration_receipt_prevents_legacy_resurrection(self) -> None:
-        """Preserve legacy bytes without replaying migration."""
-        legacy = self.path.with_name("legacy.parquet")
-        store.sync_events(events(), legacy)
-        original = legacy.read_bytes()
-        migrate_milestones(legacy, self.path)
-        pl.DataFrame(schema=store.SCHEMA).write_parquet(self.path)
-        migrate_milestones(legacy, self.path)
-        assert store.load(self.path).is_empty()
-        assert legacy.read_bytes() == original
-
-    def test_old_milestone_schema_requires_explicit_migration(self) -> None:
-        """Require explicit migration and preserve original evidence."""
+    def test_incomplete_milestone_schema_is_rejected(self) -> None:
+        """Reject incomplete records while preserving their bytes."""
         legacy = self.path.with_name("legacy.parquet")
         rows = store.sync_events(events(), legacy)
         rows.drop(
@@ -276,11 +264,6 @@ class RecognitionStoreTests(TestCase):
         original = legacy.read_bytes()
         with self.assertRaises(ValueError):
             store.load(legacy)
-        migrate_milestones(legacy, self.path)
-        restored = store.load(self.path)
-        assert restored.height == rows.height
-        assert restored["event_id"].equals(rows["event_id"])
-        assert restored["updated_at"].equals(rows["updated_at"])
         assert legacy.read_bytes() == original
 
     def test_inventory_keeps_events_erased_from_newer_talk_revision(

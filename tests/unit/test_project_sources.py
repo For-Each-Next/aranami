@@ -609,12 +609,13 @@ class TestProjectStatements(TestCase):
         }
 
     @staticmethod
-    def test_compact_assessments_never_resolve_page_titles() -> None:
-        """Fetch assessment IDs and totals without resolving titles."""
+    def test_assessments_retain_source_titles_without_extra_metadata() -> None:
+        """Fetch page identity without talk or revision joins."""
         site = OfflineSite("zh", "wikipedia")
         name = "Project with ' quotes"
         columns = (
             "page_id",
+            "page_title",
             "page_namespace",
             "page_is_redirect",
             "pa_class",
@@ -625,7 +626,10 @@ class TestProjectStatements(TestCase):
                 "shared.sources.quarry.query._fetch",
                 return_value=(
                     columns,
-                    [(7, 0, 0, "B", None), (8, 14, 0, None, None)],
+                    [
+                        (7, "First", 0, 0, "B", None),
+                        (8, "Second", 14, 0, None, None),
+                    ],
                 ),
             ) as fetch,
             patch.object(projects, "_with_titles") as titles,
@@ -638,11 +642,12 @@ class TestProjectStatements(TestCase):
         assert tuple(statement.selected_columns.keys()) == columns
         assert name in compiled.params.values()
         assert name not in str(compiled)
-        assert "page_title" not in str(compiled)
+        assert "page.page_title" in str(compiled)
         assert "page_latest" not in str(compiled)
         assert "talk" not in str(compiled)
         assert result.schema == {
             "page_id": pl.Int64,
+            "page_title": pl.String,
             "page_namespace": pl.Int64,
             "page_is_redirect": pl.Int64,
             "pa_class": pl.String,
@@ -766,6 +771,50 @@ class TestProjectStatements(TestCase):
         assert result["full_title"].to_list() == ["Current name"]
         assert result["talk_title"].to_list() == ["Talk:Current name"]
         assert result["page_revision"].to_list() == [81]
+
+    @staticmethod
+    def test_deleted_identity_fallback_uses_public_exact_page_records() -> (
+        None
+    ):
+        """Recover names without inventing talk or revision IDs."""
+        site = OfflineSite("zh", "wikipedia")
+        deleted_id = 9
+        current_columns = (
+            "page_id",
+            "page_namespace",
+            "page_title",
+            "page_revision",
+            "talk_page_id",
+            "talk_revision",
+        )
+        deleted_columns = ("page_id", "page_namespace", "page_title")
+        with patch(
+            "shared.sources.quarry.query._fetch",
+            side_effect=[
+                (current_columns, [(7, 0, "Existing", 81, 17, 82)]),
+                (deleted_columns, [(deleted_id, 118, "天河傳說")]),
+            ],
+        ) as fetch:
+            result = projects.page_metadata(
+                site,
+                [7, deleted_id, deleted_id],
+                include_deleted=True,
+            )
+        current_read, deletion_read = fetch.call_args_list
+        assert current_read.args[1].is_select
+        statement = deletion_read.args[1]
+        parameters = statement.compile().params
+        assert parameters["log_page_1"] == deleted_id
+        assert parameters["log_type_1"] == "delete"
+        assert parameters["log_action_1"] == "delete"
+        assert parameters["log_deleted_1"] == 0
+        assert parameters["param_1"] == 1
+        assert "log_timestamp DESC" in str(statement)
+        assert result["full_title"].to_list() == ["Existing", "Draft:天河傳說"]
+        removed = result.filter(pl.col("page_id") == deleted_id)
+        assert removed.item(0, "talk_title") == "Draft talk:天河傳說"
+        for name in ("talk_page_id", "page_revision", "talk_revision"):
+            assert removed.item(0, name) is None
 
     @staticmethod
     def test_new_page_query_uses_utc_bounds_and_content_filters() -> None:

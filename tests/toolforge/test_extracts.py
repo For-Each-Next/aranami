@@ -14,6 +14,7 @@ from unittest.mock import Mock, call, patch
 import polars as pl
 
 from backend.website.extracts import ExtractCache
+from shared.support.cache import ParquetCache
 
 
 class TestArticleExtractCache(TestCase):
@@ -39,6 +40,24 @@ class TestArticleExtractCache(TestCase):
             self.clock + dt.timedelta(hours=hours),
             self.fetch,
         )
+
+    def _write(
+        self,
+        frame: pl.DataFrame,
+        contract: str = "article-extracts:2",
+    ) -> None:
+        """Write typed fixture observations with a parser contract.
+
+        Args:
+            frame: Complete synthetic introduction observations.
+            contract: Parser identity recorded in cache metadata.
+        """
+        ParquetCache(
+            schema=frame.schema,
+            contract=contract,
+            max_rows=10_000,
+            max_bytes=8 * 1024 * 1024,
+        ).write(self.path, frame)
 
     def test_reuses_duplicate_titles_across_reports_and_restarts(self) -> None:
         """Fetch once while preserving repeated appearances."""
@@ -82,9 +101,9 @@ class TestArticleExtractCache(TestCase):
         cache = self._cache()
         saved = cache.enrich(self.records)[0]
         cache.save()
-        pl.read_parquet(self.path).filter(
-            pl.col("variant") != "zh",
-        ).write_parquet(self.path)
+        self._write(
+            pl.read_parquet(self.path).filter(pl.col("variant") != "zh"),
+        )
         self.fetch.reset_mock()
         self.fetch.return_value = "原文游戏與音樂。"
         refreshed = self._cache(hours=1).enrich(self.records)[0]
@@ -118,6 +137,38 @@ class TestArticleExtractCache(TestCase):
             self._cache(hours=0.5).enrich(self.records)[0]["extract"] is None
         )
         assert self.fetch.call_count == 5
+
+    def test_changed_or_absent_contract_refreshes_matching_schema(
+        self,
+    ) -> None:
+        """Refresh intros when an unchanged schema has old semantics."""
+        cache = self._cache()
+        cache.enrich(self.records)
+        cache.save()
+        frame = pl.read_parquet(self.path)
+        self._write(frame, "article-extracts:1")
+        self.fetch.reset_mock()
+        self.fetch.return_value = "Fresh introduction."
+        assert (
+            self._cache().enrich(self.records)[0]["extract"]
+            == "Fresh introduction."
+        )
+        assert self.fetch.call_count == 5
+        frame.write_parquet(self.path)
+        self.fetch.reset_mock()
+        refreshed = self._cache()
+        assert (
+            refreshed.enrich(self.records)[0]["extract"]
+            == "Fresh introduction."
+        )
+        assert self.fetch.call_count == 5
+        refreshed.save()
+        self.fetch.reset_mock()
+        assert (
+            self._cache().enrich(self.records)[0]["extract"]
+            == "Fresh introduction."
+        )
+        self.fetch.assert_not_called()
 
     def test_long_and_markup_bearing_leads_stay_bounded_plain_text(
         self,
@@ -192,10 +243,12 @@ class TestArticleExtractCache(TestCase):
             {"extract": "Bad\x00Text"},
         ):
             with self.subTest(changes=changes):
-                original.with_columns(
-                    pl.lit(value, dtype=original.schema[key]).alias(key)
-                    for key, value in changes.items()
-                ).write_parquet(self.path)
+                self._write(
+                    original.with_columns(
+                        pl.lit(value, dtype=original.schema[key]).alias(key)
+                        for key, value in changes.items()
+                    ),
+                )
                 self.fetch.reset_mock()
                 self._cache().enrich(self.records)
                 assert self.fetch.call_args_list == [

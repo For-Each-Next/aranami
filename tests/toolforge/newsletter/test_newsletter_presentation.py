@@ -44,6 +44,52 @@ def _issue(*, available: bool = True) -> dict[str, object]:
 class NewsletterPresentationTests(unittest.TestCase):
     """Exercise selectable source displays and interface locales."""
 
+    def test_introduction_links_the_newsletter_in_every_locale(self) -> None:
+        """Link the newsletter in the localized introduction."""
+        for locale, before, name, after in (
+            (
+                "en",
+                "Generate page templates for the ",
+                "WikiProject Video Games Newsletter",
+                " and automatically fill in some data.",
+            ),
+            (
+                "zh-hans",
+                "生成",
+                "电子游戏专题简讯",
+                "页面模板\uff0c并自动填写部分资料。",
+            ),
+            (
+                "zh-hant",
+                "生成",
+                "電子遊戲專題簡訊",
+                "頁面模板\uff0c並自動填寫部分資料。",
+            ),
+        ):
+            with self.subTest(locale=locale):
+                output = render_newsletter(_issue(), locale)
+                intro = re.search(
+                    r"<div data-newsletter-content>\s*"
+                    r'<p class="page-description">(.*?)</p>',
+                    output,
+                    re.DOTALL,
+                )[1]
+                link = re.fullmatch(
+                    re.escape(before)
+                    + r'<a href="([^"]+)">'
+                    + re.escape(name)
+                    + "</a>"
+                    + re.escape(after),
+                    intro,
+                )
+                assert link is not None
+                target = urlsplit(unescape(link[1]))
+                assert target.scheme == "https"
+                assert target.netloc == "zh.wikipedia.org"
+                assert (
+                    unquote(target.path) == "/wiki/WikiProject:电子游戏/简讯"
+                )
+
     def test_editorial_pages_have_localized_copy_controls(self) -> None:
         """Show ordinary and January drafts in every locale."""
         for value, suffixes in (
@@ -139,7 +185,7 @@ class NewsletterPresentationTests(unittest.TestCase):
                     # HTML consumes the textarea's first newline.
                     assert unescape(text.removeprefix("\n")) == page["text"]
                     assert (
-                        f'id="newsletter-code-label-{index}" lang="zh">'
+                        f'id="newsletter-code-label-{index}"><span lang="zh">'
                         f"{escape(page['title'])}</span>" in output
                     )
                 accordions = re.findall(
@@ -188,9 +234,9 @@ class NewsletterPresentationTests(unittest.TestCase):
     ) -> None:
         """Keep copying, viewing, and manual editing independent."""
         for locale, copy_label, view_label, edit_label in (
-            ("en", "Copy", "View newsletter page", "Edit newsletter page"),
-            ("zh-hans", "复制", "查看简讯页", "编辑简讯页"),
-            ("zh-hant", "複製", "檢視簡訊頁", "編輯簡訊頁"),
+            ("en", "Copy", "View page", "Edit page"),
+            ("zh-hans", "复制", "查看页面", "编辑页面"),
+            ("zh-hant", "複製", "查看頁面", "編輯頁面"),
         ):
             with self.subTest(locale=locale):
                 value = _issue()
@@ -356,7 +402,7 @@ class NewsletterPresentationTests(unittest.TestCase):
     ) -> None:
         """Keep native date and issue navigation separate."""
         for locale, label, through, generated in (
-            ("en", "Data date", "Data through", "Generated"),
+            ("en", "Data date", "Data as of", "Generated"),
             ("zh-hans", "数据日期", "数据截至", "生成于"),
             ("zh-hant", "資料日期", "資料截至", "產生於"),
         ):
@@ -383,7 +429,11 @@ class NewsletterPresentationTests(unittest.TestCase):
                 assert 'min="2026-01-01" max="2026-12-31"' in form[2]
                 assert 'name="issue" value="2027-01"' in form[2]
                 assert f'name="lang" value="{locale}"' in form[2]
-                assert 'type="submit"' in form[2]
+                assert re.search(
+                    r'<noscript><button\b[^>]*type="submit"[^>]*>'
+                    r".*?</button></noscript>",
+                    form[2],
+                )
                 assert label in form[2]
                 assert "data-newsletter-calendar" not in form[2]
                 assert output.count('name="date"') == 1
@@ -401,6 +451,11 @@ class NewsletterPresentationTests(unittest.TestCase):
                 )
                 assert issue_form is not None
                 assert 'name="date"' not in issue_form[1]
+                assert re.search(
+                    r'<noscript><button\b[^>]*type="submit"[^>]*>'
+                    r".*?</button></noscript>",
+                    issue_form[1],
+                )
 
     def test_missing_daily_date_never_displays_another_saved_draft(
         self,

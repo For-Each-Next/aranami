@@ -366,6 +366,15 @@ def write_interface_fixtures(destination: Path) -> None:
         ],
         "query": "",
     }
+    latest_run = logs["runs"][0]
+    fixture["status"]["routines"]["routines"]["pageviews"].update(
+        run_id=latest_run["run_id"],
+        finished_at=latest_run["finished_at"],
+    )
+    fixture["status"]["reports"]["reports"]["first"]["run_id"] = latest_run[
+        "run_id"
+    ]
+    fixture["status"]["history"] = logs
     stored = destination / "reports/data/assessments/zhwiki/Video games"
     stored.mkdir(parents=True, exist_ok=True)
     pl.DataFrame({
@@ -751,10 +760,10 @@ class ReviewPresentationTests(unittest.TestCase):
                 assert " · " not in metadata[1]
                 assert " | " not in metadata[1]
 
-    def test_review_months_use_fixed_lengths_and_elapsed_reply_ages(
+    def test_review_ages_keep_fixed_units_and_exact_timestamps(
         self,
     ) -> None:
-        """Keep fixed month boundaries and elapsed reply ages."""
+        """Abbreviate English ages while retaining exact hover times."""
         row = {
             **self.data["article"],
             "review_type": "fac",
@@ -765,12 +774,21 @@ class ReviewPresentationTests(unittest.TestCase):
         month = dt.timedelta(days=365.25 / 12)
         for locale in ("en", "zh-hans", "zh-hant", "zh"):
             interface = Interface(locale)
-            for elapsed, unit, started_count, replied_count in (
-                (month - dt.timedelta(seconds=1), "days", 30, 30),
-                (month, "months", 1, 1),
-                (month + dt.timedelta(seconds=1), "months", 1, 1),
-                (2 * month, "months", 2, 2),
-                (dt.timedelta(days=132), "months", 4, 4),
+            for elapsed, unit, count, compact in (
+                (dt.timedelta(seconds=0), "minutes", 0, "0m"),
+                (dt.timedelta(seconds=59), "minutes", 0, "0m"),
+                (dt.timedelta(minutes=1), "minutes", 1, "1m"),
+                (dt.timedelta(minutes=59), "minutes", 59, "59m"),
+                (dt.timedelta(hours=1), "hours", 1, "1h"),
+                (dt.timedelta(hours=23), "hours", 23, "23h"),
+                (dt.timedelta(days=1), "days", 1, "1d"),
+                (month - dt.timedelta(seconds=1), "days", 30, "30d"),
+                (month, "months", 1, "1mo"),
+                (month + dt.timedelta(seconds=1), "months", 1, "1mo"),
+                (2 * month, "months", 2, "2mo"),
+                (dt.timedelta(days=132), "months", 4, "4mo"),
+                (8 * month, "months", 8, "8mo"),
+                (12 * month, "months", 12, "12mo"),
             ):
                 with self.subTest(locale=locale, elapsed=elapsed):
                     instant = (self.now - elapsed).isoformat()
@@ -791,16 +809,20 @@ class ReviewPresentationTests(unittest.TestCase):
                     assert review_times == [
                         (
                             tooltip,
-                            interface.text(
+                            f"Started {compact} ago"
+                            if locale == "en"
+                            else interface.text(
                                 f"reviews.started_{unit}",
-                                count=started_count,
+                                count=count,
                             ),
                         ),
                         (
                             tooltip,
-                            interface.text(
+                            f"Last comment {compact} ago"
+                            if locale == "en"
+                            else interface.text(
                                 f"reviews.replied_{unit}",
-                                count=replied_count,
+                                count=count,
                             ),
                         ),
                     ]
@@ -1051,7 +1073,29 @@ class PresentationTests(unittest.TestCase):
         assert timestamp("2026-02-30T12:00:00Z") is None
         assert timestamp("2026-10-18T12:00:00") is None
         assert self.en.date("2020-03", month_only=True) == "March 2020"
+        assert self.en.date("2026-10-31") == "October 31, 2026"
+        assert self.en.date("2026-10-31", compact=True) == "Oct 31, 2026"
+        assert self.en.date("2028-02-09", compact=True) == "Feb 9, 2028"
+        assert (
+            self.en.date(
+                "2026-10-31",
+                compact=True,
+                reference_year=2026,
+            )
+            == "Oct 31"
+        )
+        assert (
+            self.en.date(
+                "2025-10-31",
+                compact=True,
+                reference_year=2026,
+            )
+            == "Oct 31, 2025"
+        )
         assert Interface("zh-hant").date("2026-10-18") == "2026年10月18日"
+        assert Interface("zh-hant").date("2026-10-18", compact=True) == (
+            "2026年10月18日"
+        )
         assert duration(0.25, self.en) == "0.25 sec"
         assert duration(59.999, self.en) == "1 min 0.00 sec"
         assert duration(65.1, self.en) == "1 min 5.10 sec"
@@ -1116,21 +1160,25 @@ class PresentationTests(unittest.TestCase):
         for seconds, expected in (
             (0, "(just now)"),
             (-59, "(just now)"),
-            (59, "(within 1 minute)"),
-            (-60, "(1 minute ago)"),
-            (60, "(1 minute from now)"),
-            (-3599, "(59 minutes ago)"),
-            (3599, "(59 minutes from now)"),
-            (-3600, "(1 hour ago)"),
-            (3600, "(1 hour from now)"),
-            (-7199, "(1 hour ago)"),
-            (7199, "(1 hour from now)"),
-            (-86399, "(23 hours ago)"),
-            (86399, "(23 hours from now)"),
-            (-86400, "(1 day ago)"),
-            (86400, "(1 day from now)"),
-            (-172799, "(1 day ago)"),
-            (172800, "(2 days from now)"),
+            (59, "(within 1m)"),
+            (-60, "(1m ago)"),
+            (60, "(1m from now)"),
+            (-3599, "(59m ago)"),
+            (3599, "(59m from now)"),
+            (-3600, "(1h ago)"),
+            (3600, "(1h from now)"),
+            (-7199, "(1h ago)"),
+            (7199, "(1h from now)"),
+            (-86399, "(23h ago)"),
+            (86399, "(23h from now)"),
+            (-86400, "(1d ago)"),
+            (86400, "(1d from now)"),
+            (-172799, "(1d ago)"),
+            (172800, "(2d from now)"),
+            (-2629800, "(1mo ago)"),
+            (2629800, "(1mo from now)"),
+            (-5259600, "(2mo ago)"),
+            (5259600, "(2mo from now)"),
         ):
             with self.subTest(seconds=seconds):
                 value = (self.now + dt.timedelta(seconds=seconds)).isoformat()
@@ -1141,7 +1189,7 @@ class PresentationTests(unittest.TestCase):
                 self.en,
                 self.now,
             )
-            == "(1 minute from now)"
+            == "(1m from now)"
         )
         for invalid in (None, "", "invalid", "2026-10-18T12:00:00"):
             assert not relative_time(invalid, self.en, self.now)
@@ -1291,8 +1339,8 @@ class PresentationTests(unittest.TestCase):
         assert "March 2020" in output
         assert "Category%3A%E8%87%AA2020" in output
         assert "Maintenance &lt;&amp;&gt; article" in output
-        assert 'name="seed" type="hidden" value="0123456789abcdef"' in output
-        assert 'type="radio" name="order" value="desc"' in output
+        assert 'type="hidden" name="seed" value="0123456789abcdef"' in output
+        assert 'name="order" value="desc"' in output
         with self.assertRaises(LookupError):
             render_maintenance(
                 self.data["snapshot"],
@@ -1335,10 +1383,71 @@ class PresentationTests(unittest.TestCase):
         assert query["start"] == ["2026-09-18"]
         assert query["end"] == ["2026-10-17"]
         assert query["pages"] == [article["title"]]
+        self._assert_card_dates_follow_dashboard_year()
         self._assert_popularity_date_prefix()
         self._assert_popularity_ordinals()
         self._assert_showcase_metadata_order()
         self._assert_highlight_icons()
+
+    def _assert_card_dates_follow_dashboard_year(self) -> None:
+        """Omit only the current English year and retain exact dates."""
+        snapshot = copy.deepcopy(self.data["snapshot"])
+        snapshot["pageviews"]["date"] = "2026-10-31"
+        snapshot["pageviews"]["items"][0]["title"] = "Date popularity"
+        examples = {
+            "featured": ("Date showcase", "2025-10-31", "fa", "observed"),
+            "upcoming": ("Date upcoming", "2027-01-01", "ga", "scheduled"),
+            "dyk": ("Date DYK", "2026-10-31", "dyk", "observed"),
+            "news": ("Date news", "2026-10-31", "news", "observed"),
+        }
+        for section, (title, date, kind, date_kind) in examples.items():
+            snapshot["homepage"][section] = [
+                {
+                    **self.data["article"],
+                    "title": title,
+                    "date": date,
+                    "kind": kind,
+                    "date_kind": date_kind,
+                },
+            ]
+        expected = {
+            "Date popularity": ("2026-10-31", "Oct 31", "Oct 31, 2026"),
+            "Date showcase": ("2025-10-31", "Oct 31, 2025", "Oct 31, 2025"),
+            "Date upcoming": ("2027-01-01", "Jan 1, 2027", "Jan 1"),
+            "Date DYK": ("2026-10-31", "Oct 31", "Oct 31, 2026"),
+            "Date news": ("2026-10-31", "Oct 31", "Oct 31, 2026"),
+        }
+        original = copy.deepcopy(snapshot)
+        for reference_index, clock in enumerate(
+            (
+                dt.datetime(2026, 12, 31, 23, 59, 59, tzinfo=dt.UTC),
+                dt.datetime(2027, 1, 1, tzinfo=dt.UTC),
+            ),
+            start=1,
+        ):
+            for locale in ("en", "zh-hans", "zh-hant"):
+                with self.subTest(clock=clock, locale=locale):
+                    output = render_dashboard(snapshot, {}, {}, locale, clock)
+                    cards = re.findall(
+                        r"<article\b[^>]*>(.*?)</article>",
+                        output,
+                        re.DOTALL,
+                    )
+                    for title, dates in expected.items():
+                        card = next(
+                            body for body in cards if f">{title}</a>" in body
+                        )
+                        date = dates[0]
+                        label = (
+                            dates[reference_index]
+                            if locale == "en"
+                            else Interface(locale).date(date)
+                        )
+                        assert (
+                            f'<time datetime="{date}" title="{date}">'
+                            f"{label}</time>" in card
+                        )
+        assert snapshot == original
 
     def _assert_showcase_metadata_order(self) -> None:
         """Lead showcase metadata with kind and retain date evidence."""
@@ -1374,9 +1483,14 @@ class PresentationTests(unittest.TestCase):
                 items = re.findall(r"<li>(.*?)</li>", metadata, re.DOTALL)
                 assert len(items) == 2
                 assert items[0] == interface.text("appearance.featured")
+                label = (
+                    "Oct 13"
+                    if locale == "en"
+                    else interface.date("2026-10-13")
+                )
                 assert (
-                    '<time datetime="2026-10-13">'
-                    f"{interface.date('2026-10-13')}</time>" in items[1]
+                    '<time datetime="2026-10-13" title="2026-10-13">'
+                    f"{label}</time>" in items[1]
                 )
                 if date_kind == "scheduled":
                     assert interface.text("date.scheduled") in items[1]
@@ -1409,7 +1523,7 @@ class PresentationTests(unittest.TestCase):
                 output,
             )
             assert site_rank is not None
-            assert site_rank[1] == f"site-wide ranked {ordinal}"
+            assert site_rank[1] == f"{ordinal} site-wide"
             views = re.search(
                 r'<a\b[^>]*class="pageviews-number"[^>]*>(.*?)</a>',
                 output,
@@ -1510,17 +1624,17 @@ class PresentationTests(unittest.TestCase):
         for locale, prefix, rank_label in (
             (
                 "en",
-                "October 31, 2026: 10,110 views",
-                "site-wide ranked 14th",
+                "Oct 31: 10,110 views",
+                "14th site-wide",
             ),
             (
                 "zh-hans",
-                "2026年10月31日\uff1a日浏览10,110次",
+                "2026年10月31日\uff1a10,110次浏览",
                 "全站第14名",
             ),
             (
                 "zh-hant",
-                "2026年10月31日\uff1a日瀏覽10,110次",
+                "2026年10月31日\uff1a10,110次瀏覽",
                 "全站第14名",
             ),
         ):
@@ -1542,7 +1656,10 @@ class PresentationTests(unittest.TestCase):
                         section,
                         re.DOTALL,
                     )[1]
-                    assert '<time datetime="2026-10-31">' in metadata
+                    assert (
+                        '<time datetime="2026-10-31" title="2026-10-31">'
+                        in metadata
+                    )
                     assert 'class="pageviews-number"' in metadata
                     assert ('class="site-rank"' in metadata) == (
                         rank is not None
@@ -1667,19 +1784,19 @@ class PresentationTests(unittest.TestCase):
         assert "temporarily unavailable" in missing
 
     def test_status_line_labels_and_independent_timing(self) -> None:
-        """Show finish times and retain durations in details."""
+        """Link status text and show independent check times."""
         for locale, finished, next_label, report_duration in (
-            ("en", "Finished at ", "Next scheduled run: ", "5.00 sec"),
+            ("en", "Checked at ", "Next check ", "5.00 sec"),
             (
                 "zh-hans",
-                "结束时间\uff1a",
-                "下次排程\uff1a",
+                "检查时间\uff1a",
+                "下次检查\uff1a",
                 "5.00秒",
             ),
             (
                 "zh-hant",
-                "結束時間\uff1a",
-                "下次排程\uff1a",
+                "檢查時間\uff1a",
+                "下次檢查\uff1a",
                 "5.00秒",
             ),
         ):
@@ -1696,16 +1813,15 @@ class PresentationTests(unittest.TestCase):
             )
             assert line is not None
             interface = Interface(locale)
-            opening, closing = (
-                (" (", ")") if locale == "en" else ("\uff08", "\uff09")
+            assert line[1].startswith('<a class="status-label status-link"')
+            assert "<svg" not in line[1]
+            assert "<img" not in line[1]
+            assert line[1].endswith(
+                f">{interface.text('state.Deferred')}</a>",
             )
-            details = interface.text("ops.details_link")
-            assert line[1].startswith('<svg class="status-icon"')
-            assert '</svg><span class="status-label">' in line[1]
-            assert f"</span>{opening}<a " in line[1]
-            assert line[1].endswith(f">{details}</a>{closing}")
+            assert interface.text("ops.details_link") not in line[1]
             assert "data-clock" not in line[1]
-            assert '<a class="status-link" href="#report-details-' in line[1]
+            assert 'href="#report-details-' in line[1]
             assert "<div" not in line[1]
             assert "<br" not in line[1]
             assert finished in output
@@ -2128,10 +2244,7 @@ class LiveVisibilityTests(unittest.TestCase):
                     ):
                         for output in self._outputs(locale):
                             card = self._card(output, routine)
-                            assert (
-                                f'<span class="status-label">{label}</span>'
-                                in card
-                            )
+                            assert f">{label}</a>" in card
                             assert 'data-status="updated"' in card
 
     def test_contents_links_match_each_page(self) -> None:
@@ -2176,10 +2289,10 @@ class LiveVisibilityTests(unittest.TestCase):
         assert 'href="#homepage-pageviews"' not in output
         assert 'href="#backlog"' not in output
 
-    def test_about_monitor_keeps_versions_and_fresh_resource_cards(
+    def test_about_monitor_keeps_one_flat_localized_resource_table(
         self,
     ) -> None:
-        """Keep three native cards without obsolete system details."""
+        """Keep versions and fresh metrics in one accessible table."""
         status = self.data["status"]
         status["schedule"]["runtime"] = {
             "python": "3.15.0",
@@ -2251,43 +2364,8 @@ class LiveVisibilityTests(unittest.TestCase):
                     assert value not in output
                 assert "0.8.5" in output
                 assert self.data["config"]["version"] in output
-                for removed in ("hardware", "system", "environment"):
-                    assert f'id="server-group-{removed}"' not in output
-                cards = re.findall(
-                    r'<article\b[^>]*class="([^"]*\bserver-card\b[^"]*)"'
-                    r"[^>]*>(.*?)</article>",
-                    output,
-                    re.DOTALL,
-                )
-                assert len(cards) == 3
-                assert all(
-                    "cdx-card" in classes.split()
-                    and "cdx-card--separation-" not in classes
-                    for classes, _ in cards
-                )
-                for group, label in (
-                    ("application", "server.group.application"),
-                    ("memory", "server.memory"),
-                    ("cpu", "server.cpu"),
-                ):
-                    card = next(
-                        body
-                        for _, body in cards
-                        if f'id="server-group-{group}"' in body
-                    )
-                    assert Interface(locale).text(label) in card
-                    if group != "application":
-                        assert "<table" not in card
-                        assert card.count('class="server-value"') == 1
-                        assert card.count(Interface(locale).text(label)) == 1
-                        assert ("data-schedule-time" in card) == fresh
-                        value = memory if group == "memory" else cpu
-                        assert (value in card) == fresh
-                        if not fresh:
-                            assert (
-                                Interface(locale).text("ops.unavailable")
-                                in card
-                            )
+                assert "server-card" not in output
+                assert "server-group-" not in output
                 assert started in output
                 assert "2026-10-16 08:56:00" in output
                 age = Interface(locale).text("time.days_ago", count=2)[1:-1]
@@ -2302,10 +2380,30 @@ class LiveVisibilityTests(unittest.TestCase):
                 )
                 assert len(tables) == 1
                 metrics = "".join(tables)
-                assert metrics.count("<tr>") == 3
+                assert metrics.count("<tr>") == 5
+                assert metrics.count('<th scope="row">') == 5
+                assert '<caption class="visually-hidden">' in metrics
+                assert Interface(locale).text("server.heading") in metrics
+                assert "<table" not in metrics
+                assert "cdx-card" not in metrics
                 assert 'id="server-state"' in metrics
                 assert "0.8.5" in metrics
                 assert self.data["config"]["version"] in metrics
+                for key, value in (("memory", memory), ("cpu", cpu)):
+                    label = re.escape(Interface(locale).text(f"server.{key}"))
+                    row = re.search(
+                        rf'<tr><th scope="row">{label}</th>'
+                        r"<td([^>]*)>(.*?)</td></tr>",
+                        metrics,
+                        re.DOTALL,
+                    )
+                    assert row is not None
+                    assert ("data-schedule-time" in row[1]) == fresh
+                    assert (value in row[2]) == fresh
+                    if not fresh:
+                        assert (
+                            Interface(locale).text("ops.unavailable") in row[2]
+                        )
                 assert "TiB" not in metrics
                 for label in (
                     "Storage used / total",
@@ -2340,7 +2438,7 @@ class LiveVisibilityTests(unittest.TestCase):
         for output in self._outputs("en"):
             card = self._card(output)
             assert "Updated report for" not in card
-            assert '<span class="status-label">Updated</span>' in card
+            assert ">Updated</a>" in card
 
     def test_unknown_failure_identifiers_never_expose_diagnostic_text(
         self,
@@ -2407,7 +2505,7 @@ class LiveVisibilityTests(unittest.TestCase):
                 event.update(fields)
                 for output in self._outputs("en"):
                     card = self._card(output)
-                    assert f'<span class="status-label">{label}</span>' in card
+                    assert f">{label}</a>" in card
                     assert "October 17, 2026" not in card
                     assert "October 18, 2026" not in card
         event.update(
@@ -2418,7 +2516,7 @@ class LiveVisibilityTests(unittest.TestCase):
         )
         for output in self._outputs("en"):
             card = self._card(output)
-            assert '<span class="status-label">Updated</span>' in card
+            assert ">Updated</a>" in card
             assert "TimeoutError" not in card
 
     def test_http_causes_are_human_readable_in_every_status_view(self) -> None:
@@ -2488,11 +2586,11 @@ class LiveVisibilityTests(unittest.TestCase):
             for output in self._outputs(locale):
                 card = self._card(output)
                 status_label = re.search(
-                    r'<span[^>]*class="status-label"[^>]*>(.*?)</span>',
+                    r'<a[^>]*class="status-label status-link"[^>]*>(.*?)</a>',
                     card,
                 )
                 line = re.search(
-                    r'<p class="routine-progress context"[^>]*>(.*?)</p>',
+                    r'<p class="routine-progress"[^>]*>(.*?)</p>',
                     card,
                 )
                 assert status_label is not None
@@ -2529,7 +2627,7 @@ class LiveVisibilityTests(unittest.TestCase):
                 self.now,
             )
             assert f"data-progress-active>{expected}</p>" in output
-            assert ">Updating pageview records</span>" in output
+            assert ">Updating pageview records</a>" in output
         for current, total, expected in (
             (None, None, "Fetching pageviews"),
             (None, 13500, "Fetching pageviews"),
@@ -2629,7 +2727,7 @@ class LiveVisibilityTests(unittest.TestCase):
             ):
                 for output in self._outputs(locale):
                     card = self._card(output, routine)
-                    assert f">{label}</span>" in card
+                    assert f">{label}</a>" in card
                     assert f'data-progress-label="{label}"' in card
                     assert "data-progress-active" in card
 
@@ -2655,7 +2753,7 @@ class LiveVisibilityTests(unittest.TestCase):
         ):
             for output in self._outputs(locale):
                 card = self._card(output, "new_pages")
-                assert f">{label}</span>" in card
+                assert f">{label}</a>" in card
                 assert f"data-progress-active>{note}</p>" in card
 
     def test_progress_requires_fresh_active_observations(self) -> None:
@@ -2694,9 +2792,7 @@ class LiveVisibilityTests(unittest.TestCase):
                     assert "data-progress-active" not in card
                     assert "data-progress-label" not in card
                     assert "data-progress-fallback" not in card
-                    assert (
-                        f'<span class="status-label">{fallback}</span>' in card
-                    )
+                    assert f">{fallback}</a>" in card
 
     def test_progress_requires_the_current_monitor_session(self) -> None:
         """Hide old running records after a monitor restart."""
@@ -2721,7 +2817,7 @@ class LiveVisibilityTests(unittest.TestCase):
                     if visible
                     else "Running"
                 )
-                assert f">{label}</span>" in card
+                assert f">{label}</a>" in card
                 assert ("data-progress-active" in card) is visible
                 assert ("data-progress-label" in card) is visible
 
@@ -2775,37 +2871,37 @@ class LiveVisibilityTests(unittest.TestCase):
             (
                 "en",
                 "Started at ",
-                "Finished at ",
-                "Next scheduled run: ",
-                "(2 minutes ago)",
-                "(35 minutes from now)",
+                "Checked at ",
+                "Next check ",
+                "(2m ago)",
+                "(35m from now)",
             ),
             (
                 "zh-hans",
                 "开始时间\uff1a",
-                "结束时间\uff1a",
-                "下次排程\uff1a",
+                "检查时间\uff1a",
+                "下次检查\uff1a",
                 "\uff082分钟前\uff09",
                 "\uff0835分钟后\uff09",
             ),
             (
                 "zh-hant",
                 "開始時間\uff1a",
-                "結束時間\uff1a",
-                "下次排程\uff1a",
+                "檢查時間\uff1a",
+                "下次檢查\uff1a",
                 "\uff082分鐘前\uff09",
                 "\uff0835分鐘後\uff09",
             ),
         ):
-            for state, icon in (
-                ("running", "running"),
-                ("updated", "success"),
-                ("no_update", "success"),
-                ("failed", "failed"),
-                ("deferred", "warning"),
-                ("unconfirmed", "warning"),
-                ("queued", "queued"),
-                ("unknown", "unknown"),
+            for state in (
+                "running",
+                "updated",
+                "no_update",
+                "failed",
+                "deferred",
+                "unconfirmed",
+                "queued",
+                "unknown",
             ):
                 event["status"] = state
                 live = render_live_status(
@@ -2826,11 +2922,12 @@ class LiveVisibilityTests(unittest.TestCase):
                     re.DOTALL,
                 )
                 assert status_line is not None
-                assert 'class="status-icon"' in status_line[1]
-                assert 'aria-hidden="true"' in status_line[1]
-                assert 'focusable="false"' in status_line[1]
-                assert f'#status-{icon}"' in status_line[1]
-                assert '<span class="status-label"' in status_line[1]
+                assert f'data-status="{state}"' in status_line[0]
+                assert status_line[1].startswith(
+                    '<a class="status-label status-link"',
+                )
+                assert "<svg" not in status_line[1]
+                assert "<img" not in status_line[1]
                 assert 'class="report-icon cdx-card__icon"' in card[1]
                 metadata = re.search(
                     r'<ul class="routine-meta">(.*?)</ul>',
@@ -2969,6 +3066,11 @@ class ServerPresentationTests(unittest.TestCase):
             assert 'id="credits"' in output
             assert "CC0-1.0" in output
             assert "CC BY-SA 4.0" in output
+            assert (
+                '<a href="/assets/icons/maintenance/credits.html">'
+                + Interface(locale).text("about.maintenance_icons")
+                + "</a>"
+            ) in output
             assert "wiki/%E4%B8%AD%E6%96%87" in output
             assert "WikiProject%3A" in output
             assert 'id="tool-status"' not in output
@@ -3075,7 +3177,7 @@ class ServerPresentationTests(unittest.TestCase):
         status["schedule"]["started_at"] = "2026-10-18T11:45:07Z"
         status["schedule"]["updated_at"] = "2026-10-18T12:00:02Z"
         for locale, prefix, age, recent in (
-            ("en", "Last updated: ", "15 minutes ago", "(just now)"),
+            ("en", "Last updated: ", "15m ago", "(just now)"),
             ("zh-hans", "最近更新\uff1a", "15分钟前", "\uff08刚刚\uff09"),
             ("zh-hant", "最近更新\uff1a", "15分鐘前", "\uff08剛剛\uff09"),
         ):
@@ -3174,7 +3276,11 @@ class EventPresentationTests(unittest.TestCase):
                     re.DOTALL,
                 )
             ]
-            for row in re.findall(r"<tr>(.*?)</tr>", table[1], re.DOTALL)
+            for row in re.findall(
+                r"<tr\b[^>]*>(.*?)</tr>",
+                table[1],
+                re.DOTALL,
+            )
         ]
 
     def test_reports_keep_status_panel_and_four_column_log(self) -> None:

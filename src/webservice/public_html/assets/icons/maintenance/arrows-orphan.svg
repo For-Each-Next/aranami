@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="75.976463" height="72.33461" version="1.0">
+  <defs>
+    <radialGradient id="a" cx="30" cy="-310" r="30" fx="30" fy="-310" gradientTransform="matrix(.1677 0 0 .168 22.26125 45.14375)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a249a5"/>
+      <stop offset="1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient xlink:href="#a" id="b" cx="39.960041" cy="40.039959" r="5.5005722" fx="39.960041" fy="40.039959" gradientUnits="userSpaceOnUse"/>
+  </defs>
+  <path fill="#ed1c24" stroke="#ed1c24" stroke-width="1.58473921" d="M64.672983 2.1786101 51.056398 15.706277l-7.324445-7.2766157-3.3427 25.3460597 25.610979-3.223198-6.046354-6.006869 13.616585-13.527666-8.89748-8.8393779zM40.389253 33.775721h-.098313.098313z" color="#000" overflow="visible" style="marker:none"/>
+  <path fill="#0054a6" stroke="#0054a6" stroke-width="1.58473921" d="M11.303475 2.1786101 2.4059964 11.017988 16.071739 24.545654 10.1237 30.45485l25.463506 3.320871-3.19523-25.4437318-7.422758 7.3742878L11.303475 2.1786101zM35.587206 33.775721h.098313-.098313z" color="#000" overflow="visible" style="marker:none"/>
+  <path fill="#ed1c24" stroke="#ed1c24" stroke-width="1.58473921" d="m11.145882 70.156003-8.8974786-8.839377L15.914146 47.78896l-5.9480389-5.909197 25.4635059-3.320871-3.19523 25.443733-7.422758-7.374289-13.665743 13.527667zm24.283731-31.597111v-.097673.097673z"/>
+  <path fill="#0054a6" stroke="#0054a6" stroke-width="1.58473921" d="M64.830579 69.840821 51.213993 56.313149l-7.324445 7.276615-3.3427-25.34606 25.610979 3.223199-6.046353 6.006868 13.616584 13.527666-8.897479 8.839384zM40.546848 38.243704h-.098313.098313z"/>
+  <path d="M45.460613 40.039959a5.5005722 5.5005722 0 1 1-11.001144 0 5.5005722 5.5005722 0 1 1 11.001144 0z" color="#000" overflow="visible" style="marker:none" transform="translate(3.1972059 1.3702774) scale(.8717)"/>
+  <path fill="url(#b)" d="M45.460613 40.039959a5.5005722 5.5005722 0 1 1-11.001144 0 5.5005722 5.5005722 0 1 1 11.001144 0z" color="#000" overflow="visible" style="marker:none" transform="translate(3.1972059 1.3702774) scale(.8717)"/>
+</svg>

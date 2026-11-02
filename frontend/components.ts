@@ -1,6 +1,7 @@
 /** Enhance Codex controls while retaining their server-rendered form contracts. */
 import { createApp, h, type App } from "vue";
 import { CdxButton, type ButtonAction, type ButtonWeight, type ButtonSize } from "@wikimedia/codex";
+import { initializeMaintenance } from "./maintenance";
 
 const applications = new WeakMap<HTMLElement, App>();
 
@@ -9,6 +10,10 @@ function variant<T extends string>(element: Element, prefix: string, values: rea
 }
 
 function enhance(root: ParentNode): void {
+    for (const form of root.querySelectorAll<HTMLFormElement>(".page-size:not([data-auto-submit])")) {
+        form.querySelector("select")?.addEventListener("change", () => form.requestSubmit());
+        form.dataset.autoSubmit = "";
+    }
     for (const button of root.querySelectorAll<HTMLButtonElement>("button.cdx-button:not([data-codex-enhanced])")) {
         // Live snapshots reconcile these native controls in place; Vue must
         // never own DOM that the status renderer also updates.
@@ -43,3 +48,4 @@ function dispose(root: ParentNode): void {
 
 window.aranamiComponents = { enhance, dispose };
 enhance(document);
+initializeMaintenance({ enhance, dispose });

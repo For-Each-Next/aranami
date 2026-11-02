@@ -22,7 +22,7 @@ import { CdxAccordion, CdxTextArea } from "@wikimedia/codex";
 </template>
 
 <jinja name="title">
-<span id="newsletter-code-label-{{ draft_index }}" lang="zh">{{ draft.title }}</span>
+<span id="newsletter-code-label-{{ draft_index }}"><span lang="zh">{{ draft.title }}</span>{{ t.newsletter.generated_source }}</span>
 </jinja>
 
 <jinja name="text-area-id">

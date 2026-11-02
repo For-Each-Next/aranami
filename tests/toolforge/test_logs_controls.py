@@ -108,7 +108,7 @@ class LogControlsTests(unittest.TestCase):
                 assert response.status_code == 200
                 output = response.text
                 listing = self._listing(output)
-                assert listing.count("<tr>") == 20
+                assert listing.count("<tr ") == 20
                 assert len(re.findall(r"<td\b[^>]*>", listing)) == 60
                 assert listing.count('<th scope="row">') == 20
                 assert len(re.findall(r'<th\b[^>]*scope="col"', output)) == 4
@@ -220,7 +220,7 @@ class LogControlsTests(unittest.TestCase):
             path.unlink()
         response = self.client.get("/reports/")
         assert response.status_code == 200
-        assert self._listing(response.text).count("<tr>") == 20
+        assert self._listing(response.text).count("<tr ") == 20
         assert self.client.get("/logs/").status_code == 200
         (self.runtime / "state" / "job-history.json").write_text("{}")
         response = self.client.get("/reports/")

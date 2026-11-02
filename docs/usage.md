@@ -182,9 +182,11 @@ simplified assessment labels and unbolded discussion/revision links. Entries
 sort by numeric namespace and then title within each subsection.
 
 Each completed UTC date retains an immutable project PageAssessments dataset
-with only `page_id`, `pa_class`, and `pa_importance`. The 00:00 UTC run saves
+with `page_id`, `page_title`, `page_namespace`, `pa_class`, `pa_importance`,
+and `page_is_redirect`. The 00:00 UTC run saves
 `assessments-YYYYMMDD.parquet` for the day that just ended. It compares saved
-datasets by page ID before resolving titles for changed pages. Capture
+datasets by page ID, preserving observed titles and namespaces for pages that
+later leave the assessment set. Capture
 precedes the destination read, so a wiki read or edit failure
 does not discard that day's reusable source data. The manifest records the
 actual observation time; a delayed run never claims it collected at midnight.
@@ -194,17 +196,23 @@ and a manual report anchor cannot create a historical snapshot from current data
 Other Toolforge workflows can call
 `backend.services.project_assessments.read_snapshot(site, project, day)` to read
 an existing date without querying sources. It returns a validated report bundle
-or `None` when that completed date has no snapshot; the compact assessment table
+or `None` when that completed date has no snapshot; the assessment table
 is `bundle.tables["members"]`. Its file is
 `reports/data/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet`.
 Preview snapshots stay under
 `dry-run/reports/` and cannot replace production observations.
+Older three-column snapshots remain readable with their original integrity
+checks; missing historical page identities remain unknown.
 See [Saved data and Parquet fields](backend/data-storage.md) for the field
 contract.
 
-Each new dated section starts with the total number of mainspace articles and
-lists, followed by quality classes and importance levels in assessment order.
-List counts follow the corresponding quality class; zero counts are omitted.
+Each new dated section shows only comparable, nonzero changes for project
+pages, articles, nonarticles, and redirects. Changed quality classes and
+importance levels appear in assessment order, separated by a full-width `｜`.
+When no comparable values changed, the visible summary is omitted. Full totals
+remain in an HTML comment. Redirects and set-index pages are not articles,
+even in the main namespace; redirects also remain outside the project page
+total and appear separately.
 
 The `assessment-log` range retains 30 report dates by default, through yesterday;
 `days` accepts 1 through 365. Repeated checks append within the same daily
@@ -282,5 +290,5 @@ and redirects while keeping the original discussion anchor. A category-only
 request has no start date until a relevant dated discussion exists.
 
 Hourly refreshes check source revisions in batches and reuse unchanged
-parses from `review-sources-v1.parquet`. Introductions share the existing
+parses from `review-sources.parquet`. Introductions share the existing
 daily article-summary cache across review cards and highlights.

@@ -4,6 +4,51 @@ This file records major completed changes, grouped by package release line.
 
 ## Until 0.9
 
+### 0.8.8 (2026-11-02 14:01 UTC)
+
+Overview: Standardized Codex cards, dialogs, and maintenance controls, clarified
+report update observations, preserved assessment identities and daily changes,
+kept newsletter drafts current, and unified disposable Parquet cache contracts.
+
+- Restored Codex card typography and layout, compact leading icons, neutral
+  status text and links, failure highlighting, and consistent hover/focus borders.
+- Aligned update-status cards with the responsive dashboard grid and retained
+  compact descriptions, progress, completion times, and scheduled checks.
+- Compiled shared Codex dialogs with keyboard controls and full-width tables
+  that retain horizontal scrolling on narrow screens.
+- Added locally served maintenance icons matching their wiki templates and
+  presented icon attribution and licenses in tables linked from About.
+- Standardized helper text and source disclosures, shortened dates, review ages,
+  ranks and view counts, and separated card metadata with pipes.
+- Replaced maintenance filter panels with a category menu, title search, and
+  Codex column sorting over all matching rows before pagination.
+- Sorted quality by article/list assessment hierarchy, kept unknown values last,
+  and added page-size selection, result counts, and complete pagination controls.
+- Updated maintenance selections and newsletter issue/date changes in place,
+  preserving URL history, keyboard focus, and native forms without JavaScript.
+- Distinguished confirmed report updates from checks and scheduled checks,
+  retained daily report dates, and linked observations to invocation history.
+- Retained assessment titles, namespaces, and redirect flags without rewriting
+  older snapshots, and restored named article/discussion links for removals.
+- Excluded redirects and set-index pages from article totals, retained full totals
+  in comments, and displayed only comparable, nonzero daily assessment changes.
+- Refreshed quarterly new-article counts and grades from daily sources, including
+  delayed drafts after quarter end, while preserving dated archives.
+- Restored a viewport-bounded mobile language menu with accessible icon-only
+  controls and readable maintenance category selection on narrow screens.
+- Replaced nested server-status cards with one accessible table for status,
+  application versions, memory, and CPU observations.
+- Shortened the introduction license notice in all locales and removed inline
+  styling from newsletter comment invitations while preserving their links.
+- Replaced Parquet filename versions with bounded, contract-identified caches
+  that rebuild incompatible data and atomically preserve healthy replacements.
+- Retired article, assessment, report, and newsletter layout converters; runtime
+  data must use current layouts, with historical readers and backups preserved.
+- Isolated browser verification from concurrent rebuilds by checking a fixed
+  copy of the generated assets.
+- Deployed to Toolforge and verified both services, status and credit tables,
+  asset digests, and fresh version observations at 2026-11-02 14:01 UTC.
+
 ### 0.8.7 (2026-11-01 17:13 UTC)
 
 Overview: Clarified dashboard cards and report details, focused server status

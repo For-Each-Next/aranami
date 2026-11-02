@@ -22,23 +22,34 @@ if TYPE_CHECKING:
 _RUN_LIMIT = 20
 
 
-def history_context(interface: Interface, data: Record) -> Record:
+def history_context(
+    interface: Interface,
+    data: Record,
+    *,
+    required_run_ids: set[str] | None = None,
+) -> Record:
     """Localize recent invocations across all observed dates.
 
     Args:
         interface: Negotiated interface language and authored messages.
         data: Validated saved invocations.
+        required_run_ids: Older invocations referenced by current cards.
 
     Returns:
-        At most twenty execution rows with explicit stage popups.
+        At most twenty execution rows and one popup per displayed or
+        explicitly referenced invocation.
     """
     rows = []
     runs = sorted(
         data.get("runs", []),
         key=operator.itemgetter("started_at"),
         reverse=True,
-    )[:_RUN_LIMIT]
-    for run in runs:
+    )
+    for index, run in enumerate(runs):
+        if index >= _RUN_LIMIT and run["run_id"] not in (
+            required_run_ids or set()
+        ):
+            continue
         task = interface.text(f"routine.{run['routine']}")
         result = interface.text(
             "state.Running"
@@ -76,4 +87,4 @@ def history_context(interface: Interface, data: Record) -> Record:
                 for stage in run["stages"]
             ],
         })
-    return {"events": rows}
+    return {"events": rows[:_RUN_LIMIT], "history_dialogs": rows}

@@ -554,7 +554,7 @@ def collect_reviews(  # ruff: ignore[too-many-arguments]
     """
     cache = ReviewCache(
         site,
-        cache_directory / "review-sources-v1.parquet"
+        cache_directory / "review-sources.parquet"
         if cache_directory
         else None,
         now,

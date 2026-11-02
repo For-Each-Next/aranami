@@ -32,7 +32,7 @@
       </nav>
       <nav class="language-switcher" aria-label="{{ t.nav.language }}">
         <details class="navigation-tools language-menu">
-        <summary><svg class="language-icon" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#language"></use></svg>{{ t.nav.language }}</summary>
+        <summary aria-label="{{ t.nav.language }}"><svg class="language-icon" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#language"></use></svg><span class="language-label">{{ t.nav.language }}</span></summary>
         <ul class="navigation-tools-list">
         {% if navigation %}
           {% for language in navigation.languages %}<li><a href="{{ language.url }}" lang="{{ language.tag }}" hreflang="{{ language.tag }}"{% if language.current %} aria-current="true"{% endif %}>{{ language.label }}</a></li>{% endfor %}

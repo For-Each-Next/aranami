@@ -614,9 +614,7 @@ class EditorialDraftTests(unittest.TestCase):
             assert str(button.get("1").value) == "📝&nbsp;新增感想"
             assert str(button.get("url").value) == str(links[0])
             assert str(button.get("class").value) == "mw-ui-progressive"
-            style = str(button.get("style").value)
-            assert "background:#36c;color:#fff" in style
-            assert "min-height:32px" in style
+            assert not button.has("style")
         assert "mw-ui-constructive" not in text
         assert "%E9" not in text
         assert text.index(str(links[0])) < text.index("== 專題報導")

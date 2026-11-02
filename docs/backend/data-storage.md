@@ -11,7 +11,7 @@ Execution outcomes belong in `state/`, diagnostics in `logs/`, and disposable
 downloads, staging files, and retry budgets in `cache/` or a temporary directory.
 Removing a cache must not remove source evidence.
 See [Architecture](../architecture.md) for ownership and
-[Administration](../administration.md) for migration and recovery.
+[Administration](../administration.md) for recovery and cleanup.
 
 ## Choose a path
 
@@ -43,19 +43,27 @@ Its collection boundary is 24:00 on that date, equivalent to
 capture must not claim to have been observed exactly at midnight. Reuse the
 first complete saved observation, and leave unobserved historical dates absent.
 
-The table contains only the stable article identity and its assessments.
-Resolve current titles, namespaces, talk pages, and revision references through
-their owning source adapters when a caller needs them.
+The table preserves each page's observed identity and assessments, including
+nonarticle pages. Retained titles and namespaces provide original links when a
+page moves or leaves the project. Resolve current talk pages and revision
+references through their owning source adapters when needed.
 
 | Field | Polars dtype | Null and value contract |
 |---|---|---|
 | `page_id` | `Int64` | Required, positive, unique within this wiki/project/date |
+| `page_title` | `String` | Observed database title without a namespace prefix |
+| `page_namespace` | `Int64` | Observed nonnegative namespace ID |
 | `pa_class` | `String` | Nullable; the observed project quality assessment |
 | `pa_importance` | `String` | Nullable; the observed project importance assessment |
+| `page_is_redirect` | `Int64` | Observed redirect flag, either 0 or 1 |
 
 An unknown assessment is null. Do not substitute an empty string, zero, or a
 display label for missing source evidence. A page's identity is its numeric ID;
 a title change does not create a different member.
+Older three-column files remain readable with their original checksums and
+without invented identity fields. Migrated historical observations may have
+null identity or redirect fields when that fact was not retained. Never fill
+historical gaps using current page metadata or rewrite a completed snapshot.
 
 The Parquet file embeds its JSON manifest under the metadata key `aranami`;
 there is no companion JSON selector or generation directory. It records:
@@ -68,18 +76,19 @@ there is no companion JSON selector or generation directory. It records:
 | `calculated_at`, `started_at` | Original UTC capture time, including any delay after the scheduled boundary |
 | `metadata.project`, `metadata.snapshot_date` | Project and completed UTC date matching the filename |
 | `metadata.scheduled_for` | Midnight immediately after the completed date |
-| `metadata.article_totals` | Article-only count and class/importance counts, derived before discarding namespaces; null when only compact source rows survived |
+| `metadata.article_totals` | Article-only count and class/importance counts; null when only legacy assessment rows survived |
 | `publication.state` | Production or preview storage observation; collecting source data does not establish a wiki save |
 | `rows`, `sha256` | Row count and digest of canonical sorted observations |
 
 `article_totals` contains `count`, `class`, and `importance`, with optional
 `nonarticles` (count and class aggregates) and `redirects` (excluded page count)
-in newer observations. Mainspace disambiguation pages count as nonarticles;
-redirects are excluded from both page totals. Each aggregate list
+in newer observations. Mainspace disambiguation, set-index, and redirect-grade
+pages count as nonarticles. The actual redirect flag excludes redirects from
+both page totals, even when their assessment grade is stale. Each aggregate list
 contains `{value, count}` objects; `value` may be null for an unassessed article.
-These aggregates exclude nonarticle namespaces while the compact table retains
-all project page IDs. Do not infer article-only totals from the compact table
-after its namespace column has been discarded.
+These aggregates exclude nonarticle namespaces while the table retains all
+project page IDs. Do not infer article-only totals from legacy tables without
+namespace evidence.
 
 ## Article history fields
 
@@ -235,6 +244,6 @@ when reusing data.
 
 Missing files may produce explicitly typed first-use frames where the owning
 contract allows it. Existing malformed, unsafe, or oversized durable files
-must remain recoverable and fail visibly. Preserved migration originals remain
-in `backups/report-layout/`. See [Newsletter collection](newsletter.md) for
-retained observations and JSON archives.
+must remain recoverable and fail visibly. Preserved originals from retired
+layouts remain in `backups/report-layout/`. See
+[Newsletter collection](newsletter.md) for retained observations and JSON archives.

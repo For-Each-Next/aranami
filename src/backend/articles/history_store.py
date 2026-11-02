@@ -38,17 +38,6 @@ EVENT_SCHEMA = {
     "action_type": pl.String,
     "question": pl.String,
 }
-_PRE_MILESTONE_EVENT_SCHEMA = {
-    key: value
-    for key, value in EVENT_SCHEMA.items()
-    if key not in {"action_type", "question"}
-}
-_LEGACY_EVENT_SCHEMA = {
-    key: value
-    for key, value in _PRE_MILESTONE_EVENT_SCHEMA.items()
-    if key
-    not in {"nominator", "main_author", "nomination_link", "contributors"}
-}
 SCHEMA = {
     "page_id": pl.Int64,
     "title": pl.String,
@@ -275,52 +264,6 @@ def read_versions(path: Path) -> pl.DataFrame:
         Validated snapshots, or an empty first-use frame.
     """
     frame = _read(path)
-    _validate(frame)
-    return frame
-
-
-def import_versions(path: Path) -> pl.DataFrame:
-    """Read preserved legacy history for an explicit migration.
-
-    Args:
-        path: Original archive whose bytes remain unchanged.
-
-    Returns:
-        Validated canonical snapshots with unknown new fields left null.
-    """
-    frame = _read(path)
-    event_type = frame.schema.get("events")
-    existing_fields = (
-        event_type.inner.fields
-        if isinstance(event_type, pl.List)
-        and isinstance(event_type.inner, pl.Struct)
-        else []
-    )
-    compatible = (
-        bool(existing_fields)
-        and all(
-            EVENT_SCHEMA.get(field.name) == field.dtype
-            for field in existing_fields
-        )
-        and set(_LEGACY_EVENT_SCHEMA).issubset({
-            field.name for field in existing_fields
-        })
-    )
-    if compatible and frame.schema != pl.Schema(SCHEMA):
-        existing = frame.schema["events"].inner.fields
-        missing = {
-            key: dtype
-            for key, dtype in EVENT_SCHEMA.items()
-            if key not in {field.name for field in existing}
-        }
-        frame = frame.with_columns(
-            pl.col("events").list.eval(
-                pl.element().struct.with_fields(
-                    pl.lit(None, dtype=dtype).alias(key)
-                    for key, dtype in missing.items()
-                ),
-            ),
-        ).cast(SCHEMA)
     _validate(frame)
     return frame
 

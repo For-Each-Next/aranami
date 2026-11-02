@@ -413,7 +413,11 @@ class AnniversaryArchiveTests(unittest.TestCase):
         archive.save()
         row = pl.read_parquet(self.path).row(0, named=True)
         row["redirects"][0]["text"] = "#REDIRECT [[Wikipedia:Different]]"
-        pl.DataFrame([row], schema=SCHEMA).write_parquet(self.path)
+        identity = pl.read_parquet_metadata(self.path)["aranami.cache"]
+        pl.DataFrame([row], schema=SCHEMA).write_parquet(
+            self.path,
+            metadata={"aranami.cache": identity},
+        )
         self.read.at.reset_mock()
         return title, target
 
@@ -548,14 +552,14 @@ class AnniversaryArchiveTests(unittest.TestCase):
         self.path.parent.mkdir()
         self.path.write_bytes(b"invalid parquet")
         with self.assertLogs(
-            "backend.articles.archive",
+            "shared.support.cache",
             level="WARNING",
         ):
             archive = DailyHistoryArchive(self.read, self.path, self.now)
         day = dt.date(2026, 10, 17)
         archive.at(_title(day), _boundary(day))
         with self.assertLogs(
-            "backend.articles.archive",
+            "shared.support.cache",
             level="WARNING",
         ):
             archive.save()
@@ -580,7 +584,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
         archive.at(_title(next_day), _boundary(next_day))
         with (
             patch(
-                "backend.articles.archive.write_parquet_cache",
+                "backend.articles.archive.ParquetCache.write",
                 side_effect=OSError,
             ),
             self.assertRaises(OSError),

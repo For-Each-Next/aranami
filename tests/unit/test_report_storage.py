@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -415,40 +414,6 @@ class TestReportStore(TestCase):
             assert store.lock_root.is_relative_to(Path(directory) / "state")
 
     @staticmethod
-    def test_english_legacy_family_migrates_without_changing_evidence() -> (
-        None
-    ):
-        """Preserve the historical family under its readable key."""
-        with TemporaryDirectory() as directory:
-            root = Path(directory) / "reports"
-            title = "Wikipedia:Quality"
-            digest = hashlib.sha256(title.encode()).hexdigest()[:16]
-            old_key = f"english-comparisons-zhwiki-quality-{digest}"
-            source = ReportStore(root).write(
-                old_key,
-                replace(_result(), family="enwp_key_articles"),
-                "original",
-                run_id="1" * 32,
-                started_at=_START,
-                target={"site": "zhwiki", "title": title},
-            )
-            store = ReportStore(root / "records")
-            assert store.migrate_legacy() == [root / old_key]
-            key = report_key(
-                "english-comparisons",
-                "zhwiki",
-                title,
-                variant="quality",
-            )
-            migrated = store.read(key)
-            assert migrated.wikitext == source.wikitext
-            assert migrated.manifest["family"] == "enwp_key_articles"
-            assert (
-                migrated.manifest["generated_at"]
-                == (source.manifest["generated_at"])
-            )
-
-    @staticmethod
     def test_daily_observation_installs_named_files_once() -> None:
         """Retain the first observation directly in its date folder."""
         with TemporaryDirectory() as directory:
@@ -481,73 +446,6 @@ class TestReportStore(TestCase):
             assert again.wikitext == "first"
             assert store.read(key).wikitext == "first"
             assert store.read(key, previous=True) is None
-
-    @staticmethod
-    def test_legacy_selection_migrates_with_predecessor_and_evidence() -> None:
-        """Validate both records before selecting readable copies."""
-        with TemporaryDirectory() as directory:
-            reports = Path(directory) / "reports"
-            target = "Wikipedia:Report"
-            digest = hashlib.sha256(target.encode()).hexdigest()[:16]
-            old_key = f"test-report-zhwiki-{digest}"
-            source = ReportStore(reports)
-            for index in (1, 2):
-                source.write(
-                    old_key,
-                    _result(index),
-                    f"report {index}",
-                    run_id=f"{index:032x}",
-                    started_at=_START + dt.timedelta(days=index),
-                    target={"site": "zhwiki", "title": target},
-                )
-            store = ReportStore(reports / "records")
-            key = report_key("test-report", "zhwiki", target)
-            assert store.read(key) is None
-            assert store.migrate_legacy() == [reports / old_key]
-            latest = store.read(key)
-            assert latest.wikitext == "report 2"
-            assert latest.manifest["report_key"] == key
-            assert store.read(key, previous=True).wikitext == "report 1"
-            assert source.read(old_key).wikitext == "report 2"
-            (store.root / key / "latest.json").unlink()
-            assert store.read(key) is None
-            assert store.migrate_legacy() == [reports / old_key]
-            assert (store.root / key / "latest.json").exists()
-
-    def test_migration_rejects_corrupt_predecessor_without_selection(
-        self,
-    ) -> None:
-        """Preserve original data when either record is corrupt."""
-        with TemporaryDirectory() as directory:
-            reports = Path(directory) / "reports"
-            target = "Wikipedia:Report"
-            digest = hashlib.sha256(target.encode()).hexdigest()[:16]
-            old_key = f"test-report-zhwiki-{digest}"
-            source = ReportStore(reports)
-            for index in (1, 2):
-                source.write(
-                    old_key,
-                    _result(index),
-                    f"report {index}",
-                    run_id=f"{index:032x}",
-                    started_at=_START + dt.timedelta(days=index),
-                    target={"site": "zhwiki", "title": target},
-                )
-            previous = source.read(old_key, previous=True)
-            (previous.path / "report.wikitext").write_text("corrupt")
-            store = ReportStore(reports / "records")
-            with self.assertRaises(ValueError):
-                store.migrate_legacy()
-            assert not (
-                store.root
-                / report_key(
-                    "test-report",
-                    "zhwiki",
-                    target,
-                )
-                / "latest.json"
-            ).exists()
-            assert source.read(old_key).wikitext == "report 2"
 
 
 class TestStoredPublication(TestCase):

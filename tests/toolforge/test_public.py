@@ -301,6 +301,7 @@ class PublicWebsiteTests(unittest.TestCase):
                 "routines": None,
                 "schedule": None,
                 "reports": None,
+                "history": None,
             }
             assert self.request("/api/dashboard")[0] == 503
             config = json.loads(self.request("/api/config")[2])
@@ -417,7 +418,8 @@ class PublicWebsiteTests(unittest.TestCase):
             assert head[2] == b""
             assert head[1]["Content-Length"] == headers["Content-Length"]
             detail = self.request("/maintenance/?task=sources")[2].decode()
-            assert '<form class="maintenance-controls"' in detail
+            assert '<form class="maintenance-search"' in detail
+            assert 'class="cdx-table__table__sort-button"' in detail
             assert 'href="/maintenance/" class="back"' in detail
             assert self.request("/maintenance/?task=missing")[0] == 404
             assert self.request("/maintenance/?sort=title")[0] == 400
@@ -465,7 +467,10 @@ class PublicWebsiteTests(unittest.TestCase):
             assert status == 200
             assert headers["Cache-Control"] == "no-store"
             assert "Accept-Language" in headers["Vary"]
-            assert b'<span class="status-label">Running</span>' in body
+            assert re.search(
+                rb'<a class="status-label status-link"[^>]*>Running</a>',
+                body,
+            )
             assert b'id="live-uptime"' in body
             record.update(
                 status="updated",
@@ -475,21 +480,18 @@ class PublicWebsiteTests(unittest.TestCase):
             )
             assert write_routine_status(record, directory=directory)
             body = self.request("/api/live")[2]
-            assert b'<span class="status-label">Updated</span>' in body
-            assert b"Finished at " in body
+            assert b">Updated</a>" in body
+            assert b"Checked at " in body
             assert b"(33 sec)" not in body
             assert b"32.89" not in body
             translated = self.request("/api/live", language="zh-TW")
             assert translated[1]["Content-Language"] == "zh-Hant-TW"
-            assert "結束時間\uff1a" in translated[2].decode()
+            assert "檢查時間\uff1a" in translated[2].decode()
             assert "執行時間33秒" not in translated[2].decode()
             assert self.request("/api/live", "HEAD")[2] == b""
             assert self.request("/api/live", "POST")[0] == 405
             (directory / "routine-status.json").write_text("invalid")
-            assert (
-                b'<span class="status-label">No record</span>'
-                in self.request("/api/live")[2]
-            )
+            assert b">No record</a>" in self.request("/api/live")[2]
         assert not (self.runtime / "cache").exists()
 
     def test_log_selection_filter_limits_and_full_download(self) -> None:
@@ -578,7 +580,7 @@ class PublicWebsiteTests(unittest.TestCase):
         _, marker, remainder = human.partition("<tbody>")
         assert marker
         rows = remainder.partition("</tbody>")[0]
-        assert rows.count("<tr>") == 20
+        assert rows.count("<tr ") == 20
         assert "Pageview rankings" in rows
         assert "Running" in rows
         assert "2026-10-23 12:02:29" in rows
@@ -614,6 +616,10 @@ class PublicWebsiteTests(unittest.TestCase):
 
     def _assert_report_navigation(self, content: str, filename: str) -> None:
         """Keep report history separate from diagnostic downloads."""
+        history = json.loads(self.request("/api/status")[2])["history"]
+        assert len(history["runs"]) == 100
+        live = self.request("/api/live")[2].decode()
+        assert live.count('<dialog id="job-history-') == 20
         assert self.request("/reports/", "HEAD")[2] == b""
         assert self.request("/reports/", "POST")[0] == 405
         for query in (
@@ -627,7 +633,7 @@ class PublicWebsiteTests(unittest.TestCase):
                 assert status == 200
                 output = body.decode()
                 rows = output.partition("<tbody>")[2].partition("</tbody>")[0]
-                assert rows.count("<tr>") == 20
+                assert rows.count("<tr ") == 20
                 assert "2026-10-22 12:00:50" not in rows
                 assert rows.index("2026-10-23 12:02:29") < rows.index(
                     "2026-10-23 12:02:10",
@@ -677,6 +683,7 @@ class PublicWebsiteTests(unittest.TestCase):
             is None
         )
         assert history.read_text() == "invalid history"
+        assert json.loads(self.request("/api/status")[2])["history"] is None
 
     def test_raw_targets_and_query_bounds_remain_strict(self) -> None:
         """Reject encoded paths and oversized or invalid queries."""

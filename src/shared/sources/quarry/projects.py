@@ -247,16 +247,16 @@ def query_project_assessments(
     site: BaseSite,
     project_name: str,
 ) -> pl.DataFrame:
-    """Read project assessment IDs and grades without resolving titles.
+    """Read project page identities and their observed assessments.
 
     Args:
         site: Wiki whose replica holds the assessment observations.
         project_name: Exact PageAssessments project title.
 
     Returns:
-        Eager page IDs, namespaces, and nullable quality/importance
-        observations. Namespace supports aggregate article totals only;
-        no subject names, talk pages, or revisions are requested.
+        Eager page IDs, raw database titles, namespaces, redirect flags,
+        and nullable quality/importance observations. Talk pages and
+        revisions are resolved separately only when needed.
     """
     page = tables.Page
     assessment = tables.PageAssessments
@@ -264,6 +264,7 @@ def query_project_assessments(
     statement = (
         select(
             page.page_id,
+            page.page_title,
             page.page_namespace,
             page.page_is_redirect,
             assessment.pa_class,
@@ -281,6 +282,7 @@ def query_project_assessments(
             statement,
             schema_overrides={
                 "page_id": pl.Int64,
+                "page_title": pl.String,
                 "page_namespace": pl.Int64,
                 "page_is_redirect": pl.Int64,
                 "pa_class": pl.String,
@@ -423,16 +425,104 @@ def _with_titles(site: BaseSite, frame: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def page_metadata(site: BaseSite, page_ids: Iterable[int]) -> pl.DataFrame:
+def page_identity_metadata(
+    site: BaseSite,
+    identities: pl.DataFrame,
+) -> pl.DataFrame:
+    """Name saved page identities and their discussion targets.
+
+    Args:
+        site: Wiki with already available namespace definitions.
+        identities: IDs with database title/namespace or full titles.
+
+    Returns:
+        Full subject and discussion titles without fetching pages.
+        Discussion links do not assert that the talk page exists.
+    """
+    if "page_title" not in identities.columns:
+        rows = []
+        for identifier, title in identities.select(
+            "page_id",
+            "full_title",
+        ).iter_rows():
+            page = pywikibot.Page(site, title)
+            rows.append((
+                identifier,
+                int(page.namespace()),
+                page.title(with_ns=False),
+            ))
+        identities = pl.DataFrame(rows, schema=_MEMBER_SCHEMA, orient="row")
+    return _with_titles(
+        site,
+        identities.select(*_MEMBER_SCHEMA).with_columns(
+            pl.col("page_id").alias("talk_page_id"),
+            pl.lit(None, dtype=pl.Int64).alias("page_revision"),
+            pl.lit(None, dtype=pl.Int64).alias("talk_revision"),
+        ),
+    ).with_columns(pl.lit(None, dtype=pl.Int64).alias("talk_page_id"))
+
+
+def _deleted_page_metadata(
+    site: BaseSite,
+    page_ids: Iterable[int],
+) -> pl.DataFrame:
+    """Recover missing identities from exact public deletion records.
+
+    Args:
+        site: Wiki whose public replica contains deletion records.
+        page_ids: IDs absent from the current page table.
+
+    Returns:
+        Latest public deletion title for each known ID, no revisions.
+        IDs without a matching visible deletion remain absent.
+    """
+    log = tables.Logging
+    statement = (
+        select(
+            log.log_page.label("page_id"),
+            log.log_namespace.label("page_namespace"),
+            log.log_title.label("page_title"),
+        )
+        .where(
+            log.log_type == "delete",
+            log.log_action == "delete",
+            log.log_deleted == 0,
+        )
+        .order_by(log.log_timestamp.desc(), log.log_id.desc())
+        .limit(1)
+    )
+    frames = [
+        _replica(site.dbName())
+        .query(
+            statement.where(log.log_page == identifier),
+            schema_overrides=_MEMBER_SCHEMA,
+        )
+        .collect()
+        for identifier in dict.fromkeys(page_ids)
+    ]
+    return page_identity_metadata(
+        site,
+        pl.concat(frames) if frames else pl.DataFrame(schema=_MEMBER_SCHEMA),
+    )
+
+
+def page_metadata(
+    site: BaseSite,
+    page_ids: Iterable[int],
+    *,
+    include_deleted: bool = False,
+) -> pl.DataFrame:
     """Read current titles and revision references for selected IDs.
 
     Args:
         site: Wiki whose current page records are requested.
         page_ids: Exact changed identities, including departed members.
+        include_deleted: Recover absent IDs from public deletion logs.
 
     Returns:
         Current subject/talk names, namespaces, and revision IDs.
-        Deleted IDs are absent; no page content is requested.
+        Deleted IDs are absent unless a public deletion title is found
+        when requested. No page content or deleted text is requested.
     """
     page = tables.Page.__table__
     talk = page.alias("talk")
@@ -461,6 +551,7 @@ def page_metadata(site: BaseSite, page_ids: Iterable[int]) -> pl.DataFrame:
         )
         .order_by(page.c.page_id)
     )
+    identifiers = tuple(dict.fromkeys(page_ids))
     frames = [
         _replica(site.dbName())
         .query(
@@ -469,15 +560,20 @@ def page_metadata(site: BaseSite, page_ids: Iterable[int]) -> pl.DataFrame:
         )
         .collect()
         for batch in batched(
-            dict.fromkeys(page_ids),
+            identifiers,
             _BATCH_SIZE,
             strict=False,
         )
     ]
-    return _with_titles(
+    current = _with_titles(
         site,
         pl.concat(frames) if frames else pl.DataFrame(schema=schema),
     )
+    if not include_deleted:
+        return current
+    missing = set(identifiers) - set(current["page_id"])
+    deleted = _deleted_page_metadata(site, sorted(missing))
+    return pl.concat((current, deleted.select(current.columns)))
 
 
 def _project_membership(database: str, project_name: str) -> pl.DataFrame:

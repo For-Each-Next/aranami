@@ -16,6 +16,7 @@ import polars as pl
 
 from shared.sources.revisions import RevisionTextCache
 from shared.sources.wiki import WikiReader
+from shared.support.cache import ParquetCache
 
 _NOW = dt.datetime(2026, 10, 31, tzinfo=dt.UTC)
 
@@ -27,6 +28,22 @@ def _sha(text: str) -> str:
         Hexadecimal SHA-1 digest.
     """
     return hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest()
+
+
+def _write(path: Path, frame: pl.DataFrame, contract: str) -> None:
+    """Retain a fixture with its own revision-text contract.
+
+    Args:
+        path: Disposable test cache destination.
+        frame: Exact typed fixture observations.
+        contract: Revision-text format identity written in metadata.
+    """
+    ParquetCache(
+        schema=frame.schema,
+        contract=contract,
+        max_rows=5000,
+        max_bytes=16 * 1024 * 1024,
+    ).write(path, frame)
 
 
 class TestRevisionTextCache(TestCase):
@@ -51,7 +68,7 @@ class TestRevisionTextCache(TestCase):
             frame = pl.read_parquet(path).with_columns(
                 pl.lit("bad").alias("text"),
             )
-            frame.write_parquet(path)
+            _write(path, frame, "newsletter-revision-text:1")
             assert RevisionTextCache(path, _NOW).get(1, _sha("old")) is None
             path.write_bytes(b"corrupt")
             assert RevisionTextCache(path, _NOW).get(1, _sha("old")) is None
@@ -67,11 +84,31 @@ class TestRevisionTextCache(TestCase):
             original = path.read_bytes()
             cache.put(2, "new")
             with patch(
-                "shared.sources.revisions.write_parquet_cache",
+                "shared.sources.revisions.ParquetCache.write",
                 side_effect=OSError("unavailable"),
             ):
                 cache.save()
             assert path.read_bytes() == original
+
+    @staticmethod
+    def test_changed_or_absent_contract_rebuilds_matching_schema() -> None:
+        """Reject obsolete text contracts even with current columns."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "revisions.parquet"
+            current = RevisionTextCache(path, _NOW)
+            current.put(1, "old")
+            current.save()
+            frame = pl.read_parquet(path)
+            _write(path, frame, "newsletter-revision-text:0")
+            assert RevisionTextCache(path, _NOW).get(1, _sha("old")) is None
+            frame.write_parquet(path)
+            assert RevisionTextCache(path, _NOW).get(1, _sha("old")) is None
+            rebuilt = RevisionTextCache(path, _NOW)
+            rebuilt.put(1, "fresh")
+            rebuilt.save()
+            assert (
+                RevisionTextCache(path, _NOW).get(1, _sha("fresh")) == "fresh"
+            )
 
     @staticmethod
     def test_reader_rechecks_cutoff_before_reusing_content() -> None:
@@ -119,8 +156,8 @@ class TestRevisionTextCache(TestCase):
         """Bound files and separate preview source observations."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            live = root / "cache" / "newsletter-revisions-v1.parquet"
-            preview = root / "dry-run" / "newsletter-revisions-v1.parquet"
+            live = root / "cache" / "newsletter-revisions.parquet"
+            preview = root / "dry-run" / "newsletter-revisions.parquet"
             cache = RevisionTextCache(live, _NOW)
             cache.put(1, "live")
             cache.put(2, "second")

@@ -315,7 +315,7 @@ def _retain_overview(
         facts["overview_observed_at"] = prior.get("overview_observed_at")
 
 
-def _new_page_assessment_options(
+def _year_assessment_options(
     issue: Issue,
     now: dt.datetime,
     current: pl.DataFrame | None,
@@ -385,7 +385,7 @@ def _year_review(  # ruff: ignore[too-many-arguments]
         "awards": None,
         "newcomers": None,
     }
-    assessment_options = _new_page_assessment_options(
+    assessment_options = _year_assessment_options(
         issue,
         now,
         current_assessments,
@@ -678,15 +678,12 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
             historical,
             issue,
             through=observation_end,
+            observed_at=now,
+            assessments=current_assessments,
+            assessment_observed_at=now.isoformat(timespec="seconds"),
             resolve=read.resolve,
             resolve_many=read.resolve_many,
             resolve_page_id=read.resolve_page_id,
-            **_new_page_assessment_options(
-                issue,
-                now,
-                current_assessments,
-                assessments_at,
-            ),
         )
         facts["awards"], facts["newcomers"] = _awards(
             _read_optional(
@@ -800,15 +797,16 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
         overview_at: Read retained database counts for an exclusive UTC
             date boundary with their actual observation timestamp.
             Missing snapshots leave their counts unknown.
-        current_assessments: Fresh internal grades for open-quarter new
-            articles. Closed quarters never use these observations.
+        current_assessments: Fresh internal grades for registered new
+            articles in every active draft, including closed quarters.
+            Historical annual statistics retain their own boundaries.
         dyk_projects: Complete current article memberships with
             ``full_title`` and ``project`` columns for annual groups.
             Their observation time remains separate from the historical
             source cutoff, including for completed years.
         assessments_at: Read retained assessment rows for an exact UTC
             date with their actual observation time. Missing historical
-            snapshots leave new-article grade breakdowns unavailable.
+            snapshots leave historical annual statistics unavailable.
         revision_counts: Replica ranking for an explicit annual
             UTC interval. Missing readers leave revisions unavailable.
         annual_pageviews: Read prepared calendar-year Pageviews through

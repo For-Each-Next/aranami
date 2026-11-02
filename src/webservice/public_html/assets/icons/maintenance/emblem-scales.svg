@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="48" height="48">
+  <defs>
+    <radialGradient xlink:href="#a" id="b" cx="23.857143" cy="40" r="17.142857" fx="23.857143" fy="40" gradientTransform="matrix(1 0 0 .5 0 20)" gradientUnits="userSpaceOnUse"/>
+    <linearGradient id="a">
+      <stop offset="0"/>
+      <stop offset="1" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#b)" d="M41 40a17.142857 8.5714283 0 1 1-34.2857132 0A17.142857 8.5714283 0 1 1 41 40z" color="#000" display="block" opacity=".6" overflow="visible" style="marker:none" transform="matrix(1.07055 0 0 .525 -.892755 22.5)"/>
+  <g fill="#f57900" stroke="#8f5902">
+    <path stroke-width="1.00000193" d="M45.49996985 23.00004338c0 11.87410558-9.62586427 21.49996985-21.49996985 21.49996985S2.50002979 34.87414896 2.50002979 23.00004338 12.12589442 1.5000729 24 1.5000729s21.49996985 9.62586491 21.49996985 21.4999705z"/>
+    <path fill="none" stroke="#fff" stroke-width=".99999581" d="M44.49999996 22.99999997a20.49999997 20.49999997 0 1 1-40.99999994 0 20.49999997 20.49999997 0 1 1 40.99999994 0z" opacity=".35"/>
+    <path fill="#fff" stroke="none" d="M24 3C12.954305 3 4 11.954305 4 23c0 1.686052.2321382 3.310816.625 4.875 3.2039734 4.793264 13.253522-.120144 20.21875-5.59375 8.00805-6.293106 17.842029 8.359347 19.125 1.4375C43.977181 23.480132 44 23.240675 44 23c0-11.045695-8.954305-20-20-20z" opacity=".25"/>
+  </g>
+  <g transform="matrix(.08578 0 0 .09482 7.01409084 8.1431068)">
+    <path fill="none" stroke="#fff" stroke-linecap="round" stroke-width="1.49999997" d="m13 18 9.037685-2.464823m4.001273-1.091256L35 12" transform="matrix(11.65828 0 0 10.54642 -81.77223973 -85.88065678)"/>
+    <path fill="none" stroke="#fff" stroke-width="22.17684937" d="M198.02648 93.408547V283.24417"/>
+    <g id="c">
+      <path fill="none" stroke="#fff" stroke-linejoin="bevel" stroke-width="11.875" d="m279.63444 146.14066 46.63312-105.464231 46.63312 105.464231"/>
+      <path fill="#fff" d="M122 188a57 57 0 1 1-114 0" transform="matrix(1.02266 0 0 .92512 259.79491 -38.329236)"/>
+    </g>
+    <path fill="none" stroke="#fff" stroke-width="33.26527405" d="M279.63443 288.51738H116.41852"/>
+    <use xlink:href="#c" width="48" height="48" transform="translate(-256.48216 63.278541)"/>
+    <path fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.49999996" d="M26 15a2 2 0 1 1-4 0 2 2 0 1 1 4 0z" transform="matrix(11.65828 0 0 10.54642 -81.772234 -85.880653)"/>
+    <path fill="none" stroke="#fff" stroke-linecap="round" stroke-width="1.49999998" d="m26.038958 14.443921 2.255573-.615156" transform="matrix(0 -10.54642 11.65828 0 23.15226726 325.42987047)"/>
+  </g>
+</svg>

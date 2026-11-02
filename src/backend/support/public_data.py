@@ -20,6 +20,7 @@ from backend.support.events import (
     MAX_EVENT_LINE_BYTES,
     validate_event,
 )
+from backend.support.job_history import read_job_history
 from backend.support.report_status import read_report_status
 from backend.support.routine_status import read_routine_status
 from backend.support.server_status import validate_runtime
@@ -201,12 +202,13 @@ def saved_status(runtime: Path) -> dict[str, object]:
         runtime: Tool home containing the backend-owned state directory.
 
     Returns:
-        Routine, scheduler, and report envelopes or independent nulls.
+        Routine, scheduler, report, and history envelopes, or nulls.
     """
     readers: tuple[tuple[str, str, Callable], ...] = (
         ("routines", "routine-status.json", read_routine_status),
         ("schedule", "schedule-status.json", read_schedule_status),
         ("reports", "report-updates.json", read_report_status),
+        ("history", "job-history.json", read_job_history),
     )
     result = {}
     for key, name, reader in readers:

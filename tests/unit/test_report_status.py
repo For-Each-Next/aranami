@@ -448,6 +448,7 @@ class TestReportStatusStorage(TestCase):
                 other,
                 directory=destination,
             )
+            last_updated = None
             for sequence, status in enumerate((
                 "queued",
                 "running",
@@ -462,16 +463,18 @@ class TestReportStatusStorage(TestCase):
                     record,
                     directory=destination,
                 )
+                if status == "updated":
+                    last_updated = record["finished_at"]
+                expected = dict(record)
+                if last_updated is not None:
+                    expected["last_updated_at"] = last_updated
                 actual = _reports(destination)
-                assert (
-                    actual[
-                        report_status.report_update_key(
-                            "zhwiki",
-                            other["title"],
-                        )
-                    ]
-                    == other
-                )
+                assert actual[
+                    report_status.report_update_key(
+                        "zhwiki",
+                        other["title"],
+                    )
+                ] == {**other, "last_updated_at": other["finished_at"]}
                 assert (
                     actual[
                         report_status.report_update_key(
@@ -479,7 +482,7 @@ class TestReportStatusStorage(TestCase):
                             record["title"],
                         )
                     ]
-                    == record
+                    == expected
                 )
 
     @staticmethod
@@ -517,7 +520,10 @@ class TestReportStatusStorage(TestCase):
                 newer,
                 directory=destination,
             )
-            assert next(iter(_reports(destination).values())) == newer
+            assert next(iter(_reports(destination).values())) == {
+                **newer,
+                "last_updated_at": current["finished_at"],
+            }
 
     @staticmethod
     def test_equal_time_queue_can_start_but_cannot_regress() -> None:
@@ -681,3 +687,291 @@ class TestReportStatusStorage(TestCase):
                 "Wikipedia:Report 3",
                 "Wikipedia:Report 4",
             }
+
+
+class TestLastConfirmedUpdate(TestCase):
+    """Retain actual save evidence independently of later checks."""
+
+    @staticmethod
+    def test_checks_starts_and_failures_keep_the_last_save() -> None:
+        """Keep confirmed saves separate from later attempts."""
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            saved = _record()
+            assert report_status.write_report_update(
+                saved,
+                directory=directory,
+            )
+            expected = saved["finished_at"]
+            for index, status in enumerate(
+                (
+                    "queued",
+                    "running",
+                    "no_update",
+                    "failed",
+                    "deferred",
+                    "unconfirmed",
+                ),
+                1,
+            ):
+                started = _START + dt.timedelta(minutes=index)
+                incoming = _record(status=status, started_at=started)
+                if status not in {"queued", "running"}:
+                    incoming["finished_at"] = report_status._iso(
+                        started + dt.timedelta(seconds=2.5),
+                    )
+                assert report_status.write_report_update(
+                    incoming,
+                    directory=directory,
+                )
+                assert (
+                    next(iter(_reports(directory).values()))["last_updated_at"]
+                    == expected
+                )
+            newer = {
+                **_record(started_at=_START + dt.timedelta(minutes=10)),
+                "finished_at": "2026-10-20T19:09:02.500000Z",
+            }
+            assert report_status.write_report_update(
+                newer,
+                directory=directory,
+            )
+            assert (
+                next(iter(_reports(directory).values()))["last_updated_at"]
+                == newer["finished_at"]
+            )
+            stale_evidence = {
+                **newer,
+                "status": "no_update",
+                "confirmed_edits": 0,
+                "started_at": "2026-10-20T19:10:00Z",
+                "finished_at": "2026-10-20T19:10:02Z",
+                "last_updated_at": saved["finished_at"],
+            }
+            assert report_status.write_report_update(
+                stale_evidence,
+                directory=directory,
+            )
+            assert (
+                next(iter(_reports(directory).values()))["last_updated_at"]
+                == newer["finished_at"]
+            )
+            snapshot = (directory / "report-updates.json").read_bytes()
+            assert not report_status.write_report_update(
+                {**newer, "dry": True},
+                directory=directory,
+            )
+            assert not report_status.write_report_update(
+                {**saved, "finished_at": "2026-10-20T20:59:00.000000Z"},
+                directory=directory,
+            )
+            assert (directory / "report-updates.json").read_bytes() == snapshot
+
+    @staticmethod
+    def test_legacy_saved_record_is_recovered_and_preserved() -> None:
+        """Recover save evidence from legacy schema one records."""
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            path = directory / "report-updates.json"
+            saved = _record()
+            key = report_status.report_update_key(
+                saved["site"],
+                saved["title"],
+            )
+            path.write_text(
+                json.dumps({
+                    "schema": 1,
+                    "updated_at": saved["finished_at"],
+                    "reports": {key: saved},
+                }),
+            )
+            assert (
+                report_status.read_report_status(path)["reports"][key][
+                    "last_updated_at"
+                ]
+                == saved["finished_at"]
+            )
+            assert (
+                "last_updated_at"
+                not in json.loads(path.read_text())["reports"][key]
+            )
+            checking = _record(
+                status="running",
+                started_at=_START + dt.timedelta(hours=1),
+            )
+            assert report_status.write_report_update(
+                checking,
+                directory=directory,
+            )
+            assert (
+                _reports(directory)[key]["last_updated_at"]
+                == saved["finished_at"]
+            )
+
+    @staticmethod
+    def test_partial_failure_requires_an_observed_save_time() -> None:
+        """Keep partial failures without save timestamps unknown."""
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            partial = {**_record(status="failed"), "confirmed_edits": 1}
+            assert report_status.write_report_update(
+                partial,
+                directory=directory,
+            )
+            assert "last_updated_at" not in next(
+                iter(_reports(directory).values()),
+            )
+            observed = {**partial, "last_updated_at": "2026-10-20T18:59:01Z"}
+            assert report_status.write_report_update(
+                observed,
+                directory=directory,
+            )
+            assert (
+                next(iter(_reports(directory).values()))["last_updated_at"]
+                == "2026-10-20T18:59:01.000000Z"
+            )
+
+    def test_invalid_last_update_does_not_replace_valid_state(self) -> None:
+        """Reject malformed optional save timestamps."""
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            assert report_status.write_report_update(
+                _record(),
+                directory=directory,
+            )
+            original = (directory / "report-updates.json").read_bytes()
+            for value in (True, 123, "invalid", "2026-10-20T18:59:00"):
+                with self.assertLogs(_LOGGER, level="WARNING"):
+                    assert not report_status.write_report_update(
+                        {**_record(), "last_updated_at": value},
+                        directory=directory,
+                    )
+                assert (
+                    directory / "report-updates.json"
+                ).read_bytes() == original
+
+    @staticmethod
+    def test_exact_saved_history_survives_history_retention() -> None:
+        """Backfill only matching configured destinations."""
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            checked = _record(status="no_update")
+            stamp = "2026-10-19T12:00:00Z"
+            history = {
+                "schema": 1,
+                "runs": [
+                    {
+                        "run_id": "c" * 32,
+                        "routine": "pageviews",
+                        "started_at": stamp,
+                        "finished_at": stamp,
+                        "status": "updated",
+                        "duration_seconds": 0,
+                        "stages": [
+                            {
+                                "time": stamp,
+                                "kind": "saved",
+                                "title": checked["title"],
+                            },
+                        ],
+                        "truncated": False,
+                    },
+                ],
+            }
+            (directory / "job-history.json").write_text(json.dumps(history))
+            for different in (
+                {**checked, "site": "enwiki"},
+                {**checked, "routine": "dyks"},
+                {**checked, "title": "Wikipedia:Other"},
+            ):
+                assert report_status.write_report_update(
+                    different,
+                    directory=directory,
+                )
+                key = report_status.report_update_key(
+                    different["site"],
+                    different["title"],
+                )
+                assert "last_updated_at" not in _reports(directory)[key]
+            assert report_status.write_report_update(
+                checked,
+                directory=directory,
+            )
+            key = report_status.report_update_key(
+                checked["site"],
+                checked["title"],
+            )
+            expected = "2026-10-19T12:00:00.000000Z"
+            assert _reports(directory)[key]["last_updated_at"] == expected
+            (directory / "job-history.json").unlink()
+            later = {
+                **checked,
+                "started_at": "2026-10-21T18:59:00Z",
+                "finished_at": "2026-10-21T18:59:02Z",
+            }
+            assert report_status.write_report_update(
+                later,
+                directory=directory,
+            )
+            assert _reports(directory)[key]["last_updated_at"] == expected
+
+    @staticmethod
+    def test_newer_saved_stage_advances_older_persisted_evidence() -> None:
+        """Retain a partial save even when its attempt later fails."""
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            original = _record()
+            assert report_status.write_report_update(
+                original,
+                directory=directory,
+            )
+            stamp = "2026-10-20T19:05:00Z"
+            failed = {
+                **_record(status="failed"),
+                "started_at": "2026-10-20T19:04:00Z",
+                "finished_at": "2026-10-20T19:06:00Z",
+            }
+            history = {
+                "schema": 1,
+                "runs": [
+                    {
+                        "run_id": failed["run_id"],
+                        "routine": "pageviews",
+                        "started_at": failed["started_at"],
+                        "finished_at": failed["finished_at"],
+                        "status": "failed",
+                        "duration_seconds": 120,
+                        "stages": [
+                            {
+                                "time": stamp,
+                                "kind": "saved",
+                                "title": failed["title"],
+                            },
+                        ],
+                        "truncated": False,
+                    },
+                ],
+            }
+            (directory / "job-history.json").write_text(json.dumps(history))
+            assert report_status.write_report_update(
+                failed,
+                directory=directory,
+            )
+            expected = "2026-10-20T19:05:00.000000Z"
+            assert (
+                next(iter(_reports(directory).values()))["last_updated_at"]
+                == expected
+            )
+            (directory / "job-history.json").unlink()
+            assert report_status.write_report_update(
+                {
+                    **_record(status="no_update"),
+                    "started_at": "2026-10-20T19:10:00Z",
+                    "finished_at": "2026-10-20T19:10:02Z",
+                },
+                directory=directory,
+            )
+            assert (
+                next(iter(_reports(directory).values()))["last_updated_at"]
+                == expected
+            )

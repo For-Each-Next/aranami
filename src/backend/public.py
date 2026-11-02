@@ -34,7 +34,6 @@ from backend.support.http import (
     encoded_response,
     read_only_headers,
 )
-from backend.support.job_history import read_job_history
 from backend.support.logs import open_run_log
 from backend.support.page_cache import PageCache
 from backend.support.public_data import (
@@ -877,6 +876,7 @@ class _PublicViews:
                 "state/routine-status.json",
                 "state/schedule-status.json",
                 "state/report-updates.json",
+                "state/job-history.json",
             )
         ]
         paths.append(Path(__file__).resolve().parents[2] / "pyproject.toml")
@@ -1004,17 +1004,13 @@ class _PublicViews:
         Returns:
             A Reports page with retained invocations across all dates.
         """
-        try:
-            runs = read_job_history(
-                self.runtime / "state" / "job-history.json",
-            )["runs"]
-        except OSError, ValueError, TypeError, OverflowError, RecursionError:
-            runs = []
+        status = saved_status(self.runtime)
+        runs = (status.get("history") or {}).get("runs", [])
         return _html(
             pages.render_reports(
                 {"runs": runs},
                 locale,
-                status=saved_status(self.runtime),
+                status=status,
                 config=_configuration(),
                 navigation=_navigation(request, locale),
             ),
@@ -1106,6 +1102,7 @@ class _PublicViews:
             "state/routine-status.json",
             "state/schedule-status.json",
             "state/report-updates.json",
+            "state/job-history.json",
         ):
             try:
                 info = (self.runtime / name).lstat()

@@ -60,18 +60,6 @@ SCHEMA = {
     "occurred_at": pl.Datetime("us", "UTC"),
     "oldid": pl.Int64,
 }
-_LEGACY_SCHEMA = {
-    key: value
-    for key, value in SCHEMA.items()
-    if key
-    not in {
-        "action_type",
-        "question",
-        "question_status",
-        "occurred_at",
-        "oldid",
-    }
-}
 _FIELDS = (
     "date",
     "nominator",
@@ -426,28 +414,6 @@ def load(path: Path) -> pl.DataFrame:
         Validated records, or a typed empty first-use frame.
     """
     frame = _read(path)
-    _validate(frame)
-    return frame
-
-
-def import_records(path: Path) -> pl.DataFrame:
-    """Read preserved legacy recognition for an explicit migration.
-
-    Args:
-        path: Original inventory whose bytes remain unchanged.
-
-    Returns:
-        Validated canonical rows with unknown new fields left null.
-    """
-    frame = _read(path)
-    if frame.schema == pl.Schema(_LEGACY_SCHEMA):
-        frame = _coverage(
-            frame.with_columns(
-                pl.lit(None, dtype=dtype).alias(name)
-                for name, dtype in SCHEMA.items()
-                if name not in frame.columns
-            ).select(list(SCHEMA)),
-        )
     _validate(frame)
     return frame
 

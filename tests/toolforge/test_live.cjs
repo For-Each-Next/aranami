@@ -13,13 +13,15 @@ const messages = {
     "duration.minutes": "{minutes} min {seconds} sec",
     "duration.hours": "{hours} hr {minutes} min {seconds} sec",
     "duration.days": "{days} d {hours} hr {minutes} min {seconds} sec",
-    "time.minutes_ago": "({count} min ago)",
-    "time.hours_ago": "({count} hr ago)",
-    "time.days_ago": "({count} d ago)",
-    "time.minutes_ahead": "(in {count} min)",
-    "time.hours_ahead": "(in {count} hr)",
-    "time.days_ahead": "(in {count} d)",
-    "time.soon": "(soon)",
+    "time.minutes_ago": "({count}m ago)",
+    "time.hours_ago": "({count}h ago)",
+    "time.days_ago": "({count}d ago)",
+    "time.months_ago": "({count}mo ago)",
+    "time.minutes_ahead": "({count}m from now)",
+    "time.hours_ahead": "({count}h from now)",
+    "time.days_ahead": "({count}d from now)",
+    "time.months_ahead": "({count}mo from now)",
+    "time.soon": "(within 1m)",
     "time.just_now": "(just now)",
 };
 const base = Date.parse("2026-10-24T12:00:00Z");
@@ -133,15 +135,9 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
             "data-progress-fallback": "Running",
         }),
     }, completed ? "No update" : subject);
-    const statusSymbol = new Element("use", {
-        id: "status-symbol", href: `/assets/icons/report-icons.svg#status-${completed ? "success" : "running"}`,
-    });
-    const statusIcon = new Element("svg", {
-        id: "status-icon", class: "status-icon", "aria-hidden": "true", focusable: "false",
-    }, "", [statusSymbol]);
     const statusLine = new Element("P", {
         id: "status-line", class: "routine-status", "data-status": completed ? "no_update" : "running",
-    }, "", [statusIcon, statusLabel, button]);
+    }, "", [statusLabel, button]);
     const clock = new Element("SPAN", {
         id: "elapsed",
         ...(completed ? {} : {
@@ -154,7 +150,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
     const relative = new Element("SMALL", {
         "data-clock": "relative", "data-observed-at": stamp(75000),
     });
-    const schedule = new Element("SPAN", { "data-schedule-time": "" }, "Next: ", [relative]);
+    const schedule = new Element("SPAN", { "data-schedule-time": "" }, "Next ", [relative]);
     const server = new Element("P", {
         id: "server-state", "data-schedule-time": "", "data-stale-text": "Server unavailable",
     }, "Running");
@@ -194,7 +190,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
             return this.roots.map(search).find(Boolean) ?? null;
         },
     };
-    return { document, button, statusLabel, statusLine, statusIcon, statusSymbol, clock, popup, relative, schedule, server, progress, notice, root, uptime, runtime, memory };
+    return { document, button, statusLabel, statusLine, clock, popup, relative, schedule, server, progress, notice, root, uptime, runtime, memory };
 }
 
 function browser(logs = false, resources = false, options = {}) {
@@ -392,18 +388,22 @@ test("running clocks use whole seconds across day and hour boundaries", () => {
 test("relative clocks use days for boot times at twenty-four hours and beyond", () => {
     for (const [seconds, expected] of [
         [-59, "(just now)"],
-        [-60, "(1 min ago)"],
-        [-3599, "(59 min ago)"],
-        [-3600, "(1 hr ago)"],
-        [-86399, "(23 hr ago)"],
-        [-86400, "(1 d ago)"],
-        [-259200, "(3 d ago)"],
-        [59, "(soon)"],
-        [60, "(in 1 min)"],
-        [3600, "(in 1 hr)"],
-        [86399, "(in 23 hr)"],
-        [86400, "(in 1 d)"],
-        [259200, "(in 3 d)"],
+        [-60, "(1m ago)"],
+        [-3599, "(59m ago)"],
+        [-3600, "(1h ago)"],
+        [-86399, "(23h ago)"],
+        [-86400, "(1d ago)"],
+        [-259200, "(3d ago)"],
+        [-2629800, "(1mo ago)"],
+        [-5259600, "(2mo ago)"],
+        [59, "(within 1m)"],
+        [60, "(1m from now)"],
+        [3600, "(1h from now)"],
+        [86399, "(23h from now)"],
+        [86400, "(1d from now)"],
+        [259200, "(3d from now)"],
+        [2629800, "(1mo from now)"],
+        [5259600, "(2mo from now)"],
     ]) {
         const page = browser();
         page.relative.setAttribute("data-observed-at", stamp(1000 + seconds * 1000));
@@ -414,7 +414,7 @@ test("relative clocks use days for boot times at twenty-four hours and beyond", 
 
 test("inline relative notes omit localized parentheses", async () => {
     for (const [label, expected] of [
-        ["({count} d ago)", "3 d ago"],
+        ["({count}d ago)", "3d ago"],
         ["（{count}天前）", "3天前"],
     ]) {
         const page = browser();
@@ -441,10 +441,10 @@ test("stale samples retain permanent boot facts while server state expires", asy
         " (2026-10-21 12:00:00, ", [age, new Text(")")]);
     page.root.insertBefore(boot, page.notice);
     page.jump(1000);
-    assert.equal(boot.textContent, " (2026-10-21 12:00:00, 3 d ago)");
+    assert.equal(boot.textContent, " (2026-10-21 12:00:00, 3d ago)");
     page.jump(120000);
     await page.settle();
-    assert.equal(boot.textContent, " (2026-10-21 12:00:00, 3 d ago)");
+    assert.equal(boot.textContent, " (2026-10-21 12:00:00, 3d ago)");
     assert.equal(page.server.textContent, "Server unavailable");
 });
 
@@ -466,9 +466,9 @@ test("local clocks advance by elapsed time while server requests stay periodic",
     assert.equal(page.clock.textContent, "(15 sec…)");
     page.jump(10000);
     assert.equal(page.requests.length, 3);
-    assert.equal(page.relative.textContent, "(in 1 min)");
+    assert.equal(page.relative.textContent, "(1m from now)");
     page.jump(1000);
-    assert.equal(page.relative.textContent, "(soon)");
+    assert.equal(page.relative.textContent, "(within 1m)");
 });
 
 test("synchronization keeps existing modal dialogs and freezes completed timers", async () => {
@@ -484,7 +484,6 @@ test("synchronization keeps existing modal dialogs and freezes completed timers"
     assert.equal(page.document.getElementById("status-button"), page.button);
     assert.equal(page.statusLabel.textContent, "No update");
     assert.equal(page.statusLine.getAttribute("data-status"), "no_update");
-    assert.equal(page.statusSymbol.getAttribute("href"), "/assets/icons/report-icons.svg#status-success");
     assert.equal(page.button.textContent, "Details…");
     assert.equal(page.statusLabel.hasAttribute("data-progress-label"), false);
     assert.equal(page.statusLabel.hasAttribute("data-progress-fallback"), false);
@@ -496,25 +495,22 @@ test("synchronization keeps existing modal dialogs and freezes completed timers"
     assert.equal(page.statusLabel.textContent, "No update");
 });
 
-test("status icons follow live outcomes without replacing labels or open dialogs", async () => {
+test("live outcomes update status text and styling state without replacing labels or open dialogs", async () => {
     const page = browser();
     page.popup.open = true;
     page.document.activeElement = page.button;
-    for (const [index, [state, icon]] of [
-        ["failed", "failed"], ["queued", "queued"], ["deferred", "warning"],
-        ["unconfirmed", "warning"], ["unknown", "unknown"], ["updated", "success"],
+    for (const [index, state] of [
+        "failed", "queued", "deferred", "unconfirmed", "unknown", "updated",
     ].entries()) {
         const next = fixture(index * 5000, true);
         next.statusLine.setAttribute("data-status", state);
         next.statusLabel.textContent = state;
-        next.statusSymbol.setAttribute("href", `/assets/icons/report-icons.svg#status-${icon}`);
         await page.respond(next);
         assert.equal(page.statusLine.getAttribute("data-status"), state);
-        assert.equal(page.statusSymbol.getAttribute("href"), `/assets/icons/report-icons.svg#status-${icon}`);
         assert.equal(page.statusLabel.textContent, state);
-        assert.equal(page.document.getElementById("status-icon"), page.statusIcon);
+        assert.equal(page.document.getElementById("status-line"), page.statusLine);
         assert.equal(page.document.getElementById("status-label"), page.statusLabel);
-        assert.equal(page.statusIcon.getAttribute("aria-hidden"), "true");
+        assert.deepEqual(page.statusLine.childNodes, [page.statusLabel, page.button]);
         assert.equal(page.document.activeElement, page.button);
         assert.equal(page.popup.open, true);
         page.jump(5000);

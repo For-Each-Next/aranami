@@ -1,7 +1,7 @@
 """Store disposable revision-keyed quality dates beneath the caller.
 
-Null dates are valid cached parsing results. Change the filename version
-when extraction semantics change so old results are rebuilt.
+Null dates are valid cached parsing results. The embedded parser
+contract invalidates cached dates when extraction rules change.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import polars as pl
 
-from shared.support.cache import write_parquet_cache
+from shared.support.cache import ParquetCache
 
 SCHEMA = {
     "page_id": pl.Int64,
@@ -21,7 +21,13 @@ SCHEMA = {
     "aliases": pl.String,
     "quality_date": pl.Date,
 }
-_FILENAME = "enwiki_quality_listing_dates-v1.parquet"
+_CACHE = ParquetCache(
+    schema=SCHEMA,
+    contract="enwiki-quality-listing-dates:1",
+    max_rows=1_000_000,
+    max_bytes=64 * 1024 * 1024,
+)
+_FILENAME = "enwiki_quality_listing_dates.parquet"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -33,15 +39,7 @@ def load() -> pl.DataFrame:
         absent talk pages.
     """
     path = Path.cwd() / "cache" / _FILENAME
-    if not path.exists():
-        return pl.DataFrame(schema=SCHEMA)
-    try:
-        frame = pl.read_parquet(path).select(
-            pl.col(name).cast(dtype) for name, dtype in SCHEMA.items()
-        )
-    except OSError, pl.exceptions.PolarsError:
-        _LOGGER.warning("Ignoring unreadable quality-date cache: %s", path)
-        return pl.DataFrame(schema=SCHEMA)
+    frame = _CACHE.read(path)
     invalid = frame.filter(
         pl.col("page_id").is_null()
         | (pl.col("page_id") <= 0)
@@ -71,6 +69,6 @@ def save(frame: pl.DataFrame) -> None:
     """
     path = Path.cwd() / "cache" / _FILENAME
     try:
-        write_parquet_cache(path, frame.select(list(SCHEMA)).sort("page_id"))
-    except OSError, pl.exceptions.PolarsError:
+        _CACHE.write(path, frame.select(list(SCHEMA)).sort("page_id"))
+    except OSError, ValueError, pl.exceptions.PolarsError:
         _LOGGER.warning("Could not write quality-date cache: %s", path)

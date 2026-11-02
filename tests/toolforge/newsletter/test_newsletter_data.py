@@ -604,10 +604,10 @@ class NewsletterDataTests(unittest.TestCase):
         )
         assert changed["issues"]["2027-01"]["overview"]["ga"] == 6
 
-    def test_new_page_grades_select_current_or_historical_observation(
+    def test_new_page_grades_use_current_observation_for_active_drafts(
         self,
     ) -> None:
-        """Keep open-quarter grades separate from closed history."""
+        """Refresh grades for open and delayed closed-quarter drafts."""
         current = pl.DataFrame({"full_title": ["Game"], "pa_class": ["Stub"]})
         previous = pl.DataFrame({"full_title": ["Game"], "pa_class": ["GA"]})
         observed = "2026-10-01T05:37:12+00:00"
@@ -623,15 +623,15 @@ class NewsletterDataTests(unittest.TestCase):
                 current_assessments=current,
                 assessments_at=lookup,
             )
-        lookup.assert_called_once_with(dt.date(2026, 10, 1))
+        lookup.assert_not_called()
         closed, opened = collect.call_args_list
-        assert closed.kwargs["assessments"] is previous
-        assert closed.kwargs["assessment_observed_at"] == observed
+        assert closed.kwargs["assessments"] is current
+        assert closed.kwargs["assessment_observed_at"] == now.isoformat()
         assert opened.kwargs["assessments"] is current
         assert opened.kwargs["assessment_observed_at"] == now.isoformat()
         assert (
             result["issues"]["2026-10"]["new_pages_data"]["grades_observed_at"]
-            == observed
+            == now.isoformat()
         )
         assert valid_newsletter(result)
         future = copy.deepcopy(result)
@@ -640,10 +640,10 @@ class NewsletterDataTests(unittest.TestCase):
         )
         assert not valid_newsletter(future)
 
-    def test_missing_historical_grades_never_use_current_membership(
+    def test_missing_historical_grades_do_not_block_current_draft_grades(
         self,
     ) -> None:
-        """Leave an unobserved closed-quarter breakdown unavailable."""
+        """Refresh draft grades without requiring old snapshots."""
         current = pl.DataFrame({"full_title": ["Game"], "pa_class": ["GA"]})
         result = collect_source_facts(
             Reader(),
@@ -651,7 +651,7 @@ class NewsletterDataTests(unittest.TestCase):
             current_assessments=current,
             assessments_at=lambda _day: None,
         )
-        assert result["issues"]["2026-10"]["new_pages_data"]["grades"] is None
+        assert result["issues"]["2026-10"]["new_pages_data"]["grades"] == {}
         assert result["issues"]["2027-01"]["new_pages_data"]["grades"] == {}
 
     def test_awards_keep_fifth_place_ties_and_newcomer_threshold(self) -> None:

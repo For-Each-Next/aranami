@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import tempfile
 from functools import partial
 from pathlib import Path
@@ -36,6 +37,28 @@ if TYPE_CHECKING:
 _NOW = dt.datetime(2026, 10, 25, 12, tzinfo=dt.UTC)
 _START = "2026-10-07T03:04:00+00:00"
 _SIGNATURE = "2026年10月7日 (三) 03:04 (UTC)"
+
+
+def _rewrite_cache(
+    path: Path,
+    frame: pl.DataFrame,
+    *,
+    contract: str | None = None,
+) -> None:
+    """Replace test observations while retaining their cache identity.
+
+    Args:
+        path: Existing cache whose metadata should be preserved.
+        frame: Replacement observations, including invalid test cases.
+        contract: Optional obsolete parser identity to simulate.
+    """
+    identity = json.loads(pl.read_parquet_metadata(path)["aranami.cache"])
+    if contract is not None:
+        identity["contract"] = contract
+    frame.write_parquet(
+        path,
+        metadata={"aranami.cache": json.dumps(identity)},
+    )
 
 
 class ParserTests(TestCase):
@@ -523,7 +546,7 @@ class CollectionTests(TestCase):
     ) -> None:
         """Require successful source checks even with saved parses."""
         first = self._collect()
-        path = self.cache / "review-sources-v1.parquet"
+        path = self.cache / "review-sources.parquet"
         path.write_bytes(b"damaged")
         assert self._collect() == first
         del self.texts[COMMUNITY_SOURCES["flc"]]
@@ -560,9 +583,9 @@ class CollectionTests(TestCase):
         assert self._collect()["items"][0]["replied_at"] is None
 
     def test_old_cache_schema_is_reparsed_for_participant_counts(self) -> None:
-        """Rebuild legacy parses to collect participant counts."""
+        """Rebuild incompatible parses to collect participant counts."""
         first = self._collect()
-        path = self.cache / "review-sources-v1.parquet"
+        path = self.cache / "review-sources.parquet"
         frame = pl.read_parquet(path)
         schema = dict(frame.schema)
         schema["items"] = pl.List(
@@ -578,7 +601,7 @@ class CollectionTests(TestCase):
         for row in rows:
             for item in row["items"]:
                 del item["participant_count"]
-        pl.DataFrame(rows, schema=schema).write_parquet(path)
+        _rewrite_cache(path, pl.DataFrame(rows, schema=schema))
         self.site.simple_request.reset_mock()
         assert self._collect() == first
         assert any(
@@ -589,13 +612,13 @@ class CollectionTests(TestCase):
     def test_invalid_cached_participant_count_is_reparsed(self) -> None:
         """Discard cached zero counts and rebuild source facts."""
         first = self._collect()
-        path = self.cache / "review-sources-v1.parquet"
+        path = self.cache / "review-sources.parquet"
         frame = pl.read_parquet(path)
         rows = frame.to_dicts()
         for row in rows:
             for item in row["items"]:
                 item["participant_count"] = 0
-        pl.DataFrame(rows, schema=frame.schema).write_parquet(path)
+        _rewrite_cache(path, pl.DataFrame(rows, schema=frame.schema))
         self.site.simple_request.reset_mock()
         assert self._collect() == first
         assert any(
@@ -606,11 +629,12 @@ class CollectionTests(TestCase):
     def test_outdated_parser_cache_is_reparsed(self) -> None:
         """Refresh unchanged revisions when parsing semantics change."""
         first = self._collect()
-        path = self.cache / "review-sources-v1.parquet"
-        frame = pl.read_parquet(path).with_columns(
-            pl.lit(1, dtype=pl.Int64).alias("parser_version"),
+        path = self.cache / "review-sources.parquet"
+        _rewrite_cache(
+            path,
+            pl.read_parquet(path),
+            contract="review-sources:1",
         )
-        frame.write_parquet(path)
         self.site.simple_request.reset_mock()
         assert self._collect() == first
         assert any(
@@ -750,13 +774,13 @@ class CollectionTests(TestCase):
     def test_invalid_cached_credit_fields_force_source_reparse(self) -> None:
         """Reject unsafe cached attribution before durable retention."""
         first = self._collect()
-        path = self.cache / "review-sources-v1.parquet"
+        path = self.cache / "review-sources.parquet"
         frame = pl.read_parquet(path)
         rows = frame.to_dicts()
         for source in rows:
             for item in source["items"]:
                 item["question"] = "invalid\x00question"
-        pl.DataFrame(rows, schema=frame.schema).write_parquet(path)
+        _rewrite_cache(path, pl.DataFrame(rows, schema=frame.schema))
         self.site.simple_request.reset_mock()
         assert self._collect() == first
         assert any(

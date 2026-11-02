@@ -1,0 +1,2 @@
+{% from "includes/generated/popup_dialog.html" import popup with context %}
+{% for event in history_dialogs %}{% call popup(event.popup_id, event.task, "#recent-events") %}<p>{{ event.result }} · {{ event.duration }}</p>{% if event.truncated %}<p class="context">{{ t.reports.stage_truncated }}</p>{% endif %}<ol class="job-stages">{% for stage in event.stages %}<li>{% with time=stage.time %}{% include "includes/time.html" %}{% endwith %} · {{ stage.label }}{% if stage.link %} · <span lang="zh">{{ stage.link }}</span>{% endif %}</li>{% endfor %}</ol>{% endcall %}{% endfor %}

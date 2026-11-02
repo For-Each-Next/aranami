@@ -33,7 +33,7 @@ import { CdxCard } from "@wikimedia/codex";
       </div>
       {% elif card.pageviews_url %}
       <div class="card-meta popularity-meta">
-      <span class="card-meta-lead"><time datetime="{{ card.date.value }}">{{ card.date.label }}</time>{{ card.date_separator }}</span>
+      <span class="card-meta-lead"><time datetime="{{ card.date.value }}" title="{{ card.date.value }}">{{ card.date.label }}</time>{{ card.date_separator }}</span>
       <ul class="metadata-items" role="list">
         <li><a href="{{ card.pageviews_url }}" class="pageviews-number">{{ card.views }}</a></li>
         {% if card.site_rank %}<li><a class="site-rank" href="{{ card.site_rank_url }}">{{ card.site_rank }}</a></li>{% endif %}
@@ -42,7 +42,7 @@ import { CdxCard } from "@wikimedia/codex";
       {% else %}
       <ul class="card-meta metadata-items" role="list">
         {% if section.key == 'recognized' and card.kind %}<li>{{ card.kind }}</li>{% endif %}
-        {% if card.date or card.scheduled or card.date_note %}<li>{{ card.scheduled }}{% if card.date %}<time datetime="{{ card.date.value }}">{{ card.date.label }}</time>{% endif %}{% if card.date_note %}<abbr class="date-note-marker" title="{{ card.date_note }}" aria-label="{{ card.date_note }}">†</abbr>{% endif %}</li>{% endif %}
+        {% if card.date or card.scheduled or card.date_note %}<li>{{ card.scheduled }}{% if card.date %}<time datetime="{{ card.date.value }}" title="{{ card.date.value }}">{{ card.date.label }}</time>{% endif %}{% if card.date_note %}<abbr class="date-note-marker" title="{{ card.date_note }}" aria-label="{{ card.date_note }}">†</abbr>{% endif %}</li>{% endif %}
         {% if section.key != 'recognized' and card.kind %}<li>{{ card.kind }}</li>{% endif %}
       </ul>
       {% endif %}

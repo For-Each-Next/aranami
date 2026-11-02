@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from shared.support.cache import write_parquet_cache
+from shared.support.cache import ParquetCache
 
 if TYPE_CHECKING:
     import datetime as dt
@@ -37,6 +37,12 @@ _SCHEMA = {
     "attempted_at": pl.Int64,
     "used_at": pl.Int64,
 }
+_CACHE = ParquetCache(
+    schema=_SCHEMA,
+    contract="article-extracts:2",
+    max_rows=_MAX_ROWS,
+    max_bytes=_MAX_BYTES,
+)
 _KEYS = ["title", "variant"]
 _VARIANTS = pl.DataFrame({
     "variant": ["zh-hans", "zh-hant", "zh", "zh-tw", "zh-hk"],
@@ -70,59 +76,40 @@ def _intro(value: str | None) -> str | None:
     return text or None
 
 
-def _load(path: Path | None, now: int) -> pl.DataFrame:  # ruff: ignore[too-many-return-statements]
+def _load(path: Path | None, now: int) -> pl.DataFrame:
     """Read bounded, typed observations or rebuild an invalid cache.
 
     Returns:
         Unique title/script observations with validated UTC metadata.
     """
-    empty = pl.DataFrame(schema=_SCHEMA)
-    if path is None or not path.exists():
-        return empty
-    try:  # ruff: ignore[too-many-statements-in-try-clause]
-        if path.is_symlink() or path.parent.is_symlink():
-            return empty
-        if not path.is_file() or path.stat().st_size > _MAX_BYTES:
-            return empty
-        frame = pl.read_parquet(path, n_rows=_MAX_ROWS + 1)
-        if frame.schema != pl.Schema(_SCHEMA) or frame.height > _MAX_ROWS:
-            return empty
-        invalid = frame.filter(
-            pl.col("title").is_null()
-            | pl.col("variant").is_null()
-            | ~pl.col("variant").is_in([
-                "zh",
-                "zh-hans",
-                "zh-hant",
-                "zh-tw",
-                "zh-hk",
-            ])
-            | pl.col("title").str.strip_chars().eq("")
-            | pl.col("title").str.contains(r"[\x00-\x1f\x7f]")
-            | (pl.col("extract").str.len_bytes() > MAX_EXTRACT_BYTES)
-            | pl.col("extract").str.contains(r"[\x00-\x1f\x7f]")
-            | pl.col("extract").str.strip_chars().eq("")
-            | (
-                pl.col("observed_at").is_null()
-                & pl.col("extract").is_not_null()
-            )
-            | pl.col("attempted_at").is_null()
-            | pl.col("used_at").is_null()
-            | (pl.col("observed_at") < 0)
-            | (pl.col("attempted_at") < 0)
-            | (pl.col("used_at") < 0)
-            | (pl.col("observed_at") > pl.col("attempted_at"))
-            | (pl.col("attempted_at") > now)
-            | (pl.col("used_at") > now),
-        )
-        if (
-            not invalid.is_empty()
-            or frame.unique(_KEYS).height != frame.height
-        ):
-            return empty
-    except OSError, ValueError, pl.exceptions.PolarsError:
-        _LOGGER.warning("Ignoring unreadable article-introduction cache.")
-        return empty
+    frame = _CACHE.read(path)
+    invalid = frame.filter(
+        pl.col("title").is_null()
+        | pl.col("variant").is_null()
+        | ~pl.col("variant").is_in([
+            "zh",
+            "zh-hans",
+            "zh-hant",
+            "zh-tw",
+            "zh-hk",
+        ])
+        | pl.col("title").str.strip_chars().eq("")
+        | pl.col("title").str.contains(r"[\x00-\x1f\x7f]")
+        | (pl.col("extract").str.len_bytes() > MAX_EXTRACT_BYTES)
+        | pl.col("extract").str.contains(r"[\x00-\x1f\x7f]")
+        | pl.col("extract").str.strip_chars().eq("")
+        | (pl.col("observed_at").is_null() & pl.col("extract").is_not_null())
+        | pl.col("attempted_at").is_null()
+        | pl.col("used_at").is_null()
+        | (pl.col("observed_at") < 0)
+        | (pl.col("attempted_at") < 0)
+        | (pl.col("used_at") < 0)
+        | (pl.col("observed_at") > pl.col("attempted_at"))
+        | (pl.col("attempted_at") > now)
+        | (pl.col("used_at") > now),
+    )
+    if not invalid.is_empty() or frame.unique(_KEYS).height != frame.height:
+        return pl.DataFrame(schema=_SCHEMA)
     return frame
 
 
@@ -285,11 +272,6 @@ class ExtractCache:
                 .sort(["used_at", "title"], descending=[True, False])
                 .head(_MAX_ROWS)
             )
-            write_parquet_cache(
-                self.path,
-                self._frame,
-                max_bytes=_MAX_BYTES,
-                mode=0o640,
-            )
+            _CACHE.write(self.path, self._frame)
         except OSError, ValueError, pl.exceptions.PolarsError:
             _LOGGER.warning("Could not save the article-introduction cache.")

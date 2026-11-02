@@ -1,12 +1,12 @@
-"""Save compact daily project assessments and read them without sources.
+"""Save daily page identities and assessments with their prior titles.
 
 Each ``assessments-YYYYMMDD.parquet`` retains the first complete current
 assessment observation assigned to the day ending at the following
 00:00 UTC boundary. A delayed replica read observes its actual query
-time; it cannot reconstruct historical midnight state. Only stable page
-IDs and nullable grades are columns; capture times and aggregate totals
-stay in Parquet metadata.
-Titles are resolved by consumers after comparing datasets by page ID.
+time; it cannot reconstruct historical midnight state. Page IDs, source
+titles, namespaces, redirect flags, and nullable grades remain columns;
+capture times and aggregate totals stay in Parquet metadata. Older files
+containing only IDs and grades remain readable without invented titles.
 """
 
 # Persisted schema errors use ValueError; safe reader errors propagate.
@@ -36,13 +36,23 @@ from shared.support.assessment_encoding import (
 from shared.support.files import read_regular, staging_directory
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from pywikibot.site import BaseSite
 
 _FAMILY = "project-assessments"
-_SCHEMA = {
+_LEGACY_SCHEMA = {
     "page_id": pl.Int64,
     "pa_class": pl.String,
     "pa_importance": pl.String,
+}
+_SCHEMA = {
+    "page_id": pl.Int64,
+    "page_title": pl.String,
+    "page_namespace": pl.Int64,
+    "pa_class": pl.String,
+    "pa_importance": pl.String,
+    "page_is_redirect": pl.Int64,
 }
 _MAX_BYTES = 64 * 1024 * 1024
 _MAX_METADATA_BYTES = 1024 * 1024
@@ -82,7 +92,7 @@ def snapshot_path(
     runtime: Path | None = None,
     dry: bool = False,
 ) -> Path:
-    """Locate a compact dataset without opening files or source clients.
+    """Locate a daily dataset without opening files or source clients.
 
     Args:
         site_name: Source wiki database identity.
@@ -112,7 +122,9 @@ def _validated(frame: pl.DataFrame) -> pl.DataFrame:
         frame: Complete project assessment rows.
 
     Returns:
-        Three columns sorted by page ID, retaining null observations.
+        Canonical source columns sorted by page ID. Legacy observations
+        retain their three columns; partial historical identity fields
+        receive nulls for unknown values, never current source facts.
 
     Raises:
         ValueError: Required columns or page identities are invalid.
@@ -121,18 +133,43 @@ def _validated(frame: pl.DataFrame) -> pl.DataFrame:
         frame.is_empty()
         or frame.height > _MAX_ROWS
         or any(
-            frame.schema.get(name) != dtype for name, dtype in _SCHEMA.items()
+            frame.schema.get(name) != dtype
+            for name, dtype in _LEGACY_SCHEMA.items()
+        )
+        or any(
+            name in frame.columns and frame.schema[name] != dtype
+            for name, dtype in _SCHEMA.items()
         )
     ):
         message = "Invalid project assessment snapshot schema or empty result."
         raise ValueError(message)
-    compact = frame.select(list(_SCHEMA)).sort("page_id")
+    schema = (
+        _SCHEMA
+        if set(frame.columns) & (set(_SCHEMA) - set(_LEGACY_SCHEMA))
+        else _LEGACY_SCHEMA
+    )
+    compact = frame.select(
+        pl.col(name)
+        if name in frame.columns
+        else pl.lit(None, dtype=dtype).alias(name)
+        for name, dtype in schema.items()
+    ).sort("page_id")
     if not compact.filter(
         pl.col("page_id").is_null()
         | (pl.col("page_id") <= 0)
         | pl.col("page_id").is_duplicated(),
     ).is_empty():
         message = "Invalid project assessment snapshot identities."
+        raise ValueError(message)
+    if (
+        schema is _SCHEMA
+        and not compact.filter(
+            (pl.col("page_title").str.strip_chars().str.len_chars() == 0)
+            | (pl.col("page_namespace") < 0)
+            | ~pl.col("page_is_redirect").is_in([0, 1]),
+        ).is_empty()
+    ):
+        message = "Invalid project assessment page metadata."
         raise ValueError(message)
     return compact
 
@@ -146,8 +183,34 @@ def _digest(frame: pl.DataFrame) -> str:
     return hashlib.sha256(frame.write_json().encode()).hexdigest()
 
 
+def _nonarticle_grade(column: str) -> pl.Expr:
+    """Identify known nonarticle grades independently of namespace.
+
+    Returns:
+        A null-safe classification expression preserving custom grades.
+    """
+    return (
+        pl
+        .col(column)
+        .fill_null("")
+        .str.strip_chars()
+        .str.to_lowercase()
+        .str.replace(r"[级級]$", "")
+        .is_in([
+            "disambig",
+            "消歧义",
+            "消歧義",
+            "redirect",
+            "重定向",
+            "setindex",
+            "同类索引",
+            "同類索引",
+        ])
+    )
+
+
 def _totals(source: pl.DataFrame) -> dict | None:
-    """Retain article-only totals without storing titles or namespaces.
+    """Separate article, nonarticle, and actual redirect observations.
 
     Returns:
         Quality and importance counts, or unknown for compact-only
@@ -167,14 +230,18 @@ def _totals(source: pl.DataFrame) -> dict | None:
     ):
         message = "Invalid project assessment source namespaces."
         raise ValueError(message)
+    if (
+        "page_is_redirect" in source.columns
+        and source["page_is_redirect"].null_count()
+        and source["page_is_redirect"].eq(1).any()
+    ):
+        return None
     redirect = (
-        pl.col("page_is_redirect") != 0
+        pl.col("page_is_redirect").fill_null(0) != 0
         if "page_is_redirect" in source.columns
         else pl.lit(value=False)
     )
-    article = (pl.col("page_namespace") == 0) & ~pl.col("pa_class").fill_null(
-        "",
-    ).str.to_lowercase().is_in(["disambig", "消歧义", "消歧義"])
+    article = (pl.col("page_namespace") == 0) & ~_nonarticle_grade("pa_class")
     articles = source.filter(article & ~redirect)
     nonarticles = source.filter(~article & ~redirect)
     return {
@@ -190,6 +257,7 @@ def _totals(source: pl.DataFrame) -> dict | None:
         },
         "redirects": source.filter(redirect).height
         if "page_is_redirect" in source.columns
+        and not source["page_is_redirect"].null_count()
         else None,
         **{
             name: articles
@@ -204,6 +272,68 @@ def _totals(source: pl.DataFrame) -> dict | None:
             )
         },
     }
+
+
+def summary_totals(
+    source: pl.DataFrame | None,
+    *,
+    saved: Mapping | None = None,
+) -> dict | None:
+    """Prepare comparable article totals from current or legacy facts.
+
+    Complete page evidence permits exact recalculation. Legacy
+    aggregates can reclassify known nonarticle grades without changing
+    immutable saved values. Their article importance remains unknown
+    because the required joint facts were not retained.
+
+    Args:
+        source: Original assessment rows, with optional page evidence.
+        saved: Validated aggregate facts from the same observation.
+
+    Returns:
+        Normalized totals, or null when article membership is unknown.
+        An unknown importance distribution is represented by null.
+    """
+    if (
+        source is not None
+        and "page_namespace" in source.columns
+        and not source["page_namespace"].null_count()
+    ):
+        if "page_is_redirect" in source.columns:
+            if not source["page_is_redirect"].null_count():
+                return _totals(source)
+        elif saved is None:
+            return _totals(source)
+    if saved is None:
+        return None
+    schema = {"value": pl.String, "count": pl.Int64}
+    quality = pl.DataFrame(saved["class"], schema=schema)
+    moved = quality.filter(_nonarticle_grade("value"))
+    if moved.is_empty():
+        return dict(saved)
+    count = moved["count"].sum()
+    normalized = {
+        **saved,
+        "count": saved["count"] - count,
+        "class": quality.filter(~_nonarticle_grade("value")).to_dicts(),
+        "importance": None,
+    }
+    if (nonarticles := saved.get("nonarticles")) is not None:
+        normalized["nonarticles"] = {
+            "count": nonarticles["count"] + count,
+            "class": (
+                pl
+                .concat([
+                    pl.DataFrame(nonarticles["class"], schema=schema),
+                    moved,
+                ])
+                .group_by("value")
+                .agg(pl.col("count").sum())
+                .sort("value", nulls_last=True)
+                .to_dicts()
+            ),
+        }
+    return normalized
 
 
 def _validate_totals(value: object, frame: pl.DataFrame) -> None:
@@ -369,7 +499,8 @@ def _read(
     """Validate one complete dataset and its embedded source metadata.
 
     Returns:
-        Compact source bundle, or none if this date was never saved.
+        Source bundle, or none if this date was never saved. Legacy
+        files keep their original schema and integrity digest.
 
     Raises:
         ValueError: Metadata, schema, identity, or integrity is invalid.
@@ -404,7 +535,7 @@ def _read(
         "started_at": observed.isoformat(timespec="microseconds"),
     }
     if (
-        frame.schema != pl.Schema(_SCHEMA)
+        frame.schema != compact.schema
         or any(manifest.get(key) != value for key, value in expected.items())
         or type(manifest.get("rows")) is not int
         or not isinstance(metadata, dict)
@@ -458,7 +589,8 @@ def read_snapshot(
             capture date.
 
     Returns:
-        Validated compact observations, or none for an unavailable date.
+        Validated observations, or none for an unavailable date. Legacy
+        files without page metadata retain only IDs and assessments.
     """
     site_name = site.dbName()
     return _read(
@@ -531,7 +663,7 @@ def _save(  # ruff: ignore[too-many-arguments]
     """Retain the first complete observation for a UTC boundary.
 
     Returns:
-        Previously retained or newly validated compact data.
+        Previously retained or newly validated source data.
 
     Raises:
         ValueError: Existing data conflicts with the supplied
@@ -544,7 +676,9 @@ def _save(  # ruff: ignore[too-many-arguments]
     _safe_directories(path.parent, runtime)
     existing = _read(path, site_name, project, day)
     if existing is not None:
-        if not existing.tables["members"].equals(compact) or (
+        previous = existing.tables["members"]
+        shared = [name for name in previous.columns if name in compact.columns]
+        if not previous.select(shared).equals(compact.select(shared)) or (
             totals is not None
             and existing.manifest["metadata"]["article_totals"] != totals
         ):
@@ -625,7 +759,7 @@ def get_snapshot(
             data.
 
     Returns:
-        Immutable compact assessments and their actual capture metadata.
+        Immutable page identities, assessments, and capture metadata.
 
     Raises:
         ValueError: Time, source observations, or retained data is
@@ -671,136 +805,3 @@ def get_snapshot(
             observed_at,
             dry=dry,
         )
-
-
-def _legacy_identity(
-    bundle: ReportBundle,
-    key: str,
-) -> tuple[str, str, dt.datetime]:
-    """Validate daily identity before compacting original evidence.
-
-    Returns:
-        Original wiki, project, and actual UTC observation time.
-
-    Raises:
-        ValueError: An original bundle has inconsistent source identity.
-    """
-    manifest = bundle.manifest
-    target = manifest.get("target")
-    metadata = manifest.get("metadata")
-    try:
-        observed = dt.datetime.fromisoformat(manifest.get("calculated_at"))
-    except TypeError, ValueError:
-        message = "Legacy project assessment capture time is invalid."
-        raise ValueError(message) from None
-    if (
-        manifest.get("family") != _FAMILY
-        or not isinstance(target, dict)
-        or not isinstance(metadata, dict)
-        or "members" not in bundle.tables
-    ):
-        message = "Legacy project assessment source identity is invalid."
-        raise ValueError(message)
-    site, project = target.get("site"), target.get("title")
-    if not isinstance(site, str) or not isinstance(project, str):
-        message = "Legacy project assessment target is invalid."
-        raise ValueError(message)
-    day = observed.date()
-    scheduled = dt.datetime.combine(day, dt.time(), dt.UTC).isoformat()
-    digest = hashlib.sha256(project.encode()).hexdigest()[:16]
-    expected_key = f"{_FAMILY}-{site}-{day.isoformat()}-{digest}"
-    expected_metadata = {
-        "project": project,
-        "snapshot_date": day.isoformat(),
-        "scheduled_for": scheduled,
-    }
-    if (
-        observed.utcoffset() != dt.timedelta()
-        or key != expected_key
-        or metadata != expected_metadata
-        or target != {"site": site, "title": project}
-    ):
-        message = "Legacy project assessment path or boundary is invalid."
-        raise ValueError(message)
-    _validated(bundle.tables["members"])
-    return site, project, observed
-
-
-def _seed_report_sources(runtime: Path) -> None:
-    """Recover compact baselines from validated retained report records.
-
-    Raises:
-        ValueError: A retained source conflicts with existing compact
-            data.
-    """
-    directory = runtime / "reports/records/assessment-log"
-    _safe_directories(directory, runtime)
-    for path in sorted(directory.glob("*/*/*/manifest.json")):
-        metadata = json.loads(read_regular(path, _MAX_METADATA_BYTES))
-        if not isinstance(metadata, dict) or not all(
-            isinstance(metadata.get(name), str)
-            for name in ("report_key", "generation")
-        ):
-            message = "Invalid retained assessment report metadata."
-            raise ValueError(message)
-        bundle = ReportStore._read_bundle_path(  # ruff: ignore[private-member-access]
-            path.parent,
-            metadata["report_key"],
-            metadata["generation"],
-        )
-        source = bundle.tables.get("source")
-        if source is None:
-            continue
-        target = bundle.manifest["target"]
-        project = bundle.manifest["metadata"].get("project")
-        try:
-            observed = dt.datetime.fromisoformat(
-                bundle.manifest["calculated_at"],
-            )
-        except TypeError, ValueError:
-            message = "Invalid retained assessment report capture time."
-            raise ValueError(message) from None
-        if (
-            not isinstance(project, str)
-            or observed.utcoffset() != dt.timedelta()
-        ):
-            message = "Invalid retained assessment report source identity."
-            raise ValueError(message)
-        _save(runtime, target["site"], project, source, observed)
-
-
-def migrate_snapshots(runtime: Path) -> list[Path]:
-    """Convert full observations while preserving their original times.
-
-    Args:
-        runtime: Toolforge home with writers stopped for explicit
-            migration.
-
-    Returns:
-        Validated legacy source directories safe to move into durable
-        backups.
-
-    Raises:
-        ValueError: Legacy or compact observations conflict or fail
-            validation.
-    """
-    reports = runtime / "reports"
-    _safe_directories(reports, runtime)
-    sources = []
-    for directory in sorted(reports.glob("project-assessments-*")):
-        _safe_directories(directory, runtime)
-        store = ReportStore(reports)
-        bundle = store.read(directory.name)
-        if bundle is None:
-            message = (
-                "Legacy project assessments have no selected observation."
-            )
-            raise ValueError(message)
-        site, project, observed = _legacy_identity(bundle, directory.name)
-        predecessor = store.read(directory.name, previous=True)
-        if predecessor is not None:
-            _legacy_identity(predecessor, directory.name)
-        _save(runtime, site, project, bundle.tables["members"], observed)
-        sources.append(directory)
-    _seed_report_sources(runtime)
-    return sources

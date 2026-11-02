@@ -2,8 +2,9 @@
 
 Use :func:`track_report_update` around each destination's preparation
 and publication. Live attempts retain actual start, finish, duration,
-and confirmed edit count in ``state/report-updates.json``. This bounded
-snapshot is authoritative metadata; diagnostic log text is independent.
+and confirmed edit count in ``state/report-updates.json``. Save times
+survive later checks as ``last_updated_at``. This bounded snapshot
+is authoritative metadata; diagnostic log text is independent.
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ from backend.support.failure_status import (
     exception_failure_details,
     validate_failure_details,
 )
+from backend.support.job_history import read_job_history
+from shared.config import TASK_DEFINITIONS
 from shared.support.files import read_json_object
 
 if TYPE_CHECKING:
@@ -150,11 +153,16 @@ def _validated_record(value: object) -> dict[str, object]:
     if (
         not isinstance(value, Mapping)
         or not set(value) >= _FIELDS
-        or set(value) - _FIELDS - FAILURE_FIELDS - {"revision_id"}
+        or set(value)
+        - _FIELDS
+        - FAILURE_FIELDS
+        - {"revision_id", "last_updated_at"}
     ):
         message = "Report update metadata requires its complete fields."
         raise ValueError(message)
     record = dict(value)
+    if record.get("last_updated_at") is not None:
+        record["last_updated_at"] = _timestamp(record["last_updated_at"])[1]
     revision = record.get("revision_id")
     if revision is not None and (
         type(revision) is not int
@@ -241,6 +249,11 @@ def _terminal_record(
     if invalid_count:
         message = "Report edit counts must agree with their outcomes."
         raise ValueError(message)
+    if status == "updated":
+        record["last_updated_at"] = max(
+            record.get("last_updated_at") or "",
+            record["finished_at"],
+        )
     return record
 
 
@@ -441,11 +454,56 @@ def _write_record(
             return False
         if not _newer_record(current, incoming):
             return False
+        candidates = [
+            record["last_updated_at"]
+            for record in (current, incoming)
+            if record and record.get("last_updated_at")
+        ]
+        if saved := _historical_update(incoming, directory):
+            candidates.append(saved)
+        if candidates:
+            incoming["last_updated_at"] = max(candidates)
         records[key] = incoming
         _replace_snapshot(path, records)
     finally:
         os.close(descriptor)
     return True
+
+
+def _historical_update(
+    record: Mapping[str, object],
+    directory: Path,
+) -> str | None:
+    """Recover a confirmed save from retained structured job stages.
+
+    History predates destination timestamps and does not carry wiki
+    identities. Restrict recovery to configured Chinese Wikipedia
+    destinations, where the routine and exact title establish identity.
+    A missing or invalid history leaves the observation unknown.
+
+    Returns:
+        Latest canonical save timestamp, or none without exact evidence.
+    """
+    definition = TASK_DEFINITIONS.get(record["routine"])
+    if record["site"] != "zhwiki" or definition is None:
+        return None
+    title = record["title"]
+    if title not in definition.pages.values() and not any(
+        title.startswith(prefix + "/") for prefix in definition.prefixes
+    ):
+        return None
+    try:
+        runs = read_job_history(directory / "job-history.json")["runs"]
+    except OSError, ValueError, TypeError, OverflowError, RecursionError:
+        return None
+    saved = (
+        _timestamp(stage["time"])[1]
+        for run in runs
+        if run["routine"] == record["routine"]
+        for stage in run["stages"]
+        if stage["kind"] == "saved" and stage["title"] == title
+    )
+    return max(saved, default=None)
 
 
 @dataclass(slots=True)

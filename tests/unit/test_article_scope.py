@@ -16,7 +16,6 @@ from backend.articles import (
     milestone_store as store,
 )
 from backend.articles.scope import load, reconcile_scope
-from backend.articles.storage import DEFAULT_ROOT, migrate_legacy
 
 
 class ArticleScopeTests(TestCase):
@@ -128,31 +127,3 @@ class ArticleScopeTests(TestCase):
         )
         self.observe([1], 366)
         assert store.load(self.root / "milestones.parquet").height == 1
-
-    def test_layout_migration_preserves_tombstones(self) -> None:
-        """Keep purged pages absent and retain original source bytes."""
-        self.observe([1], 0)
-        self.observe([1], 365)
-        source = self.root / "reports/article-milestones-v1"
-        source.mkdir(parents=True)
-        for name in ("milestones.parquet", "scope.parquet"):
-            (self.root / name).rename(source / name)
-        stale = (
-            self.root / "reports/project-recognition-v1/recognition.parquet"
-        )
-        store.sync_events(self.events, stale)
-        original = {file.name: file.read_bytes() for file in source.iterdir()}
-        migrate_legacy(self.root)
-        migrate_legacy(self.root)
-        target = self.root / DEFAULT_ROOT
-        assert store.load(target / "milestones.parquet")[
-            "page_id"
-        ].to_list() == [1]
-        assert load(target).filter(pl.col("page_id") == 2)["purged_at"].item()
-        assert {
-            file.name: file.read_bytes() for file in source.iterdir()
-        } == original
-        assert (self.root / "state/report-layout/articles.json").is_file()
-        (target / "milestones.parquet").write_text("damaged")
-        with self.assertRaises((ValueError, pl.exceptions.PolarsError)):
-            migrate_legacy(self.root)

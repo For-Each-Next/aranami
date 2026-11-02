@@ -29,7 +29,6 @@ DEFAULT_ROOT = Path("reports/data/newsletter")
 OBSERVATIONS_PATH = DEFAULT_ROOT / "observations"
 
 _MAX_BYTES = 16 * 1024 * 1024
-_POINTER_BYTES = 4096
 _MAX_CAPTURES = 10_000
 
 
@@ -197,86 +196,3 @@ def save_observation(
             generation,
             max_bytes=_MAX_BYTES,
         )
-
-
-def _migration_selection(
-    directory: Path,
-    validate: Callable[[object], bool],
-) -> dict | None:
-    """Validate a historical digest selector for explicit migration.
-
-    Returns:
-        Original selected facts, or none when no legacy selector exists.
-
-    Raises:
-        OSError: Source evidence is unreadable or unsafe.
-        ValueError: A selector or generation fails validation.
-    """
-    pointer_path = directory / "latest.json"
-    if not pointer_path.exists() and not pointer_path.is_symlink():
-        return None
-    pointer = read_json_object(pointer_path, _POINTER_BYTES)
-    digest = pointer.get("digest")
-    if (
-        pointer.get("data_version") != DATA_VERSION
-        or not isinstance(digest, str)
-        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
-    ):
-        message = "Invalid newsletter observation pointer."
-        raise ValueError(message)
-    generation = read_json_object(directory / f"{digest}.json", _MAX_BYTES)
-    facts = _validate_generation(generation, validate)
-    metadata = {
-        key: value for key, value in generation.items() if key != "facts"
-    }
-    if metadata != pointer:
-        message = "Invalid newsletter observation generation."
-        raise ValueError(message)
-    return facts
-
-
-def migrate_observations(
-    source: Path,
-    target: Path,
-    validate: Callable[[object], bool],
-) -> int:
-    """Copy validated legacy observations and preserve original bytes.
-
-    Args:
-        source: Legacy content-addressed observation directory.
-        target: New readable observation directory.
-        validate: Domain validator supplied by the migration workflow.
-
-    Returns:
-        Number of complete source observations validated and retained.
-
-    Raises:
-        ValueError: Saved observations are invalid or exceed the bound.
-        OSError: Source or destination paths are unsafe or unreadable.
-    """
-    if not source.exists() and not source.is_symlink():
-        return 0
-    if source.is_symlink() or not source.is_dir():
-        message = "Legacy observations require a regular directory."
-        raise OSError(message)
-    selected = load_observation(source, validate)
-    if selected is None:
-        selected = _migration_selection(source, validate)
-    paths = sorted(source.glob("*.json"))
-    if len(paths) > _MAX_CAPTURES:
-        message = "Legacy observation count exceeds the migration bound."
-        raise ValueError(message)
-    count = 0
-    for path in paths:
-        if re.fullmatch(r"[0-9a-f]{64}\.json", path.name) is None:
-            continue
-        generation = read_json_object(path, _MAX_BYTES)
-        facts = _validate_generation(generation, validate)
-        if path.stem != generation["digest"]:
-            message = "Legacy observation identity differs from its filename."
-            raise ValueError(message)
-        save_observation(target, facts, validate)
-        count += 1
-    if selected is not None:
-        save_observation(target, selected, validate)
-    return count

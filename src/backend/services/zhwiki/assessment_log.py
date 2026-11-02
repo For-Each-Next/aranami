@@ -23,7 +23,10 @@ from backend.services.project_assessments import (
     read_previous_snapshot,
 )
 from shared.reports import ReportResult, ReportStore, report_key
-from shared.sources.quarry.projects import page_metadata
+from shared.sources.quarry.projects import (
+    page_identity_metadata,
+    page_metadata,
+)
 from shared.support.dates import parse_complete_date
 from shared.support.regions import (
     integer_option,
@@ -63,6 +66,34 @@ _GROUP_LEVEL = 4
 
 
 @dataclass(frozen=True)
+class AssessmentSummaryChange:
+    """Retain one generated summary category and its observed changes.
+
+    Attributes:
+        label: Project, article, nonarticle, or redirect category.
+        change: Original signed change, or unknown comparison.
+        dimensions: Ordered quality/importance label and change pairs.
+    """
+
+    label: str
+    change: int | None
+    dimensions: tuple[tuple[tuple[str, int], ...], ...] = ()
+
+
+@dataclass(frozen=True)
+class AssessmentSummaryMigration:
+    """Preserve generated summary facts for presentation-only migration.
+
+    Attributes:
+        changes: Original categories with their measured signed changes.
+        totals: Escaped full totals from the original inert comment.
+    """
+
+    changes: tuple[AssessmentSummaryChange, ...]
+    totals: str
+
+
+@dataclass(frozen=True)
 class AssessmentLogData:
     """Carry complete snapshots, changes, and retained dated sections.
 
@@ -81,6 +112,8 @@ class AssessmentLogData:
         summaries: Retained per-day assessment totals paragraphs.
         previous_source: Prior source rows with known namespaces.
         previous_totals: Prior article-only aggregate facts.
+        removed_links: Opaque removal lines with verified titles.
+        summary_migrations: Original facts from old generated summaries.
     """
 
     members: pl.DataFrame
@@ -99,6 +132,12 @@ class AssessmentLogData:
     summaries: Mapping[dt.date, str] = field(default_factory=dict)
     previous_source: pl.DataFrame | None = None
     previous_totals: Mapping[str, object] | None = None
+    removed_links: Mapping[str, tuple[str, str | None]] = field(
+        default_factory=dict,
+    )
+    summary_migrations: Mapping[dt.date, AssessmentSummaryMigration] = field(
+        default_factory=dict,
+    )
 
     @property
     def report_date(self) -> dt.date:
@@ -295,16 +334,22 @@ def _assessment_members(source: pl.DataFrame) -> pl.DataFrame:
 def _resolve_changes(
     site: BaseSite,
     changes: pl.DataFrame,
+    source: pl.DataFrame,
+    previous_source: pl.DataFrame,
+    previous_members: pl.DataFrame,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Resolve current metadata for changed IDs after comparison.
 
     Args:
         site: Wiki supplying current identity metadata.
         changes: Already compared assessment rows, without titles.
+        source: Current saved page identities when available.
+        previous_source: Previous identities, including removed pages.
+        previous_members: Legacy identities with known full titles.
 
     Returns:
-        Enriched changes and current reference metadata. Deleted IDs
-        retain stable Special:Redirect links for unavailable titles.
+        Current names or saved/deletion titles for missing pages.
+        Truly unknown identities retain stable Special:Redirect links.
     """
     if changes.is_empty():
         return changes.with_columns(
@@ -321,6 +366,54 @@ def _resolve_changes(
         site,
         changes.select("page_id").unique()["page_id"].to_list(),
     )
+    identities = pl.concat(
+        _saved_identities(
+            site,
+            frame.join(
+                changes.filter(condition).select("page_id").unique(),
+                on="page_id",
+            ),
+        )
+        for frame, condition in (
+            (previous_source, pl.col("kind") == "removed"),
+            (previous_members, pl.col("kind") == "removed"),
+            (source, pl.col("kind") != "removed"),
+        )
+    ).unique("page_id", keep="first")
+    columns = [
+        "page_id",
+        "full_title",
+        "page_namespace",
+        "talk_title",
+        "page_revision",
+        "talk_revision",
+    ]
+    metadata = pl.concat((
+        metadata.select(
+            pl.col(name)
+            if name in metadata.columns
+            else pl.lit(None, dtype=identities.schema[name]).alias(name)
+            for name in columns
+        ),
+        identities,
+    )).unique("page_id", keep="first")
+    missing = (
+        changes
+        .select("page_id")
+        .unique()
+        .join(
+            metadata.select("page_id"),
+            on="page_id",
+            how="anti",
+        )
+    )
+    if not missing.is_empty():
+        deleted = page_metadata(
+            site,
+            missing["page_id"].to_list(),
+            include_deleted=True,
+        )
+        metadata = pl.concat((metadata, deleted.select(columns)))
     resolved = (
         changes
         .join(
@@ -355,6 +448,203 @@ def _resolve_changes(
     return resolved, metadata
 
 
+def _saved_identities(site: BaseSite, source: pl.DataFrame) -> pl.DataFrame:
+    """Project only known saved identities into link metadata.
+
+    Args:
+        site: Wiki namespace definitions used to name saved identities.
+        source: Current or historical assessment rows.
+
+    Returns:
+        Known original subject and discussion targets; legacy compact
+        rows without identity columns produce no invented names.
+    """
+    schema = {
+        "page_id": pl.Int64,
+        "full_title": pl.String,
+        "page_namespace": pl.Int64,
+        "talk_title": pl.String,
+        "page_revision": pl.Int64,
+        "talk_revision": pl.Int64,
+    }
+    required = {"page_id", "page_title", "page_namespace"}
+    if not required.issubset(source.columns):
+        title = next(
+            (
+                name
+                for name in ("full_title", "title")
+                if name in source.columns
+            ),
+            None,
+        )
+        if title is None:
+            return pl.DataFrame(schema=schema)
+        source = source.select(
+            "page_id",
+            pl.col(title).alias("full_title"),
+        ).filter(
+            pl.col("full_title").is_not_null()
+            & ~pl.col("full_title").str.contains(
+                r"^Special:Redirect/page/[1-9][0-9]*$",
+            ),
+        )
+    else:
+        source = source.drop_nulls(["page_title", "page_namespace"])
+    return page_identity_metadata(
+        site,
+        source,
+    ).select(*schema)
+
+
+def _removed_link_repairs(
+    site: BaseSite,
+    history: Mapping[dt.date, Mapping[str, str]],
+    *sources: pl.DataFrame,
+) -> dict[str, tuple[str, str | None]]:
+    """Resolve retained generated removal lines with unavailable titles.
+
+    Args:
+        site: Wiki supplying exact public page identity records.
+        history: Parsed retained change groups.
+        sources: Saved observations with potential original titles.
+
+    Returns:
+        Exact generated lines mapped to verified subject/discussion
+        targets. Unknown IDs and unrelated user text remain untouched.
+    """
+    lines = {}
+    pattern = re.compile(
+        r"\* '''\[\[:Special:Redirect/page/([1-9][0-9]*)\]\]'''"
+        r"已移除評級。",
+    )
+    for sections in history.values():
+        for line in sections.get("移除評級", "").splitlines():
+            matched = pattern.fullmatch(line)
+            if matched:
+                lines[line] = int(matched[1])
+    if not lines:
+        return {}
+    metadata = page_metadata(site, lines.values())
+    identifiers = pl.DataFrame(
+        {"page_id": list(set(lines.values()))},
+        schema={"page_id": pl.Int64},
+    )
+    columns = ["page_id", "full_title", "talk_title"]
+    metadata = pl.concat((
+        metadata.select(columns),
+        *(
+            _saved_identities(
+                site,
+                frame.join(identifiers, on="page_id"),
+            ).select(columns)
+            for frame in sources
+        ),
+    )).unique("page_id", keep="first")
+    missing = identifiers.join(metadata, on="page_id", how="anti")
+    if not missing.is_empty():
+        metadata = pl.concat((
+            metadata,
+            page_metadata(
+                site,
+                missing["page_id"].to_list(),
+                include_deleted=True,
+            ).select(columns),
+        ))
+    titles = {
+        identifier: (title, talk)
+        for identifier, title, talk in metadata.select(
+            "page_id",
+            "full_title",
+            "talk_title",
+        ).iter_rows()
+    }
+    return {
+        line: titles[identifier]
+        for line, identifier in lines.items()
+        if identifier in titles
+    }
+
+
+def _summary_group(text: str) -> AssessmentSummaryChange | None:
+    """Parse one category from the narrowly generated legacy summary.
+
+    Args:
+        text: Exact category fragment from a retained one-line summary.
+
+    Returns:
+        Original changes without inventing unknown comparisons, or null
+        when the fragment does not follow the generated format.
+    """
+    number = r"[0-9]+(?:,[0-9]{3})*"
+    matched = re.fullmatch(
+        rf"(专题页面|条目|非条目|重定向)(?:([+-]{number})|"
+        rf"(?:{number}|未知)\uFF08无可比记录\uFF09)"
+        r"(?:\uFF08([^\uFF08\uFF09]*)\uFF09)?",
+        text,
+    )
+    if matched is None:
+        return None
+    dimensions = []
+    if matched[3]:
+        for dimension in matched[3].split(" | "):
+            values = []
+            for item in dimension.split(" · "):
+                pair = re.fullmatch(rf"(.+?)([+-]{number})", item)
+                if pair is None:
+                    return None
+                values.append((pair[1], int(pair[2].replace(",", ""))))
+            dimensions.append(tuple(values))
+    return AssessmentSummaryChange(
+        matched[1],
+        int(matched[2].replace(",", "")) if matched[2] else None,
+        tuple(dimensions),
+    )
+
+
+def _summary_migrations(
+    summaries: Mapping[dt.date, str],
+) -> dict[dt.date, AssessmentSummaryMigration]:
+    """Recover original signed facts from generated legacy summaries.
+
+    Args:
+        summaries: Validated retained daily summary paragraphs.
+
+    Returns:
+        Only unambiguous generated one-line summaries. Full totals stay
+        escaped and unknown comparisons remain unknown during migration.
+    """
+    migrations = {}
+    for day, summary in summaries.items():
+        visible, separator, comment = summary.partition("<!-- ")
+        if (
+            not separator
+            or not comment.endswith(" -->")
+            or "--" in comment[:-4]
+            or comment.startswith("aranami-assessment-totals:")
+            or not visible.startswith("专题页面")
+        ):
+            continue
+        project, colon, categories = visible.partition("\uff1a")
+        if not colon:
+            continue
+        pieces = [
+            project,
+            *re.split(r" · (?![^\uFF08\uFF09]*\uFF09)", categories),
+        ]
+        groups = tuple(_summary_group(piece) for piece in pieces)
+        if any(group is None for group in groups):
+            continue
+        labels = tuple(group.label for group in groups)
+        if labels[:2] != ("专题页面", "条目") or labels != tuple(
+            label
+            for label in ("专题页面", "条目", "非条目", "重定向")
+            if label in labels
+        ):
+            continue
+        migrations[day] = AssessmentSummaryMigration(groups, comment[:-4])
+    return migrations
+
+
 def _daily_summaries(
     introductions: Mapping[dt.date, str],
     days: Mapping[dt.date, Mapping[str, str]],
@@ -375,7 +665,19 @@ def _daily_summaries(
     delta = r'<small style="color: gray;">\uFF08[+-][0-9,]+\uFF09</small>'
     for day, introduction in introductions.items():
         paragraphs = introduction.strip().split("\n\n")
-        if re.fullmatch(r"'''总条目'''[0-9,]+篇。[^\r\n]*", paragraphs[0]):
+        if (
+            re.fullmatch(
+                r"(?:(?:专题页面|条目|非条目|重定向)[^\r\n<]*)?"
+                r"<!-- aranami-assessment-totals:v2 [^<>\r\n]* -->",
+                paragraphs[0],
+            )
+            or re.fullmatch(
+                r"专题页面(?:[+-][0-9,]+|(?:[0-9,]+|未知)\uFF08无可比记录\uFF09)"
+                r"\uFF1A[^\r\n<]*<!-- [^\r\n]* -->",
+                paragraphs[0],
+            )
+            or re.fullmatch(r"'''总条目'''[0-9,]+篇。[^\r\n]*", paragraphs[0])
+        ):
             summaries[day] = paragraphs.pop(0)
         elif re.fullmatch(
             rf"'''條目頁[0-9,]+篇'''(?:{delta})?\uFF1A\n\* [^\r]+",
@@ -648,36 +950,26 @@ def _references(
     }
 
 
-def _compact_baseline(  # ruff: ignore[too-many-arguments]
-    site: BaseSite,
-    project: str,
+def _compact_baseline(
     source: pl.DataFrame,
     instant: dt.datetime,
     *,
     previous: _LogBaseline | None,
     body: str,
-    dry: bool,
+    retained: ReportBundle | None,
 ) -> _LogBaseline:
     """Prefer retained publication history, then the preceding dataset.
 
     Args:
-        site: Source wiki identity.
-        project: Exact assessment project.
         source: Complete current compact source observations.
         instant: Actual current observation time.
         previous: Published/pending report baseline when retained.
         body: Current live managed report text.
-        dry: Keep preview observations isolated.
+        retained: Most recent saved dataset before the current date.
 
     Returns:
         A baseline preserving pending transitions across failed saves.
     """
-    retained = read_previous_snapshot(
-        site,
-        project,
-        instant.date() - dt.timedelta(days=1),
-        dry=dry,
-    )
     if previous is not None:
         if retained is not None and previous.body == body:
             retained_at = dt.datetime.fromisoformat(
@@ -758,20 +1050,30 @@ def _prepare_compact(  # ruff: ignore[too-many-arguments]
     if members.is_empty():
         message = "An empty project snapshot cannot establish removals."
         raise ValueError(message)
-    state = _compact_baseline(
+    retained = read_previous_snapshot(
         site,
         project,
+        instant.date() - dt.timedelta(days=1),
+        dry=dry,
+    )
+    state = _compact_baseline(
         source,
         instant,
         previous=previous,
         body=body,
-        dry=dry,
+        retained=retained,
     )
     compared = compare_assessments(
         _assessment_members(state.observed_source),
         members,
     )
-    changes, metadata = _resolve_changes(site, compared)
+    changes, metadata = _resolve_changes(
+        site,
+        compared,
+        source,
+        state.observed_source,
+        state.observed_members,
+    )
     result = ReportResult(
         family="assessment-log",
         tables={
@@ -812,8 +1114,29 @@ def _prepare_compact(  # ruff: ignore[too-many-arguments]
         unchanged=state.observed_at.date() < instant.date()
         and changes.is_empty(),
         summaries=summaries,
-        previous_source=state.observed_source,
-        previous_totals=state.observed_totals,
+        previous_source=(
+            state.observed_source
+            if state.observed_at.date() < instant.date()
+            else retained.tables["members"]
+            if retained
+            else None
+        ),
+        previous_totals=(
+            state.observed_totals
+            if state.observed_at.date() < instant.date()
+            else retained.manifest["metadata"].get("article_totals")
+            if retained
+            else None
+        ),
+        removed_links=_removed_link_repairs(
+            site,
+            history,
+            state.observed_source,
+            state.observed_members,
+            state.source,
+            state.members,
+        ),
+        summary_migrations=_summary_migrations(summaries),
     )
 
 
@@ -969,4 +1292,5 @@ def prepare_data(  # ruff: ignore[too-many-arguments, too-many-locals]
         summaries=summaries,
         previous_source=state.observed_source,
         previous_totals=state.observed_totals,
+        summary_migrations=_summary_migrations(summaries),
     )

@@ -21,7 +21,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING
-from urllib.parse import unquote
 
 import polars as pl
 
@@ -41,7 +40,6 @@ _GENERATION = re.compile(
     r"(?:[0-9a-f]{32}|[0-9]{8}T[0-9]{12}Z|"
     r"[a-z0-9][a-z0-9._-]{0,127}-[0-9]{14}(?:-[1-9][0-9]*)?)",
 )
-_LEGACY_DIRECTORY = re.compile(r"[a-z0-9][a-z0-9._-]*-[0-9a-f]{16}")
 _MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 _MAX_COMPONENT_BYTES = 255
 _LOCKS_GUARD = RLock()
@@ -158,27 +156,6 @@ def _validate_report_key(value: str) -> None:
     ):
         message = "Report keys must be safe relative paths."
         raise ValueError(message)
-
-
-def _legacy_key(key: str) -> str:
-    """Translate a readable path to its former digest-based identity.
-
-    Args:
-        key: Validated readable report path.
-
-    Returns:
-        The legacy single-component key, or the unchanged custom key.
-    """
-    parts = key.split("/")
-    if len(parts) not in {3, 4}:
-        return key
-    family, site, title, *variants = parts
-    variant = variants[0] if variants else ""
-    if family == "project-assessments" and re.fullmatch(r"\d{8}", variant):
-        variant = dt.date.fromisoformat(variant).isoformat()
-    prefix = "-".join(value for value in (family, site, variant) if value)
-    digest = hashlib.sha256(unquote(title).encode("utf-8")).hexdigest()[:16]
-    return f"{prefix[:110]}-{digest}"
 
 
 def _validate_key(value: str) -> None:
@@ -468,11 +445,6 @@ class ReportStore:
         )
         self.cache = runtime / "cache" / "report-staging"
         self.lock_root = runtime / "state" / "report-locks"
-        self.legacy_root = (
-            self.root.parent
-            if self.root.name in {"data", "records"}
-            else self.root
-        )
 
     @contextmanager
     def locked(self, key: str) -> Iterator[None]:
@@ -824,136 +796,6 @@ class ReportStore:
             return (
                 self._read_bundle(key, str(generation)) if generation else None
             )
-
-    def migrate_legacy(self) -> list[Path]:
-        """Copy validated legacy selections into readable report paths.
-
-        Daily stores select only project-assessment observations; record
-        stores select other families. Complete copies are verified
-        before atomic selection. Original directories remain untouched,
-        allowing interrupted workflows to resume and archive evidence.
-
-        Returns:
-            Legacy directories whose selections have readable copies.
-
-        Raises:
-            ValueError: Retained data or its identity is invalid.
-        """
-        if not self.legacy_root.exists():
-            return []
-        migrated = []
-        source = ReportStore(self.legacy_root, dry=self.dry)
-        for directory in sorted(self.legacy_root.iterdir()):
-            if (
-                directory.is_symlink()
-                or not directory.is_dir()
-                or _LEGACY_DIRECTORY.fullmatch(directory.name) is None
-            ):
-                continue
-            selection = source._selection(directory.name)
-            if selection["latest"] is None:
-                message = "Legacy report has no complete selected generation."
-                raise ValueError(message)
-            latest = source._read_bundle(
-                directory.name,
-                str(selection["latest"]),
-            )
-            manifest = latest.manifest
-            family = str(manifest["family"])
-            family = {
-                "enwp_key_articles": "english-comparisons",
-            }.get(family, family)
-            if (family == "project-assessments") != self.daily:
-                continue
-            site = str(manifest["target"]["site"])
-            title = str(manifest["target"]["title"])
-            prefix = f"{family}-{site}"
-            variant = directory.name[len(prefix) : -17].removeprefix("-")
-            if self.daily:
-                variant = dt.date.fromisoformat(
-                    str(manifest["metadata"]["snapshot_date"]),
-                ).strftime("%Y%m%d")
-            key = report_key(family, site, title, variant=variant)
-            if _legacy_key(key) != directory.name:
-                message = "Legacy report path disagrees with its identity."
-                raise ValueError(message)
-            if selection["previous"] is not None:
-                source._read_bundle(directory.name, str(selection["previous"]))
-            with self.locked(key):
-                self._migrate_selection(key, source, directory.name)
-            migrated.append(directory)
-        return migrated
-
-    def _migrate_selection(
-        self,
-        key: str,
-        source: ReportStore,
-        old_key: str,
-    ) -> None:
-        """Select verified copies of one legacy latest/predecessor pair.
-
-        Args:
-            key: New readable destination identity, already locked.
-            source: Reader for the legacy root.
-            old_key: Original digest-based destination identity.
-
-        Raises:
-            ValueError: A resumed copy conflicts with stored evidence.
-        """
-        destination = self.root / key
-        if self.daily and destination.exists():
-            self.read(key, locked=True)
-            return
-        if not self.daily and self._selection(key)["latest"] is not None:
-            self.read(key, locked=True)
-            return
-        selection = source._selection(old_key)
-        copied = {"schema": 1, "latest": None, "previous": None}
-        for name in ("previous", "latest"):
-            if selection[name] is None or (self.daily and name == "previous"):
-                continue
-            bundle = source._read_bundle(old_key, str(selection[name]))
-            instant = dt.datetime.fromisoformat(
-                str(bundle.manifest["generated_at"]),
-            )
-            prefix = f"{bundle.manifest['family']}-{instant:%Y%m%d%H%M%S}"
-            generation = prefix
-            suffix = 0
-            while generation in copied.values():
-                suffix += 1
-                generation = f"{prefix}-{suffix}"
-            final = destination if self.daily else destination / generation
-            self.cache.mkdir(parents=True, exist_ok=True)
-            temporary = Path(
-                tempfile.mkdtemp(prefix="migration-", dir=self.cache),
-            )
-            try:
-                shutil.copytree(bundle.path, temporary, dirs_exist_ok=True)
-                manifest = dict(bundle.manifest)
-                manifest.update(report_key=key, generation=generation)
-                manifest["tables"] = {
-                    name: _write_table(temporary / f"{name}.parquet", frame)
-                    for name, frame in bundle.tables.items()
-                }
-                _atomic_json(temporary / "manifest.json", manifest)
-                self._read_bundle_path(temporary, key, generation)
-                _sync_directory(temporary)
-                final.parent.mkdir(parents=True, exist_ok=True)
-                if final.exists():
-                    existing = self._read_bundle_path(final, key, generation)
-                    if existing.manifest != manifest:
-                        message = "Migrated report conflicts with saved data."
-                        raise ValueError(message)
-                else:
-                    temporary.replace(final)
-                    _sync_directory(final.parent)
-            finally:
-                if temporary.exists():
-                    shutil.rmtree(temporary)
-            copied[name] = generation
-        if not self.daily:
-            _atomic_json(destination / "latest.json", copied)
-            _sync_directory(destination)
 
     def _read_bundle(self, key: str, generation: str) -> ReportBundle:
         """Read the generation selected by a validated identity.

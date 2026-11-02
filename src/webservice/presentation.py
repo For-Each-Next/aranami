@@ -14,7 +14,7 @@ import math
 import operator
 import re
 from dataclasses import dataclass
-from functools import cmp_to_key, lru_cache
+from functools import lru_cache
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -65,9 +65,9 @@ _FAILURE_REASONS = {
 _QUALITY = (
     ("FA", "fa", "典范", "典範"),
     ("FL", "fl", "特色列表", "典表"),
-    ("GA", "ga", "优良", "優良"),
     ("A", "a", "甲"),
     ("AL", "al", "甲表", "甲级列表", "甲級列表"),
+    ("GA", "ga", "优良", "優良"),
     ("Bplus", "bplus", "乙上"),
     ("B", "b", "乙"),
     ("BL", "bl", "乙表", "乙级列表", "乙級列表"),
@@ -116,6 +116,13 @@ _RANKS = {
         "Substub": 1,
     },
     "importance": {"Top": 5, "High": 4, "Mid": 3, "Low": 2, "Bottom": 1},
+}
+# Table sorting distinguishes grades that share filter boundaries.
+_SORT_RANKS = {
+    dimension: {
+        code: rank for rank, (code, *_) in enumerate(reversed(groups[:-1]))
+    }
+    for dimension, groups in (("class", _QUALITY), ("importance", _IMPORTANCE))
 }
 
 
@@ -284,8 +291,22 @@ class Interface:
             message,
         )
 
-    def date(self, value: str, *, month_only: bool = False) -> str:
+    def date(
+        self,
+        value: str,
+        *,
+        month_only: bool = False,
+        compact: bool = False,
+        reference_year: int | None = None,
+    ) -> str:
         """Display a saved date without timezone conversion.
+
+        Args:
+            value: Saved ISO calendar date or month.
+            month_only: Display the month and year without a day.
+            compact: Abbreviate English full dates for card metadata.
+            reference_year: Omit this year in compact English dates.
+                Without a reference, retain every date's year.
 
         Returns:
             A localized calendar date or month label.
@@ -294,6 +315,11 @@ class Interface:
         if self.locale != "en":
             suffix = "" if month_only else f"{day.day}日"
             return f"{day.year}年{day.month}月{suffix}"
+        if compact and not month_only:
+            label = f"{calendar.month_abbr[day.month]} {day.day}"
+            return (
+                label if day.year == reference_year else f"{label}, {day.year}"
+            )
         month = calendar.month_name[day.month]
         return (
             f"{month} {day.year}"
@@ -740,8 +766,11 @@ def maintenance_items(
 ) -> list[Record]:
     """Sort worklists with stable IDs and unknown values last.
 
+    Assessment sorting follows the recognized hierarchy, with article
+    grades ahead of the corresponding list grades in descending order.
     Random sorting uses a seed and SHA-256 to stay stable across pages.
-    The saved input is never mutated.
+    Other ties retain ascending titles and page IDs. The saved input is
+    never mutated.
 
     Returns:
         A new sorted list retaining every saved article.
@@ -756,36 +785,46 @@ def maintenance_items(
             reverse=order == "desc",
         )
 
-    def compare(left: Record, right: Record) -> int:
-        """Compare sort fields with fixed ascending title and ID ties.
-
-        Returns:
-            Negative, zero, or positive ordering for the two rows.
-        """
-        if sort in {"oldest", "class", "importance", "size"}:
-            a, b = (
-                (
-                    item.get("oldest_issue_month")
-                    if sort == "oldest"
-                    else item.get("page_length")
-                    if sort == "size"
-                    else assessment_rank(item.get(f"assessment_{sort}"), sort)
-                )
-                for item in (left, right)
+    frame = pl.from_dicts(
+        items,
+        schema={
+            "page_id": pl.Int64,
+            "title": pl.String,
+            "oldest_issue_month": pl.String,
+            "page_length": pl.Int64,
+            "assessment_class": pl.String,
+            "assessment_importance": pl.String,
+        },
+    ).with_row_index("position")
+    if sort in _SORT_RANKS:
+        field = (
+            pl
+            .col(f"assessment_{sort}")
+            .str.strip_chars()
+            .str.to_lowercase()
+            .replace_strict(_ALIASES[sort], default=None)
+            .replace_strict(
+                _SORT_RANKS[sort],
+                default=None,
+                return_dtype=pl.Int64,
             )
-            if (a is None) != (b is None):
-                return 1 if a is None else -1
-            if a != b:
-                result = (a > b) - (a < b)
-                return -result if order == "desc" else result
-        result = (left["title"] > right["title"]) - (
-            left["title"] < right["title"]
         )
-        if sort == "title" and order == "desc":
-            result = -result
-        return result or left["page_id"] - right["page_id"]
-
-    return sorted(items, key=cmp_to_key(compare))
+    else:
+        field = pl.col(
+            {"oldest": "oldest_issue_month", "size": "page_length"}.get(
+                sort,
+                "title",
+            ),
+        )
+    positions = frame.sort(
+        field,
+        "title",
+        "page_id",
+        descending=[order == "desc", False, False],
+        nulls_last=True,
+        maintain_order=True,
+    ).get_column("position")
+    return [items[position] for position in positions]
 
 
 def maintenance_page(

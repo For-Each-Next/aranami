@@ -11,7 +11,7 @@
 {% endblock %}
 {% block content %}
 <div data-newsletter-content>
-<p>{{ t.newsletter.intro }}</p>
+<p class="page-description">{{ introduction }}</p>
 <form class="newsletter-controls" action="/newsletter/" method="get" data-newsletter-issue-form>
   <div class="field cdx-field newsletter-issue-field">
     <div class="cdx-label"><label class="cdx-label__label" for="newsletter-issue"><span class="cdx-label__label__text">{{ t.newsletter.issue }}</span></label></div>
@@ -20,7 +20,7 @@
         {% if archived_issue %}<option value="{{ selected_issue }}" selected disabled hidden>{{ selected_issue }} ({{ t.newsletter.choice.archived }})</option>{% endif %}
         {% for choice in issue_choices %}<option value="{{ choice.value }}"{% if choice.checked %} selected{% endif %}>{{ choice.value }} ({{ choice.label }})</option>{% endfor %}
       </select>
-      <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.issue_view }}</button>
+      <noscript><button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.issue_view }}</button></noscript>
     </div>
   </div>
   <input type="hidden" name="lang" value="{{ locale }}">
@@ -33,7 +33,7 @@
     <div class="cdx-label"><label class="cdx-label__label" id="newsletter-date-label" for="newsletter-data-date"><span class="cdx-label__label__text">{{ t.newsletter.history.date }}</span></label></div>
     <div class="cdx-field__control newsletter-date-selection">
       <div class="cdx-text-input"><input class="cdx-text-input__input" id="newsletter-data-date" name="date" type="date" value="{{ draft_history.form_date }}"{% if draft_history.minimum %} min="{{ draft_history.minimum }}" max="{{ draft_history.maximum }}" list="newsletter-saved-dates"{% endif %} required></div>
-      <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.history.view }}</button>
+      <noscript><button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.history.view }}</button></noscript>
     </div>
   </div>
   <input type="hidden" name="issue" value="{{ selected_issue }}">

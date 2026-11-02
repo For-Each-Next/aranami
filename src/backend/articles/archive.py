@@ -30,9 +30,9 @@ if TYPE_CHECKING:
 
 import polars as pl
 
-from shared.support.cache import write_parquet_cache
+from shared.support.cache import ParquetCache
 
-DEFAULT_PATH = Path("cache/today-in-history-v1.parquet")
+DEFAULT_PATH = Path("cache/today-in-history.parquet")
 _REDIRECT_SCHEMA = {
     "title": pl.String,
     "page_id": pl.Int64,
@@ -68,6 +68,12 @@ _MAX_TEXT_BYTES = 250_000
 _MAX_TITLE_BYTES = 1000
 _MAX_REDIRECTS = 10
 _MAX_SUBJECTS = 1000
+_CACHE = ParquetCache(
+    schema=SCHEMA,
+    contract="today-in-history:1",
+    max_rows=_MAX_ROWS,
+    max_bytes=_MAX_BYTES,
+)
 _REVISION_URL = re.compile(
     r"https://zh\.wikipedia\.org/w/index\.php\?oldid=([1-9]\d*)",
 )
@@ -239,13 +245,8 @@ def _load(path: Path | None) -> pl.DataFrame:
     if path is None:
         return pl.DataFrame(schema=SCHEMA)
     _safe_path(path)
-    if not path.exists():
-        return pl.DataFrame(schema=SCHEMA)
     try:
-        if path.stat().st_size > _MAX_BYTES:
-            _LOGGER.warning("Rebuilding oversized anniversary cache: %s", path)
-            return pl.DataFrame(schema=SCHEMA)
-        frame = pl.read_parquet(path, n_rows=_MAX_ROWS + 1)
+        frame = _CACHE.read(path)
         _validate(frame)
     except OSError, ValueError, pl.exceptions.PolarsError:
         _LOGGER.warning(
@@ -603,7 +604,7 @@ class DailyHistoryArchive:
             original = _load(self.path)
             merged = self._merge(original, pending)
             if not self.path.exists() or not original.equals(merged):
-                write_parquet_cache(self.path, merged, max_bytes=_MAX_BYTES)
+                _CACHE.write(self.path, merged)
             self._saved = merged
             self._pending.clear()
             self._repairs.clear()

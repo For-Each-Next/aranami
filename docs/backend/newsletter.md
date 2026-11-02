@@ -38,13 +38,13 @@ the next collection rebuilds them without losing retained report evidence.
 
 | Location | Retained data | Effect of clearing |
 |---|---|---|
-| `<cache_directory>/newsletter-revisions-v1.parquet` | Raw Chinese Wikipedia text keyed by exact revision ID | Safe: source text is fetched again after fresh historical revision checks |
-| `cache/today-in-history-v1.parquet` | Daily OTD source evidence for the last 100 completed UTC dates | Safe: historical sources are fetched again; saved reports remain intact |
+| `<cache_directory>/newsletter-revisions.parquet` | Raw Chinese Wikipedia text keyed by exact revision ID | Safe: source text is fetched again after fresh historical revision checks |
+| `cache/today-in-history.parquet` | Daily OTD source evidence for the last 100 completed UTC dates | Safe: historical sources are fetched again; saved reports remain intact |
 | `reports/data/articles/milestones.parquet` | Project reviews and homepage appearances, source links, attribution, and per-field coverage | Durable inventory: unknown fields remain incomplete |
 | `reports/data/articles/history.parquet` | Versioned talk snapshots and nested recorded events | Durable evidence: never clear as a cache |
 | `reports/data/articles/authorship.parquet` | Listing revisions, all contributor token/share statistics, and tied leading authors | Durable evidence: preserve successful observations |
 | `reports/data/newsletter/observations/current.json` and `YYYYMMDD/` archives | Current prepared facts and immutable earlier observations | Durable data consumed by newsletter generation |
-| `backups/report-layout/` | Original legacy evidence after validated layout migration | Durable recovery copies, not active stores |
+| `backups/report-layout/` | Preserved evidence from retired layouts | Durable recovery copies, not active stores |
 | `reports/records/newsletter/` | Independent daily JSON facts and date catalogs | Durable history: deleting it loses retained date selections |
 
 Hourly milestone acquisition supplements recorded talk-page history with the
@@ -115,14 +115,11 @@ snapshot retains newsletter availability; requests read the canonical current
 observation or an immutable daily archive directly. Collection, durable data, and newsletter projection remain separate
 boundaries even when the hub coordinates them in one scheduled pass.
 
-Migration merges every retained legacy talk revision into the shared article
-history store under the store's source-version keys. It leaves the original
-`reports/newsletter-history-v1.parquet` byte file untouched. Existing daily
-archives retain their original facts and capture times.
-Earlier `reports/newsletter-data-v2/history.parquet` and `authorship.parquet`
-are also preserved migration sources, while the active shared stores live
-under `reports/data/articles/`. The newsletter-specific directory now
-holds prepared observations rather than owning the common article database.
+The shared article stores live under `reports/data/articles/`; the
+newsletter-specific directory holds prepared observations. Existing daily
+archives retain their original facts and capture times. Retired layout
+converters are no longer shipped; preserved originals remain recovery
+evidence rather than collection inputs.
 
 ## Daily observations
 
@@ -142,18 +139,9 @@ New schema-2 captures contain no generated wikitext, rendered-page objects,
 page artifacts, or output manifests. Query handlers render only the selected
 snapshot's facts using the current updater renderer, without source requests
 or writes. Formatting changes therefore apply to historical views while
-their source facts and capture timestamps stay fixed. Legacy schema-1 facts
-remain readable after validating their retained JSON evidence; generated
-output files are not required. The explicit report-layout migration writes
-facts-only records and preserves the original evidence in its backup.
-With the hub and web service stopped, the layout workflow also converts
-schema-1 histories already in the active directory. It validates a staged
-facts-only copy, moves the original to
-`backups/report-layout/newsletter-wikitext/`, and selects the new archive.
-`state/newsletter-structured.json` records its checkpoint; interrupted work
-resumes from the preserved source even if disposable staging has been cleared.
-Conversion runs only through explicit maintenance, never a page request or
-normal startup.
+their source facts and capture timestamps stay fixed. Active archives use
+canonical inline facts and compact date folders; readers reject retired
+rendered-record layouts without altering their original files.
 
 January's annual feature has a separate daily stream under
 `<issue>/annual-feature/YYYYMMDD/metadata.json`, with complete annual facts and
@@ -179,7 +167,7 @@ refreshes every started, unpublished issue selected by the publication plan,
 including delayed drafts from earlier quarters. It uses an explicit exclusive
 observation cutoff through the latest completed UTC day, capped at each
 reporting period's end. Historical
-reads, DYK, quality revisions, awards, curated new pages, and homepage
+reads, DYK, quality revisions, awards, and homepage
 appearances use that same cutoff. Quarterly completion is separate from data
 availability. The overview retains content links even when the pages have not
 been created; January links the annual feature without a separate interview.
@@ -195,11 +183,18 @@ internally. Copied drafts retain all three quarter months, using the registered
 counts available at collection time without minimum-count or gap annotations.
 Unelapsed months therefore have zero registered articles in the draft without
 changing their unknown observation state in saved facts.
-Join curated registered titles to internal assessment observations for monthly
-grade counts and the quarterly pie chart. Prefer exact titles, then batched
-canonical titles and page IDs across renames. Current assessments apply only to
-open quarters; closed quarters require their exact retained boundary snapshot
-and its actual collection time. Registered articles without a valid project
+Read the curated new-article register and its year archive at each actual daily
+acquisition time, including when refreshing an unpublished issue after its
+quarter ends. Select only completed dates within that issue's quarter; later
+register corrections can therefore update the selected quarter's counts.
+For example, November 2 includes November 1 records, and January 5 can refresh
+the preceding fourth quarter using the January 5 source observation.
+Join those registered titles to current internal assessments for monthly grade
+counts and the quarterly pie chart. Prefer exact titles, then batched canonical
+titles and page IDs across renames. Retain the actual register and grade
+observation timestamps separately from the selected quarter's end. Historical
+daily archives remain immutable; annual statistics retain their own historical
+boundaries. Registered articles without a valid project
 class count as unassessed, including subjects absent from the project snapshot.
 Older saved unknown-class counts also render as unassessed; this reporting
 category does not assert that a project banner is present.
@@ -222,8 +217,8 @@ observations, never a rolling year relabeled as the reviewed year.
 Only the two editor-comment invitations use buttons, both with the verified
 reflection preload; introduction and data slots have no invitation buttons.
 The invitations use `Template:Clickable button 2` revision 61200765 and
-`Module:Clickable button 2` revision 61200823, with explicit blue primary
-styling so their appearance does not depend on global Codex resource loading.
+`Module:Clickable button 2` revision 61200823, with the `mw-ui-progressive`
+class and no inline style parameter.
 Annual ACG awards include all positive score gains and mark first-year scorers
 with `N`; quarterly awards retain fifth-place ties and the ten-point newcomer
 threshold. Community honors remain blank for editors. Unsupported DYK subject
@@ -381,8 +376,7 @@ Introduction and editor commentary remain editorial work. Historical queries
 render the current page structure using only selected saved observations.
 
 Normal observation and daily archive readers accept only canonical inline
-facts and compact date folders. Explicit migration operations retain access to
-older digest selectors, ISO date folders, and schema-1 rendered records in
-preserved backups. Requests and ordinary startup never run those conversions.
+facts and compact date folders. Older digest selectors, ISO date folders, and
+schema-1 rendered records in preserved backups are not active inputs.
 Both newsletter stores use the shared atomic JSON writer: it flushes the file
 before replacement and syncs the destination directory before returning.

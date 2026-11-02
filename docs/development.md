@@ -25,6 +25,7 @@ rules are maintained in [AGENTS.md](../AGENTS.md), not duplicated here.
 | Change | Start here |
 |---|---|
 | Source facts, parsing, comparisons, caches | `src/backend/services/` |
+| Disposable Parquet cache contracts | `src/shared/support/cache.py`; [cache guide](backend/caching.md) |
 | Shared article history, recognition, credits, retention | `src/backend/articles/` |
 | Scheduling, execution, status, storage | `src/backend/`, `src/backend/support/` |
 | Website collection/maintenance definitions | `src/backend/website/` |
@@ -132,8 +133,9 @@ node tests/toolforge/check_interface.cjs /tmp/aranami-interface-fixtures /tmp/ar
 
 Set `ARANAMI_CHROMIUM` to the Chromium executable when it differs from the
 macOS default. The checker uses native Node/CDP and synthetic data, without
-external services or npm dependencies. It writes a JSON result and sample
-screenshots, checking overflow, log download visibility/column alignment,
+external services or npm dependencies. Each run snapshots the built assets
+so later rebuilds cannot change pages during verification. It writes a JSON
+result and sample screenshots, checking overflow, log download visibility/column alignment,
 and modal focus, background inertness, dismissal, and restoration. Browser
 and local-loopback permission are required. Inspect the screenshots as well.
 Focused 320- and 1440-pixel cases also verify Tools hover, click, and keyboard

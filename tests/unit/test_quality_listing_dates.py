@@ -271,7 +271,7 @@ class TestQualityDatesCache(TestCase):
             path = Path(directory) / "cache" / cache._FILENAME  # ruff: ignore[private-member-access]
             path.parent.mkdir()
             path.write_text("invalid parquet", encoding="utf-8")
-            with patch.object(cache._LOGGER, "warning") as warning:  # ruff: ignore[private-member-access]
+            with patch("shared.support.cache._LOGGER.warning") as warning:
                 result = cache.load()
         assert result.is_empty()
         assert result.schema == cache.SCHEMA

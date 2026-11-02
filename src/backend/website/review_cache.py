@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from shared.support.cache import write_parquet_cache
+from shared.support.cache import ParquetCache
 
 if TYPE_CHECKING:
     import datetime as dt
@@ -26,7 +26,6 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_ROWS = 10_000
 _RETENTION = 30 * 24 * 3600
-_PARSER_VERSION = 3
 _MAX_QUESTION_BYTES = 16 * 1024
 _MAX_ACCOUNT_BYTES = 1000
 _BAD_ACCOUNT = r"[:#\[\]{}|<>\x00-\x1f\x7f]"
@@ -41,13 +40,18 @@ ITEM_SCHEMA = {
     "question": pl.String,
 }
 _SCHEMA = {
-    "parser_version": pl.Int64,
     "source": pl.String,
     "kind": pl.String,
     "revision": pl.Int64,
     "items": pl.List(pl.Struct(ITEM_SCHEMA)),
     "used_at": pl.Int64,
 }
+_CACHE = ParquetCache(
+    schema=_SCHEMA,
+    contract="review-sources:3",
+    max_rows=_MAX_ROWS,
+    max_bytes=_MAX_BYTES,
+)
 
 
 def _valid_items(frame: pl.DataFrame) -> bool:
@@ -124,22 +128,10 @@ def _load(path: Path | None, now: int) -> pl.DataFrame:
         A typed frame; a corrupt cache behaves like a missing cache.
     """
     empty = pl.DataFrame(schema=_SCHEMA)
-    if path is None or not path.exists():
-        return empty
     try:
-        if (
-            path.is_symlink()
-            or path.parent.is_symlink()
-            or not path.is_file()
-            or path.stat().st_size > _MAX_BYTES
-        ):
-            return empty
-        frame = pl.read_parquet(path, n_rows=_MAX_ROWS + 1)
-        if frame.schema != pl.Schema(_SCHEMA) or frame.height > _MAX_ROWS:
-            return empty
+        frame = _CACHE.read(path)
         invalid = frame.filter(
             pl.any_horizontal(pl.all().is_null())
-            | (pl.col("parser_version") != _PARSER_VERSION)
             | (pl.col("revision") <= 0)
             | (pl.col("used_at") > now)
             | (pl.col("items").list.len() > _MAX_ROWS),
@@ -298,7 +290,6 @@ class ReviewCache:
             if key in changed:
                 items = parser(self._texts[revision] if revision else "")
                 self._rows[key] = {
-                    "parser_version": _PARSER_VERSION,
                     "source": key[0],
                     "kind": key[1],
                     "revision": revision,
@@ -331,6 +322,6 @@ class ReviewCache:
             .head(_MAX_ROWS)
         )
         try:
-            write_parquet_cache(self.path, frame, max_bytes=_MAX_BYTES)
+            _CACHE.write(self.path, frame)
         except OSError, ValueError, pl.exceptions.PolarsError:
             _LOGGER.warning("Could not save the disposable review cache.")

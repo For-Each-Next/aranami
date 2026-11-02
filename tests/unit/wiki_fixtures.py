@@ -28,6 +28,13 @@ class OfflineSite(BaseSite):
             aliases=["PJ", "维基专题"],
             case="first-letter",
         )
+        for number, name in ((118, "Draft"), (119, "Draft talk")):
+            namespaces[number] = Namespace(
+                number,
+                canonical_name=name,
+                custom_name=name,
+                case="first-letter",
+            )
         return namespaces
 
     @staticmethod

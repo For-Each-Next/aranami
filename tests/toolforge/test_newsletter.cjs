@@ -39,7 +39,7 @@ function fixture(clipboard) {
     vm.runInNewContext(script, {
         document: {
             querySelector: () => null,
-            querySelectorAll: selector => selector === "[data-newsletter-copy]" ? [button] : [source],
+            querySelectorAll: selector => selector === "[data-newsletter-copy]" ? [button] : selector === "[data-newsletter-wikitext]" ? [source] : [],
             getElementById: () => source,
         },
         getComputedStyle: () => ({lineHeight: "20px", paddingTop: "16px", paddingBottom: "16px"}),
@@ -130,7 +130,7 @@ test("fallback sizing measures wrapped text on expansion and viewport changes", 
     assert.equal(view.source.rows, 10, "hidden content must not replace measured rows");
 });
 
-function issueFixture() {
+function issueFixture({fetchAvailable = true} = {}) {
     function selection(value, choices = ["2026-10", "2027-01", "2027-04"].map(value => ({value}))) {
         return {
             value,
@@ -142,7 +142,6 @@ function issueFixture() {
         };
     }
     const issue = selection("2027-01");
-    const submit = {hidden: false};
     const statusText = {textContent: ""};
     const status = {
         hidden: true, dataset: {failure: "Unable to load this issue"},
@@ -150,12 +149,19 @@ function issueFixture() {
         get textContent() { return statusText.textContent; },
     };
     const requests = [];
+    const submissions = [];
     const addresses = [];
     let current;
     function result(text) {
+        const date = {
+            value: "2026-12-31", handlers: {},
+            form: {requestSubmit() { submissions.push({issue: issue.value, date: date.value}); }},
+            addEventListener(name, handler) { this.handlers[name] = handler; },
+        };
         return {
-            textContent: text, attrs: {},
-            querySelector: () => null, querySelectorAll: () => [],
+            textContent: text, attrs: {}, date,
+            querySelector: () => null,
+            querySelectorAll: selector => selector === '#newsletter-data-date' ? [date] : [],
             setAttribute(name, value) { this.attrs[name] = value; },
             removeAttribute(name) { delete this.attrs[name]; },
             replaceWith(replacement) { current = replacement; },
@@ -164,7 +170,8 @@ function issueFixture() {
     current = result("Original draft");
     const form = {
         action: "/newsletter/", handlers: {},
-        querySelector: selector => selector === '[name="issue"]' ? issue : submit,
+        querySelector: selector => selector === '[name="issue"]' ? issue : null,
+        requestSubmit() { submissions.push({issue: issue.value}); },
         addEventListener(name, handler) { this.handlers[name] = handler; },
     };
     const document = {
@@ -173,7 +180,7 @@ function issueFixture() {
             "[data-newsletter-load-status]": status,
             "[data-newsletter-result]": current,
         })[selector] || null,
-        querySelectorAll: () => [],
+        querySelectorAll: selector => selector === '#newsletter-data-date' ? [current.date] : [],
     };
     class ResponseParser {
         parseFromString(text) {
@@ -192,17 +199,16 @@ function issueFixture() {
         FormData: class { *[Symbol.iterator]() { yield ["issue", issue.value]; yield ["lang", "zh-hant"]; } },
         location: {href: "https://example.test/newsletter/?issue=2027-01&date=2026-12-31", origin: "https://example.test"},
         history: {replaceState(_state, _title, url) { addresses.push(String(url)); }},
-        fetch: (url, options) => new Promise((resolve, reject) => requests.push({url, options, resolve, reject})),
+        fetch: fetchAvailable ? (url, options) => new Promise((resolve, reject) => requests.push({url, options, resolve, reject})) : undefined,
     });
     function respond(index, values, ok = true) {
         requests[index].resolve({ok, text: async () => JSON.stringify(values)});
     }
-    return {issue, submit, status, requests, addresses, form, respond, result: () => current};
+    return {issue, status, requests, submissions, addresses, form, respond, result: () => current};
 }
 
 test("issue selection reads the new issue and replaces its draft without submission", async () => {
     const view = issueFixture();
-    assert.equal(view.submit.hidden, false);
     view.issue.value = "2026-10";
     const loaded = view.issue.handlers.change();
     assert.equal(view.requests.length, 1);
@@ -217,7 +223,6 @@ test("issue selection reads the new issue and replaces its draft without submiss
     assert.equal(view.result().textContent, "Previous issue draft");
     assert.equal(view.result().attrs["aria-busy"], undefined);
     assert.equal(view.issue.value, "2026-10");
-    assert.equal(view.submit.hidden, false);
     assert.equal(view.status.hidden, true);
     assert.equal(view.addresses.length, 1);
 });
@@ -234,7 +239,6 @@ test("failed or mismatched issue loads retain the displayed draft and explain re
         assert.equal(view.result().textContent, "Original draft", failure);
         assert.equal(view.issue.value, "2027-01", failure);
         assert.deepEqual(view.issue.options, choices, failure);
-        assert.equal(view.submit.hidden, false, failure);
         assert.equal(view.result().attrs["aria-busy"], undefined, failure);
         assert.equal(view.status.textContent, "Unable to load this issue", failure);
         assert.equal(view.status.hidden, false, failure);
@@ -327,4 +331,32 @@ test("late failed requests cannot reset a successful current issue", async () =>
     assert.equal(view.result().textContent, "Latest requested draft");
     assert.equal(view.issue.value, "2027-04");
     assert.equal(view.status.hidden, true);
+});
+
+test("date selection submits the native form initially and after an issue replacement", async () => {
+    const view = issueFixture();
+    const originalDate = view.result().date;
+    originalDate.value = "";
+    originalDate.handlers.change();
+    assert.deepEqual(view.submissions, [], "clearing the date must not navigate");
+    originalDate.value = "2026-12-30";
+    originalDate.handlers.change();
+    assert.deepEqual(view.submissions, [{issue: "2027-01", date: "2026-12-30"}]);
+    view.issue.value = "2026-10";
+    const loaded = view.issue.handlers.change();
+    view.respond(0, {issue: "2026-10", text: "Previous issue draft"});
+    await loaded;
+    const date = view.result().date;
+    assert.notEqual(date, originalDate);
+    date.value = "2026-09-30";
+    date.handlers.change();
+    assert.deepEqual(view.submissions.at(-1), {issue: "2026-10", date: "2026-09-30"});
+});
+
+test("issue changes submit natively when in-place loading is unavailable", () => {
+    const view = issueFixture({fetchAvailable: false});
+    view.issue.value = "2026-10";
+    view.issue.handlers.change();
+    assert.deepEqual(view.submissions, [{issue: "2026-10"}]);
+    assert.deepEqual(view.requests, []);
 });

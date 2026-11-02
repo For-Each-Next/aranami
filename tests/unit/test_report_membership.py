@@ -107,6 +107,7 @@ class TestReportMembershipCache(TestCase):
         """Ignore missing fields, invalid IDs, and duplicate titles."""
         cache.save_membership(self.site, self.target, self.text, {"Game": 123})
         [path] = (self.root / "cache").glob("*.parquet")
+        identity = pl.read_parquet_metadata(path)["aranami.cache"]
         digest = hashlib.sha256(self.text.encode()).hexdigest()
         malformed = (
             pl.DataFrame({"title": ["Game"]}),
@@ -122,7 +123,7 @@ class TestReportMembershipCache(TestCase):
             }),
         )
         for frame in malformed:
-            frame.write_parquet(path)
+            frame.write_parquet(path, metadata={"aranami.cache": identity})
             assert not cache.load_membership(self.site, self.target, self.text)
         path.write_text("not parquet", encoding="utf-8")
         assert not cache.load_membership(self.site, self.target, self.text)

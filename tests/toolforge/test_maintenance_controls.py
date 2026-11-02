@@ -11,7 +11,7 @@ import unittest
 from html import unescape
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from fastapi.testclient import TestClient
 
@@ -64,8 +64,31 @@ def _snapshot() -> dict[str, object]:
     }
 
 
+def _sort_controls(output: str, column: str) -> dict[str, str]:
+    """Read a native sortable header's submitted query fields.
+
+    Returns:
+        Hidden controls and the sort button's direction value.
+
+    Raises:
+        AssertionError: The column has no native sort form.
+    """
+    for form in re.findall(r"<form\b[^>]*>(.*?)</form>", output, re.DOTALL):
+        values = {
+            name: unescape(value)
+            for name, value in re.findall(
+                r'name="([^"]+)" value="([^"]*)"',
+                form,
+            )
+        }
+        if values.get("sort") == column and "__sort-button" in form:
+            return values
+    message = f"Missing sortable header: {column}"
+    raise AssertionError(message)
+
+
 class TestMaintenanceControls(unittest.TestCase):
-    """Preserve filter state and native GET controls across pages."""
+    """Preserve native table controls and compatible saved queries."""
 
     @staticmethod
     def test_unlimited_ranges_keep_list_genre_and_size() -> None:
@@ -113,9 +136,10 @@ class TestMaintenanceControls(unittest.TestCase):
         assert '<option value="D"' not in output
         assert '<option value="FL"' not in output
         assert '<option value="Substub"' not in output
-        assert 'id="maintenance-quality-to"' in output
-        assert 'name="genre" value="list"' in output
-        assert output.count('class="pagination"') == 1
+        assert 'class="maintenance-controls"' not in output
+        assert 'id="maintenance-quality-to"' not in output
+        assert 'name="genre" value="list"' not in output
+        assert output.count('class="cdx-table-pager ') == 1
         assert output.count('class="source-updated"') == 1
 
     @staticmethod
@@ -239,17 +263,22 @@ class TestMaintenanceControls(unittest.TestCase):
             ),
             "en",
         )
-        assert output.count('class="pagination"') == 1
+        assert output.count('class="cdx-table-pager ') == 1
         assert output.count('class="page-jump"') == 0
         assert "Articles 11\u201320 of 103" in output
         assert ">11</td>" in output
         assert "Game 011" in output
         assert "Game 010" not in output
-        assert (
-            '<option value="title" selected>Article title</option>' in output
-        )
-        assert 'class="sort-controls"' not in output
-        assert 'type="radio" name="order" value="asc" checked' in output
+        assert 'aria-sort="ascending"' in output
+        assert _sort_controls(output, "title") == {
+            "task": "references",
+            "q": "Game",
+            "quality": "B",
+            "importance": "Low",
+            "sort": "title",
+            "order": "desc",
+        }
+        assert _sort_controls(output, "class")["order"] == "desc"
         links = re.findall(r'href="([^"]+)"[^>]*rel="(?:prev|next)"', output)
         assert len(links) == 2
         for link in links:
@@ -280,7 +309,9 @@ class TestMaintenanceControls(unittest.TestCase):
                 assert f'data-label="{heading}"' in output
                 assert 'scope="col"' in output
                 assert 'scope="row"' in output
-                assert 'id="maintenance-task"' in output
+                assert 'class="navigation-tools maintenance-menu"' in output
+                assert 'class="maintenance-search" role="search"' in output
+                assert "<caption>" in output
                 output = render_maintenance(
                     _snapshot(),
                     {"task": ["references"], "q": ['<script>"']},
@@ -338,6 +369,56 @@ class TestMaintenanceHttpControls(unittest.TestCase):
                 assert re.findall(row_pattern, translated.text) == expected
             generated.assert_called_once_with(8)
 
+    def test_header_sort_orders_full_category_and_resets_page(self) -> None:
+        """Follow header sorting across pages and directions."""
+        snapshot = _snapshot()
+        rows = snapshot["backlog"]["groups"][0]["items"]
+        for row, grade in zip(
+            rows[-6:],
+            ("Bplus", "GA", "AL", "A", "FL", "FA"),
+            strict=True,
+        ):
+            row["assessment_class"] = grade
+        with patch(
+            "backend.public._PublicViews._dashboard",
+            return_value=snapshot,
+        ):
+            initial = self.client.get(
+                "/maintenance/?task=references&q=Game&page=2&limit=20",
+            )
+            controls = _sort_controls(initial.text, "class")
+            assert "page" not in controls
+            assert controls["limit"] == "20"
+            assert controls["q"] == "Game"
+            descending = self.client.get(
+                "/maintenance/?" + urlencode(controls),
+            )
+            assert descending.status_code == 200
+            titles = re.findall(
+                r'<th scope="row".*?>(Game \d+)</a>',
+                descending.text,
+            )
+            assert titles[:6] == [
+                "Game 103",
+                "Game 102",
+                "Game 101",
+                "Game 100",
+                "Game 099",
+                "Game 098",
+            ]
+            assert 'aria-sort="descending"' in descending.text
+            reverse = _sort_controls(descending.text, "class")
+            assert reverse["order"] == "asc"
+            ascending = self.client.get("/maintenance/?" + urlencode(reverse))
+            assert ascending.status_code == 200
+            assert 'aria-sort="ascending"' in ascending.text
+            titles = re.findall(
+                r'<th scope="row".*?>(Game \d+)</a>',
+                ascending.text,
+            )
+            assert titles[0] == "Game 001"
+            assert "Game 103" not in titles
+
     def test_actual_language_switch_keeps_filtered_second_page(self) -> None:
         """Keep the selected rows and numbering across scripts."""
         original = (
@@ -376,7 +457,7 @@ class TestMaintenanceHttpControls(unittest.TestCase):
                 assert "Game 010" not in changed.text
                 assert ">11</td>" in changed.text
                 next_link = re.search(
-                    r'<a[^>]+href="([^"]+)" rel="next">',
+                    r'<a[^>]+href="([^"]+)" rel="next"[^>]*>',
                     changed.text,
                 )
                 assert next_link is not None

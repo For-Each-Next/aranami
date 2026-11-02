@@ -729,7 +729,14 @@ def _valid_issue(key: str, facts: object) -> bool:
         and _valid_observation_stamp(
             (facts.get("new_pages_data") or {}).get("grades_observed_at"),
             stamp,
-            observation_end,
+            None
+            if "source_observed_at" in (facts.get("new_pages_data") or {})
+            else observation_end,
+        )
+        and _valid_observation_stamp(
+            (facts.get("new_pages_data") or {}).get("source_observed_at"),
+            stamp,
+            None,
         )
         and _homepage_facts(facts, issue, observation_end)
         and _valid_year_review(

@@ -6,9 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import json
-import shutil
 import tempfile
 from copy import deepcopy
 from html import unescape
@@ -22,8 +20,6 @@ from fastapi.testclient import TestClient
 from backend.newsletter.archive import (
     DEFAULT_PATH,
     NewsletterDraftArchive,
-    convert_newsletter_archive,
-    migrate_newsletter_layout,
 )
 from backend.newsletter.collection import collect_source_facts
 from backend.public import create_app
@@ -42,23 +38,6 @@ def _data(clock: dt.datetime, total: int = 3) -> dict:
         now=clock,
         current_counts={"total": total},
     )
-
-
-def _digest(value: dict) -> str:
-    """Hash the canonical structured encoding used by archive records.
-
-    Returns:
-        The record's SHA-256 hexadecimal digest.
-    """
-    return hashlib.sha256(
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode(),
-    ).hexdigest()
 
 
 def _annual_review(issue: Issue, day: dt.date) -> dict:
@@ -91,53 +70,7 @@ def _annual_review(issue: Issue, day: dt.date) -> dict:
     }
 
 
-def _legacy_daily(
-    directory: Path,
-    issue: Issue,
-    facts: dict,
-    stamp: str,
-) -> dict:
-    """Write a preconversion archive with embedded generated output.
-
-    Returns:
-        The original schema-one observation used for compatibility.
-    """
-    rendered = {"pages": [{"text": "obsolete stored output"}]}
-    day = (
-        dt.date.fromisoformat(facts["observation_end"]) - dt.timedelta(days=1)
-    ).isoformat()
-    record = {
-        "schema": 1,
-        "issue": issue.value,
-        "date": day,
-        "generated_at": stamp,
-        "sha256": _digest({"facts": facts, "rendered": rendered}),
-        "facts": facts,
-        "rendered": rendered,
-        "wikitext": True,
-    }
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{day}.json").write_text(
-        json.dumps(record, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    (directory / "catalog.json").write_text(
-        json.dumps({
-            "schema": 1,
-            "issue": issue.value,
-            "dates": {
-                day: {
-                    "generated_at": stamp,
-                    "sha256": record["sha256"],
-                },
-            },
-        }),
-        encoding="utf-8",
-    )
-    return record
-
-
-class NewsletterDraftArchiveTests(TestCase):  # ruff: ignore[too-many-public-methods]
+class NewsletterDraftArchiveTests(TestCase):
     """Preserve complete independent facts and actual capture times."""
 
     def setUp(self) -> None:
@@ -423,82 +356,6 @@ class NewsletterDraftArchiveTests(TestCase):  # ruff: ignore[too-many-public-met
         )
         assert entry["year_review"]["dyk"][0]["projects"] == ["虚构角色"]
 
-    def test_legacy_daily_facts_require_explicit_conversion(
-        self,
-    ) -> None:
-        """Require conversion before reading historical facts."""
-        facts = _data(self.clock)["issues"][self.issue.value]
-        directory = self.path / self.issue.value
-        record = _legacy_daily(
-            directory,
-            self.issue,
-            facts,
-            self.clock.isoformat(),
-        )
-        with self.assertRaises(FileNotFoundError):
-            self.archive.read_entry(self.issue, dt.date(2026, 10, 30))
-        target = NewsletterDraftArchive(self.path.parent / "converted")
-        assert target.migrate_from(self.archive) == {
-            "drafts": 1,
-            "features": 0,
-        }
-        entry = target.read_entry(self.issue, dt.date(2026, 10, 30))
-        assert entry["facts"] == facts
-        assert "rendered" not in entry
-        assert "wikitext" not in entry
-        assert entry["sha256"] != record["sha256"]
-        path = directory / "2026-10-30.json"
-        damaged = json.loads(path.read_bytes())
-        damaged["facts"]["overview"]["total"] += 1
-        path.write_text(json.dumps(damaged), encoding="utf-8")
-        with self.assertRaises(ValueError):
-            target.migrate_from(self.archive)
-
-    def test_legacy_annual_facts_require_explicit_conversion(self) -> None:
-        """Check legacy fact hashes without generated text."""
-        day = dt.date(2026, 1, 1)
-        review = _annual_review(self.issue, day)
-        directory = self.path / self.issue.value / "annual-feature"
-        folder = directory / "20260101"
-        folder.mkdir(parents=True)
-        record = {
-            "schema": 1,
-            "issue": self.issue.value,
-            "date": day.isoformat(),
-            "generated_at": "2026-01-02T00:00:00+00:00",
-            "year_review": review,
-            "sha256": hashlib.sha256(b"deleted output").hexdigest(),
-            "facts_sha256": _digest(review),
-        }
-        metadata = folder / "metadata.json"
-        metadata.write_text(json.dumps(record), encoding="utf-8")
-        (directory / "catalog.json").write_text(
-            json.dumps({
-                "schema": 1,
-                "issue": self.issue.value,
-                "dates": {
-                    day.isoformat(): {
-                        key: record[key] for key in ("generated_at", "sha256")
-                    },
-                },
-            }),
-            encoding="utf-8",
-        )
-        with self.assertRaises(ValueError):
-            self.archive.read_feature(self.issue, day)
-        target = NewsletterDraftArchive(self.path.parent / "converted")
-        assert target.migrate_from(self.archive) == {
-            "drafts": 0,
-            "features": 1,
-        }
-        entry = target.read_feature(self.issue, day)
-        assert entry["year_review"] == review
-        assert "text" not in entry
-        record["facts_sha256"] = "0" * 64
-        metadata.write_text(json.dumps(record), encoding="utf-8")
-        with self.assertRaises(ValueError):
-            target.migrate_from(self.archive)
-
     def test_daily_calendar_identity_advances_only_for_new_dates(self) -> None:
         """Add observed dates without inventing earlier observations."""
         assert self.archive.identity(self.issue) is None
@@ -573,226 +430,6 @@ class NewsletterDraftArchiveTests(TestCase):  # ruff: ignore[too-many-public-met
             )
             == original
         )
-
-    def test_layout_migration_preserves_evidence_without_output_copies(
-        self,
-    ) -> None:
-        """Migrate legacy JSON facts while retaining source bytes."""
-        runtime = self.path.parent
-        legacy = runtime / "reports/newsletter-drafts-v1"
-        facts = _data(self.clock)["issues"][self.issue.value]
-        original_record = _legacy_daily(
-            legacy / self.issue.value,
-            self.issue,
-            facts,
-            self.clock.isoformat(),
-        )
-        output = legacy / self.issue.value / "20261030/main.wikitext"
-        output.parent.mkdir()
-        output.write_text("obsolete stored output", encoding="utf-8")
-        source = {
-            str(file.relative_to(legacy)): file.read_bytes()
-            for file in legacy.rglob("*")
-            if file.is_file()
-        }
-        for _ in range(2):
-            counts = migrate_newsletter_layout(runtime)
-            assert counts["drafts"] == 1
-        target = NewsletterDraftArchive(runtime / DEFAULT_PATH)
-        entry = target.read_entry(self.issue, dt.date(2026, 10, 30))
-        assert entry["schema"] == 2
-        assert entry["facts"] == original_record["facts"]
-        assert entry["generated_at"] == original_record["generated_at"]
-        assert not list((runtime / DEFAULT_PATH).rglob("*.wikitext"))
-        assert {
-            str(file.relative_to(legacy)): file.read_bytes()
-            for file in legacy.rglob("*")
-            if file.is_file()
-        } == source
-        path = runtime / DEFAULT_PATH / "2027-01/20261030/observation.json"
-        damaged = json.loads(path.read_bytes())
-        damaged["facts"]["overview"]["total"] += 1
-        path.write_text(json.dumps(damaged), encoding="utf-8")
-        with self.assertRaises(ValueError):
-            migrate_newsletter_layout(runtime)
-
-    def test_active_conversion_keeps_backup_and_removes_output_format(
-        self,
-    ) -> None:
-        """Convert active legacy data only through maintenance."""
-        runtime = self.path.parent
-        active = runtime / DEFAULT_PATH
-        facts = _data(self.clock)["issues"][self.issue.value]
-        _legacy_daily(
-            active / self.issue.value,
-            self.issue,
-            facts,
-            self.clock.isoformat(),
-        )
-        output = active / self.issue.value / "20261030/main.wikitext"
-        output.parent.mkdir()
-        output.write_text("obsolete output", encoding="utf-8")
-        archive = NewsletterDraftArchive(active)
-        archive.save_feature(
-            self.issue,
-            facts["year_review"],
-            generated_at=self.clock,
-        )
-        before = {
-            str(file.relative_to(active)): file.read_bytes()
-            for file in active.rglob("*")
-            if file.is_file()
-        }
-        for _ in range(2):
-            counts = convert_newsletter_archive(runtime)
-            assert counts == {"drafts": 1, "features": 1}
-        entry = archive.read_entry(self.issue, dt.date(2026, 10, 30))
-        assert entry["schema"] == 2
-        assert entry["facts"] == facts
-        assert not list(active.rglob("*.wikitext"))
-        assert not list(active.rglob("manifest.json"))
-        backup = runtime / "backups/report-layout/newsletter-wikitext"
-        assert {
-            str(file.relative_to(backup)): file.read_bytes()
-            for file in backup.rglob("*")
-            if file.is_file()
-        } == before
-        checkpoint = runtime / "state/newsletter-structured.json"
-        assert json.loads(checkpoint.read_bytes())["stage"] == "complete"
-
-    def _interrupted_conversion(self) -> tuple[Path, dict]:
-        """Pause conversion after the original archive is backed up.
-
-        Returns:
-            The complete staging directory and original source facts.
-        """
-        runtime = self.path.parent
-        active = runtime / DEFAULT_PATH
-        facts = _data(self.clock)["issues"][self.issue.value]
-        _legacy_daily(
-            active / self.issue.value,
-            self.issue,
-            facts,
-            self.clock.isoformat(),
-        )
-        staged = runtime / "cache/report-staging/newsletter-structured"
-        rename = Path.rename
-
-        def interrupted(source: Path, destination: Path) -> Path:
-            """Simulate storage failure during the final selection.
-
-            Returns:
-                The renamed path before promotion fails.
-
-            Raises:
-                OSError: The staged directory is being promoted.
-            """
-            if source == staged:
-                message = "Interrupted promotion."
-                raise OSError(message)
-            return rename(source, destination)
-
-        with (
-            patch.object(
-                Path,
-                "rename",
-                autospec=True,
-                side_effect=interrupted,
-            ),
-            self.assertRaises(OSError),
-        ):
-            convert_newsletter_archive(runtime)
-        assert not active.exists()
-        backup = runtime / "backups/report-layout/newsletter-wikitext"
-        assert backup.exists()
-        assert staged.exists()
-        return staged, facts
-
-    def test_active_conversion_resumes_interrupted_promotion(self) -> None:
-        """Resume after preserving the original active archive."""
-        staged, facts = self._interrupted_conversion()
-        runtime = self.path.parent
-        assert convert_newsletter_archive(runtime) == {
-            "drafts": 1,
-            "features": 0,
-        }
-        assert not staged.exists()
-        assert (
-            NewsletterDraftArchive(runtime / DEFAULT_PATH).read(
-                self.issue,
-                dt.date(2026, 10, 30),
-            )
-            == facts
-        )
-
-    def test_active_conversion_rebuilds_discarded_staging(self) -> None:
-        """Recover the selected archive after disposable cache loss."""
-        staged, facts = self._interrupted_conversion()
-        runtime = self.path.parent
-        active = runtime / DEFAULT_PATH
-        shutil.rmtree(staged)
-        assert not active.exists()
-        assert convert_newsletter_archive(runtime) == {
-            "drafts": 1,
-            "features": 0,
-        }
-        assert (
-            NewsletterDraftArchive(active).read(
-                self.issue,
-                dt.date(2026, 10, 30),
-            )
-            == facts
-        )
-        assert not staged.exists()
-
-    def test_active_conversion_rejects_corrupt_staging_before_resume(
-        self,
-    ) -> None:
-        """Keep backups intact when staged facts fail validation."""
-        staged, _facts = self._interrupted_conversion()
-        runtime = self.path.parent
-        backup = runtime / "backups/report-layout/newsletter-wikitext"
-        original = {
-            str(file.relative_to(backup)): file.read_bytes()
-            for file in backup.rglob("*")
-            if file.is_file()
-        }
-        record = staged / self.issue.value / "20261030/observation.json"
-        damaged = json.loads(record.read_bytes())
-        damaged["facts"]["overview"]["total"] += 1
-        record.write_text(json.dumps(damaged), encoding="utf-8")
-        with self.assertRaises(ValueError):
-            convert_newsletter_archive(runtime)
-        assert not (runtime / DEFAULT_PATH).exists()
-        assert {
-            str(file.relative_to(backup)): file.read_bytes()
-            for file in backup.rglob("*")
-            if file.is_file()
-        } == original
-
-    def test_active_conversion_rejects_corruption_before_selection(
-        self,
-    ) -> None:
-        """Leave source evidence selected if its digest is invalid."""
-        runtime = self.path.parent
-        active = runtime / DEFAULT_PATH
-        facts = _data(self.clock)["issues"][self.issue.value]
-        record = _legacy_daily(
-            active / self.issue.value,
-            self.issue,
-            facts,
-            self.clock.isoformat(),
-        )
-        record["facts"]["overview"]["total"] += 1
-        source = active / self.issue.value / "2026-10-30.json"
-        source.write_text(json.dumps(record), encoding="utf-8")
-        original = source.read_bytes()
-        with self.assertRaises(ValueError):
-            convert_newsletter_archive(runtime)
-        assert source.read_bytes() == original
-        assert not (
-            runtime / "backups/report-layout/newsletter-wikitext"
-        ).exists()
 
     def test_invalid_dates_capture_times_and_parent_links_are_rejected(
         self,

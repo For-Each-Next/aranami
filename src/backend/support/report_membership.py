@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from shared.support.cache import write_parquet_cache
+from shared.support.cache import ParquetCache
 from shared.support.titles import title_sort_key
 
 if TYPE_CHECKING:
@@ -30,6 +30,12 @@ _SCHEMA = {
     "title": pl.String,
     "page_id": pl.Int64,
 }
+_CACHE = ParquetCache(
+    schema=_SCHEMA,
+    contract="report-membership:1",
+    max_rows=1_000_000,
+    max_bytes=64 * 1024 * 1024,
+)
 
 
 @dataclass(frozen=True)
@@ -55,12 +61,12 @@ def _cache_path(site: BaseSite, report_title: str) -> Path:
         report_title: Full destination report title.
 
     Returns:
-        A versioned Parquet path under the caller's cache directory.
+        A Parquet path under the caller's cache directory.
     """
     key = hashlib.sha256(
         f"{site.dbName()}\0{report_title}".encode(),
     ).hexdigest()
-    return Path.cwd() / "cache" / f"report-membership-{key}-v1.parquet"
+    return Path.cwd() / "cache" / f"report-membership-{key}.parquet"
 
 
 def load_membership(
@@ -80,18 +86,8 @@ def load_membership(
         malformed, or unreadable snapshots.
     """
     path = _cache_path(site, report_title)
-    try:
-        frame = pl.read_parquet(path)
-    except FileNotFoundError:
-        return {}
-    except OSError, pl.exceptions.PolarsError:
-        _LOGGER.warning(
-            "Ignoring unreadable report membership cache: %s",
-            path,
-        )
-        return {}
-    if frame.schema != pl.Schema(_SCHEMA) or frame.is_empty():
-        _LOGGER.warning("Ignoring malformed report membership cache: %s", path)
+    frame = _CACHE.read(path)
+    if frame.is_empty():
         return {}
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     if not frame.filter(
@@ -169,8 +165,8 @@ def save_membership(
     """
     path = _cache_path(site, report_title)
     try:
-        write_parquet_cache(path, _membership_frame(text, members))
-    except OSError, pl.exceptions.PolarsError:
+        _CACHE.write(path, _membership_frame(text, members))
+    except OSError, ValueError, pl.exceptions.PolarsError:
         _LOGGER.warning("Could not write report membership cache: %s", path)
 
 

@@ -1,9 +1,10 @@
-"""Count curated new articles from complete historical daily records.
+"""Count curated new articles within a selected reporting quarter.
 
-Read the register and archive at an explicit observation boundary.
+Read the register and archive at an explicit acquisition time, separate
+from the completed dates selected for the reporting quarter.
 The register uses ``vgc`` links; archives retain ordinary wikilinks.
-Caller-supplied assessments provide monthly grade breakdowns. Missing
-snapshots remain unavailable rather than using later assessments.
+Caller-supplied assessments provide monthly grade breakdowns with their
+actual observation time. Missing assessments remain unavailable.
 The register, 2026 archive, and Template:Vgc were checked on
 31 October 2026. Keyword-filter results are never used here.
 """
@@ -316,25 +317,50 @@ def _grade_mapping(counts: pl.DataFrame) -> dict[str, int]:
     return dict(counts.select("grade", "count").iter_rows())
 
 
+def _source_boundary(
+    through: dt.date,
+    observed_at: dt.datetime | None,
+) -> dt.datetime:
+    """Select an aware source read time after the selected date range.
+
+    Returns:
+        The actual observation time or the historical UTC boundary.
+
+    Raises:
+        ValueError: An acquisition time is naive or precedes the range.
+    """
+    boundary = dt.datetime.combine(through, dt.time.min, dt.UTC)
+    if observed_at is None:
+        return boundary
+    if observed_at.utcoffset() is None or observed_at < boundary:
+        message = "New-page sources require an aware acquisition time."
+        raise ValueError(message)
+    return observed_at.astimezone(dt.UTC)
+
+
 def collect_new_pages(  # ruff: ignore[too-many-arguments]
     read: Callable[[str, dt.datetime], str],
     issue: Issue,
     *,
     through: dt.date | None = None,
+    observed_at: dt.datetime | None = None,
     assessments: pl.DataFrame | None = None,
     assessment_observed_at: str | None = None,
     resolve: Callable[[str], str] | None = None,
     resolve_many: Callable[[Iterable[str]], None] | None = None,
     resolve_page_id: Callable[[str], int | None] | None = None,
 ) -> dict[str, object]:
-    """Count elapsed curated records through a completed UTC date.
+    """Count curated records from an explicit source observation.
 
     Args:
         read: Historical source callable accepting title and boundary.
         issue: Validated quarterly publication month.
-        through: Exclusive observed date, or the quarter boundary.
+        through: Exclusive selected date, or the quarter boundary.
+        observed_at: Actual source acquisition time. Later observations
+            include register corrections for the same selected quarter.
+            Omit only for an exact historical boundary read.
         assessments: Internal article assessments for the issue.
-            Omit when no appropriate historical snapshot is available.
+            Omit when no appropriate observation is available.
         assessment_observed_at: Actual timestamp of that observation.
         resolve: Canonical title lookup for unmatched register subjects.
         resolve_many: Optional batch primer for title resolution.
@@ -346,13 +372,13 @@ def collect_new_pages(  # ruff: ignore[too-many-arguments]
         Blank, missing, or conflicting elapsed dates remain unknown.
 
     Raises:
-        ValueError: The observation boundary lies outside the quarter.
+        ValueError: The selected dates or acquisition time are invalid.
     """
     through = through or issue.end
     if not issue.start <= through <= issue.end:
         message = "New-page observations must lie within the issue quarter."
         raise ValueError(message)
-    boundary = dt.datetime.combine(through, dt.time.min, dt.UTC)
+    boundary = _source_boundary(through, observed_at)
     frames = []
     if through > issue.start:
         for title in (_REGISTER, f"{_REGISTER}/{issue.start.year}年存档"):
@@ -439,6 +465,8 @@ def collect_new_pages(  # ruff: ignore[too-many-arguments]
         "months": months.to_dicts(),
         "grades": None,
     }
+    if observed_at is not None:
+        result["source_observed_at"] = boundary.isoformat(timespec="seconds")
     if assessments is not None:
         grades = _grade_counts(
             daily,
@@ -566,10 +594,20 @@ def valid_new_pages(  # ruff: ignore[too-many-return-statements]
         return False
     try:
         observed = dt.date.fromisoformat(value["observation_end"])
+        source_stamp = (
+            dt.datetime.fromisoformat(value["source_observed_at"])
+            if "source_observed_at" in value
+            else None
+        )
     except TypeError, ValueError, KeyError:
         return False
     if not issue.start <= observed <= issue.end or (
         through is not None and through != observed
+    ):
+        return False
+    if source_stamp is not None and (
+        source_stamp.utcoffset() != dt.timedelta()
+        or source_stamp.date() < observed
     ):
         return False
     months = value.get("months")
@@ -591,5 +629,8 @@ def valid_new_pages(  # ruff: ignore[too-many-return-statements]
         and value["known_count"] == sum(row["known_count"] for row in months)
         and type(value.get("missing_days")) is int
         and value["missing_days"] == sum(row["missing_days"] for row in months)
-        and _valid_breakdown(value, observed)
+        and _valid_breakdown(
+            value,
+            source_stamp.date() if source_stamp is not None else observed,
+        )
     )

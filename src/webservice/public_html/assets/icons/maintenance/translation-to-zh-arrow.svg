@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="60" height="20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="svg">
+	<g id="arrow">
+		<linearGradient id="midbar_1_" gradientUnits="userSpaceOnUse" x1="17.3159" y1="9.6338" x2="34.2344" y2="9.6338">
+			<stop  offset="0" style="stop-color:#0055AA"/>
+			<stop  offset="1" style="stop-color:#EE1122"/>
+		</linearGradient>
+		<rect id="midbar" x="17.316" y="6.633" fill="url(#midbar_1_)" width="16.918" height="6"/>
+		<path id="rightarrow" fill="#EE1122" d="M34.15,2.716l9,7l-9,7V2.716z"/>
+	</g>
+</g>
+<g id="Layer_2" style="font-weight:bold;fill:#333333">
+	<text x="1" y="17" style="font-family:DejaVu Serif;font-size:19">A</text>
+	<text x="43" y="16" style="font-family:Noto Sans CJK SC;font-size:16">&#25991;</text>
+</g>
+</svg>

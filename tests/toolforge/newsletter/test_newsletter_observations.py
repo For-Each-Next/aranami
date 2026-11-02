@@ -14,10 +14,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.observations import (
-    migrate_observations,
-    save_observation,
-)
+from backend.newsletter.observations import save_observation
 from backend.newsletter.schema import read_newsletter_data, valid_newsletter
 from newsletter.test_newsletter_data import Reader
 
@@ -115,31 +112,3 @@ class NewsletterObservationTests(TestCase):
                     else:
                         annual[section][0][field] = names
                     assert valid_newsletter(facts) is expected
-
-    def test_legacy_migration_preserves_source_bytes_and_dated_captures(
-        self,
-    ) -> None:
-        """Validate legacy envelopes before copying their evidence."""
-        save_observation(self.directory, self.facts, valid_newsletter)
-        envelope = json.loads((self.directory / "current.json").read_text())
-        legacy = self.directory.parent / "legacy"
-        legacy.mkdir()
-        path = legacy / f"{envelope['digest']}.json"
-        path.write_text(json.dumps(envelope))
-        pointer = {
-            key: value for key, value in envelope.items() if key != "facts"
-        }
-        (legacy / "latest.json").write_text(json.dumps(pointer))
-        original = {file.name: file.read_bytes() for file in legacy.iterdir()}
-        target = self.directory.parent / "migrated"
-        assert migrate_observations(legacy, target, valid_newsletter) == 1
-        assert migrate_observations(legacy, target, valid_newsletter) == 1
-        assert read_newsletter_data(target) == self.facts
-        assert {
-            file.name: file.read_bytes() for file in legacy.iterdir()
-        } == original
-        assert (target / "20270105/observation-000000000000.json").is_file()
-        assert not (target / "latest.json").exists()
-        path.write_text("{}")
-        with self.assertRaises(ValueError):
-            migrate_observations(legacy, target, valid_newsletter)

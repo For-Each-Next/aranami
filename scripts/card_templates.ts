@@ -11,9 +11,9 @@ import { renderToString } from "vue/server-renderer";
 const components = {
     ArticleCard: "article_card.html",
     RoutineCard: "routine_card.html",
-    ServerCard: "server_card.html",
     MaintenanceCard: "maintenance_card.html",
     NewsletterDraft: "newsletter_draft.html",
+    PopupDialog: "popup_dialog.html",
 };
 
 function replaceOnce(source: string, token: string, value: string): string {
@@ -71,6 +71,25 @@ function newsletterShell(html: string, slots: Map<string, string>): string {
     return restoreSlots(shell, slots);
 }
 
+/** Let native dialogs own modality while retaining the compiled Codex layout. */
+function dialogShell(html: string, slots: Map<string, string>): string {
+    let shell = html.replace(/<!--(?:v-if|\[|\])-->/g, "");
+    const opening = '<!--teleport start anchor--><div class="cdx-dialog-backdrop"><div tabindex="0"></div>'
+        + '<div class="cdx-dialog page-updates" role="dialog" aria-labelledby="v-0" aria-modal="true">';
+    const closing = '</div><div tabindex="0"></div><div></div></div><!--teleport anchor-->';
+    assert.ok(shell.startsWith(opening) && shell.endsWith(closing), "Unexpected Codex dialog shell");
+    shell = '<dialog id="{{ dialog_id }}" class="cdx-dialog page-updates" aria-labelledby="{{ dialog_id }}-heading">'
+        + shell.slice(opening.length, -closing.length) + '</dialog>';
+    shell = replaceOnce(shell, '<h2 id="v-0"', '<h3 id="{{ dialog_id }}-heading"');
+    shell = replaceOnce(shell, '</h2>', '</h3>');
+    shell = replaceOnce(shell, 'type="button"', 'type="button" command="close" commandfor="{{ dialog_id }}" autofocus');
+    shell = replaceOnce(shell, '</button>', '</button><noscript><a href="{{ return_to }}">{{ t.ops.close }}</a></noscript>');
+    shell = replaceOnce(shell, '<div class="cdx-dialog-focus-trap" tabindex="-1"></div>', '');
+    assert.doesNotMatch(shell, /\sstyle=|tabindex=|<!--|aria-modal=/, "Unexpected native dialog attribute");
+    return '{% macro popup(dialog_id, dialog_title, return_to) %}'
+        + restoreSlots(shell, slots) + '{% endmacro %}';
+}
+
 /** Render every authored Codex source and retain only its server template. */
 export async function buildCardTemplates(root: string, output: string): Promise<Array<{ name: string; source: string }>> {
     const templates = [];
@@ -97,8 +116,11 @@ export async function buildCardTemplates(root: string, output: string): Promise<
         const modulePath = join(output, `${component}.mjs`);
         writeFileSync(modulePath, code);
         const vue = await import(pathToFileURL(modulePath).href);
-        const rendered = await renderToString(createSSRApp(vue.default));
-        const html = component === "NewsletterDraft"
+        const context: { teleports?: Record<string, string> } = {};
+        const rendered = await renderToString(createSSRApp(vue.default), context);
+        const html = component === "PopupDialog"
+            ? dialogShell(context.teleports?.body ?? "", slots)
+            : component === "NewsletterDraft"
             ? newsletterShell(rendered, slots)
             : semanticShell(rendered, slots);
         const source = join(output, name);

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import re
 from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -314,10 +313,9 @@ class TestAssessmentLogEmptyDays(_AssessmentLogFixture):
         assert prepared.changes.is_empty()
         rendered = update_text(_TEXT, prepared)
         assert "=== 2026年10月25日 ===\n\n" in rendered
-        assert (
-            "'''條目頁1篇'''：\n* '''乙级'''条目1篇。\n"
-            "* '''高重要度'''1篇。\n\n無變更" in rendered
-        )
+        assert "\n\n<!-- aranami-assessment-totals:v2 " in rendered
+        assert "专题页面+0" not in rendered
+        assert "条目1 非条目0 重定向未知 专题页面1 -->\n\n無變更" in rendered
         assert "2026年10月24日" not in rendered
         assert "====" not in rendered
         assert rendered.startswith("Introduction\n")
@@ -804,30 +802,22 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         )
         prepared = self._prepare(members)
         rendered = update_text(_TEXT, prepared)
-        plain = re.sub(
-            r'<small style="color: gray;">[^<]+</small>',
-            "",
-            rendered,
-        )
         assert (
-            "'''條目頁1,241篇'''：\n* '''典范级'''条目1,234篇、列表2篇，"
-            "'''优良级'''条目1篇，'''乙上级'''条目1篇，'''乙级'''条目1篇、列表1篇，'''未评级'''1篇。\n"
-            "* '''极高重要度'''1,234篇，'''高重要度'''2篇，"
-            "'''中重要度'''1篇，'''低重要度'''3篇，'''未知重要度'''1篇。"
-        ) in plain
-        assert (
-            "'''典范级'''条目1,234篇"
-            '<small style="color: gray;">（+1,233）</small>'
+            "专题页面+1,242：条目+1,240（典范+1,233 · 特色列表+2 · 优良+1"
+            " · 乙上+1 · 乙+1 · 乙级列表+1 · 未评+1 ｜ 极高重要度+1,233"
+            " · 高重要度+2 · 中重要度+1 · 低重要度+3 · 未知重要度+1）"
         ) in rendered
         assert (
-            "1,241篇'''<small style=\"color: gray;\">（+1,240）</small>"
+            "<!-- aranami-assessment-totals:v2 "
+            "典范1,234 特色列表2 甲0 甲级列表0 优良1"
         ) in rendered
+        assert "条目1,241 非条目2 重定向未知 专题页面1,243 -->" in rendered
         totals = next(
             line
             for line in rendered.splitlines()
-            if line.startswith("'''條目頁")
-        )
-        assert "甲级条目" not in totals
+            if line.startswith("专题页面")
+        ).split("<!--", 1)[0]
+        assert "甲+" not in totals
         assert "不适用重要度" not in totals
 
     def test_failed_days_keep_their_own_snapshot_totals(self) -> None:
@@ -848,17 +838,8 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         rendered = update_text(_TEXT, second)
         older = rendered[rendered.index("=== 2026年10月25日 ===") :]
         newer = rendered[: rendered.index("=== 2026年10月25日 ===")]
-        assert (
-            "'''條目頁2篇'''"
-            '<small style="color: gray;">（+1）</small>：\n'
-            "* '''乙级'''条目1篇，'''丙级'''条目1篇"
-            '<small style="color: gray;">（+1）</small>。' in older
-        )
-        assert (
-            "'''條目頁1篇'''"
-            '<small style="color: gray;">（-1）</small>：\n'
-            "* '''乙级'''条目1篇。"
-        ) in newer
+        assert "专题页面+1：条目+1（丙+1 ｜ 低重要度+1）" in older
+        assert "专题页面-1：条目-1（丙-1 ｜ 低重要度-1）" in newer
         self._retain(second, rendered, 3)
         retry = self._prepare(
             seed,
@@ -902,10 +883,7 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         groups = ("重命名", "變更評級", "新增評級", "移除評級")
         positions = [rendered.index(f"==== {group} ====") for group in groups]
         assert positions == sorted(positions)
-        assert (
-            "=== 2026年10月24日 ===\n\n'''條目頁2篇'''"
-            '<small style="color: gray;">（+1）</small>：'
-        ) in rendered
+        assert ("=== 2026年10月24日 ===\n\n条目+1（") in rendered
         for group in groups:
             assert f"==== {group} ====\n\n* " in rendered
         assert "。\n\n==== 變更評級 ====" in rendered
@@ -1405,13 +1383,9 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
         removed = prepared.changes.filter(pl.col("kind") == "removed")
         assert removed.item(0, "old_title") == "Current departed name"
         rendered = update_text(_TEXT, prepared)
-        assert "'''條目頁3篇'''：" in rendered
-        assert (
-            "'''乙级'''条目2篇<small style=\"color: gray;\">（+1）</small>"
-        ) in rendered
-        assert (
-            "'''高重要度'''2篇<small style=\"color: gray;\">（+1）</small>"
-        ) in rendered
+        assert "\n\n条目（乙+1" in rendered
+        assert "高重要度+1" in rendered
+        assert "条目3 非条目未知" in rendered
         assert "[[:Current name]]" in rendered
         assert "重命名" not in rendered
 
@@ -1449,7 +1423,8 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
                 observed_at=_NOW,
             )
         rendered = update_text(_TEXT, prepared)
-        assert "'''條目頁2篇'''：" in rendered
+        assert "\n\n<!-- aranami-assessment-totals:v2 " in rendered
+        assert "无可比记录" not in rendered
         assert '<small style="color: gray;">' not in rendered
 
     def test_aggregate_changes_cover_articles_and_nonarticles(self) -> None:
@@ -1513,16 +1488,13 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
             )
         rendered = update_text(_TEXT, prepared)
         for fragment in (
-            "條目頁2篇'''" + '<small style="color: gray;">（-1）</small>',
-            "'''乙级'''条目1篇" + '<small style="color: gray;">（-1）</small>',
-            "'''高重要度'''1篇" + '<small style="color: gray;">（-2）</small>',
-            "非條目2頁'''" + '<small style="color: gray;">（+1）</small>',
-            "'''模板級'''2頁" + '<small style="color: gray;">（+1）</small>',
+            "条目-1（乙-1 ｜ 高重要度-2 · 低重要度+1）",
+            "非条目+1（模板级+1）",
+            "条目2 非条目2 重定向0 专题页面4",
         ):
             assert fragment in rendered
-        assert "'''优良级'''条目1篇，" in rendered
-        assert "'''專題共計4頁'''。" in rendered
-        assert "（不含0重定向頁）" in rendered
+        assert "优良1" in rendered
+        assert "重定向+0" not in rendered
         self._retain(prepared, rendered, 1)
         with (
             patch.object(source, "get_snapshot", return_value=after),
@@ -1612,6 +1584,190 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
         )
         assert prepared.changes.item(0, "page_namespace") is None
 
+    def test_removed_page_uses_saved_title_or_verified_current_title(
+        self,
+    ) -> None:
+        """Keep deleted titles and follow an existing page's move."""
+        prior = _members((1, "Original", "B", "High"), (2, "Same", "C", None))
+        current = _members((2, "Same", "C", None))
+        snapshot = self._snapshot(prior, _NOW - dt.timedelta(days=1))
+        snapshot.tables["members"] = _replica_rows(prior).select(
+            "page_id",
+            "page_title",
+            "page_namespace",
+            "pa_class",
+            "pa_importance",
+        )
+        metadata = pl.DataFrame(
+            [(1, "Draft:天河傳說", 118, "Draft talk:天河傳說", 17, 18)],
+            schema={
+                "page_id": pl.Int64,
+                "full_title": pl.String,
+                "page_namespace": pl.Int64,
+                "talk_title": pl.String,
+                "page_revision": pl.Int64,
+                "talk_revision": pl.Int64,
+            },
+            orient="row",
+        )
+        for observed, title, talk in (
+            (metadata, "Draft:天河傳說", "Draft talk:天河傳說"),
+            (metadata.clear(), "Original", "Talk:Original"),
+        ):
+            with (
+                self.subTest(title=title),
+                patch.object(
+                    source,
+                    "get_snapshot",
+                    return_value=self._snapshot(current, _NOW),
+                ),
+                patch.object(
+                    source,
+                    "read_previous_snapshot",
+                    return_value=snapshot,
+                ),
+                patch.object(source, "page_metadata", return_value=observed),
+            ):
+                prepared = source.prepare_data(
+                    self.site,
+                    "电子游戏",
+                    _TITLE,
+                    _TEXT,
+                    observed_at=_NOW,
+                )
+            assert prepared.changes.item(0, "old_title") == title
+            assert (
+                f"'''[[:{title}]]'''（[[:{talk}|討論]]）已移除評級。"
+                in update_text(_TEXT, prepared)
+            )
+
+    def test_retained_unknown_removal_is_repaired_without_new_changes(
+        self,
+    ) -> None:
+        """Repair retained removal links using public identities."""
+        line = "* '''[[:Special:Redirect/page/8543576]]'''已移除評級。"
+        unrelated = "Preserved comment: " + line
+        original = _TEXT.replace(
+            '<!-- aranami end="assessment-log" -->',
+            "=== 2026年10月24日 ===\n\n==== 移除評級 ====\n\n"
+            + line
+            + "\n"
+            + unrelated
+            + '\n\n<!-- aranami end="assessment-log" -->',
+        )
+        members = _members((2, "Same", "C", None))
+        metadata = pl.DataFrame(
+            [(8543576, "Draft:天河傳說", "Draft talk:天河傳說")],
+            schema={
+                "page_id": pl.Int64,
+                "full_title": pl.String,
+                "talk_title": pl.String,
+            },
+            orient="row",
+        )
+        with (
+            patch.object(
+                source,
+                "get_snapshot",
+                return_value=self._snapshot(members, _NOW),
+            ),
+            patch.object(source, "read_previous_snapshot", return_value=None),
+            patch.object(
+                source,
+                "page_metadata",
+                side_effect=[metadata.clear(), metadata],
+            ),
+        ):
+            prepared = source.prepare_data(
+                self.site,
+                "电子游戏",
+                _TITLE,
+                original,
+                observed_at=_NOW,
+            )
+        assert prepared.changes.is_empty()
+        rendered = update_text(original, prepared)
+        assert unrelated in rendered
+        assert "\n" + line + "\n" not in rendered
+        assert (
+            "'''[[:Draft:天河傳說]]'''"
+            "（[[:Draft talk:天河傳說|討論]]）已移除評級。" in rendered
+        )
+
+    def test_same_day_summary_migration_uses_preceding_daily_observation(
+        self,
+    ) -> None:
+        """Use prior daily totals on same-day retries."""
+        prior_members = _members((1, "First", "C", "Low"))
+        current = _members(
+            (1, "First", "C", "Low"),
+            (2, "Second", "B", "High"),
+        )
+        before = self._snapshot(prior_members, _NOW - dt.timedelta(days=1))
+        after = self._snapshot(current, _NOW)
+        with (
+            patch.object(source, "get_snapshot", return_value=after),
+            patch.object(
+                source,
+                "read_previous_snapshot",
+                return_value=before,
+            ),
+            patch.object(
+                source,
+                "page_metadata",
+                return_value=_replica_rows(current),
+            ),
+        ):
+            prepared = source.prepare_data(
+                self.site,
+                "电子游戏",
+                _TITLE,
+                _TEXT,
+                observed_at=_NOW,
+            )
+        rendered = update_text(_TEXT, prepared)
+        summary = next(
+            line
+            for line in rendered.splitlines()
+            if "aranami-assessment-totals:v2" in line
+        )
+        legacy = rendered.replace(summary, "'''总条目'''2篇。")
+        self._retain(prepared, legacy, 1)
+        for retained in (before, None):
+            with (
+                self.subTest(retained=retained is not None),
+                patch.object(source, "get_snapshot", return_value=after),
+                patch.object(
+                    source,
+                    "read_previous_snapshot",
+                    return_value=retained,
+                ),
+            ):
+                retry = source.prepare_data(
+                    self.site,
+                    "电子游戏",
+                    _TITLE,
+                    legacy,
+                    observed_at=_NOW,
+                )
+            assert retry.changes.is_empty()
+            if retained is not None:
+                assert (
+                    retry.previous_totals
+                    == before.manifest["metadata"]["article_totals"]
+                )
+                assert "条目+1（乙+1 ｜ 高重要度+1）" in update_text(
+                    legacy,
+                    retry,
+                )
+            else:
+                assert retry.previous_source is None
+                assert retry.previous_totals is None
+                assert "\n\n<!-- aranami-assessment-totals:v2 " in update_text(
+                    legacy,
+                    retry,
+                )
+
     def test_failed_compact_proposal_retains_reversed_grade_changes(
         self,
     ) -> None:
@@ -1662,14 +1818,9 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
                     observed_at=observed,
                 )
             rendered = update_text(_TEXT, prepared)
-            assert (
-                "'''丙级'''条目1篇<small style=\"color: gray;\">（+1）</small>"
-            ) in rendered
+            assert "乙-1 · 丙+1 ｜ 高重要度-1 · 低重要度+1" in rendered
             if sequence == 3:  # ruff: ignore[magic-value-comparison]
-                assert (
-                    "'''乙级'''条目1篇"
-                    '<small style="color: gray;">（+1）</small>'
-                ) in rendered
+                assert "乙+1 · 丙-1 ｜ 高重要度+1 · 低重要度-1" in rendered
             self._retain(prepared, rendered, sequence, state="unconfirmed")
         assert prepared.pending
         assert prepared.changes.item(0, "old_class") == "C"

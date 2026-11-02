@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from shared.support.cache import write_parquet_cache
+from shared.support.cache import ParquetCache
 
 if TYPE_CHECKING:
     import datetime as dt
@@ -30,6 +30,12 @@ _SCHEMA = {
     "text": pl.String,
     "used_at": pl.Int64,
 }
+_CACHE = ParquetCache(
+    schema=_SCHEMA,
+    contract="newsletter-revision-text:1",
+    max_rows=_MAX_ROWS,
+    max_bytes=_MAX_BYTES,
+)
 
 
 def _load(path: Path | None, now: int) -> pl.DataFrame:
@@ -38,38 +44,17 @@ def _load(path: Path | None, now: int) -> pl.DataFrame:
     Returns:
         Valid cached rows, or an empty frame for unavailable storage.
     """
-    empty = pl.DataFrame(schema=_SCHEMA)
-    if path is None:
-        return empty
-    try:
-        if (
-            path.is_symlink()
-            or path.parent.is_symlink()
-            or not path.is_file()
-            or path.stat().st_size > _MAX_BYTES
-        ):
-            return empty
-        frame = pl.read_parquet(path, n_rows=_MAX_ROWS + 1)
-        if (
-            frame.schema != pl.Schema(_SCHEMA)
-            or frame.height > _MAX_ROWS
-            or frame.estimated_size() > _MAX_BYTES
-            or frame["revision"].n_unique() != frame.height
-        ):
-            return empty
-        invalid = frame.filter(
-            pl.any_horizontal(pl.all().is_null())
-            | (pl.col("revision") <= 0)
-            | ~pl.col("sha1").str.contains(r"^[0-9a-f]{40}$")
-            | (pl.col("text").str.len_bytes() > _MAX_TEXT)
-            | (pl.col("used_at") > now),
-        )
-        if not invalid.is_empty():
-            return empty
-        return frame.filter(pl.col("used_at") >= now - _RETENTION)
-    except OSError, ValueError, pl.exceptions.PolarsError:
-        _LOGGER.warning("Ignoring unreadable newsletter revision cache.")
-        return empty
+    frame = _CACHE.read(path)
+    invalid = frame.filter(
+        pl.any_horizontal(pl.all().is_null())
+        | (pl.col("revision") <= 0)
+        | ~pl.col("sha1").str.contains(r"^[0-9a-f]{40}$")
+        | (pl.col("text").str.len_bytes() > _MAX_TEXT)
+        | (pl.col("used_at") > now),
+    )
+    if not invalid.is_empty() or frame["revision"].n_unique() != frame.height:
+        return pl.DataFrame(schema=_SCHEMA)
+    return frame.filter(pl.col("used_at") >= now - _RETENTION)
 
 
 class RevisionTextCache:
@@ -149,6 +134,6 @@ class RevisionTextCache:
             )
         )
         try:
-            write_parquet_cache(self.path, frame, max_bytes=_MAX_BYTES)
+            _CACHE.write(self.path, frame)
         except OSError, ValueError, pl.exceptions.PolarsError:
             _LOGGER.warning("Could not save newsletter revision cache.")

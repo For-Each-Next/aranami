@@ -992,7 +992,7 @@ def _report_plan(
             if name == "reviews"
             else "zh:all-access:user:top1000:limit12:lookback7:extracts-v3"
             if name == "pageviews"
-            else "quarterly-newsletter-v20:publication-lifecycle"
+            else "quarterly-newsletter-v21:current-new-article-observation"
             if name == "newsletter"
             else f"days:{days}:extracts-v3:talk-news-v1"
             if name == "news_history"
@@ -1326,7 +1326,7 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments, too-many-statements, 
     observations_path: Path | None = OBSERVATIONS_PATH,
     milestones_path: Path | None = MILESTONES_PATH,
     today_history_path: Path | None = Path(
-        "cache/today-in-history-v1.parquet",
+        "cache/today-in-history.parquet",
     ),
     draft_archive_path: Path | None = DRAFT_ARCHIVE_PATH,
 ) -> dict[str, object]:
@@ -1387,7 +1387,7 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments, too-many-statements, 
         membership = members = None
     extracts = (
         ExtractCache(
-            cache_directory / "article-extracts-v2.parquet"
+            cache_directory / "article-extracts.parquet"
             if cache_directory
             else None,
             clock,
@@ -1429,7 +1429,7 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments, too-many-statements, 
         try:  # ruff: ignore[too-many-statements-in-try-clause]
             if name == "newsletter" and read is not None:
                 read.revision_cache = RevisionTextCache(
-                    cache_directory / "newsletter-revisions-v1.parquet"
+                    cache_directory / "newsletter-revisions.parquet"
                     if cache_directory
                     else None,
                     clock,

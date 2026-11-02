@@ -25,6 +25,10 @@ controls, and a collapsible contents button on small screens. See
 Content-review icons follow Chinese Wikipedia's `Module:PJ:VG/RVW`
 (revision 92100885). Preserve each icon's Commons file-page link and the source
 and license notices in `src/webservice/public_html/assets/icons/credits.html`.
+Maintenance icons retain their template correspondence, authors, source links,
+and licenses in `assets/icons/maintenance/credits.html`. About links directly
+to both credit tables. Keep these pages focused on attribution rather than
+file hashes or upload history.
 
 Header navigation uses near-black text without underlines, with visible focus
 outlines and current-page markers. The Tools menu opens on mouse hover; clicking

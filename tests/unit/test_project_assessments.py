@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -19,7 +18,6 @@ import polars as pl
 from polars.testing import assert_frame_equal
 
 from backend.services import project_assessments as snapshots
-from shared.reports import ReportResult, ReportStore
 from shared.support.assessment_encoding import encode_assessments
 
 if TYPE_CHECKING:
@@ -34,6 +32,7 @@ _SOURCE_SCHEMA = {
     "page_id": pl.Int64,
     "page_namespace": pl.Int64,
     "page_title": pl.String,
+    "page_is_redirect": pl.Int64,
     "talk_page_id": pl.Int64,
     "pa_class": pl.String,
     "pa_importance": pl.String,
@@ -41,9 +40,13 @@ _SOURCE_SCHEMA = {
 }
 _SAVED_SCHEMA = {
     "page_id": pl.Int64,
+    "page_title": pl.String,
+    "page_namespace": pl.Int64,
     "pa_class": pl.String,
     "pa_importance": pl.String,
+    "page_is_redirect": pl.Int64,
 }
+_LEGACY_COLUMNS = ["page_id", "pa_class", "pa_importance"]
 
 
 def _members() -> pl.DataFrame:
@@ -54,8 +57,8 @@ def _members() -> pl.DataFrame:
     """
     return pl.DataFrame(
         [
-            (2, 0, "Second", 102, "C", "Low", "Second"),
-            (1, 14, "First", None, None, None, "Category:First"),
+            (2, 0, "Second", 0, 102, "C", "Low", "Second"),
+            (1, 14, "First", 0, None, None, None, "Category:First"),
         ],
         schema=_SOURCE_SCHEMA,
         orient="row",
@@ -90,7 +93,7 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
         """Capture source facts with this test's default time.
 
         Returns:
-            The selected compact daily observation.
+            The selected daily observation.
         """
         return snapshots.get_snapshot(
             self.site,
@@ -99,8 +102,8 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
             dry=dry,
         )
 
-    def test_midnight_uses_completed_date_and_compact_fields(self) -> None:
-        """Save only identities and grades at the UTC 24:00 boundary."""
+    def test_midnight_retains_page_identity_and_assessments(self) -> None:
+        """Save source identity and grades at the UTC 24:00 boundary."""
         self.query.return_value = _members().with_columns(
             pl.lit("discarded").alias("extra"),
         )
@@ -190,7 +193,7 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
         stored = pl.read_parquet(saved.path)
         assert isinstance(stored.schema["pa_class"], pl.Enum)
         assert isinstance(stored.schema["pa_importance"], pl.Enum)
-        assert stored.columns == list(_SAVED_SCHEMA)
+        assert stored.columns == _LEGACY_COLUMNS
         assert saved.manifest["columns"] == {
             name: str(dtype) for name, dtype in stored.schema.items()
         }
@@ -204,6 +207,7 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
 
     def test_legacy_string_file_remains_readable(self) -> None:
         """Read older compact String datasets without rewriting them."""
+        self.query.return_value = _members().select(_LEGACY_COLUMNS)
         saved = self._capture()
         manifest = dict(saved.manifest)
         manifest.pop("columns")
@@ -226,8 +230,69 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
         with self.assertRaisesRegex(ValueError, "column declaration"):
             snapshots.read_snapshot(self.site, _PROJECT, _DAY)
 
-    def test_read_accessor_discards_titles_and_references(self) -> None:
-        """Read compact saved facts without recollecting source rows."""
+    def test_legacy_snapshot_reuse_never_reconstructs_missing_titles(
+        self,
+    ) -> None:
+        """Keep old checksums and unknown identities during retries."""
+        self.query.return_value = _members().select(_LEGACY_COLUMNS)
+        saved = self._capture()
+        original = saved.path.read_bytes()
+        self.query.return_value = _members()
+        self.query.reset_mock()
+        repeated = self._capture(observed_at=_NOW + dt.timedelta(hours=1))
+        assert repeated.tables["members"].columns == _LEGACY_COLUMNS
+        assert repeated.manifest == saved.manifest
+        assert repeated.path.read_bytes() == original
+        self.query.assert_not_called()
+
+    def test_saved_titles_and_namespaces_are_integrity_checked(self) -> None:
+        """Reject altered identities with an unchanged source digest."""
+        saved = self._capture()
+        for changed in (
+            pl.lit("Moved").alias("page_title"),
+            pl.lit(118, dtype=pl.Int64).alias("page_namespace"),
+            pl.lit(1, dtype=pl.Int64).alias("page_is_redirect"),
+        ):
+            with self.subTest(changed=changed):
+                encode_assessments(
+                    saved.tables["members"].with_columns(changed),
+                ).write_parquet(
+                    saved.path,
+                    metadata={"aranami": json.dumps(saved.manifest)},
+                )
+                with self.assertRaisesRegex(ValueError, "integrity"):
+                    snapshots.read_snapshot(self.site, _PROJECT, _DAY)
+
+    def test_partial_historical_identity_preserves_unknown_redirects(
+        self,
+    ) -> None:
+        """Retain old title evidence without assuming redirect state."""
+        self.query.return_value = _members().drop("page_is_redirect")
+        saved = self._capture()
+        assert saved.tables["members"].columns == list(_SAVED_SCHEMA)
+        assert (
+            saved.tables["members"]["page_is_redirect"].null_count()
+            == saved.tables["members"].height
+        )
+        assert saved.tables["members"]["page_title"].to_list() == [
+            "First",
+            "Second",
+        ]
+        assert (
+            saved.manifest["metadata"]["article_totals"]["redirects"] is None
+        )
+        self.query.return_value = saved.tables["members"]
+        retained = self._capture(observed_at=_NOW + dt.timedelta(days=1))
+        assert_frame_equal(retained.tables["members"], saved.tables["members"])
+        assert (
+            retained.manifest["metadata"]["article_totals"]
+            == saved.manifest["metadata"]["article_totals"]
+        )
+
+    def test_read_accessor_retains_titles_without_revision_references(
+        self,
+    ) -> None:
+        """Read saved identities without recollecting source rows."""
         self.query.return_value = _members().with_columns(
             pl.Series("page_revision", [2002, 2001], dtype=pl.Int64),
             pl.Series("talk_revision", [3002, None], dtype=pl.Int64),
@@ -322,6 +387,18 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
             "grade-type": _members().with_columns(
                 pl.lit(1, dtype=pl.Int64).alias("pa_class"),
             ),
+            "title-type": _members().with_columns(
+                pl.lit(1, dtype=pl.Int64).alias("page_title"),
+            ),
+            "blank-title": _members().with_columns(
+                pl.lit(" ").alias("page_title"),
+            ),
+            "namespace": _members().with_columns(
+                pl.lit(-1, dtype=pl.Int64).alias("page_namespace"),
+            ),
+            "redirect": _members().with_columns(
+                pl.lit(2, dtype=pl.Int64).alias("page_is_redirect"),
+            ),
         }
         for name, frame in cases.items():
             with self.subTest(name=name):
@@ -409,7 +486,7 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
         assert all(path.suffix == ".parquet" for path in paths)
 
     def test_article_totals_exclude_other_namespaces(self) -> None:
-        """Keep article-only aggregates beside the compact dataset."""
+        """Keep article-only aggregates beside the page observations."""
         saved = self._capture()
         assert saved.manifest["metadata"]["article_totals"] == {
             "count": 1,
@@ -417,7 +494,7 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
                 "count": 1,
                 "class": [{"value": None, "count": 1}],
             },
-            "redirects": None,
+            "redirects": 0,
             "class": [{"value": "C", "count": 1}],
             "importance": [{"value": "Low", "count": 1}],
         }
@@ -432,7 +509,7 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
                 "count": 1,
                 "class": [{"value": None, "count": 1}],
             },
-            "redirects": None,
+            "redirects": 0,
             "class": [{"value": "C", "count": 1}],
             "importance": [{"value": "Low", "count": 1}],
         }
@@ -517,43 +594,3 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
                 )
                 with self.assertRaises(ValueError):
                     self._capture()
-
-    def test_legacy_migration_preserves_original_capture_bytes(self) -> None:
-        """Convert full retained source bundles without querying."""
-        digest = hashlib.sha256(_PROJECT.encode()).hexdigest()[:16]
-        key = f"project-assessments-enwiki-2026-02-02-{digest}"
-        source = ReportStore(self.root / "reports").write(
-            key,
-            ReportResult(
-                family="project-assessments",
-                tables={"members": _members()},
-                metadata={
-                    "project": _PROJECT,
-                    "snapshot_date": "2026-02-02",
-                    "scheduled_for": _NOW.isoformat(),
-                },
-                calculated_at=_NOW,
-            ),
-            "",
-            run_id="1" * 32,
-            started_at=_NOW,
-            target={"site": "enwiki", "title": _PROJECT},
-        )
-        original = {
-            path: path.read_bytes()
-            for path in source.path.rglob("*")
-            if path.is_file()
-        }
-        self.query.side_effect = AssertionError("Migration must not query")
-        for _ in range(2):
-            migrated = snapshots.migrate_snapshots(self.root)
-            assert self.root / "reports" / key in migrated
-            saved = snapshots.read_snapshot(self.site, _PROJECT, _DAY)
-            assert saved.path.name == "assessments-20260201.parquet"
-            assert saved.tables["members"].columns == list(_SAVED_SCHEMA)
-            assert saved.manifest["calculated_at"] == _NOW.isoformat(
-                timespec="microseconds",
-            )
-            assert all(
-                path.read_bytes() == value for path, value in original.items()
-            )

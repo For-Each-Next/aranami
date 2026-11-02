@@ -58,14 +58,14 @@ Paths below are relative to `/data/project/aranami`:
 | `python/`, `uv-bootstrap/` | Managed Python 3.15.0 and setup tooling |
 | `reports/data/` | Collected facts, current tables, and daily `YYYYMMDD` observations |
 | `reports/records/` | Generated reports, publication metadata, and saved newsletter drafts |
-| `reports/data/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet` | Immutable completed-day page IDs, quality, and importance |
+| `reports/data/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet` | Immutable completed-day page identities, namespaces, redirect flags, quality, and importance |
 | `reports/records/newsletter/` | Immutable daily newsletter facts, original editorial layouts, and date catalogs |
 | `reports/data/articles/milestones.parquet` | Shared project review and homepage actions, roles, questions, and coverage |
 | `reports/data/articles/history.parquet` | Durable versioned talk snapshots and recorded events |
 | `reports/data/articles/authorship.parquet` | Durable listing-time contributor evidence and token statistics |
 | `reports/data/articles/scope.parquet` | Confirmed project presence, 365-day absence clocks, and removal tombstones |
 | `reports/data/newsletter/observations/` | Current prepared facts and immutable date-folder JSON observations |
-| `backups/report-layout/` | Original legacy reports preserved after validated layout migration |
+| `backups/report-layout/` | Preserved originals from retired report layouts |
 | `state/` | Routine, schedule, and per-destination observations |
 | `cache/` | Disposable source data, completion evidence, bytecode, and website snapshots |
 | `logs/` | UTC diagnostic logs and separate major-event records, retained for 30 dates |
@@ -76,6 +76,13 @@ verified recovery generation with its own validator, receipt, and environment.
 Clearing disposable caches forces later collection/revalidation;
 it is not a normal deployment step. Inspect saved observations through the
 [terminal workflow](usage.md#inspect-results-and-logs).
+
+Parquet caches use stable filenames with embedded contracts. Earlier filenames
+with schema suffixes are no longer read; compatible current files are reused
+and incompatible files rebuild. Remove obsolete cache files only after active
+work stops. See [Disposable caches](backend/caching.md) for the boundary
+between disposable files and durable evidence.
+
 See the [newsletter storage table](backend/newsletter.md#data-cache-and-archive-lifecycle)
 and [Saved data and Parquet fields](backend/data-storage.md) for retained data.
 
@@ -273,13 +280,12 @@ Verify the new generation before removing recovery artifacts. Limit cleanup to
 exact obsolete paths; preserve credentials, `reports/`, `state/`, `logs/`, the
 active generation, every generation still used by a process (including manual
 jobs), and a verified recovery generation with its receipt/environment.
-Migration merges legacy talk snapshots and authorship into
-`reports/data/articles/` without replacing the original files.
-Preserve that shared data and all prepared observation generations as durable
-evidence, not disposable caches. Existing
+Preserve `reports/data/articles/`, all prepared observation generations, and
+any retained layout backups as durable evidence. Retired layout converters
+are no longer shipped. Existing
 `reports/records/newsletter/` stores complete daily JSON observations.
-Queries render the selected facts with the current formatting; migrations
-preserve source facts and capture times without carrying generated wikitext.
+Queries render the selected facts with the current formatting while retaining
+their original source facts and capture times.
 Remove a stale `deployment.lock/` only after confirming no deployment/setup
 process remains and validating the selected generation.
 

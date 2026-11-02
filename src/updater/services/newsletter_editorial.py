@@ -267,7 +267,7 @@ def _invitation(issue: Issue) -> str:
     """Open the feature's comment preload with an empty heading.
 
     Returns:
-        A styled new-section link using the verified newsletter preload.
+        A new-section button using the verified newsletter preload.
     """
     url = (
         f"{{{{fullurl:{ROOT}/{issue.value}/專題"
@@ -277,10 +277,6 @@ def _invitation(issue: Issue) -> str:
         "<center>{{Clickable button 2|1=📝&nbsp;新增感想|url="
         + url
         + "|class=mw-ui-progressive"
-        + "|style=display:inline-flex;align-items:center;"
-        + "justify-content:center;box-sizing:border-box;min-height:32px;"
-        + "padding:0 11px;border:1px solid transparent;border-radius:2px;"
-        + "background:#36c;color:#fff;font-weight:700;line-height:1.375"
         + "}}</center>"
     )
 

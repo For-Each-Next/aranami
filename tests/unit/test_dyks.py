@@ -4,6 +4,7 @@
 # ruff: file-ignore[private-member-access]
 
 from contextlib import nullcontext
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -372,11 +373,32 @@ class TestDykCache(TestCase):
             assert dyk_cache.load()["oldid"].to_list() == [102]
 
     @staticmethod
+    def test_parser_contract_change_discards_unchanged_revision() -> None:
+        """Extract dates again after the parsing rules change."""
+        frame = pl.DataFrame(
+            [(11, 100, "aliases", [date(2025, 1, 1)])],
+            schema=dyk_cache.SCHEMA,
+            orient="row",
+        )
+        with (
+            TemporaryDirectory() as directory,
+            patch.object(dyk_cache.Path, "cwd", return_value=Path(directory)),
+        ):
+            dyk_cache.save(frame)
+            assert dyk_cache.load().equals(frame)
+            with patch.object(
+                dyk_cache,
+                "_CACHE",
+                replace(dyk_cache._CACHE, contract="changed-date-extraction"),
+            ):
+                assert dyk_cache.load().is_empty()
+
+    @staticmethod
     def test_corrupt_cache_is_ignored() -> None:
         """Treat corrupt local bytes as a normal cache miss."""
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            path = root / "cache" / "vg_dyks_talk_pages-v2.parquet"
+            path = root / "cache" / "vg_dyks_talk_pages.parquet"
             path.parent.mkdir()
             path.write_bytes(b"not parquet")
             with patch(

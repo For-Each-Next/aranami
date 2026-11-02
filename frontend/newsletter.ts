@@ -12,6 +12,12 @@ function sizeNewsletterText(source: HTMLTextAreaElement): void {
 
 // Enhance each newly displayed draft without changing its literal source text.
 function initializeNewsletterResult(root: ParentNode = document): void {
+    // Retain native date validation and GET navigation for saved daily drafts.
+    for (const date of root.querySelectorAll<HTMLInputElement>('#newsletter-data-date')) {
+        date.addEventListener("change", () => {
+            if (date.value) date.form?.requestSubmit();
+        });
+    }
     for (const source of root.querySelectorAll<HTMLTextAreaElement>("[data-newsletter-wikitext]")) {
         source.closest("details")?.addEventListener("toggle", () => sizeNewsletterText(source));
         sizeNewsletterText(source);
@@ -44,10 +50,13 @@ function initializeNewsletterResult(root: ParentNode = document): void {
 
 // Keep the issue control in place while refreshing its saved choices and draft.
 function initializeIssueForm(): void {
-    if (typeof fetch !== "function" || typeof DOMParser !== "function" || typeof AbortController !== "function") return;
     const form = document.querySelector<HTMLFormElement>("[data-newsletter-issue-form]");
     if (!form) return;
     const issue = form.querySelector<HTMLSelectElement>('[name="issue"]')!;
+    if (typeof fetch !== "function" || typeof DOMParser !== "function" || typeof AbortController !== "function") {
+        issue.addEventListener("change", () => form.requestSubmit());
+        return;
+    }
     const status = document.querySelector<HTMLElement>("[data-newsletter-load-status]")!;
     const statusText = status.querySelector<HTMLElement>(".cdx-message__content")!;
     let result = document.querySelector<HTMLElement>("[data-newsletter-result]")!;

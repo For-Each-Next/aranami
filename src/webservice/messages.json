@@ -15,9 +15,14 @@
     "zh-hant": "下載日誌"
   },
   "about.review_icons": {
-    "en": "Review icon sources and licenses",
-    "zh-hans": "内容评审图标来源与许可",
-    "zh-hant": "內容評審圖示來源與授權"
+    "en": "Content icon sources and licenses",
+    "zh-hans": "内容图标来源与许可",
+    "zh-hant": "內容圖示來源與授權"
+  },
+  "about.maintenance_icons": {
+    "en": "Maintenance icon sources and licenses",
+    "zh-hans": "条目维护图标来源与许可",
+    "zh-hant": "條目維護圖示來源與授權"
   },
   "page.description": {
     "en": "Chinese Wikipedia video game content reviews, highlights, pageviews, maintenance tasks, and report updates.",
@@ -320,22 +325,22 @@
     "zh-hant": "評審區"
   },
   "reviews.started_days": {
-    "en": "Started {count} days ago",
+    "en": "Started {count}d ago",
     "zh-hans": "{count}日前发起",
     "zh-hant": "{count}日前發起"
   },
   "reviews.replied_days": {
-    "en": "Last comment {count} days ago",
+    "en": "Last comment {count}d ago",
     "zh-hans": "{count}日前最后留言",
     "zh-hant": "{count}日前最後留言"
   },
   "reviews.replied_months": {
-    "en": "Last comment {count} months ago",
+    "en": "Last comment {count}mo ago",
     "zh-hans": "{count}月前最后留言",
     "zh-hant": "{count}月前最後留言"
   },
   "reviews.replied_hours": {
-    "en": "Last comment {count} hours ago",
+    "en": "Last comment {count}h ago",
     "zh-hans": "{count}小时前最后留言",
     "zh-hant": "{count}小時前最後留言"
   },
@@ -396,18 +401,18 @@
   },
   "pageviews.views": {
     "en": "{count} views",
-    "zh-hans": "日浏览{count}次",
-    "zh-hant": "日瀏覽{count}次"
+    "zh-hans": "{count}次浏览",
+    "zh-hant": "{count}次瀏覽"
   },
   "pageviews.views_one": {
     "en": "{count} view",
-    "zh-hans": "日浏览{count}次",
-    "zh-hant": "日瀏覽{count}次"
+    "zh-hans": "{count}次浏览",
+    "zh-hant": "{count}次瀏覽"
   },
   "extracts.attribution": {
-    "en": "Introductions come from the corresponding Chinese Wikipedia articles and are available under {license}.",
-    "zh-hans": "简介摘自中文维基百科对应条目，以{license}协议发布",
-    "zh-hant": "簡介摘自中文維基百科對應條目，以{license}協議發布"
+    "en": "Dashboard summaries come from Wikipedia under {license}.",
+    "zh-hans": "看板简介摘自维基百科，采用{license}协议。",
+    "zh-hant": "看板簡介摘自維基百科，採用{license}協議。"
   },
   "ops.details": {
     "en": "{routine}: page updates",
@@ -430,7 +435,7 @@
     "zh-hant": "狀態"
   },
   "pageviews.site_rank": {
-    "en": "site-wide ranked {rank}",
+    "en": "{rank} site-wide",
     "zh-hans": "全站第{rank}名",
     "zh-hant": "全站第{rank}名"
   },
@@ -539,6 +544,11 @@
     "zh-hans": "目前没有待维护条目。",
     "zh-hant": "目前沒有待維護條目。"
   },
+  "backlog.first": {
+    "en": "First page",
+    "zh-hans": "第一页",
+    "zh-hant": "第一頁"
+  },
   "backlog.previous": {
     "en": "Previous page",
     "zh-hans": "上一页",
@@ -548,6 +558,11 @@
     "en": "Next page",
     "zh-hans": "下一页",
     "zh-hant": "下一頁"
+  },
+  "backlog.last": {
+    "en": "Last page",
+    "zh-hans": "最后一页",
+    "zh-hant": "最後一頁"
   },
   "backlog.not_found": {
     "en": "This maintenance list or page could not be found.",
@@ -650,14 +665,14 @@
     "zh-hant": "更新資料庫報告"
   },
   "ops.execution_finished": {
-    "en": "Finished at ",
-    "zh-hans": "结束时间：",
-    "zh-hant": "結束時間："
+    "en": "Checked at ",
+    "zh-hans": "检查时间：",
+    "zh-hant": "檢查時間："
   },
   "ops.next_run": {
-    "en": "Next scheduled run: ",
-    "zh-hans": "下次排程：",
-    "zh-hant": "下次排程："
+    "en": "Next check ",
+    "zh-hans": "下次检查：",
+    "zh-hant": "下次檢查："
   },
   "ops.schedule_idle": {
     "en": "Waiting for idle time",
@@ -665,32 +680,32 @@
     "zh-hant": "等待空閒時執行"
   },
   "time.minutes_ago": {
-    "en": "({count} minutes ago)",
+    "en": "({count}m ago)",
     "zh-hans": "（{count}分钟前）",
     "zh-hant": "（{count}分鐘前）"
   },
   "time.hours_ago": {
-    "en": "({count} hours ago)",
+    "en": "({count}h ago)",
     "zh-hans": "（{count}小时前）",
     "zh-hant": "（{count}小時前）"
   },
   "time.days_ago": {
-    "en": "({count} days ago)",
+    "en": "({count}d ago)",
     "zh-hans": "（{count}日前）",
     "zh-hant": "（{count}日前）"
   },
   "time.minutes_ahead": {
-    "en": "({count} minutes from now)",
+    "en": "({count}m from now)",
     "zh-hans": "（{count}分钟后）",
     "zh-hant": "（{count}分鐘後）"
   },
   "time.hours_ahead": {
-    "en": "({count} hours from now)",
+    "en": "({count}h from now)",
     "zh-hans": "（{count}小时后）",
     "zh-hant": "（{count}小時後）"
   },
   "time.days_ahead": {
-    "en": "({count} days from now)",
+    "en": "({count}d from now)",
     "zh-hans": "（{count}日后）",
     "zh-hant": "（{count}日後）"
   },
@@ -700,7 +715,7 @@
     "zh-hant": "（剛剛）"
   },
   "time.soon": {
-    "en": "(within 1 minute)",
+    "en": "(within 1m)",
     "zh-hans": "（1分钟内）",
     "zh-hant": "（1分鐘內）"
   },
@@ -808,6 +823,11 @@
     "en": "Updated report for {date}",
     "zh-hans": "已更新{date}报告",
     "zh-hant": "已更新{date}報告"
+  },
+  "state.UpdatedAt": {
+    "en": "Updated at {time}",
+    "zh-hans": "更新于{time}",
+    "zh-hant": "更新於{time}"
   },
   "state.NoUpdate": {
     "en": "No update needed",
@@ -1089,6 +1109,11 @@
     "zh-hans": "搜索条目名",
     "zh-hant": "搜尋條目名"
   },
+  "backlog.search_action": {
+    "en": "Search",
+    "zh-hans": "搜索",
+    "zh-hant": "搜尋"
+  },
   "backlog.task": {
     "en": "Task",
     "zh-hans": "任务",
@@ -1340,9 +1365,14 @@
     "zh-hant": "電子遊戲專題簡訊草稿"
   },
   "newsletter.intro": {
-    "en": "Review the collected statistics and complete the feature and interview templates before copying the drafts to Wikipedia. January includes a year-in-review feature.",
-    "zh-hans": "检查已获取的统计数据并填写专题和访谈模板后，将草稿复制到维基百科。1月号提供年终回顾专题。",
-    "zh-hant": "檢查已取得的統計資料並填寫專題和訪談模板後，將草稿複製到維基百科。1月號提供年終回顧專題。"
+    "en": "Generate page templates for the {newsletter} and automatically fill in some data.",
+    "zh-hans": "生成{newsletter}页面模板，并自动填写部分资料。",
+    "zh-hant": "生成{newsletter}頁面模板，並自動填寫部分資料。"
+  },
+  "newsletter.name": {
+    "en": "WikiProject Video Games Newsletter",
+    "zh-hans": "电子游戏专题简讯",
+    "zh-hant": "電子遊戲專題簡訊"
   },
   "newsletter.issue": {
     "en": "Issue",
@@ -1350,9 +1380,9 @@
     "zh-hant": "刊號"
   },
   "newsletter.issue_view": {
-    "en": "View issue",
-    "zh-hans": "查看本期",
-    "zh-hant": "查看本期"
+    "en": "View this issue",
+    "zh-hans": "查看该期",
+    "zh-hant": "查看該期"
   },
   "newsletter.load_failed": {
     "en": "Could not load this issue. Try again.",
@@ -1365,12 +1395,12 @@
     "zh-hant": "資料日期"
   },
   "newsletter.history.view": {
-    "en": "View draft for this date",
-    "zh-hans": "查看当日草稿",
-    "zh-hant": "查看當日草稿"
+    "en": "View data for this date",
+    "zh-hans": "查看当日数据",
+    "zh-hant": "查看當日資料"
   },
   "newsletter.history.through": {
-    "en": "Data through",
+    "en": "Data as of",
     "zh-hans": "数据截至",
     "zh-hant": "資料截至"
   },
@@ -1390,9 +1420,9 @@
     "zh-hant": "沒有此日期的已儲存草稿。"
   },
   "newsletter.history.invalid_date": {
-    "en": "Choose one data date in YYYY-MM-DD format within the selected issue’s reporting quarter.",
-    "zh-hans": "请选择本期期刊统计季度内的一个数据日期，格式为YYYY-MM-DD。",
-    "zh-hant": "請選擇本期期刊統計季度內的一個資料日期，格式為YYYY-MM-DD。"
+    "en": "Choose the date in YYYY-MM-DD format.",
+    "zh-hans": "请选择日期，格式为YYYY-MM-DD。",
+    "zh-hant": "請選擇日期，格式為YYYY-MM-DD。"
   },
   "newsletter.history.read_error": {
     "en": "Saved daily drafts are temporarily unavailable. Try again later.",
@@ -1410,14 +1440,14 @@
     "zh-hant": "複製"
   },
   "newsletter.view_page": {
-    "en": "View newsletter page",
-    "zh-hans": "查看简讯页",
-    "zh-hant": "檢視簡訊頁"
+    "en": "View page",
+    "zh-hans": "查看页面",
+    "zh-hant": "查看頁面"
   },
   "newsletter.edit_page": {
-    "en": "Edit newsletter page",
-    "zh-hans": "编辑简讯页",
-    "zh-hant": "編輯簡訊頁"
+    "en": "Edit page",
+    "zh-hans": "编辑页面",
+    "zh-hant": "編輯頁面"
   },
   "newsletter.copied": {
     "en": "Wikitext copied.",
@@ -1490,7 +1520,7 @@
     "zh-hant": "電子遊戲專題"
   },
   "about.credits": {
-    "en": "Credits",
+    "en": "Credits and thanks",
     "zh-hans": "许可与鸣谢",
     "zh-hant": "許可與鳴謝"
   },
@@ -1510,12 +1540,12 @@
     "zh-hant": "到"
   },
   "reviews.started_months": {
-    "en": "Started {count} months ago",
+    "en": "Started {count}mo ago",
     "zh-hans": "{count}月前发起",
     "zh-hant": "{count}月前發起"
   },
   "reviews.started_hours": {
-    "en": "Started {count} hours ago",
+    "en": "Started {count}h ago",
     "zh-hans": "{count}小时前发起",
     "zh-hant": "{count}小時前發起"
   },
@@ -1600,102 +1630,102 @@
     "zh-hant": "年度回顧"
   },
   "reviews.started_months_one": {
-    "en": "Started {count} month ago",
+    "en": "Started {count}mo ago",
     "zh-hans": "{count}月前发起",
     "zh-hant": "{count}月前發起"
   },
   "reviews.started_days_one": {
-    "en": "Started {count} day ago",
+    "en": "Started {count}d ago",
     "zh-hans": "{count}日前发起",
     "zh-hant": "{count}日前發起"
   },
   "reviews.started_hours_one": {
-    "en": "Started {count} hour ago",
+    "en": "Started {count}h ago",
     "zh-hans": "{count}小时前发起",
     "zh-hant": "{count}小時前發起"
   },
   "reviews.started_minutes": {
-    "en": "Started {count} minutes ago",
+    "en": "Started {count}m ago",
     "zh-hans": "{count}分钟前发起",
     "zh-hant": "{count}分鐘前發起"
   },
   "reviews.started_minutes_one": {
-    "en": "Started {count} minute ago",
+    "en": "Started {count}m ago",
     "zh-hans": "{count}分钟前发起",
     "zh-hant": "{count}分鐘前發起"
   },
   "reviews.replied_months_one": {
-    "en": "Last comment {count} month ago",
+    "en": "Last comment {count}mo ago",
     "zh-hans": "{count}月前最后留言",
     "zh-hant": "{count}月前最後留言"
   },
   "reviews.replied_days_one": {
-    "en": "Last comment {count} day ago",
+    "en": "Last comment {count}d ago",
     "zh-hans": "{count}日前最后留言",
     "zh-hant": "{count}日前最後留言"
   },
   "reviews.replied_hours_one": {
-    "en": "Last comment {count} hour ago",
+    "en": "Last comment {count}h ago",
     "zh-hans": "{count}小时前最后留言",
     "zh-hant": "{count}小時前最後留言"
   },
   "reviews.replied_minutes": {
-    "en": "Last comment {count} minutes ago",
+    "en": "Last comment {count}m ago",
     "zh-hans": "{count}分钟前最后留言",
     "zh-hant": "{count}分鐘前最後留言"
   },
   "reviews.replied_minutes_one": {
-    "en": "Last comment {count} minute ago",
+    "en": "Last comment {count}m ago",
     "zh-hans": "{count}分钟前最后留言",
     "zh-hant": "{count}分鐘前最後留言"
   },
   "time.months_ago": {
-    "en": "({count} months ago)",
+    "en": "({count}mo ago)",
     "zh-hans": "（{count}月前）",
     "zh-hant": "（{count}月前）"
   },
   "time.months_ahead": {
-    "en": "({count} months from now)",
+    "en": "({count}mo from now)",
     "zh-hans": "（{count}月后）",
     "zh-hant": "（{count}月後）"
   },
   "time.minutes_ago_one": {
-    "en": "({count} minute ago)",
+    "en": "({count}m ago)",
     "zh-hans": "（{count}分钟前）",
     "zh-hant": "（{count}分鐘前）"
   },
   "time.minutes_ahead_one": {
-    "en": "({count} minute from now)",
+    "en": "({count}m from now)",
     "zh-hans": "（{count}分钟后）",
     "zh-hant": "（{count}分鐘後）"
   },
   "time.hours_ago_one": {
-    "en": "({count} hour ago)",
+    "en": "({count}h ago)",
     "zh-hans": "（{count}小时前）",
     "zh-hant": "（{count}小時前）"
   },
   "time.hours_ahead_one": {
-    "en": "({count} hour from now)",
+    "en": "({count}h from now)",
     "zh-hans": "（{count}小时后）",
     "zh-hant": "（{count}小時後）"
   },
   "time.days_ago_one": {
-    "en": "({count} day ago)",
+    "en": "({count}d ago)",
     "zh-hans": "（{count}日前）",
     "zh-hant": "（{count}日前）"
   },
   "time.days_ahead_one": {
-    "en": "({count} day from now)",
+    "en": "({count}d from now)",
     "zh-hans": "（{count}日后）",
     "zh-hant": "（{count}日後）"
   },
   "time.months_ago_one": {
-    "en": "({count} month ago)",
+    "en": "({count}mo ago)",
     "zh-hans": "（{count}月前）",
     "zh-hant": "（{count}月前）"
   },
   "time.months_ahead_one": {
-    "en": "({count} month from now)",
+    "en": "({count}mo from now)",
     "zh-hans": "（{count}月后）",
     "zh-hant": "（{count}月後）"
   },
@@ -1829,11 +1859,6 @@
     "zh-hans": "专题重要度评级：{grade}",
     "zh-hant": "專題重要度評級：{grade}"
   },
-  "server.group.application": {
-    "en": "Aranami",
-    "zh-hans": "Aranami",
-    "zh-hant": "Aranami"
-  },
   "server.web_version": {
     "en": "Website version",
     "zh-hans": "网站版本",
@@ -1843,5 +1868,10 @@
     "en": "Hub version",
     "zh-hans": "后台版本",
     "zh-hant": "後台版本"
+  },
+  "newsletter.generated_source": {
+    "en": " (automatically generated wikitext)",
+    "zh-hans": "（自动生成的维基代码）",
+    "zh-hant": "（自動產生的維基代碼）"
   }
 }
