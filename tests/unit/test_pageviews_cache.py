@@ -1,9 +1,10 @@
-"""Verify full downloads, early failures, and healthy snapshots."""
+"""Verify gapped-history refreshes and healthy snapshot preservation."""
 
 # Exercise private snapshot validation and standard unittest assertions.
 # ruff: file-ignore[magic-value-comparison, pytest-unittest-raises-assertion]
 
 import datetime as dt
+import re
 from contextlib import chdir
 from contextvars import copy_context
 from dataclasses import replace
@@ -17,9 +18,10 @@ from urllib.error import HTTPError
 
 import polars as pl
 
-from backend.services.zhwiki import pageviews
-from backend.support.pageviews_cache import SCHEMA, PageviewsCache
-from updater.jobs import JobContext, pageviews as job
+from data.caching.pageviews import SCHEMA, PageviewsCache
+from runtime.jobs import JobContext, pageviews as job
+from shared.support.cache import latest_cache_path
+from tasks.zhwiki import pageviews
 from updater.services.zhwiki import pageviews as rendering
 
 _STOP = dt.date(2026, 10, 1)
@@ -29,6 +31,20 @@ _DAY = _STOP - dt.timedelta(days=1)
 _PERIODS = ((_REQUIRED, _STOP), (_DAY, _STOP))
 _OBSERVATIONS = {"date": pl.Date, "pageview": pl.Int64}
 _TOP_SCHEMA = {"title": pl.String, "top": pl.Int64}
+
+
+def _cache_file(cache: PageviewsCache) -> Path:
+    """Locate the timestamped generation committed by a cache.
+
+    Args:
+        cache: Loaded Pageviews cache after saving observations.
+
+    Returns:
+        Selected physical Parquet path.
+    """
+    path = latest_cache_path(cache.path)
+    assert path is not None
+    return path
 
 
 def _site() -> MagicMock:
@@ -101,7 +117,7 @@ def _build_report(
     settings: rendering.ReportSettings,
     **options: int,
 ) -> rendering.PageviewReport:
-    """Render backend data while checking observation-cache behavior.
+    """Render runtime data while checking observation-cache behavior.
 
     Args:
         site: Offline wiki identity.
@@ -110,7 +126,7 @@ def _build_report(
         **options: Backend cache and availability options.
 
     Returns:
-        Rendered report containing the backend's complete result tables.
+        Rendered report containing the runtime's complete result tables.
     """
     prepared = pageviews.prepare_report(
         site,
@@ -122,13 +138,11 @@ def _build_report(
 
 
 class TestFullDownloads(TestCase):
-    """Require full fresh inputs independently of saved coverage."""
+    """Require complete refreshes when daily rows contain gaps."""
 
     @staticmethod
-    def test_every_call_downloads_full_history_despite_complete_cache() -> (
-        None
-    ):
-        """Ignore complete coverage and outdated cached measurements."""
+    def test_coverage_markers_cannot_replace_missing_daily_rows() -> None:
+        """Ignore coverage markers when actual daily rows are sparse."""
         cache = PageviewsCache(Path("unused.parquet"))
         cache.replace("A", _OLDEST, _STOP, _observations((_DAY, 999)))
         site = _site()
@@ -157,8 +171,8 @@ class TestFullDownloads(TestCase):
         assert second.get_column("views").to_list() == [0, 0]
 
     @staticmethod
-    def test_next_day_downloads_full_buffer_instead_of_a_tail() -> None:
-        """Start a new day's request at its full history boundary."""
+    def test_gapped_history_downloads_full_buffer_instead_of_tail() -> None:
+        """Refresh the full buffer when the retained prefix has gaps."""
         cache = PageviewsCache(Path("unused.parquet"))
         cache.replace("A", _OLDEST, _STOP, _observations((_DAY, 7)))
         stop = _STOP + dt.timedelta(days=1)
@@ -374,13 +388,13 @@ class TestDailyQuickStop(TestCase):
             cache = PageviewsCache.load(site.hostname())
             cache.replace("A", _OLDEST, _STOP, _observations((_DAY, 99)))
             cache.save(["A"])
-            healthy = cache.path.read_bytes()
+            healthy = _cache_file(cache).read_bytes()
             page = MagicMock(text=original)
             failed = JobContext(
                 site,
                 _STOP,
                 dry=True,
-                started_at=dt.datetime(2026, 10, 1, 18, tzinfo=dt.UTC),
+                started_at=dt.datetime(2026, 10, 1, 19, tzinfo=dt.UTC),
             )
             with (
                 patch.object(job, "read_pages", return_value=[page]),
@@ -406,14 +420,14 @@ class TestDailyQuickStop(TestCase):
             top.assert_not_called()
             assert failed.tasks[0].status == "failed"
             assert not failed.edits
-            assert cache.path.read_bytes() == healthy
+            assert _cache_file(cache).read_bytes() == healthy
             assert page.text == original
             page.save.assert_not_called()
             retried = JobContext(
                 site,
                 _STOP,
                 dry=True,
-                started_at=dt.datetime(2026, 10, 1, 19, tzinfo=dt.UTC),
+                started_at=dt.datetime(2026, 10, 1, 20, tzinfo=dt.UTC),
             )
             with (
                 patch.object(job, "read_pages", return_value=[page]),
@@ -439,7 +453,12 @@ class TestDailyQuickStop(TestCase):
             assert retried.tasks[0].status == "success"
             assert len(retried.edits) == 1
             assert pageviews.current_data_date(retried.edits[0].text) == _DAY
-            assert cache.path.read_bytes() != healthy
+            assert _cache_file(cache).read_bytes() == healthy
+            preview = latest_cache_path(
+                Path("dry-run/cache/pageviews/zh.wikipedia.org/observations"),
+            )
+            assert preview is not None
+            assert preview.read_bytes() != healthy
 
 
 class TestDownloadBatches(TestCase):
@@ -548,7 +567,7 @@ class TestDownloadBatches(TestCase):
                     prefetch_stop=_STOP,
                 )
                 cache = PageviewsCache.load(site.hostname())
-                healthy = cache.path.read_bytes()
+                healthy = _cache_file(cache).read_bytes()
                 with self.assertRaises(pageviews.PageviewsUnavailableError):
                     pageviews.prepare_report(
                         site,
@@ -558,7 +577,7 @@ class TestDownloadBatches(TestCase):
                     )
             assert fetch.call_count == 1
             assert top.call_count == 1
-            assert cache.path.read_bytes() == healthy
+            assert _cache_file(cache).read_bytes() == healthy
             with pageviews.download_batch():
                 report = pageviews.prepare_report(
                     site,
@@ -669,13 +688,13 @@ class TestTransientDownloads(TestCase):
             cache = PageviewsCache.load(site.hostname())
             cache.replace("A", _OLDEST, _STOP, _observations((_DAY, 99)))
             cache.save(["A"])
-            before = cache.path.read_bytes()
+            before = _cache_file(cache).read_bytes()
             with (
                 pageviews.download_batch(),
                 self.assertRaises(pageviews.PageviewsDeferredError),
             ):
                 _build_report(site, _STOP, settings=settings)
-            assert cache.path.read_bytes() == before
+            assert _cache_file(cache).read_bytes() == before
             with pageviews.download_batch():
                 _build_report(site, _STOP, settings=settings)
             assert (
@@ -735,6 +754,13 @@ class TestParquetSnapshot(TestCase):
             )
             cache.replace("Empty", _OLDEST, _STOP, _observations())
             cache.save(["A", "Empty"])
+            assert cache.path == (
+                Path.cwd() / "cache/pageviews/zh.wikipedia.org/observations"
+            )
+            assert re.fullmatch(
+                r"\d{8}T\d{6}\.parquet",
+                _cache_file(cache).name,
+            )
             restored = PageviewsCache.load("zh.wikipedia.org")
             article, empty = restored.get("A"), restored.get("Empty")
             assert article is not None
@@ -744,13 +770,38 @@ class TestParquetSnapshot(TestCase):
                 pl.col("pageview").drop_nulls(),
             ).to_series().to_list() == [0]
             assert empty.height == 1
-            assert list(Path("cache").glob(".pageviews-*")) == []
+            assert list(cache.path.glob(".*.parquet")) == []
+
+    @staticmethod
+    def test_hostname_paths_normalize_escape_and_isolate_previews() -> None:
+        """Retain every wiki identity under the preview namespace."""
+        with TemporaryDirectory() as directory, chdir(directory):
+            cache = PageviewsCache.load(" ZH.WIKIPEDIA.ORG ")
+            cache.replace("A", _OLDEST, _STOP, _observations((_DAY, 7)))
+            cache.save(["A"])
+            preview = PageviewsCache.load("zh.wikipedia.org", dry=True)
+            assert preview.get("A").equals(cache.get("A"))
+            assert preview.path == (
+                Path.cwd()
+                / "dry-run/cache/pageviews/zh.wikipedia.org/observations"
+            )
+            other = PageviewsCache.load("en.wikipedia.org", dry=True)
+            assert other.path != preview.path
+            assert other.get("A") is None
+            escaped = PageviewsCache.load("example.org/unsafe", dry=True)
+            assert escaped.path.parent.name == "example.org%2Funsafe"
+            suffixed = PageviewsCache.load("example.parquet")
+            suffixed.replace("A", _OLDEST, _STOP, _observations((_DAY, 7)))
+            suffixed.save(["A"])
+            assert suffixed.path.parent.name == "example.parquet"
+            assert _cache_file(suffixed).is_file()
 
     def test_corrupted_or_malformed_cache_causes_full_refetch(self) -> None:
         """Ignore damaged Parquet and empty or malformed snapshots."""
         with TemporaryDirectory() as directory, chdir(directory):
             initial = PageviewsCache.load("zh.wikipedia.org")
-            initial.path.parent.mkdir(parents=True)
+            initial.path.mkdir(parents=True)
+            path = initial.path / "20261001T000000.parquet"
             for malformed in (
                 b"broken parquet",
                 pl.DataFrame(schema=SCHEMA),
@@ -758,9 +809,9 @@ class TestParquetSnapshot(TestCase):
             ):
                 with self.subTest(malformed=type(malformed).__name__):
                     if isinstance(malformed, bytes):
-                        initial.path.write_bytes(malformed)
+                        path.write_bytes(malformed)
                     else:
-                        malformed.write_parquet(initial.path)
+                        malformed.write_parquet(path)
                     cache = PageviewsCache.load("zh.wikipedia.org")
                     site = _site()
                     with patch.object(
@@ -782,7 +833,7 @@ class TestParquetSnapshot(TestCase):
             cache = PageviewsCache.load("zh.wikipedia.org")
             cache.replace("A", _OLDEST, _DAY, _observations((_REQUIRED, 7)))
             cache.save(["A"])
-            before = cache.path.read_bytes()
+            before = _cache_file(cache).read_bytes()
             metadata = pl.DataFrame({
                 "page_namespace": [0],
                 "full_title": ["A"],
@@ -809,7 +860,7 @@ class TestParquetSnapshot(TestCase):
                     _STOP,
                     settings=job.REPORT_SETTINGS,
                 )
-            assert cache.path.read_bytes() == before
+            assert _cache_file(cache).read_bytes() == before
             restored = PageviewsCache.load("zh.wikipedia.org").get("A")
             assert restored is not None
             assert restored.item(0, "coverage_stop") == _DAY
@@ -820,14 +871,14 @@ class TestParquetSnapshot(TestCase):
             cache = PageviewsCache.load("zh.wikipedia.org")
             cache.replace("A", _OLDEST, _STOP, _observations((_DAY, 7)))
             cache.save(["A"])
-            before = cache.path.read_bytes()
+            before = _cache_file(cache).read_bytes()
             with (
                 patch.object(Path, "replace", side_effect=OSError("blocked")),
                 self.assertLogs(
-                    "backend.support.pageviews_cache",
+                    "data.caching.pageviews",
                     level="WARNING",
                 ),
             ):
                 cache.save(["A"])
-            assert cache.path.read_bytes() == before
-            assert list(Path("cache").glob(".pageviews-*")) == []
+            assert _cache_file(cache).read_bytes() == before
+            assert list(cache.path.glob(".*.parquet")) == []

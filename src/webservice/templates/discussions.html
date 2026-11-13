@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block contents_links %}
+<ul>{% for section in groups %}<li><a href="#{{ section.key }}">{{ section.title }}</a></li>{% endfor %}</ul>
+{% endblock %}
+{% block content %}
+<p class="page-description">{{ t.discussions.intro }}</p>
+{% if unavailable %}<p role="status">{{ unavailable }}</p>{% endif %}
+{% for section in groups %}
+<section class="section-flat" id="{{ section.key }}" aria-labelledby="{{ section.key }}-heading">
+  <h2 id="{{ section.key }}-heading">{{ section.title }}</h2>
+  {% include "includes/article_cards.html" %}
+</section>
+{% endfor %}
+{% include "includes/source_updated.html" %}
+{% endblock %}

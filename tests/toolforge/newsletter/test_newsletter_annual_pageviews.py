@@ -10,14 +10,14 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from backend.newsletter import refresh
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.schema import valid_newsletter
-from backend.newsletter.statistics import collect_popularity
-from backend.support.pageviews_cache import PageviewsCache
+from data.caching.pageviews import PageviewsCache
+from data.newsletter.schema import valid_newsletter
 from newsletter.test_newsletter_data import Reader
 from newsletter.test_newsletter_statistics import _popular
 from shared.newsletter import Issue
+from tasks.zhwiki.newsletter import refresh
+from tasks.zhwiki.newsletter.collection import collect_source_facts
+from tasks.zhwiki.newsletter.statistics import collect_popularity
 
 
 def _year_to_date(*, total: int | None = 31000) -> dict:

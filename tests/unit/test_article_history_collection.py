@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,18 +14,34 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from backend.articles.history import collect_article_history, main
-from backend.articles.history_store import load, read_versions
-from shared.sources.dyk import TalkPage
+from data.articles.history_store import load, read_versions
+from shared.sources.revisions import RevisionContent
+from tasks.articles.history import collect_article_history, main
 
-_MODULE = "backend.articles.history."
+_MODULE = "tasks.articles.history."
+
+
+def _content(page_id: int, revision: int, text: str) -> RevisionContent:
+    """Build one exact immutable revision body for the source fixture.
+
+    Returns:
+        Revision metadata bound to its actual talk page and source text.
+    """
+    return RevisionContent(
+        page_id,
+        f"Talk:Page{page_id}",
+        revision,
+        dt.datetime(2026, 10, 30, tzinfo=dt.UTC),
+        hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest(),
+        text,
+    )
 
 
 class ArticleHistoryCollectionTests(unittest.TestCase):
     """Keep stored facts complete and revision identities exact."""
 
     def setUp(self) -> None:
-        """Prepare replica and preloaded-source boundaries."""
+        """Prepare fresh replica and exact revision-body boundaries."""
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name) / "reports" / "history.parquet"
@@ -51,9 +68,9 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
             "latest_revisions",
             return_value=pl.DataFrame({"page_id": [10], "page_latest": [100]}),
         )
-        self.preload = self.patch(
-            "read_talk_pages",
-            return_value=[TalkPage(10, 100, "old")],
+        self.contents = self.patch(
+            "read_revision_contents",
+            return_value={100: _content(10, 100, "old")},
         )
         self.parse = self.patch(
             "extract_events",
@@ -101,7 +118,7 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
         assert self.path.exists()
         repeated = self.collect()
         assert repeated.equals(first)
-        self.preload.assert_called_once_with(self.site, [10])
+        self.contents.assert_called_once_with(self.site, [100])
         self.parse.assert_called_once()
         tags = self.tags.call_args.args[2]
         assert ("history", "talk", "cat", "Category:已撤銷的特色列表") in tags
@@ -122,91 +139,87 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
         self.now += dt.timedelta(hours=1)
         with patch(_MODULE + "_PARSER_CONTRACT", "new-itntalk-contract"):
             self.collect()
-        assert self.preload.call_count == 2
+        assert self.contents.call_count == 2
         assert self.parse.call_args.args[-1] == ("Template:ITNtalk",)
 
-    def test_month_rollover_rechecks_unchanged_revision_only_once(
+    def test_multiple_history_upgrade_reparses_the_unchanged_talk(
         self,
     ) -> None:
-        """Re-read unchanged oldids once after each UTC month ends."""
-        original = self.collect()
-        self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
-        with self.assertLogs(_MODULE.rstrip("."), level="INFO") as logs:
-            refreshed = self.collect()
-        assert refreshed["revision_id"].to_list() == [100]
-        assert refreshed["date"].equals(original["date"])
-        assert refreshed["observed_at"].to_list() == [self.now]
-        assert self.preload.call_count == 2
-        assert any("1 month-end rechecks" in line for line in logs.output)
-        assert read_versions(self.path).height == 1
-        self.now += dt.timedelta(days=15)
-        self.collect()
-        assert self.preload.call_count == 2
-
-    def test_month_boundary_uses_utc_instead_of_local_calendar(self) -> None:
-        """Wait for the UTC boundary rather than local November."""
-        self.collect()
-        local = dt.timezone(dt.timedelta(hours=8))
-        self.now = dt.datetime(2026, 11, 1, 7, 59, tzinfo=local)
-        self.collect()
-        self.preload.assert_called_once()
-        self.now = dt.datetime(2026, 11, 1, 8, tzinfo=local)
-        self.collect()
-        assert self.preload.call_count == 2
-        assert load(self.path)["observed_at"].to_list() == [
-            dt.datetime(2026, 11, 1, tzinfo=dt.UTC),
+        """Reparse missing later actions and retain earlier proof."""
+        previous = "zh-article-history:first-template-only"
+        with patch(_MODULE + "_PARSER_CONTRACT", previous):
+            self.collect()
+        self.now += dt.timedelta(hours=1)
+        self.parse.return_value = [
+            *self.parse.return_value,
+            {
+                "kind": "quality",
+                "date": dt.date(2020, 8, 7),
+                "grade": "GA",
+                "action": "added",
+                "parameter": "history2_action1",
+                "oldid": 61028288,
+            },
         ]
+        rows = self.collect()
+        assert rows.filter(pl.col("kind") == "quality")["date"].to_list() == [
+            dt.date(2020, 8, 7),
+        ]
+        assert self.contents.call_count == 2
+        retained = read_versions(self.path)
+        assert retained["revision_id"].to_list() == [100, 100]
+        assert retained["contract"].n_unique() == 2
 
-    def test_month_recheck_keeps_older_source_revisions(self) -> None:
-        """Advance observation dates without duplicate versions."""
+    def test_prior_month_revision_reuses_original_evidence(self) -> None:
+        """Reuse immutable revision evidence across month boundaries."""
+        original = self.collect()
+        before = self.path.read_bytes()
+        self.now = dt.datetime(2027, 1, 1, tzinfo=dt.UTC)
+        self.contents.return_value = {100: None}
+        with self.assertLogs(_MODULE.rstrip("."), level="INFO") as logs:
+            repeated = self.collect()
+        assert repeated.equals(original)
+        assert self.path.read_bytes() == before
+        self.contents.assert_called_once_with(self.site, [100])
+        self.parse.assert_called_once()
+        assert any("1 reused, 0 to refresh" in line for line in logs.output)
+        assert read_versions(self.path).height == 1
+
+    def test_local_calendar_change_does_not_expire_revision(self) -> None:
+        """Preserve observation times across local UTC offsets."""
+        self.collect()
+        observed = self.now
+        local = dt.timezone(dt.timedelta(hours=8))
+        for hour in (7, 8):
+            self.now = dt.datetime(2026, 11, 1, hour, tzinfo=local)
+            self.collect()
+        self.contents.assert_called_once()
+        assert load(self.path)["observed_at"].to_list() == [observed]
+
+    def test_old_and_current_source_revisions_survive_month_rollover(
+        self,
+    ) -> None:
+        """Keep revision versions and their original source times."""
         self.collect()
         self.now += dt.timedelta(minutes=1)
         self.revisions.return_value = pl.DataFrame({
             "page_id": [10],
             "page_latest": [101],
         })
-        self.preload.return_value = [TalkPage(10, 101, "new")]
+        self.contents.return_value = {101: _content(10, 101, "new")}
         self.collect()
+        observed = self.now
         self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
         self.collect()
         assert read_versions(self.path)["revision_id"].sort().to_list() == [
             100,
             101,
         ]
-        assert load(self.path)["observed_at"].to_list() == [self.now]
+        assert load(self.path)["observed_at"].to_list() == [observed]
+        assert self.contents.call_count == 2
 
-    def test_failed_month_recheck_does_not_advance_observation(self) -> None:
-        """Keep missing source content due for the next acquisition."""
-        self.collect()
-        original = self.path.read_bytes()
-        self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
-        self.preload.return_value = []
-        with self.assertRaisesRegex(ValueError, "preload omitted"):
-            self.collect()
-        assert self.path.read_bytes() == original
-        self.preload.return_value = [TalkPage(10, 100, "old")]
-        self.collect()
-        assert self.preload.call_count == 3
-        assert load(self.path)["observed_at"].to_list() == [self.now]
-
-    def test_month_recheck_requires_its_observation_to_be_retained(
-        self,
-    ) -> None:
-        """Require the monthly observation to survive merging."""
-        self.collect()
-        stale = load(self.path)
-        self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
-        self.patch("merge_save", return_value=stale)
-        with self.assertRaisesRegex(ValueError, "superseded"):
-            self.collect()
-        assert load(self.path)["observed_at"].to_list() == [
-            dt.datetime(2026, 10, 31, 12, tzinfo=dt.UTC),
-        ]
-
-    def test_month_recheck_resumes_after_completed_source_batches(
-        self,
-    ) -> None:
-        """Retry unfinished batches while keeping completed pages."""
+    def test_changed_revision_refresh_resumes_completed_batches(self) -> None:
+        """Retry unfinished revisions and keep completed evidence."""
         self.members = pl.DataFrame({
             "page_id": [1, 2, 3],
             "page_namespace": [0, 0, 0],
@@ -218,26 +231,38 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
             "page_latest": [110, 120, 130],
         })
 
-        def read_batch(_site: object, ids: list[int]) -> list[TalkPage]:
-            """Return synthetic pages for one bounded source read.
+        def read_batch(
+            _site: object,
+            revisions: list[int],
+        ) -> dict[int, RevisionContent]:
+            """Return exact source revisions and their owning pages.
 
             Returns:
-                Requested pages with their actual current revisions.
+                Requested revisions with stable talk-page identities.
             """
-            return [
-                TalkPage(page_id, 100 + page_id, "text") for page_id in ids
-            ]
+            pages = {110: 10, 120: 20, 130: 30, 111: 10, 121: 20, 131: 30}
+            return {
+                revision: _content(pages[revision], revision, "text")
+                for revision in revisions
+            }
 
-        self.preload.side_effect = read_batch
+        self.contents.side_effect = read_batch
         with patch(_MODULE + "_HISTORY_BATCH_SIZE", 2):
             self.collect()
-            self.preload.reset_mock()
+            self.contents.reset_mock()
             self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
-            self.preload.side_effect = [
-                read_batch(self.site, [10, 20]),
-                [],
+            self.revisions.return_value = pl.DataFrame({
+                "page_id": [10, 20, 30],
+                "page_latest": [111, 121, 131],
+            })
+            self.contents.side_effect = [
+                read_batch(self.site, [111, 121]),
+                {131: None},
             ]
-            with self.assertRaisesRegex(ValueError, "preload omitted"):
+            with self.assertRaisesRegex(
+                ValueError,
+                "revision content omitted",
+            ):
                 self.collect()
             saved = load(self.path)
             assert saved.filter(
@@ -246,25 +271,123 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
                     time_zone="UTC",
                 ),
             )["talk_page_id"].to_list() == [10, 20]
-            self.preload.reset_mock()
-            self.preload.side_effect = read_batch
+            self.contents.reset_mock()
+            self.contents.side_effect = read_batch
             self.collect()
-            self.preload.assert_called_once_with(self.site, [30])
-        assert read_versions(self.path).height == 3
+            self.contents.assert_called_once_with(self.site, [131])
+        assert read_versions(self.path).height == 6
         assert load(self.path)["observed_at"].to_list() == [self.now] * 3
 
-    def test_fresh_text_keeps_actual_revision_during_replica_lag(self) -> None:
-        """Associate events with preloaded content's real revision."""
-        self.preload.return_value = [TalkPage(10, 101, "new")]
+    def test_fresh_query_selects_exact_body_without_current_rediscovery(
+        self,
+    ) -> None:
+        """Bind the requested oldid to its exact source body."""
         result = self.collect()
-        assert result["revision_id"].to_list() == [101]
-        assert load(self.path)["revision_id"].to_list() == [101]
+        assert result["revision_id"].to_list() == [100]
+        assert load(self.path)["revision_id"].to_list() == [100]
+        assert self.parse.call_args.args[0] == "old"
         self.revisions.return_value = pl.DataFrame({
             "page_id": [10],
             "page_latest": [101],
         })
+        self.contents.return_value = {101: _content(10, 101, "new")}
         self.collect()
-        self.preload.assert_called_once()
+        self.contents.assert_called_with(self.site, [101])
+        assert self.parse.call_args.args[0] == "new"
+        assert load(self.path)["revision_id"].to_list() == [101]
+
+    def test_refresh_batches_keep_fresh_ids_instead_of_daily_snapshot_ids(
+        self,
+    ) -> None:
+        """Carry fresh revision IDs through each retained batch."""
+        ids = [10, 20, 30, 40, 50]
+        self.members = pl.DataFrame({
+            "page_id": [1, 2, 3, 4, 5],
+            "page_namespace": [0] * len(ids),
+            "full_title": [f"Game{page_id}" for page_id in ids],
+            "talk_page_id": ids,
+            "talk_page_rev": [1, 2, 3, 4, 5],
+        })
+        self.revisions.return_value = pl.DataFrame({
+            "page_id": ids,
+            "page_latest": [100 + page_id for page_id in ids],
+        })
+        self.contents.side_effect = lambda _site, revisions: {
+            revision: _content(revision - 100, revision, f"body-{revision}")
+            for revision in revisions
+        }
+        with (
+            patch(_MODULE + "_HISTORY_BATCH_SIZE", 2),
+            patch("shared.sources.dyk.read_talk_pages") as current_pages,
+        ):
+            result = self.collect()
+        current_pages.assert_not_called()
+        self.revisions.assert_called_once_with(self.site, ids, talk_pages=True)
+        assert [call.args[1] for call in self.contents.call_args_list] == [
+            [110, 120],
+            [130, 140],
+            [150],
+        ]
+        assert [call.args[0] for call in self.parse.call_args_list] == [
+            f"body-{100 + page_id}" for page_id in ids
+        ]
+        assert result["revision_id"].to_list() == [
+            100 + page_id for page_id in ids
+        ]
+        assert load(self.path)["revision_id"].to_list() == [
+            100 + page_id for page_id in ids
+        ]
+
+    def test_mismatched_revision_identity_preserves_previous_file(
+        self,
+    ) -> None:
+        """Reject another page or body before parsing or saving."""
+        self.collect()
+        original = self.path.read_bytes()
+        self.revisions.return_value = pl.DataFrame({
+            "page_id": [10],
+            "page_latest": [102],
+        })
+        for content in (
+            {102: _content(99, 102, "wrong page")},
+            {102: _content(10, 103, "wrong revision")},
+            {103: _content(10, 103, "unexpected revision")},
+        ):
+            with self.subTest(content=content):
+                self.parse.reset_mock()
+                self.contents.return_value = content
+                with self.assertRaisesRegex(ValueError, "mismatched"):
+                    self.collect()
+                self.parse.assert_not_called()
+                assert self.path.read_bytes() == original
+
+    def test_replica_lag_cannot_downgrade_or_advance_newer_history(
+        self,
+    ) -> None:
+        """Keep newer evidence without advancing its observation."""
+        self.collect()
+        self.now += dt.timedelta(minutes=1)
+        self.revisions.return_value = pl.DataFrame({
+            "page_id": [10],
+            "page_latest": [101],
+        })
+        self.contents.return_value = {101: _content(10, 101, "new")}
+        self.collect()
+        latest_observed = self.now
+        self.now += dt.timedelta(minutes=1)
+        self.revisions.return_value = pl.DataFrame({
+            "page_id": [10],
+            "page_latest": [100],
+        })
+        self.contents.return_value = {100: _content(10, 100, "old")}
+        result = self.collect()
+        assert result["revision_id"].to_list() == [101]
+        assert result["observed_at"].to_list() == [latest_observed]
+        self.now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+        repeated = self.collect()
+        assert repeated["revision_id"].to_list() == [101]
+        assert load(self.path)["revision_id"].to_list() == [101]
+        assert load(self.path)["observed_at"].to_list() == [latest_observed]
 
     def test_removed_templates_refresh_to_confirmed_empty(self) -> None:
         """Recheck saved candidates after their category disappears."""
@@ -279,16 +402,16 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
             "page_id": [10],
             "page_latest": [102],
         })
-        self.preload.return_value = [TalkPage(10, 102, "empty")]
+        self.contents.return_value = {102: _content(10, 102, "empty")}
         self.parse.return_value = []
         assert self.collect().is_empty()
         saved = load(self.path)
         assert saved.height == 1
         assert saved["events"].to_list() == [[]]
         self.collect()
-        assert self.preload.call_count == 2
+        assert self.contents.call_count == 2
 
-    def test_missing_preloaded_page_preserves_previous_file(self) -> None:
+    def test_missing_revision_body_preserves_previous_file(self) -> None:
         """Reject partial source batches before durable replacement."""
         self.collect()
         original = self.path.read_bytes()
@@ -296,8 +419,8 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
             "page_id": [10],
             "page_latest": [102],
         })
-        self.preload.return_value = []
-        with self.assertRaisesRegex(ValueError, "preload omitted"):
+        self.contents.return_value = {102: None}
+        with self.assertRaisesRegex(ValueError, "revision content omitted"):
             self.collect()
         assert self.path.read_bytes() == original
 
@@ -323,7 +446,7 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
             .alias("full_title"),
         )
         assert self.collect()["title"].to_list() == ["Renamed"]
-        self.preload.assert_called_once()
+        self.contents.assert_called_once()
 
     def test_departed_members_remain_on_disk_without_output(self) -> None:
         """Preserve history when current project scope changes."""
@@ -331,7 +454,7 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
         self.members = self.members.clear()
         assert self.collect().is_empty()
         assert load(self.path).height == 1
-        self.preload.assert_called_once()
+        self.contents.assert_called_once()
 
     def test_superseded_contract_cannot_become_confirmed_empty(self) -> None:
         """Reject an equal-time conflicting parser observation."""
@@ -353,7 +476,7 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
             "page_id": [10],
             "page_latest": [102],
         })
-        self.preload.return_value = [TalkPage(10, 102, "new")]
+        self.contents.return_value = {102: _content(10, 102, "new")}
         assert self.collect()["revision_id"].to_list() == [102]
 
     def test_later_observation_cannot_justify_an_older_revision(self) -> None:
@@ -366,7 +489,7 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
             "page_id": [10],
             "page_latest": [101],
         })
-        self.preload.return_value = [TalkPage(10, 101, "new")]
+        self.contents.return_value = {101: _content(10, 101, "new")}
         self.patch("merge_save", return_value=stale)
         with self.assertRaisesRegex(ValueError, "superseded"):
             self.collect()
@@ -382,7 +505,7 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
             "page_id": [10],
             "page_latest": [101],
         })
-        self.preload.return_value = [TalkPage(10, 101, "new")]
+        self.contents.return_value = {101: _content(10, 101, "new")}
         self.patch("merge_save", return_value=current)
         result = self.collect()
         assert result["revision_id"].to_list() == [102]

@@ -12,8 +12,8 @@ from unittest.mock import patch
 import polars as pl
 import test_section_cache
 
-from backend.articles import milestone_store as article_milestones
-from backend.website.collect import validate_dashboard_snapshot
+from data.articles import milestone_store as article_milestones
+from data.website import validate_dashboard_snapshot
 
 
 class TestNewsletterCollection(test_section_cache.DashboardFixture):
@@ -42,9 +42,9 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         article_milestones.sync_events(events, path)
         self.article_history.return_value = article_milestones.load(path)
         with (
-            patch("backend.articles.authorship._collect") as authors,
+            patch("tasks.articles.authorship._collect") as authors,
             patch(
-                "backend.articles.milestone_sources.lookup_milestone",
+                "tasks.articles.milestone_sources.lookup_milestone",
             ) as lookup,
         ):
             snapshot = self._collect()
@@ -55,8 +55,8 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         authors.assert_not_called()
         lookup.assert_not_called()
 
-    def test_dashboard_news_reuses_dated_talk_history(self) -> None:
-        """Share dated talk notices with the newsletter collector."""
+    def test_current_dashboard_news_keeps_newsletter_history(self) -> None:
+        """Separate current homepage news from newsletter history."""
         self.article_history.return_value = pl.DataFrame(
             {
                 "page_id": [11] * 6,
@@ -73,17 +73,21 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
             },
             schema_overrides={"date": pl.Date},
         )
+        self.collectors["news"].return_value = [
+            {
+                "title": "Game",
+                "url": "https://zh.wikipedia.org/wiki/Game",
+                "date": "2026-10-18",
+                "date_kind": "observed",
+            },
+        ]
         snapshot = self._collect()
         assert [
-            (row["title"], row["date"], row["date_kind"])
-            for row in snapshot["homepage"]["news"]
-        ] == [
-            ("Game", "2026-10-18", "appearance"),
-            ("Game", "2026-07-11", "appearance"),
-        ]
+            (row["title"], row["date"]) for row in snapshot["homepage"]["news"]
+        ] == [("Game", "2026-10-18")]
         assert self.article_history.call_count == 1
         assert self.article_history.call_args.kwargs == {"required": True}
-        self.collectors["news"].assert_not_called()
+        self.collectors["news"].assert_called_once()
         self.reader.history.assert_not_called()
         assert self.newsletter.call_args.kwargs["article_history"].equals(
             self.article_history.return_value,
@@ -103,8 +107,11 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         assert self.article_history.call_count == 1
         assert self.article_history.call_args.kwargs == {"required": True}
         assert not snapshot["reports"]["newsletter"]["failed"]
-        for collector in self.collectors.values():
-            collector.assert_not_called()
+        for name, collector in self.collectors.items():
+            if name in {"news", "history", "featured", "good", "upcoming"}:
+                collector.assert_called_once()
+            else:
+                collector.assert_not_called()
 
     def test_quarter_rollover_refreshes_final_previous_period(self) -> None:
         """Refresh final quarter data before daily caches expire."""
@@ -116,10 +123,9 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
             collector.reset_mock()
         self._collect(dt.timedelta(seconds=1))
         self.newsletter.assert_called_once()
-        for section in ("featured", "good", "upcoming", "history"):
+        for section in ("featured", "good", "upcoming", "history", "dyk"):
             self.collectors[section].assert_called_once()
-        self.collectors["news"].assert_not_called()
-        self.collectors["dyk"].assert_not_called()
+        self.collectors["news"].assert_called_once()
 
     def test_newsletter_refresh_collects_current_count_without_extracts(
         self,
@@ -171,7 +177,7 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         retained = self._newsletter_facts()
         self.newsletter.reset_mock()
         self.membership.side_effect = OSError("database unavailable")
-        with self.assertLogs("backend.website.collect", level="ERROR"):
+        with self.assertLogs("tasks.website.collect", level="ERROR"):
             failed = self._collect(
                 dt.timedelta(minutes=2),
                 refresh_intervals=intervals,
@@ -200,7 +206,7 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         first = self._collect(refresh_intervals=intervals)
         retained = self._newsletter_facts()
         self.newsletter.side_effect = OSError("wiki unavailable")
-        with self.assertLogs("backend.website.collect", level="ERROR"):
+        with self.assertLogs("tasks.website.collect", level="ERROR"):
             failed = self._collect(
                 dt.timedelta(minutes=2),
                 refresh_intervals=intervals,
@@ -283,7 +289,7 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         })
         observed = "2026-10-01T08:37:12+00:00"
         with patch(
-            "backend.newsletter.refresh.project_assessments.read_snapshot",
+            "tasks.zhwiki.newsletter.refresh.project_assessments.read_snapshot",
             return_value=SimpleNamespace(
                 tables={"members": historical},
                 manifest={"calculated_at": observed},
@@ -294,9 +300,9 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
                 observed,
             )
             read.assert_called_once_with(
-                self.reader.site,
+                "zhwiki",
                 "电子游戏",
-                boundary,
+                boundary - dt.timedelta(days=1),
             )
             read.return_value = None
             assert overview_at(dt.date(2026, 7, 1)) is None
@@ -329,7 +335,7 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         members = pl.DataFrame({"full_title": ["Game"], "pa_class": ["GA"]})
         observed = "2026-10-01T08:37:12+00:00"
         with patch(
-            "backend.newsletter.refresh.project_assessments.read_snapshot",
+            "tasks.zhwiki.newsletter.refresh.project_assessments.read_snapshot",
             return_value=SimpleNamespace(
                 tables={"members": members},
                 manifest={"calculated_at": observed},
@@ -339,9 +345,9 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
             assert rows is members
             assert stamp == observed
             read.assert_called_once_with(
-                self.reader.site,
+                "zhwiki",
                 "电子游戏",
-                boundary,
+                boundary - dt.timedelta(days=1),
             )
             read.return_value = None
             assert assessments_at(dt.date(2026, 7, 1)) is None
@@ -351,7 +357,7 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         self._collect()
         retained = self._newsletter_facts()
         self.newsletter.return_value = {"issues": []}
-        with self.assertLogs("backend.website.collect", level="ERROR"):
+        with self.assertLogs("tasks.website.collect", level="ERROR"):
             failed = self._collect(dt.timedelta(days=1))
         assert failed["newsletter"] is None
         assert self._newsletter_facts() == retained

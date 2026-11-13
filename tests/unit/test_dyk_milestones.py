@@ -12,8 +12,8 @@ from unittest.mock import patch
 import polars as pl
 from test_dyks import _OfflineSite  # ruff: ignore[import-private-name]
 
-from backend.services.zhwiki import dyk_milestones, dyks
 from shared.sources.dyk import TalkPage
+from tasks.zhwiki import dyk_milestones, dyks
 
 _TEXT = (
     "{{DYKtalk|date=2024-01-05}}"

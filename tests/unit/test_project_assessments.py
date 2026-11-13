@@ -1,4 +1,4 @@
-"""Verify completed-day assessment files and preview isolation."""
+"""Verify retained assessment files after writer retirement."""
 
 # Keep exception assertions consistent with the unittest suite.
 # ruff: file-ignore[pytest-unittest-raises-assertion]
@@ -6,328 +6,170 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, override
+from typing import override
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import polars as pl
 from polars.testing import assert_frame_equal
 
-from backend.services import project_assessments as snapshots
+from data import project_assessments as snapshots
+from shared.assessment_profiles import assessment_profile
 from shared.support.assessment_encoding import encode_assessments
 
-if TYPE_CHECKING:
-    from shared.reports import ReportBundle
-
-_NOW = dt.datetime(2026, 2, 2, 0, 0, tzinfo=dt.UTC)
 _DAY = dt.date(2026, 2, 1)
 _PROJECT = "Video games"
-_CAPTURE_COUNT = 2
 _PATH_COUNT = 8
-_SOURCE_SCHEMA = {
+_SCHEMA = {
     "page_id": pl.Int64,
-    "page_namespace": pl.Int64,
-    "page_title": pl.String,
-    "page_is_redirect": pl.Int64,
-    "talk_page_id": pl.Int64,
     "pa_class": pl.String,
     "pa_importance": pl.String,
-    "full_title": pl.String,
 }
-_SAVED_SCHEMA = {
-    "page_id": pl.Int64,
-    "page_title": pl.String,
-    "page_namespace": pl.Int64,
-    "pa_class": pl.String,
-    "pa_importance": pl.String,
-    "page_is_redirect": pl.Int64,
-}
-_LEGACY_COLUMNS = ["page_id", "pa_class", "pa_importance"]
 
 
-def _members() -> pl.DataFrame:
-    """Supply complete source rows with an unassessed category member.
-
-    Returns:
-        Source facts in their original order.
-    """
-    return pl.DataFrame(
-        [
-            (2, 0, "Second", 0, 102, "C", "Low", "Second"),
-            (1, 14, "First", 0, None, None, None, "Category:First"),
-        ],
-        schema=_SOURCE_SCHEMA,
-        orient="row",
-    )
-
-
-class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-methods]
-    """Retain daily facts independently from report records."""
+class TestProjectAssessmentSnapshots(TestCase):
+    """Read historical facts without acquiring or rewriting them."""
 
     @override
     def setUp(self) -> None:
-        """Isolate storage and replace the source query."""
-        directory = self.enterContext(TemporaryDirectory())
-        self.root = Path(directory)
+        """Isolate retained historical files from production data."""
+        self.root = Path(self.enterContext(TemporaryDirectory()))
         self.enterContext(patch("pathlib.Path.cwd", return_value=self.root))
-        self.query = self.enterContext(
-            patch.object(
-                snapshots,
-                "query_project_assessments",
-                return_value=_members(),
-            ),
+        self.frame = pl.DataFrame(
+            [(1, None, None), (2, "C", "Low")],
+            schema=_SCHEMA,
+            orient="row",
         )
-        self.site = Mock()
-        self.site.dbName.return_value = "enwiki"
 
-    def _capture(
+    def _write_history(
         self,
+        day: dt.date = _DAY,
         *,
-        observed_at: dt.datetime = _NOW,
         dry: bool = False,
-    ) -> ReportBundle:
-        """Capture source facts with this test's default time.
+        encoded: bool = True,
+        project: str = _PROJECT,
+    ) -> Path:
+        """Supply a historical file with its saved metadata contract.
 
         Returns:
-            The selected daily observation.
+            Historical fixture path without the retired acquisition API.
         """
-        return snapshots.get_snapshot(
-            self.site,
-            _PROJECT,
-            observed_at=observed_at,
-            dry=dry,
+        observed = dt.datetime.combine(
+            day + dt.timedelta(days=1),
+            dt.time(),
+            dt.UTC,
         )
+        stored = (
+            encode_assessments(
+                self.frame,
+                profile=assessment_profile("enwiki", project),
+            )
+            if encoded
+            else self.frame
+        )
+        manifest = {
+            "schema": 1,
+            "family": "project-assessments",
+            "target": {"site": "enwiki", "title": project},
+            "report_key": snapshots.snapshot_key("enwiki", project, day),
+            "generation": observed.strftime("%Y%m%dT%H%M%S%fZ"),
+            "calculated_at": observed.isoformat(timespec="microseconds"),
+            "started_at": observed.isoformat(timespec="microseconds"),
+            "rows": self.frame.height,
+            "sha256": hashlib.sha256(
+                self.frame.write_json().encode(),
+            ).hexdigest(),
+            "metadata": {
+                "project": project,
+                "snapshot_date": day.isoformat(),
+                "scheduled_for": observed.isoformat(),
+                "article_totals": None,
+            },
+            "publication": {"state": "preview" if dry else "unattempted"},
+        }
+        if encoded:
+            manifest["columns"] = {
+                name: str(dtype) for name, dtype in stored.schema.items()
+            }
+        path = snapshots.snapshot_path("enwiki", project, day, dry=dry)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stored.write_parquet(path, metadata={"aranami": json.dumps(manifest)})
+        return path
 
-    def test_midnight_retains_page_identity_and_assessments(self) -> None:
-        """Save source identity and grades at the UTC 24:00 boundary."""
-        self.query.return_value = _members().with_columns(
-            pl.lit("discarded").alias("extra"),
-        )
-        bundle = self._capture()
-        assert bundle.path == (
+    def test_unicode_history_keeps_its_identity_after_physical_migration(
+        self,
+    ) -> None:
+        """Read both paths without rewriting historical bytes."""
+        project = "电子游戏"
+        current = self._write_history(project=project)
+        assert current.relative_to(self.root).as_posix().isascii()
+        original = current.read_bytes()
+        saved = snapshots.read_snapshot("enwiki", project, _DAY)
+        assert saved.manifest["metadata"]["project"] == project
+        legacy = (
             self.root
-            / "reports/data/assessments/enwiki"
-            / _PROJECT
-            / "assessments-20260201.parquet"
+            / "reports/data"
+            / (snapshots.snapshot_key("enwiki", project, _DAY) + ".parquet")
         )
-        assert bundle.path.is_file()
+        legacy.parent.mkdir(parents=True)
+        current.rename(legacy)
+        saved = snapshots.read_snapshot("enwiki", project, _DAY)
+        assert saved.path == legacy
+        assert_frame_equal(saved.tables["members"], self.frame)
+        assert legacy.read_bytes() == original
         assert (
-            pl.read_parquet_schema(bundle.path)
-            == encode_assessments(
-                _members().select(list(_SAVED_SCHEMA)),
-            ).schema
+            snapshots.read_previous_snapshot(
+                "enwiki",
+                project,
+                _DAY + dt.timedelta(days=1),
+            ).path
+            == legacy
         )
-        assert_frame_equal(
-            bundle.tables["members"],
-            _members().select(list(_SAVED_SCHEMA)),
-            check_row_order=False,
-        )
-        assert not bundle.wikitext
-        assert bundle.manifest["calculated_at"] == _NOW.isoformat(
-            timespec="microseconds",
-        )
-        assert bundle.manifest["metadata"]["snapshot_date"] == _DAY.isoformat()
-        assert bundle.manifest["target"] == {
-            "site": "enwiki",
-            "title": _PROJECT,
-        }
-        assert not list(bundle.path.parent.glob("*.json"))
-        self.query.assert_called_once_with(self.site, _PROJECT)
+        assert not current.exists()
 
-    def test_delayed_restart_retains_actual_time_without_filling_missed_days(
+    def test_compact_history_preserves_unknown_identities_and_bytes(
         self,
     ) -> None:
-        """Keep the report date separate from a delayed observation."""
-        delayed = dt.datetime(2027, 1, 1, 2, 13, tzinfo=dt.UTC)
-        saved = self._capture(observed_at=delayed)
-        assert saved.manifest["calculated_at"] == delayed.isoformat(
-            timespec="microseconds",
+        """Retain compact evidence without inventing page details."""
+        for encoded in (False, True):
+            with self.subTest(encoded=encoded):
+                path = self._write_history(encoded=encoded)
+                original = path.read_bytes()
+                saved = snapshots.read_snapshot("enwiki", _PROJECT, _DAY)
+                assert saved.path == path
+                assert_frame_equal(saved.tables["members"], self.frame)
+                assert saved.manifest["metadata"]["article_totals"] is None
+                assert saved.path.read_bytes() == original
+
+    def test_enum_storage_preserves_extra_labels_empty_text_and_nulls(
+        self,
+    ) -> None:
+        """Decode Enum declarations without coercing raw labels."""
+        self.frame = pl.DataFrame(
+            [(1, "Legacy", "无"), (2, "", "極高"), (3, None, None)],
+            schema=_SCHEMA,
+            orient="row",
         )
-        assert saved.manifest["metadata"]["snapshot_date"] == "2026-12-31"
-        assert saved.manifest["metadata"]["scheduled_for"] == (
-            "2027-01-01T00:00:00+00:00"
-        )
+        path = self._write_history()
+        assert isinstance(pl.read_parquet_schema(path)["pa_class"], pl.Enum)
+        saved = snapshots.read_snapshot("enwiki", _PROJECT, _DAY)
+        assert_frame_equal(saved.tables["members"], self.frame)
+
+    def test_predecessor_keeps_missing_dates_and_preview_precedence(
+        self,
+    ) -> None:
+        """Read earlier facts and prefer production on equal dates."""
+        first = self._write_history()
+        later = _DAY + dt.timedelta(days=2)
+        self._write_history(later, dry=True)
+        production = self._write_history(later)
         assert (
             snapshots.read_snapshot(
-                self.site,
-                _PROJECT,
-                dt.date(2026, 12, 30),
-            )
-            is None
-        )
-        repeated = self._capture(observed_at=delayed + dt.timedelta(hours=1))
-        assert repeated.manifest == saved.manifest
-        self.query.assert_called_once_with(self.site, _PROJECT)
-
-    def test_repeated_consumers_reuse_original_capture(self) -> None:
-        """Share facts without changing the original capture time."""
-        first = self._capture()
-        original = first.path.read_bytes()
-        self.query.side_effect = AssertionError("Unexpected source query")
-        for dry in (False, True):
-            repeated = self._capture(
-                observed_at=_NOW + dt.timedelta(hours=1),
-                dry=dry,
-            )
-            assert repeated.path == first.path
-            assert repeated.manifest == first.manifest
-            assert_frame_equal(
-                repeated.tables["members"],
-                first.tables["members"],
-            )
-        assert first.path.read_bytes() == original
-        assert not (self.root / "dry-run").exists()
-
-    def test_enum_storage_preserves_legacy_labels_and_nulls(self) -> None:
-        """Return String facts while saving Enum declarations."""
-        self.query.return_value = pl.DataFrame({
-            "page_id": [1, 2, 3, 4],
-            "pa_class": ["Legacy", "", None, "FA"],
-            "pa_importance": ["无", "極高", None, "不适用"],
-        })
-        saved = self._capture()
-        stored = pl.read_parquet(saved.path)
-        assert isinstance(stored.schema["pa_class"], pl.Enum)
-        assert isinstance(stored.schema["pa_importance"], pl.Enum)
-        assert stored.columns == _LEGACY_COLUMNS
-        assert saved.manifest["columns"] == {
-            name: str(dtype) for name, dtype in stored.schema.items()
-        }
-        assert_frame_equal(saved.tables["members"], self.query.return_value)
-        assert_frame_equal(
-            snapshots.read_snapshot(self.site, _PROJECT, _DAY).tables[
-                "members"
-            ],
-            self.query.return_value,
-        )
-
-    def test_legacy_string_file_remains_readable(self) -> None:
-        """Read older compact String datasets without rewriting them."""
-        self.query.return_value = _members().select(_LEGACY_COLUMNS)
-        saved = self._capture()
-        manifest = dict(saved.manifest)
-        manifest.pop("columns")
-        saved.tables["members"].write_parquet(
-            saved.path,
-            metadata={"aranami": json.dumps(manifest)},
-        )
-        original = saved.path.read_bytes()
-        restored = snapshots.read_snapshot(self.site, _PROJECT, _DAY)
-        assert_frame_equal(restored.tables["members"], saved.tables["members"])
-        assert saved.path.read_bytes() == original
-
-    def test_changed_enum_declaration_is_rejected(self) -> None:
-        """Validate declarations before decoding source values."""
-        saved = self._capture()
-        metadata = pl.read_parquet_metadata(saved.path)
-        pl.read_parquet(saved.path).with_columns(
-            pl.col("pa_class").cast(pl.Enum(["C"])),
-        ).write_parquet(saved.path, metadata={"aranami": metadata["aranami"]})
-        with self.assertRaisesRegex(ValueError, "column declaration"):
-            snapshots.read_snapshot(self.site, _PROJECT, _DAY)
-
-    def test_legacy_snapshot_reuse_never_reconstructs_missing_titles(
-        self,
-    ) -> None:
-        """Keep old checksums and unknown identities during retries."""
-        self.query.return_value = _members().select(_LEGACY_COLUMNS)
-        saved = self._capture()
-        original = saved.path.read_bytes()
-        self.query.return_value = _members()
-        self.query.reset_mock()
-        repeated = self._capture(observed_at=_NOW + dt.timedelta(hours=1))
-        assert repeated.tables["members"].columns == _LEGACY_COLUMNS
-        assert repeated.manifest == saved.manifest
-        assert repeated.path.read_bytes() == original
-        self.query.assert_not_called()
-
-    def test_saved_titles_and_namespaces_are_integrity_checked(self) -> None:
-        """Reject altered identities with an unchanged source digest."""
-        saved = self._capture()
-        for changed in (
-            pl.lit("Moved").alias("page_title"),
-            pl.lit(118, dtype=pl.Int64).alias("page_namespace"),
-            pl.lit(1, dtype=pl.Int64).alias("page_is_redirect"),
-        ):
-            with self.subTest(changed=changed):
-                encode_assessments(
-                    saved.tables["members"].with_columns(changed),
-                ).write_parquet(
-                    saved.path,
-                    metadata={"aranami": json.dumps(saved.manifest)},
-                )
-                with self.assertRaisesRegex(ValueError, "integrity"):
-                    snapshots.read_snapshot(self.site, _PROJECT, _DAY)
-
-    def test_partial_historical_identity_preserves_unknown_redirects(
-        self,
-    ) -> None:
-        """Retain old title evidence without assuming redirect state."""
-        self.query.return_value = _members().drop("page_is_redirect")
-        saved = self._capture()
-        assert saved.tables["members"].columns == list(_SAVED_SCHEMA)
-        assert (
-            saved.tables["members"]["page_is_redirect"].null_count()
-            == saved.tables["members"].height
-        )
-        assert saved.tables["members"]["page_title"].to_list() == [
-            "First",
-            "Second",
-        ]
-        assert (
-            saved.manifest["metadata"]["article_totals"]["redirects"] is None
-        )
-        self.query.return_value = saved.tables["members"]
-        retained = self._capture(observed_at=_NOW + dt.timedelta(days=1))
-        assert_frame_equal(retained.tables["members"], saved.tables["members"])
-        assert (
-            retained.manifest["metadata"]["article_totals"]
-            == saved.manifest["metadata"]["article_totals"]
-        )
-
-    def test_read_accessor_retains_titles_without_revision_references(
-        self,
-    ) -> None:
-        """Read saved identities without recollecting source rows."""
-        self.query.return_value = _members().with_columns(
-            pl.Series("page_revision", [2002, 2001], dtype=pl.Int64),
-            pl.Series("talk_revision", [3002, None], dtype=pl.Int64),
-        )
-        first = self._capture()
-        self.query.side_effect = AssertionError("Unexpected source query")
-        saved = snapshots.read_snapshot(self.site, _PROJECT, _DAY)
-        assert saved.path == first.path
-        assert saved.tables["members"].columns == list(_SAVED_SCHEMA)
-        assert_frame_equal(saved.tables["members"], first.tables["members"])
-
-    def test_preview_isolation_and_production_precedence(self) -> None:
-        """Isolate previews and prefer production observations."""
-        preview = self._capture(dry=True)
-        assert preview.path == self._capture(dry=True).path
-        assert preview.path.is_relative_to(self.root / "dry-run")
-        assert snapshots.read_snapshot(self.site, _PROJECT, _DAY) is None
-        self.query.return_value = _members().head(1)
-        live = self._capture(observed_at=_NOW + dt.timedelta(minutes=2))
-        assert live.path != preview.path
-        assert live.tables["members"].height == 1
-        assert self.query.call_count == _CAPTURE_COUNT
-        assert self._capture(dry=True).path == live.path
-
-    def test_predecessor_is_earlier_and_does_not_fill_missing_dates(
-        self,
-    ) -> None:
-        """Read the latest earlier observation without collection."""
-        first = self._capture()
-        second = self._capture(observed_at=_NOW + dt.timedelta(days=2))
-        assert second.path.name == "assessments-20260203.parquet"
-        self.query.side_effect = AssertionError("Read accessor must not query")
-        assert (
-            snapshots.read_snapshot(
-                self.site,
+                "enwiki",
                 _PROJECT,
                 _DAY + dt.timedelta(days=1),
             )
@@ -335,140 +177,123 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
         )
         for before, expected in (
             (_DAY, None),
-            (_DAY + dt.timedelta(days=2), first.path),
-            (_DAY + dt.timedelta(days=3), second.path),
+            (_DAY + dt.timedelta(days=2), first),
+            (_DAY + dt.timedelta(days=3), production),
         ):
             saved = snapshots.read_previous_snapshot(
-                self.site,
+                "enwiki",
                 _PROJECT,
-                before=before,
+                before,
+                dry=True,
             )
             assert (saved.path if saved else None) == expected
 
-    def test_timezone_normalization_precedes_date_selection(self) -> None:
-        """Use the completed UTC date, independent of the local date."""
-        local = dt.datetime(
-            2026,
-            2,
-            2,
-            1,
-            tzinfo=dt.timezone(dt.timedelta(hours=8)),
-        )
-        saved = self._capture(observed_at=local)
-        assert saved.path.name == "assessments-20260131.parquet"
-        assert saved.manifest["calculated_at"] == (
-            "2026-02-01T17:00:00.000000+00:00"
-        )
-
-    def test_naive_time_fails_before_collection(self) -> None:
-        """Reject timestamps with an ambiguous UTC date."""
-        with self.assertRaisesRegex(ValueError, "aware timestamp"):
-            self._capture(observed_at=_NOW.replace(tzinfo=None))
-        self.query.assert_not_called()
-        assert not (self.root / "reports").exists()
-
-    def test_invalid_source_never_creates_a_daily_file(self) -> None:
-        """Reject missing grades, ambiguous IDs, and invalid dtypes."""
-        cases = {
-            "empty": _members().clear(),
-            "missing": _members().drop("pa_importance"),
-            "wrong-type": _members().with_columns(
-                pl.col("page_id").cast(pl.String),
-            ),
-            "duplicate": _members().with_columns(
-                pl.lit(1, dtype=pl.Int64).alias("page_id"),
-            ),
-            "zero": _members().with_columns(
-                pl.lit(0, dtype=pl.Int64).alias("page_id"),
-            ),
-            "unknown-id": _members().with_columns(
-                pl.lit(None, dtype=pl.Int64).alias("page_id"),
-            ),
-            "grade-type": _members().with_columns(
-                pl.lit(1, dtype=pl.Int64).alias("pa_class"),
-            ),
-            "title-type": _members().with_columns(
-                pl.lit(1, dtype=pl.Int64).alias("page_title"),
-            ),
-            "blank-title": _members().with_columns(
-                pl.lit(" ").alias("page_title"),
-            ),
-            "namespace": _members().with_columns(
-                pl.lit(-1, dtype=pl.Int64).alias("page_namespace"),
-            ),
-            "redirect": _members().with_columns(
-                pl.lit(2, dtype=pl.Int64).alias("page_is_redirect"),
-            ),
-        }
-        for name, frame in cases.items():
-            with self.subTest(name=name):
-                self.query.return_value = frame
-                with self.assertRaises(ValueError):
-                    self._capture()
-                assert (
-                    snapshots.read_snapshot(
-                        self.site,
-                        _PROJECT,
-                        _DAY,
-                    )
-                    is None
-                )
-
-    def test_source_failure_can_retry_without_selecting_data(self) -> None:
-        """Select a capture only after the source query completes."""
-        self.query.side_effect = RuntimeError("Replica unavailable")
-        with self.assertRaisesRegex(RuntimeError, "Replica unavailable"):
-            self._capture()
-        assert snapshots.read_snapshot(self.site, _PROJECT, _DAY) is None
-        self.query.side_effect = None
-        actual = _NOW + dt.timedelta(minutes=3)
-        saved = self._capture(observed_at=actual)
-        assert saved.manifest["calculated_at"] == actual.isoformat(
-            timespec="microseconds",
-        )
-
-    def test_failed_write_preserves_prior_date_and_allows_retry(self) -> None:
-        """Keep prior evidence when saving a later observation fails."""
-        first = self._capture()
-        original = first.path.read_bytes()
-        later = _NOW + dt.timedelta(days=1)
-        with (
-            patch.object(
-                pl.DataFrame,
-                "write_parquet",
-                side_effect=OSError("disk full"),
-            ),
-            self.assertRaises(OSError),
-        ):
-            self._capture(observed_at=later)
-        assert first.path.read_bytes() == original
+    def test_preview_history_is_not_visible_to_production(self) -> None:
+        """Expose historical previews only to explicit readers."""
+        path = self._write_history(dry=True)
+        before = _DAY + dt.timedelta(days=1)
+        assert snapshots.read_snapshot("enwiki", _PROJECT, _DAY) is None
         assert (
-            snapshots.read_snapshot(
-                self.site,
-                _PROJECT,
-                _DAY + dt.timedelta(days=1),
-            )
+            snapshots.read_previous_snapshot("enwiki", _PROJECT, before)
             is None
         )
-        assert self._capture(observed_at=later).path.is_file()
+        assert (
+            snapshots.read_previous_snapshot(
+                "enwiki",
+                _PROJECT,
+                before,
+                dry=True,
+            ).path
+            == path
+        )
 
-    def test_stripped_metadata_fails_without_recollection(self) -> None:
-        """Reject tables after their identity metadata is lost."""
-        saved = self._capture()
-        saved.tables["members"].write_parquet(saved.path)
-        original = saved.path.read_bytes()
-        self.query.side_effect = AssertionError("Do not replace bad evidence")
+    def test_changed_table_fails_integrity_without_rewriting(self) -> None:
+        """Reject alterations while preserving the damaged file."""
+        path = self._write_history()
+        metadata = pl.read_parquet_metadata(path)
+        self.frame.with_columns(pl.lit("FA").alias("pa_class")).write_parquet(
+            path,
+            metadata=metadata,
+        )
+        original = path.read_bytes()
         with self.assertRaises(ValueError):
-            self._capture()
-        assert saved.path.read_bytes() == original
+            snapshots.read_snapshot("enwiki", _PROJECT, _DAY)
+        assert path.read_bytes() == original
 
-    def test_concurrent_consumers_capture_once(self) -> None:
-        """Serialize collection and share one completed-day file."""
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [pool.submit(self._capture) for _ in range(2)]
-            saved = [future.result(timeout=10) for future in futures]
-        assert saved[0].path == saved[1].path
-        self.query.assert_called_once_with(self.site, _PROJECT)
+    def test_saved_enum_declaration_excluding_observed_values_fails(
+        self,
+    ) -> None:
+        """Reject vocabularies that exclude saved observations."""
+        path = self._write_history()
+        metadata = pl.read_parquet_metadata(path)
+        manifest = json.loads(metadata["aranami"])
+        manifest["columns"]["pa_class"] = str(pl.Enum(["FA"]))
+        self.frame.write_parquet(
+            path,
+            metadata={"aranami": json.dumps(manifest)},
+        )
+        with self.assertRaises(ValueError):
+            snapshots.read_snapshot("enwiki", _PROJECT, _DAY)
+
+    def test_missing_or_contradictory_metadata_fails(self) -> None:
+        """Reject missing identity and false project or total facts."""
+        for update in (
+            None,
+            {"target": {"site": "enwiki", "title": "Other"}},
+            {"rows": True},
+            {
+                "metadata": {
+                    "project": _PROJECT,
+                    "snapshot_date": _DAY.isoformat(),
+                    "scheduled_for": "2026-02-02T00:00:00+00:00",
+                    "article_totals": {
+                        "count": True,
+                        "class": [],
+                        "importance": [],
+                    },
+                },
+            },
+        ):
+            with self.subTest(update=update):
+                path = self._write_history()
+                if update is None:
+                    self.frame.write_parquet(path)
+                else:
+                    metadata = pl.read_parquet_metadata(path)
+                    manifest = json.loads(metadata["aranami"])
+                    manifest.update(update)
+                    pl.read_parquet(path).write_parquet(
+                        path,
+                        metadata={"aranami": json.dumps(manifest)},
+                    )
+                with self.assertRaises(ValueError):
+                    snapshots.read_snapshot("enwiki", _PROJECT, _DAY)
+
+    def test_saved_title_namespace_and_redirect_are_integrity_checked(
+        self,
+    ) -> None:
+        """Reject silent alteration of saved page identities."""
+        self.frame = self.frame.with_columns(
+            pl.Series("page_title", ["First", "Second"]),
+            pl.Series("page_namespace", [14, 0], dtype=pl.Int64),
+            pl.Series("page_is_redirect", [None, 0], dtype=pl.Int64),
+        ).select(
+            "page_id",
+            "page_title",
+            "page_namespace",
+            "pa_class",
+            "pa_importance",
+            "page_is_redirect",
+        )
+        path = self._write_history()
+        saved = snapshots.read_snapshot("enwiki", _PROJECT, _DAY)
+        assert_frame_equal(saved.tables["members"], self.frame)
+        metadata = pl.read_parquet_metadata(path)
+        self.frame.with_columns(
+            pl.lit("Moved").alias("page_title"),
+        ).write_parquet(path, metadata=metadata)
+        with self.assertRaises(ValueError):
+            snapshots.read_snapshot("enwiki", _PROJECT, _DAY)
 
     def test_paths_separate_projects_sites_and_dates(self) -> None:
         """Separate source identities with safe path components."""
@@ -484,113 +309,3 @@ class TestProjectAssessmentSnapshots(TestCase):  # ruff: ignore[too-many-public-
             for path in paths
         )
         assert all(path.suffix == ".parquet" for path in paths)
-
-    def test_article_totals_exclude_other_namespaces(self) -> None:
-        """Keep article-only aggregates beside the page observations."""
-        saved = self._capture()
-        assert saved.manifest["metadata"]["article_totals"] == {
-            "count": 1,
-            "nonarticles": {
-                "count": 1,
-                "class": [{"value": None, "count": 1}],
-            },
-            "redirects": 0,
-            "class": [{"value": "C", "count": 1}],
-            "importance": [{"value": "Low", "count": 1}],
-        }
-        self.query.side_effect = AssertionError("Read accessor must not query")
-        assert snapshots.read_snapshot(
-            self.site,
-            _PROJECT,
-            _DAY,
-        ).manifest["metadata"]["article_totals"] == {
-            "count": 1,
-            "nonarticles": {
-                "count": 1,
-                "class": [{"value": None, "count": 1}],
-            },
-            "redirects": 0,
-            "class": [{"value": "C", "count": 1}],
-            "importance": [{"value": "Low", "count": 1}],
-        }
-
-    def test_disambiguations_and_redirects_have_separate_totals(self) -> None:
-        """Keep nonarticles in project totals and exclude redirects."""
-        self.query.return_value = pl.DataFrame(
-            {
-                "page_id": [1, 2, 3, 4],
-                "page_namespace": [0, 0, 14, 0],
-                "page_is_redirect": [0, 0, 0, 1],
-                "pa_class": ["FA", "Disambig", "Category", "Redirect"],
-                "pa_importance": ["Top", None, None, None],
-            },
-            schema_overrides={
-                "page_id": pl.Int64,
-                "page_namespace": pl.Int64,
-                "page_is_redirect": pl.Int64,
-            },
-        )
-        totals = self._capture().manifest["metadata"]["article_totals"]
-        assert totals["count"] == 1
-        assert totals["nonarticles"] == {
-            "count": 2,
-            "class": [
-                {"value": "Category", "count": 1},
-                {"value": "Disambig", "count": 1},
-            ],
-        }
-        assert totals["redirects"] == 1
-
-    def test_changed_table_keeps_old_digest_and_fails_validation(self) -> None:
-        """Detect changed source observations with retained metadata."""
-        saved = self._capture()
-        metadata = pl.read_parquet_metadata(saved.path)
-        saved.tables["members"].with_columns(
-            pl.lit("FA").alias("pa_class"),
-        ).write_parquet(saved.path, metadata=metadata)
-        original = saved.path.read_bytes()
-        self.query.side_effect = AssertionError("Do not replace bad evidence")
-        with self.assertRaises(ValueError):
-            snapshots.read_snapshot(self.site, _PROJECT, _DAY)
-        assert saved.path.read_bytes() == original
-
-    def test_changed_identity_metadata_is_rejected(self) -> None:
-        """Reject metadata that describes another project."""
-        saved = self._capture()
-        metadata = pl.read_parquet_metadata(saved.path)
-        manifest = json.loads(metadata["aranami"])
-        manifest["target"]["title"] = "Other project"
-        metadata["aranami"] = json.dumps(manifest)
-        saved.tables["members"].write_parquet(saved.path, metadata=metadata)
-        self.query.side_effect = AssertionError("Do not replace bad evidence")
-        with self.assertRaises(ValueError):
-            self._capture()
-
-    def test_invalid_article_totals_metadata_is_rejected(self) -> None:
-        """Reject unknown counts and contradictory grade totals."""
-        saved = self._capture()
-        original = pl.read_parquet_metadata(saved.path)
-        self.query.side_effect = AssertionError("Do not replace bad evidence")
-        for totals in (
-            [],
-            {"count": True, "class": [], "importance": []},
-            {
-                "count": 2,
-                "class": [{"value": "C", "count": 2}],
-                "importance": [{"value": "Low", "count": 2}],
-            },
-            {
-                "count": 1,
-                "class": [{"value": "FA", "count": 1}],
-                "importance": [{"value": "Low", "count": 1}],
-            },
-        ):
-            with self.subTest(totals=totals):
-                manifest = json.loads(original["aranami"])
-                manifest["metadata"]["article_totals"] = totals
-                encode_assessments(saved.tables["members"]).write_parquet(
-                    saved.path,
-                    metadata={"aranami": json.dumps(manifest)},
-                )
-                with self.assertRaises(ValueError):
-                    self._capture()

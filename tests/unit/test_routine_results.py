@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, override
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from backend.services.zhwiki import pexbot as pexbot_data
-from updater.jobs import JobContext, ProposedEdit, job_run, pexbot
+from runtime.jobs import JobContext, ProposedEdit, job_run, pexbot
+from tasks.zhwiki import pexbot as pexbot_data
 
 if TYPE_CHECKING:
     import logging
@@ -45,7 +45,7 @@ def _results(records: list[logging.LogRecord]) -> list[dict[str, object]]:
         if result is None:
             continue
         assert record.funcName == "routine_run"
-        assert record.name == "backend.support.execution"
+        assert record.name == "runtime.execution"
         assert result["schema"] == 1
         assert result["duration_seconds"] >= 0
         results.append(result)
@@ -64,7 +64,7 @@ class TestRoutineResults(TestCase):
         )
         for sink in (
             patch(
-                "updater.jobs._execution.open_run_log",
+                "runtime.jobs.context.open_run_log",
                 side_effect=nullcontext,
             ),
         ):
@@ -77,13 +77,14 @@ class TestRoutineResults(TestCase):
         """Count one save and reset the next routine's count."""
         context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
         page = Mock(text="old")
+        page.get.side_effect = ["old", "same", "new"]
         with (
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
                 return_value=page,
             ),
             self.assertLogs(
-                "backend.support.execution",
+                "runtime.execution",
                 level="INFO",
             ) as captured,
         ):
@@ -133,10 +134,10 @@ class TestRoutineResults(TestCase):
         context = JobContext(_site(), dt.date(2026, 10, 18), dry=True)
         with (
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
             ) as page,
             self.assertLogs(
-                "backend.support.execution",
+                "runtime.execution",
                 level="INFO",
             ) as captured,
             job_run("dyks", dry=False, context=context),
@@ -167,11 +168,11 @@ class TestRoutineResults(TestCase):
             with (
                 self.subTest(status=status),
                 patch(
-                    "updater.jobs._execution.pywikibot.Page",
+                    "updater.publisher.pywikibot.Page",
                     return_value=Mock(text="old"),
                 ),
                 self.assertLogs(
-                    "backend.support.execution",
+                    "runtime.execution",
                     level="INFO",
                 ) as captured,
                 self.assertRaises(RuntimeError)
@@ -193,14 +194,15 @@ class TestRoutineResults(TestCase):
         """A raised save operation cannot become a confirmed update."""
         context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
         page = Mock(text="old")
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         page.save.side_effect = RuntimeError("Save rejected.")
         with (
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
                 return_value=page,
             ),
             self.assertLogs(
-                "backend.support.execution",
+                "runtime.execution",
                 level="INFO",
             ) as captured,
             self.assertRaises(RuntimeError),
@@ -211,7 +213,7 @@ class TestRoutineResults(TestCase):
             )
         (result,) = _results(captured.records)
         assert result["status"] == "failed"
-        assert result["updated"] == 0
+        assert result["updated"] is None
 
     def test_delegated_refresh_never_claims_a_confirmed_edit(self) -> None:
         """Keep refresh completion unknown and skipped writes zero."""
@@ -237,7 +239,7 @@ class TestRoutineResults(TestCase):
                 ),
                 patch.object(pexbot, "_refresh") as refresh,
                 self.assertLogs(
-                    "backend.support.execution",
+                    "runtime.execution",
                     level="INFO",
                 ) as captured,
             ):
@@ -262,7 +264,7 @@ class TestRoutineResults(TestCase):
                 side_effect=RuntimeError("Stream lost."),
             ),
             self.assertLogs(
-                "backend.support.execution",
+                "runtime.execution",
                 level="INFO",
             ) as captured,
             self.assertRaises(ExceptionGroup),

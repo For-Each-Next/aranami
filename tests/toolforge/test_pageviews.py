@@ -6,32 +6,13 @@
 from __future__ import annotations
 
 import datetime as dt
-from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from backend.website.pageviews import collect_pageviews
+from wiki_fixtures import offline_site as _site
+
 from shared.identity import USER_AGENT
-
-
-def _site() -> SimpleNamespace:
-    """Supply Topviews site metadata without requests.
-
-    Returns:
-        In-memory namespace names and the configured main-page title.
-    """
-    return SimpleNamespace(
-        siteinfo={
-            "mainpage": "Wikipedia:首页",
-            "namespaces": {
-                "0": {"*": ""},
-                "4": {"*": "Wikipedia"},
-                "14": {"*": "Category"},
-                "100": {"*": "Portal"},
-                "-1": {"*": "Special"},
-            },
-        },
-    )
+from tasks.website.pageviews import collect_pageviews
 
 
 def _response(
@@ -113,7 +94,7 @@ class TestDailyPageviews(TestCase):
             ]
         )
         with patch(
-            "backend.website.pageviews.http.fetch",
+            "tasks.website.pageviews.http.fetch",
             return_value=_response("15", articles),
         ):
             result = collect_pageviews(
@@ -155,7 +136,7 @@ class TestDailyPageviews(TestCase):
             for index, title in enumerate(titles, start=1)
         ]
         with patch(
-            "backend.website.pageviews.http.fetch",
+            "tasks.website.pageviews.http.fetch",
             return_value=_response(articles=articles),
         ):
             result = collect_pageviews(
@@ -184,7 +165,7 @@ class TestDailyPageviews(TestCase):
             ],
         )
         with patch(
-            "backend.website.pageviews.http.fetch",
+            "tasks.website.pageviews.http.fetch",
             return_value=response,
         ) as fetch:
             result = collect_pageviews(
@@ -241,7 +222,7 @@ class TestDailyPageviews(TestCase):
             for index in range(14)
         ]
         with patch(
-            "backend.website.pageviews.http.fetch",
+            "tasks.website.pageviews.http.fetch",
             return_value=_response(articles=articles),
         ):
             result = collect_pageviews(
@@ -261,7 +242,7 @@ class TestDailyPageviews(TestCase):
     def test_only_absent_daily_results_fall_back_to_older_dates() -> None:
         """Skip HTTP 404 and explicit no-result responses only."""
         with patch(
-            "backend.website.pageviews.http.fetch",
+            "tasks.website.pageviews.http.fetch",
             side_effect=[
                 Mock(status_code=404),
                 Mock(status_code=200, json=Mock(return_value={"items": []})),
@@ -293,7 +274,7 @@ class TestDailyPageviews(TestCase):
             with (
                 self.subTest(articles=articles),
                 patch(
-                    "backend.website.pageviews.http.fetch",
+                    "tasks.website.pageviews.http.fetch",
                     return_value=_response(articles=articles),
                 ) as fetch,
             ):
@@ -310,7 +291,7 @@ class TestDailyPageviews(TestCase):
         """Leave exhausted missing observations unavailable."""
         with (
             patch(
-                "backend.website.pageviews.http.fetch",
+                "tasks.website.pageviews.http.fetch",
                 return_value=Mock(status_code=404),
             ) as fetch,
             self.assertRaisesRegex(RuntimeError, "past seven dates"),
@@ -342,7 +323,7 @@ class TestDailyPageviews(TestCase):
             with (
                 self.subTest(response=response),
                 patch(
-                    "backend.website.pageviews.http.fetch",
+                    "tasks.website.pageviews.http.fetch",
                     return_value=response,
                 ) as fetch,
                 self.assertRaises((OSError, RuntimeError)),
@@ -368,7 +349,7 @@ class TestDailyPageviews(TestCase):
             with (
                 self.subTest(key=key),
                 patch(
-                    "backend.website.pageviews.http.fetch",
+                    "tasks.website.pageviews.http.fetch",
                     return_value=response,
                 ) as fetch,
                 self.assertRaisesRegex(ValueError, "period"),
@@ -398,7 +379,7 @@ class TestDailyPageviews(TestCase):
             with (
                 self.subTest(changes=changes),
                 patch(
-                    "backend.website.pageviews.http.fetch",
+                    "tasks.website.pageviews.http.fetch",
                     return_value=_response(articles=[article]),
                 ),
                 self.assertRaisesRegex(ValueError, "title, rank, or views"),
@@ -422,7 +403,7 @@ class TestDailyPageviews(TestCase):
             with (
                 self.subTest(value=value),
                 patch(
-                    "backend.website.pageviews.http.fetch",
+                    "tasks.website.pageviews.http.fetch",
                     return_value=Mock(
                         status_code=200,
                         json=Mock(return_value=value),

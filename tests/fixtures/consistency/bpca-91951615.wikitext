@@ -1,0 +1,31 @@
+{{NoteTA
+| G1 = Games
+}}
+
+{{WikiProject:电子游戏/Sidebar|PJ:VG/BPCA|专题条目=expanded}}
+
+[[File:Symbol bplus class.svg|64px|left|alt=電子遊戲專題乙上級內容標誌]]
+
+'''乙上级条目'''指電子遊戲專題內，经獨立编者评审，确认品质达到[[Wikipedia:WIABCA|乙上級标准]]的条目。这些条目编写精心、可供查證而無原創研究、囊括主题的主要层面，有当选[[Wikipedia:优良条目|优良条目]]的潜质。
+
+电子游戏专题共有'''{{ACbPaC|project=电子游戏|formatnum=yes|FA|A|GA|Bplus|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}'''篇条目，其中乙上级条目有'''{{ACbPaC|project=电子游戏|formatnum=yes|Bplus}}'''篇。此外，专题还有[[WikiProject:电子游戏/典范内容|典范（特色）内容]]'''{{ACbPaC|project=电子游戏|formatnum=yes|FA|FL}}'''篇、[[WikiProject:电子游戏/优良条目|优良条目]]'''{{ACbPaC|project=电子游戏|formatnum=yes|GA}}'''篇，故专题中达到或超越乙上级水准的条目有'''{{ACbPaC|project=电子游戏|formatnum=yes|FA|A|GA|Bplus|FL|AL}}'''篇（约占1/{{#expr:{{ACbPaC|project=电子游戏|FA|A|GA|Bplus|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}/{{ACbPaC|project=电子游戏|FA|A|GA|Bplus|FL|AL}} round 0}}或{{percentage|{{ACbPaC|project=电子游戏|FA|A|GA|Bplus|FL|AL}}|{{ACbPaC|project=电子游戏|FA|A|GA|Bplus|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}|1}}）。
+
+下方列出专题中的乙上级条目，以入选时间逆序排列。
+
+== 当前乙上级条目 ==
+
+{{div col|colwidth=22em}}
+# {{class/icon|bplus}} [[:哥倫比婭]]<small>（2026-03-13）</small>
+# {{class/icon|bplus}} [[:高能手办团]]<small>（2026-01-31）</small>
+# {{class/icon|bplus}} [[:旧式歌剧]]<small>（2025-11-18）</small>
+# {{class/icon|bplus}} [[:聖園彌香]]<small>（2025-11-07）</small>
+# {{class/icon|bplus}} [[:70亿人]]<small>（2025-05-04）</small>
+# {{class/icon|bplus}} [[:斯露德 (游戏)]]<small>（2025-03-24）</small>
+# {{class/icon|bplus}} [[:計算機 (任天堂Switch)]]<small>（2025-03-04）</small>
+{{div col end}}
+
+== 参见 ==
+
+* [[:Category:请求乙上级评审的电子游戏条目]]
+
+[[Category:电子游戏专题遴选内容|C]]

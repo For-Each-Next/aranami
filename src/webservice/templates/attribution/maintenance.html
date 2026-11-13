@@ -1,0 +1,215 @@
+{% from "includes/attribution_card.html" import attribution_card with context %}
+<p>The maintenance overview uses the images from the corresponding Chinese Wikipedia templates. These local files are unchanged Wikimedia Commons originals. Each image retains its own license; common template images share one local file.</p>
+      <p>Templates without an explicit image inherit their actual message-box artwork from <a href="https://zh.wikipedia.org/w/index.php?title=Module%3AMessage%20box%2Fconfiguration&amp;oldid=95310635">Module:Message box/configuration</a>: <code>content</code> uses Ambox important.svg and <code>style</code> uses Edit-clear.svg. English and Japanese expansion templates share the image from <a href="https://zh.wikipedia.org/w/index.php?title=Template%3AExpand%20language&amp;oldid=92616975">Template:Expand language</a>.</p>
+      <p>The style category combines several maintenance templates; its representative image comes from the contributing Overly detailed template. Cards for text-only inline templates and tasks without a verified image use the Codex puzzle icon as a generic template symbol.</p>
+      <p>The two deletion images use <a href="/assets/icons/lgpl-2.1.html">LGPL version 2.1 or later</a>. Their source artwork is available from <a href="https://commons.wikimedia.org/wiki/File:Nuvola_filesystems_trashcan_full.png">Nuvola filesystems trashcan full.png</a>, <a href="https://commons.wikimedia.org/wiki/File:Fairytale_ark.png">Fairytale ark.png</a>, <a href="https://commons.wikimedia.org/wiki/File:Icono_aviso_borrar.png">Icono aviso borrar.png</a>, and <a href="https://commons.wikimedia.org/wiki/File:Delete.png">Delete.png</a>. Other interface artwork has <a href="/assets/icons/credits.html">separate credits</a> and <a href="/codex-license.html">Codex and Vue license notices</a>.</p>
+      <section class="section-flat" aria-labelledby="attribution-images"><h2 id="attribution-images" lang="{{ language_tag }}">{{ t.credits.images }}</h2><div class="attribution-grid">
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<svg width="28" height="28" viewBox="0 0 20 20" aria-hidden="true"><use href="/assets/icons/report-icons.svg#template"></use></svg>
+{% elif slot == 'title' %}Generic maintenance template
+{% elif slot == 'author' %}Wikimedia Design, the OOUI team, and other contributors. Grouped into a currentColor symbol without shape changes.
+{% elif slot == 'source' %}<a href="https://gerrit.wikimedia.org/g/design/codex/+/dcd478e318d99a0361723557d7ed135ffb57a682/packages/codex-icons/src/images/puzzle.svg">Codex puzzle icon source</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/ambox-globe-content.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/ambox-globe-content.svg">Ambox globe content.svg</a>
+{% elif slot == 'author' %}penubag; based on Information icon3.svg and Earth clip art.svg.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_globe_content.svg">Ambox globe content.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/b/bd/Ambox_globe_content.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_globe_content.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/ambox-important.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/ambox-important.svg">Ambox important.svg</a>
+{% elif slot == 'author' %}Dsmurat and penubag; based on Ambox scales.svg.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_important.svg">Ambox important.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/b/b4/Ambox_important.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_important.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/ambox-outdated-serious.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/ambox-outdated-serious.svg">Ambox outdated serious.svg</a>
+{% elif slot == 'author' %}penubag; clock by Tkgd2007.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_outdated_serious.svg">Ambox outdated serious.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/8/8f/Ambox_outdated_serious.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_outdated_serious.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/ambox-pr-orange.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/ambox-pr-orange.svg">Ambox PR orange.svg</a>
+{% elif slot == 'author' %}Gzhegozh.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_PR_orange.svg">Ambox PR orange.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/1/1a/Ambox_PR_orange.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_PR_orange.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/ambox-rewrite.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/ambox-rewrite.svg">Ambox rewrite.svg</a>
+{% elif slot == 'author' %}penubag.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_rewrite.svg">Ambox rewrite.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/1/1c/Ambox_rewrite.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_rewrite.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/ambox-scales.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/ambox-scales.svg">Ambox scales.svg</a>
+{% elif slot == 'author' %}penubag and Tkgd2007 (scales image); based on Emblem-scales.svg.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_scales.svg">Ambox scales.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/5/5c/Ambox_scales.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/licenses/by-sa/2.5">CC BY-SA 2.5</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/ambox-spelling.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/ambox-spelling.svg">Ambox spelling.svg</a>
+{% elif slot == 'author' %}Profoss.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_spelling.svg">Ambox spelling.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/d/d7/Ambox_spelling.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/licenses/by-sa/3.0">CC BY-SA 3.0</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/ambox-wikify.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/ambox-wikify.svg">Ambox wikify.svg</a>
+{% elif slot == 'author' %}penubag.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_wikify.svg">Ambox wikify.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/e/e1/Ambox_wikify.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Ambox_wikify.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/antistub.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/antistub.svg">Antistub.svg</a>
+{% elif slot == 'author' %}SVG derivative by McSush, based on Antistub.png by Adoomer.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Antistub.svg">Antistub.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/2/2a/Antistub.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="http://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/arrows-orphan.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/arrows-orphan.svg">Arrows-orphan.svg</a>
+{% elif slot == 'author' %}Author not identified on the Commons file page.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Arrows-orphan.svg">Arrows-orphan.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/2/2e/Arrows-orphan.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Arrows-orphan.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/copyright-problem.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/copyright-problem.svg">Copyright-problem.svg</a>
+{% elif slot == 'author' %}Coren; inspired by Emblem-important.svg.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Copyright-problem.svg">Copyright-problem.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/c/cf/Copyright-problem.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Copyright-problem.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/edit-clear.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/edit-clear.svg">Edit-clear.svg</a>
+{% elif slot == 'author' %}The Tango! project contributors.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Edit-clear.svg">Edit-clear.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/f/f2/Edit-clear.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Edit-clear.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/emblem-scales.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/emblem-scales.svg">Emblem-scales.svg</a>
+{% elif slot == 'author' %}Tkgd2007, Booyabazooka, and the Tango! project contributors; based on Unbalanced scales.svg.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Emblem-scales.svg">Emblem-scales.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/2/29/Emblem-scales.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/licenses/by-sa/2.5">CC BY-SA 2.5</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/icono-archivo-borrar.png" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/icono-archivo-borrar.png">Icono archivo borrar.png</a>
+{% elif slot == 'author' %}Composite author not identified on the Commons file page; based on Nuvola filesystems trashcan full.png by David Vignoni / ICON KING and Fairytale ark.png by Caihua (2004).
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Icono_archivo_borrar.png">Icono archivo borrar.png</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/b/b8/Icono_archivo_borrar.png">Original file download</a>.
+{% elif slot == 'license' %}<a href="/assets/icons/lgpl-2.1.html">LGPL-2.1-or-later</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/icono-aviso-borrar.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/icono-aviso-borrar.svg">Icono aviso borrar.svg</a>
+{% elif slot == 'author' %}SVG by Kxh; based on Icono aviso borrar.png, which combines Nuvola filesystems trashcan full.png by David Vignoni / ICON KING and Delete.png.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Icono_aviso_borrar.svg">Icono aviso borrar.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/e/ed/Icono_aviso_borrar.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="/assets/icons/lgpl-2.1.html">LGPL-2.1-or-later</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/merge-arrows.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/merge-arrows.svg">Merge-arrows.svg</a>
+{% elif slot == 'author' %}Erin Silversmith; based on Merge-arrows.gif by Lifeisunfair and the former Merge-arrows2.svg by Rei-artur.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Merge-arrows.svg">Merge-arrows.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/5/52/Merge-arrows.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Merge-arrows.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/split-arrows.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/split-arrows.svg">Split-arrows.svg</a>
+{% elif slot == 'author' %}Erin Silversmith.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Split-arrows.svg">Split-arrows.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/a/a7/Split-arrows.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Split-arrows.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/system-search.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/system-search.svg">System-search.svg</a>
+{% elif slot == 'author' %}The Tango! project contributors.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:System-search.svg">System-search.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/1/17/System-search.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:System-search.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/tango-nosources.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/tango-nosources.svg">Tango-nosources.svg</a>
+{% elif slot == 'author' %}RaminusFalcon; based on the Tango Project.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Tango-nosources.svg">Tango-nosources.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/4/4e/Tango-nosources.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/licenses/by-sa/2.5">CC BY-SA 2.5</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/text-document-with-red-question-mark.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/text-document-with-red-question-mark.svg">Text document with red question mark.svg</a>
+{% elif slot == 'author' %}Benjamin D. Esham (bdesham); based on Text-x-generic.svg from the Tango Project.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Text_document_with_red_question_mark.svg">Text document with red question mark.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/a/a4/Text_document_with_red_question_mark.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Text_document_with_red_question_mark.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/translation-to-zh-arrow.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/translation-to-zh-arrow.svg">Translation to zh arrow.svg</a>
+{% elif slot == 'author' %}Mikepanhu, as attributed by the Commons file page based on its copyright claims.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Translation_to_zh_arrow.svg">Translation to zh arrow.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/d/da/Translation_to_zh_arrow.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="http://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/maintenance/wiki-letter-w.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/maintenance/wiki-letter-w.svg">Wiki letter w.svg</a>
+{% elif slot == 'author' %}SVG by Jarkko Piiroinen; rights, design, and origin: Wikimedia Foundation.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Wiki_letter_w.svg">Wiki letter w.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/6/6c/Wiki_letter_w.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/licenses/by-sa/3.0">CC BY-SA 3.0</a>
+{% endif %}{% endcall %}
+</div></section>
+      <section class="section-flat" aria-labelledby="template-correspondence">
+        <h2 id="template-correspondence" lang="{{ language_tag }}">{{ t.credits.correspondence }}</h2>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Maintenance template correspondence">
+          <table><caption>Maintenance tasks and verified template images</caption><thead><tr><th scope="col">Task</th><th scope="col" lang="{{ language_tag }}">{{ t.credits.main_category }}</th><th scope="col">Template revision</th><th scope="col">Image</th></tr></thead><tbody>
+          <tr><th scope="row"><code>afd</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E6%9D%A1%E7%9B%AE%E5%88%A0%E9%99%A4%E5%80%99%E9%80%89" lang="zh">条目删除候选</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AAfd&amp;oldid=83265550">Template:Afd</a></td><td><a href="/assets/icons/maintenance/icono-aviso-borrar.svg">Icono aviso borrar.svg</a></td></tr>
+          <tr><th scope="row"><code>csd</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E5%BF%AB%E9%80%9F%E5%88%A0%E9%99%A4%E5%80%99%E9%80%89" lang="zh">快速删除候选</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ADelete&amp;oldid=89648764">Template:Delete</a></td><td><a href="/assets/icons/maintenance/icono-archivo-borrar.png">Icono archivo borrar.png</a></td></tr>
+          <tr><th scope="row"><code>copyvio</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E6%80%80%E7%96%91%E4%BE%B5%E7%8A%AF%E7%89%88%E6%9D%83%E9%A1%B5%E9%9D%A2" lang="zh">怀疑侵犯版权页面</a><br><a href="https://zh.wikipedia.org/wiki/Category:%E5%85%A7%E5%AE%B9%E7%96%91%E4%BC%BC%E6%8B%B7%E8%B2%9D%E5%BE%8C%E8%B2%BC%E4%B8%8A%E7%9A%84%E9%A0%81%E9%9D%A2" lang="zh">內容疑似拷貝後貼上的頁面</a><br><a href="https://zh.wikipedia.org/wiki/Category:%E6%8C%87%E6%98%8E%E4%BE%86%E6%BA%90%E7%9A%84%E5%85%A7%E5%AE%B9%E7%96%91%E4%BC%BC%E6%8B%B7%E8%B2%9D%E5%BE%8C%E8%B2%BC%E4%B8%8A%E7%9A%84%E9%A0%81%E9%9D%A2" lang="zh">指明來源的內容疑似拷貝後貼上的頁面</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ACopyvio&amp;oldid=94428435">Template:Copyvio</a></td><td><a href="/assets/icons/maintenance/copyright-problem.svg">Copyright-problem.svg</a></td></tr>
+          <tr><th scope="row"><code>notability</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E4%B8%BB%E9%A1%8C%E4%B8%8D%E6%BB%BF%E8%B6%B3%E6%94%B6%E9%8C%84%E6%A8%99%E6%BA%96%E7%9A%84%E6%A2%9D%E7%9B%AE" lang="zh">主題不滿足收錄標準的條目</a><br><a href="https://zh.wikipedia.org/wiki/Category:%E6%89%80%E6%9C%89%E4%B8%BB%E9%A1%8C%E4%B8%8D%E6%BB%BF%E8%B6%B3%E6%94%B6%E9%8C%84%E6%A8%99%E6%BA%96%E7%9A%84%E6%A2%9D%E7%9B%AE" lang="zh">所有主題不滿足收錄標準的條目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ANotability&amp;oldid=85825857">Template:Notability</a></td><td><a href="/assets/icons/maintenance/ambox-important.svg">Ambox important.svg</a></td></tr>
+          <tr><th scope="row"><code>unreferenced</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E7%BC%BA%E5%B0%91%E6%9D%A5%E6%BA%90%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">缺少来源的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AUnreferenced&amp;oldid=76746706">Template:Unreferenced</a></td><td><a href="/assets/icons/maintenance/tango-nosources.svg">Tango-nosources.svg</a></td></tr>
+          <tr><th scope="row"><code>references</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A1%A5%E5%85%85%E6%9D%A5%E6%BA%90%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">需补充来源的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ARefimprove&amp;oldid=76746745">Template:Refimprove</a></td><td><a href="/assets/icons/maintenance/tango-nosources.svg">Tango-nosources.svg</a></td></tr>
+          <tr><th scope="row"><code>footnotes</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E7%BC%BA%E5%B0%91%E6%B3%A8%E8%84%9A%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">缺少注脚的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ANo%20footnotes&amp;oldid=65722277">Template:No footnotes</a></td><td><a href="/assets/icons/maintenance/text-document-with-red-question-mark.svg">Text document with red question mark.svg</a></td></tr>
+          <tr><th scope="row"><code>unreliable</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E5%8F%AF%E8%83%BD%E6%9C%89%E4%B8%8D%E5%8F%AF%E9%9D%A0%E4%BE%86%E6%BA%90%E7%9A%84%E6%A2%9D%E7%9B%AE" lang="zh">可能有不可靠來源的條目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AUnreliable%20sources&amp;oldid=87368286">Template:Unreliable sources</a></td><td><a href="/assets/icons/maintenance/text-document-with-red-question-mark.svg">Text document with red question mark.svg</a></td></tr>
+          <tr><th scope="row"><code>unsourced</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E6%9C%89%E6%9C%AA%E5%88%97%E6%98%8E%E6%9D%A5%E6%BA%90%E8%AF%AD%E5%8F%A5%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">有未列明来源语句的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ACitation%20needed&amp;oldid=88702012">Template:Citation needed</a></td><td>No image: inline text marker</td></tr>
+          <tr><th scope="row"><code>blp_sources</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E7%BC%BA%E5%B0%91%E5%8F%AF%E9%9D%A0%E6%9D%A5%E6%BA%90%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">缺少可靠来源的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ABLP%20sources&amp;oldid=88386927">Template:BLP sources</a></td><td><a href="/assets/icons/maintenance/ambox-important.svg">Ambox important.svg</a></td></tr>
+          <tr><th scope="row"><code>verify</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E6%9F%A5%E8%AD%89%E4%BE%86%E6%BA%90%E7%9A%84%E7%B6%AD%E5%9F%BA%E7%99%BE%E7%A7%91%E6%A2%9D%E7%9B%AE" lang="zh">需要查證來源的維基百科條目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AVerify%20source&amp;oldid=92336045">Template:Verify source</a></td><td>No image: inline text marker</td></tr>
+          <tr><th scope="row"><code>accuracy</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E5%87%86%E7%A1%AE%E6%80%A7%E6%9C%89%E4%BA%89%E8%AE%AE%E7%9A%84%E4%BD%9C%E5%93%81" lang="zh">准确性有争议的作品</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ADisputed&amp;oldid=78159585">Template:Disputed</a></td><td><a href="/assets/icons/maintenance/system-search.svg">System-search.svg</a></td></tr>
+          <tr><th scope="row"><code>neutrality</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E4%B8%AD%E7%AB%8B%E6%80%A7%E6%9C%89%E4%BA%89%E8%AE%AE%E7%9A%84%E4%BD%9C%E5%93%81" lang="zh">中立性有争议的作品</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3APOV&amp;oldid=94173003">Template:POV</a></td><td><a href="/assets/icons/maintenance/emblem-scales.svg">Emblem-scales.svg</a></td></tr>
+          <tr><th scope="row"><code>update</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E5%BE%85%E6%9B%B4%E6%96%B0%E6%9D%A1%E7%9B%AE" lang="zh">待更新条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AUpdate&amp;oldid=89149409">Template:Update</a></td><td><a href="/assets/icons/maintenance/ambox-outdated-serious.svg">Ambox outdated serious.svg</a></td></tr>
+          <tr><th scope="row"><code>original_research</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E5%8F%AF%E8%83%BD%E5%B8%A6%E6%9C%89%E5%8E%9F%E5%88%9B%E7%A0%94%E7%A9%B6%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">可能带有原创研究的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AOriginal%20research&amp;oldid=78915053">Template:Original research</a></td><td><a href="/assets/icons/maintenance/ambox-important.svg">Ambox important.svg</a></td></tr>
+          <tr><th scope="row"><code>fiction</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E5%8D%80%E5%88%86%E4%BA%8B%E5%AF%A6%E8%88%87%E8%99%9B%E6%A7%8B%E7%9A%84%E6%A2%9D%E7%9B%AE" lang="zh">需要區分事實與虛構的條目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AFiction&amp;oldid=76669761">Template:Fiction</a></td><td><a href="/assets/icons/maintenance/ambox-important.svg">Ambox important.svg</a></td></tr>
+          <tr><th scope="row"><code>globalize</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%83%A8%E5%88%86%E5%9C%B0%E5%8C%BA%E7%9A%84%E8%A7%82%E7%82%B9" lang="zh">部分地区的观点</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AGlobalize&amp;oldid=77171605">Template:Globalize</a></td><td><a href="/assets/icons/maintenance/ambox-globe-content.svg">Ambox globe content.svg</a></td></tr>
+          <tr><th scope="row"><code>trivia</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E6%B8%85%E7%90%86%E7%9A%84%E5%85%A7%E5%AE%B9%E7%91%A3%E7%A2%8E%E6%A2%9D%E7%9B%AE" lang="zh">需要清理的內容瑣碎條目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ATrivia&amp;oldid=86392310">Template:Trivia</a></td><td><a href="/assets/icons/maintenance/edit-clear.svg">Edit-clear.svg</a></td></tr>
+          <tr><th scope="row"><code>expand_english</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E5%BE%9E%E8%8B%B1%E8%AA%9E%E7%B6%AD%E5%9F%BA%E7%99%BE%E7%A7%91%E7%BF%BB%E8%AD%AF%E7%9A%84%E6%A2%9D%E7%9B%AE" lang="zh">需要從英語維基百科翻譯的條目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AExpand%20English&amp;oldid=92616959">Template:Expand English</a></td><td><a href="/assets/icons/maintenance/translation-to-zh-arrow.svg">Translation to zh arrow.svg</a></td></tr>
+          <tr><th scope="row"><code>expand_japanese</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E5%BE%9E%E6%97%A5%E8%AA%9E%E7%B6%AD%E5%9F%BA%E7%99%BE%E7%A7%91%E7%BF%BB%E8%AD%AF%E7%9A%84%E6%A2%9D%E7%9B%AE" lang="zh">需要從日語維基百科翻譯的條目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AExpand%20Japanese&amp;oldid=92327378">Template:Expand Japanese</a></td><td><a href="/assets/icons/maintenance/translation-to-zh-arrow.svg">Translation to zh arrow.svg</a></td></tr>
+          <tr><th scope="row"><code>translation</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E7%B2%97%E5%8A%A3%E7%BF%BB%E8%AF%91" lang="zh">粗劣翻译</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ARough%20translation&amp;oldid=92981024">Template:Rough translation</a></td><td><a href="/assets/icons/maintenance/translation-to-zh-arrow.svg">Translation to zh arrow.svg</a></td></tr>
+          <tr><th scope="row"><code>proofread_translation</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E6%A0%A1%E5%B0%8D%E7%9A%84%E7%BF%BB%E8%AD%AF%E9%A0%81%E9%9D%A2" lang="zh">需要校對的翻譯頁面</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AProofreader%20needed&amp;oldid=92617024">Template:Proofreader needed</a></td><td><a href="/assets/icons/maintenance/translation-to-zh-arrow.svg">Translation to zh arrow.svg</a></td></tr>
+          <tr><th scope="row"><code>dead_links</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E5%B8%A6%E6%9C%89%E5%A4%B1%E6%95%88%E9%93%BE%E6%8E%A5%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">带有失效链接的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ADead%20link&amp;oldid=85833788">Template:Dead link</a></td><td>No image: inline text marker</td></tr>
+          <tr><th scope="row"><code>orphan</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E7%BC%BA%E5%B0%91%E9%93%BE%E5%85%A5%E9%A1%B5%E9%9D%A2%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">缺少链入页面的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AOrphan&amp;oldid=41660919">Template:Orphan</a></td><td><a href="/assets/icons/maintenance/arrows-orphan.svg">Arrows-orphan.svg</a></td></tr>
+          <tr><th scope="row"><code>underlinked</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E6%9B%B4%E5%A4%9A%E5%86%85%E9%83%A8%E9%93%BE%E6%8E%A5%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">需要更多内部链接的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AUnderlinked&amp;oldid=92617100">Template:Underlinked</a></td><td><a href="/assets/icons/maintenance/ambox-wikify.svg">Ambox wikify.svg</a></td></tr>
+          <tr><th scope="row"><code>expand</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E6%89%A9%E5%85%85%E4%B8%AD%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">扩充中的条目</a><br><a href="https://zh.wikipedia.org/wiki/Category:%E6%89%80%E6%9C%89%E6%89%A9%E5%85%85%E4%B8%AD%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">所有扩充中的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AExpand&amp;oldid=62032111">Template:Expand</a></td><td><a href="/assets/icons/maintenance/antistub.svg">Antistub.svg</a></td></tr>
+          <tr><th scope="row"><code>lead</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E6%B8%85%E7%90%86%E5%B0%8E%E8%A8%80%E7%9A%84%E9%A0%81%E9%9D%A2" lang="zh">需要清理導言的頁面</a><br><a href="https://zh.wikipedia.org/wiki/Category:%E7%BC%BA%E5%A4%B1%E5%BA%8F%E8%A8%80%E7%AB%A0%E8%8A%82%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">缺失序言章节的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3A%E9%87%8D%E5%86%99%E5%AF%BC%E8%A8%80&amp;oldid=73686439">Template:重写导言</a></td><td><a href="/assets/icons/maintenance/edit-clear.svg">Edit-clear.svg</a></td></tr>
+          <tr><th scope="row"><code>merge</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E5%90%88%E4%BD%B5%E7%9A%84%E6%A2%9D%E7%9B%AE" lang="zh">需要合併的條目</a><br><a href="https://zh.wikipedia.org/wiki/Category:%E5%85%A8%E9%83%A8%E9%9C%80%E8%A6%81%E5%90%88%E4%BD%B5%E7%9A%84%E6%A2%9D%E7%9B%AE%E9%A0%81%E9%9D%A2" lang="zh">全部需要合併的條目頁面</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AMerge&amp;oldid=94465333">Template:Merge</a></td><td><a href="/assets/icons/maintenance/merge-arrows.svg">Merge-arrows.svg</a></td></tr>
+          <tr><th scope="row"><code>split</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E6%8B%86%E5%88%86%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">需要拆分的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ASplit&amp;oldid=77171957">Template:Split</a></td><td><a href="/assets/icons/maintenance/split-arrows.svg">Split-arrows.svg</a></td></tr>
+          <tr><th scope="row"><code>copyedit</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E6%A0%A1%E5%B0%8D%E7%9A%84%E9%A0%81%E9%9D%A2" lang="zh">需要校對的頁面</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ACopy%20edit&amp;oldid=91880610">Template:Copy edit</a></td><td><a href="/assets/icons/maintenance/ambox-spelling.svg">Ambox spelling.svg</a></td></tr>
+          <tr><th scope="row"><code>rewrite</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E7%BB%B4%E5%9F%BA%E7%99%BE%E7%A7%91%E9%9C%80%E8%A6%81%E9%87%8D%E5%86%99%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">维基百科需要重写的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ACleanup%20rewrite&amp;oldid=75757372">Template:Cleanup rewrite</a></td><td><a href="/assets/icons/maintenance/ambox-rewrite.svg">Ambox rewrite.svg</a></td></tr>
+          <tr><th scope="row"><code>style</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E7%BB%B4%E5%9F%BA%E7%99%BE%E7%A7%91%E9%9C%80%E8%A6%81%E9%A3%8E%E6%A0%BC%E7%BC%96%E8%BE%91%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">维基百科需要风格编辑的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AOverly%20detailed&amp;oldid=92617016">Template:Overly detailed</a></td><td><a href="/assets/icons/maintenance/edit-clear.svg">Edit-clear.svg</a></td></tr>
+          <tr><th scope="row"><code>weasel</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E6%9C%89%E9%9D%9E%E5%B8%B8%E6%A8%A1%E6%A3%B1%E4%B8%A4%E5%8F%AF%E6%88%96%E8%80%85%E5%8D%81%E5%88%86%E7%A9%BA%E6%B3%9B%E8%AF%AD%E5%8F%A5%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">有非常模棱两可或者十分空泛语句的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AWeasel&amp;oldid=70357909">Template:Weasel</a></td><td><a href="/assets/icons/maintenance/ambox-important.svg">Ambox important.svg</a></td></tr>
+          <tr><th scope="row"><code>advert</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E6%B8%85%E7%90%86%E7%9A%84%E7%96%91%E4%BC%BC%E5%B9%BF%E5%91%8A%E6%9D%A1%E7%9B%AE" lang="zh">需要清理的疑似广告条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AAdvert&amp;oldid=91346695">Template:Advert</a></td><td><a href="/assets/icons/maintenance/ambox-pr-orange.svg">Ambox PR orange.svg</a></td></tr>
+          <tr><th scope="row"><code>selfpromotion</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E5%90%AB%E6%9C%89%E8%87%AA%E6%88%91%E5%AE%A3%E5%82%B3%E5%85%A7%E5%AE%B9%E7%9A%84%E4%BD%9C%E5%93%81" lang="zh">含有自我宣傳內容的作品</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3APeacock&amp;oldid=92617022">Template:Peacock</a></td><td><a href="/assets/icons/maintenance/ambox-important.svg">Ambox important.svg</a></td></tr>
+          <tr><th scope="row"><code>coi</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E5%8F%AF%E8%83%BD%E5%AD%98%E5%9C%A8%E5%88%A9%E7%9B%8A%E8%A1%9D%E7%AA%81%E7%9A%84%E7%B6%AD%E5%9F%BA%E7%99%BE%E7%A7%91%E6%A2%9D%E7%9B%AE" lang="zh">可能存在利益衝突的維基百科條目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ACOI&amp;oldid=90825337">Template:COI</a></td><td><a href="/assets/icons/maintenance/ambox-scales.svg">Ambox scales.svg</a></td></tr>
+          <tr><th scope="row"><code>cleanup</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E6%B8%85%E7%90%86%E7%9A%84%E6%9D%A1%E7%9B%AE" lang="zh">需要清理的条目</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3ACleanup&amp;oldid=81692788">Template:Cleanup</a></td><td><a href="/assets/icons/maintenance/edit-clear.svg">Edit-clear.svg</a></td></tr>
+          <tr><th scope="row"><code>wikify</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E7%BB%B4%E5%9F%BA%E5%8C%96%E7%9A%84%E9%A1%B5%E9%9D%A2" lang="zh">需要维基化的页面</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AWikify&amp;oldid=74353507">Template:Wikify</a></td><td><a href="/assets/icons/maintenance/ambox-wikify.svg">Ambox wikify.svg</a></td></tr>
+          <tr><th scope="row"><code>uncategorized</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E7%BC%BA%E5%B0%91%E9%A0%81%E9%9D%A2%E5%88%86%E9%A1%9E%E7%9A%84%E9%A0%81%E9%9D%A2" lang="zh">缺少頁面分類的頁面</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AUncategorized&amp;oldid=85286509">Template:Uncategorized</a></td><td><a href="/assets/icons/maintenance/wiki-letter-w.svg">Wiki letter w.svg</a></td></tr>
+          <tr><th scope="row"><code>expert</code></th><td><a href="https://zh.wikipedia.org/wiki/Category:%E6%89%80%E6%9C%89%E9%9C%80%E8%A6%81%E5%B0%88%E5%AE%B6%E9%97%9C%E6%B3%A8%E7%9A%84%E9%A0%81%E9%9D%A2" lang="zh">所有需要專家關注的頁面</a><br><a href="https://zh.wikipedia.org/wiki/Category:%E5%85%B6%E4%BB%96%E9%9C%80%E8%A6%81%E5%B0%88%E5%AE%B6%E9%97%9C%E6%B3%A8%E7%9A%84%E9%A0%81%E9%9D%A2" lang="zh">其他需要專家關注的頁面</a><br><a href="https://zh.wikipedia.org/wiki/Category:%E9%9C%80%E8%A6%81%E4%B8%93%E4%B8%9A%E4%BA%BA%E5%A3%AB%E5%85%B3%E6%B3%A8%E7%9A%84%E9%A1%B5%E9%9D%A2" lang="zh">需要专业人士关注的页面</a></td><td><a href="https://zh.wikipedia.org/w/index.php?title=Template%3AExpert%20needed&amp;oldid=76725756">Template:Expert needed</a></td><td><a href="/assets/icons/maintenance/ambox-important.svg">Ambox important.svg</a></td></tr>
+          </tbody></table>
+        </div>
+      </section>

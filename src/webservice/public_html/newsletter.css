@@ -1,9 +1,9 @@
-/* Newsletter code displays follow the shared Codex colors and native controls. */
-.newsletter-controls .cdx-select,
-.newsletter-controls .cdx-button,
-.newsletter-date-selection .cdx-text-input__input,
-.newsletter-date-selection .cdx-button,
-.newsletter-copy-controls > .cdx-button {
+/* Newsletter code displays follow the shared page colors and native controls. */
+.newsletter-controls .ui-select,
+.newsletter-controls .ui-button,
+.newsletter-date-selection .ui-text-input__input,
+.newsletter-date-selection .ui-button,
+.newsletter-copy-controls > .ui-button {
     block-size: 2rem;
     min-block-size: 2rem;
     padding-block: 0;
@@ -24,7 +24,7 @@
     gap: .5rem;
 }
 
-.newsletter-controls .cdx-select {
+.newsletter-controls .ui-select {
     inline-size: 18rem;
     max-inline-size: 100%;
 }
@@ -46,7 +46,7 @@
     gap: 0.5rem;
 }
 
-.newsletter-date-selection .cdx-text-input {
+.newsletter-date-selection .ui-text-input {
     box-sizing: border-box;
     inline-size: 12rem;
     min-inline-size: 0;
@@ -67,7 +67,7 @@
     min-inline-size: 0;
 }
 
-.newsletter-text .cdx-text-area__textarea {
+.newsletter-text .ui-text-area__textarea {
     box-sizing: border-box;
     inline-size: 100%;
     min-inline-size: 0;

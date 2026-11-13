@@ -1,39 +1,23 @@
-# Updater service instructions
+# Wikitext projection instructions
 
-These instructions apply to `src/updater/services/` in addition to the
-parent package and repository-wide instructions.
+Services turn complete prepared facts into report rows and wikitext. They
+accept concrete report settings and original destination text from the caller.
 
-## Output projection
+- Do not choose or load destinations, collect sources, create publication
+  proposals, save pages or manage runtime files.
+- Keep source parsing, membership comparisons, dates and reusable calculations
+  in tasks; keep validation and persistence in data. Read typed contracts
+  without importing an acquisition implementation.
+- Use Polars expressions for tabular projections; ordinary Python is clearer
+  for small mappings. Preserve complete stored results independently of limits.
+- Use central assessment metadata for aliases, labels, order and grade colors.
+  A report may select its own displayed series without redefining grades.
+- Build templates with `mwparserfromhell` where useful. Verify the actual wiki
+  template contract before changing calls. Preserve unknown values, measured
+  zeroes and all text outside paired managed ranges.
+- Use updater summary and formatting helpers for output mechanics. Generic
+  comment-range handling belongs in shared support.
 
-- Consume backend-prepared data and caller-supplied report settings.
-  Project complete results into report-specific tables and wikitext;
-  keep source collection, reusable analysis, and refresh cycles in backend.
-- Accept existing destination text from jobs. Do not select or load
-  publication pages, create publication proposals, or save pages here.
-- Keep project names, ranking periods, task-force lists, and destination
-  choices supplied by jobs. Preserve complete results separately from
-  display limits so other consumers can reuse them.
-- Use Polars expressions for tabular filtering, joins, grouping,
-  aggregation, sorting, and reshaping. Small scalar and mapping operations
-  may use ordinary Python.
-- Put edit-summary formatting, region labels, and publication membership
-  prose in narrowly named updater support modules. Keep membership
-  parsing/comparison, source facts, dates, and source prose extraction in
-  backend data services. Do not load or write caches or runtime files.
-
-## Wikitext rendering
-
-- Build output templates with `mwparserfromhell` where appropriate;
-  fixed text does not require a parser. Do not parse source templates or
-  retained report facts here. Consume backend-prepared metadata and use
-  shared comment-range mechanics to preserve all surrounding text.
-- Render from the same prepared results that are retained for reuse.
-  Preserve unknown values and measured zeroes, configured managed ranges,
-  and text outside those ranges.
-- Verify actual on-wiki template contracts before changing template calls.
-  Keep wiki-specific formatting rules explicit.
-- Refer to the [Polars Python API reference][1] and
-  [mwparserfromhell documentation][2] when changing their operations.
-
-[1]: https://docs.pola.rs/api/python/stable/reference/index.html
-[2]: https://mwparserfromhell.readthedocs.io/en/latest/
+See [Architecture](../../../docs/architecture.md), the
+[Polars API](https://docs.pola.rs/api/python/stable/reference/index.html) and
+[mwparserfromhell](https://mwparserfromhell.readthedocs.io/en/latest/).

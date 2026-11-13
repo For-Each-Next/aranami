@@ -1,10 +1,12 @@
-# Contributing to Aranami
+# Contributing
 
-Read [AGENTS.md](AGENTS.md) and applicable package instructions before changing
-code. Use [Development](docs/development.md) for Python 3.15 setup, offline
-verification, and release preparation; consult [Architecture](docs/architecture.md)
-when changing component or data contracts.
+Aranami is developed and tested offline; its runtime is Toolforge. Start with
+[Development](docs/development.md) for environment setup, repository layout and
+checks. Read [Architecture](docs/architecture.md), [AGENTS](AGENTS.md) and the
+instructions in each affected source directory before changing contracts.
 
-Runtime work belongs on Toolforge: see [Usage](docs/usage.md) for reports and
-[Administration](docs/administration.md) for deployments. Maintain documentation
-in English.
+Use an isolated branch, preserve unrelated work, document public Python APIs,
+and record completed changes in [CHANGELOG](CHANGELOG.md). Merge verified task
+branches into `trunk`; version 0.9.2 consolidates the unpublished development
+after v0.8.8. Submit cohesive Conventional
+Commits with relevant verification evidence.

@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-import backend
-from backend import runner
-from backend.support.events import validate_event
-from backend.support.logs import open_run_log
-from updater.jobs import JobContext, ProposedEdit, job_run
+import runtime
+from data.runtime.events import validate_event
+from data.runtime.logs import open_run_log
+from runtime import runner
+from runtime.jobs import JobContext, ProposedEdit, job_run
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -35,10 +35,10 @@ _ROUTINES = (
 
 
 def _routine_results(calls: dict[str, Mock]) -> list[dict[str, object]]:
-    """Read backend outcomes independently of diagnostic log wording.
+    """Read runtime outcomes independently of diagnostic log wording.
 
     Args:
-        calls: Recorded routine invocations carrying backend contexts.
+        calls: Recorded routine invocations carrying runtime contexts.
 
     Returns:
         Versioned routine outcomes from each recorded execution context.
@@ -75,14 +75,14 @@ def _offline_runner(root: Path) -> Iterator[dict[str, Mock]]:
     """
     with ExitStack() as stack:
         stack.enter_context(
-            patch("backend.support.logs.Path.cwd", return_value=root),
+            patch("data.runtime.logs.Path.cwd", return_value=root),
         )
-        site = stack.enter_context(patch("backend.runner.pywikibot.Site"))
+        site = stack.enter_context(patch("runtime.runner.pywikibot.Site"))
         site.return_value.dbName.return_value = "zhwiki"
         yield {
             name: stack.enter_context(
                 patch.object(
-                    import_module(f"updater.jobs.{name}"),
+                    import_module(f"runtime.jobs.{name}"),
                     "run",
                     side_effect=partial(_routine, name=name),
                 ),
@@ -104,7 +104,7 @@ class TestRunnerLoggingIntegration(TestCase):
                     _offline_runner(root) as calls,
                     patch.object(runner.monitor, "start") as start,
                 ):
-                    result = backend.run(dry=True) if dry else backend.run()
+                    result = runtime.run(dry=True) if dry else runtime.run()
                     assert result is start.return_value
                     start.assert_called_once_with(
                         dry=dry,
@@ -124,7 +124,7 @@ class TestRunnerLoggingIntegration(TestCase):
                     self.subTest(dry=dry, run_immediately=run_immediately),
                     patch.object(runner.monitor, "start") as start,
                 ):
-                    result = backend.run(
+                    result = runtime.run(
                         dry=dry,
                         run_immediately=run_immediately,
                     )
@@ -150,20 +150,20 @@ class TestRunnerLoggingIntegration(TestCase):
         ):
             root = Path(directory)
             with _offline_runner(root) as calls:
-                results = [backend.run_once(dry=True) for _ in range(runs)]
-            files = list((root / "logs").glob("aranami.*.log"))
-            assert [path.name for path in files] == ["aranami.2026-10-03.log"]
+                results = [runtime.run_once(dry=True) for _ in range(runs)]
+            files = list((root / "logs/diagnostics").glob("*.log"))
+            assert [path.name for path in files] == ["20261003.000.log"]
             content = files[0].read_text(encoding="utf-8")
             assert not list((root / "logs").glob("project.*.log"))
             assert "Routine result:" not in content
-            assert backend.run_once is runner.run_once
+            assert runtime.run_once is runner.run_once
             assert results == [None, None]
             assert content.count("run started (dry=") == runs
             assert content.count("Aranami run finished") == runs
             outcomes = _routine_results(calls)
             events = [
                 json.loads(line)
-                for line in (root / "logs" / "events.2026-10-03.jsonl")
+                for line in (root / "logs/activity/20261003.000.jsonl")
                 .read_text()
                 .splitlines()
             ]
@@ -176,12 +176,19 @@ class TestRunnerLoggingIntegration(TestCase):
                 ),
                 "run_finished",
             ]
-            assert [event["kind"] for event in events] == sequence * runs
+            assert [
+                event["kind"]
+                for event in events
+                if event["kind"] != "routine_stage"
+            ] == sequence * runs
             assert all(
                 validate_event(event) and event["dry"] is True
                 for event in events
             )
-            assert all(event["time"] == now.isoformat() for event in events)
+            assert all(
+                datetime.fromisoformat(event["time"]) == now
+                for event in events
+            )
             assert len(outcomes) == runs * len(_ROUTINES)
             assert all(
                 result["schema"] == 1
@@ -193,15 +200,18 @@ class TestRunnerLoggingIntegration(TestCase):
             for name, call in calls.items():
                 assert call.call_count == runs
                 assert (
-                    content.count(
-                        "[backend.support.execution.routine_run]: "
-                        f"Started {name}",
+                    sum(
+                        "[runtime.execution.routine_run]" in line
+                        and f": Started {name}" in line
+                        for line in content.splitlines()
                     )
                     == runs
                 )
                 assert (
-                    content.count(
-                        f"[updater.services.{name}._routine]: Report built.",
+                    sum(
+                        f"[updater.services.{name}._routine]" in line
+                        and ": Report built." in line
+                        for line in content.splitlines()
                     )
                     == runs
                 )
@@ -211,7 +221,7 @@ class TestRunnerLoggingIntegration(TestCase):
                 assert "- status: success" in summary
                 assert summary.count("  - task ") == len(_ROUTINES)
             assert all(
-                line.startswith("2026-10-03 00:01:00Z INFO ")
+                line.startswith("2026-10-03 00:01:00.000 UTC INFO ")
                 for line in content.splitlines()
             )
 
@@ -253,11 +263,13 @@ class TestRunnerLoggingIntegration(TestCase):
                 calls["dyks"].side_effect = fail
                 calls["new_pages"].side_effect = propose
                 with self.assertRaises(ExceptionGroup) as captured:  # ruff: ignore[pytest-unittest-raises-assertion]
-                    backend.run_once(dry=True)
+                    runtime.run_once(dry=True)
             assert len(captured.exception.exceptions) == 1
             for call in calls.values():
                 call.assert_called_once()
-            content = next((root / "logs").glob("aranami.*.log")).read_text(
+            content = next(
+                (root / "logs/diagnostics").glob("*.log"),
+            ).read_text(
                 encoding="utf-8",
             )
             outcomes = _routine_results(calls)
@@ -269,11 +281,18 @@ class TestRunnerLoggingIntegration(TestCase):
             assert "Simulated DYK source failure." in content
             assert "7 jobs, 1 failures" in content
             raw_events = next(
-                (root / "logs").glob("events.*.jsonl"),
+                (root / "logs/activity").glob("*.jsonl"),
             ).read_text()
             events = [json.loads(line) for line in raw_events.splitlines()]
             assert all(validate_event(event) for event in events)
-            assert events[2]["status"] == "failed"
+            assert (
+                next(
+                    event
+                    for event in events
+                    if event["kind"] == "routine_finished"
+                )["outcome"]
+                == "failed"
+            )
             assert events[-1]["failures"] == 1
             assert "Simulated DYK source failure." not in raw_events
             reports = list((root / "dry-run").glob("*.md"))
@@ -327,7 +346,7 @@ class TestRunnerLoggingIntegration(TestCase):
             with _offline_runner(root) as calls:
                 calls["pageviews"].side_effect = defer
                 calls["enwp_key_articles"].side_effect = propose
-                assert backend.run_once(dry=True) is None
+                assert runtime.run_once(dry=True) is None
             summary = next((root / "dry-run").glob("*.md")).read_text(
                 encoding="utf-8",
             )
@@ -340,7 +359,7 @@ class TestRunnerLoggingIntegration(TestCase):
             assert artifact.read_text(encoding="utf-8") == (
                 "{{Example|complete wikitext}}\n"
             )
-            log = next((root / "logs").glob("aranami.*.log")).read_text(
+            log = next((root / "logs/diagnostics").glob("*.log")).read_text(
                 encoding="utf-8",
             )
             outcomes = _routine_results(calls)
@@ -361,7 +380,7 @@ class TestRunnerLoggingIntegration(TestCase):
                 _offline_runner(root) as calls,
                 patch.object(runner.monitor, "start") as start,
             ):
-                result = backend.run_once(
+                result = runtime.run_once(
                     date=anchor,
                     dry=True,
                     tasks=[selected],
@@ -393,7 +412,7 @@ class TestRunnerLoggingIntegration(TestCase):
                 _offline_runner(root) as calls,
                 patch.object(runner.monitor, "start") as start,
             ):
-                assert backend.run_once(tasks=selected) is None
+                assert runtime.run_once(tasks=selected) is None
                 start.assert_not_called()
             calls[selected].assert_called_once()
             context = calls[selected].call_args.kwargs["context"]
@@ -409,13 +428,13 @@ class TestRunnerLoggingIntegration(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "backend.support.logs.Path.cwd",
+                "data.runtime.logs.Path.cwd",
                 return_value=Path(directory),
             ),
-            patch("backend.runner.pywikibot.Site") as site,
+            patch("runtime.runner.pywikibot.Site") as site,
         ):
             with self.assertRaises(ValueError):  # ruff: ignore[pytest-unittest-raises-assertion]
-                backend.run_once(dry=True, tasks=["unknown"])
+                runtime.run_once(dry=True, tasks=["unknown"])
             site.assert_not_called()
 
 
@@ -445,10 +464,10 @@ class TestRunLogManagerIntegration(TestCase):
                     return_value=int(before.timestamp() * 1e9),
                 ):
                     logger.info("Delayed previous-day event.")
-            first = (root / "aranami.2026-10-02.log").read_text(
+            first = (root / "diagnostics/20261002.000.log").read_text(
                 encoding="utf-8",
             )
-            second = (root / "aranami.2026-10-03.log").read_text(
+            second = (root / "diagnostics/20261003.000.log").read_text(
                 encoding="utf-8",
             )
             assert "Before midnight." in first
@@ -456,7 +475,7 @@ class TestRunLogManagerIntegration(TestCase):
             assert "After midnight." not in first
             assert "After midnight." in second
             assert "Before midnight." not in second
-            assert len(list(root.iterdir())) == 2  # ruff: ignore[magic-value-comparison]
+            assert len(list((root / "diagnostics").iterdir())) == 2  # ruff: ignore[magic-value-comparison]
 
     @staticmethod
     def test_retains_thirty_calendar_dates_including_today() -> None:
@@ -465,13 +484,16 @@ class TestRunLogManagerIntegration(TestCase):
         retained = 29
         with TemporaryDirectory() as directory:
             root = Path(directory)
+            (root / "diagnostics").mkdir()
             archives = [
-                root / f"aranami.{now.date() - timedelta(days=offset)}.log"
+                root
+                / "diagnostics"
+                / f"{now.date() - timedelta(days=offset):%Y%m%d}.000.log"
                 for offset in range(1, retained + 3)
             ]
             for archive in archives:
                 archive.write_text("archived\n", encoding="utf-8")
-            unrelated = root / "aranami.invalid.log"
+            unrelated = root / "diagnostics/invalid.log"
             unrelated.write_text("unrelated\n", encoding="utf-8")
             with (
                 open_run_log(root) as logger,
@@ -484,28 +506,24 @@ class TestRunLogManagerIntegration(TestCase):
             assert all(path.exists() for path in archives[:retained])
             assert not any(path.exists() for path in archives[retained:])
             assert unrelated.read_text(encoding="utf-8") == "unrelated\n"
-            assert len(list(root.iterdir())) == retained + 2
+            assert len(list((root / "diagnostics").iterdir())) == retained + 2
 
     @staticmethod
-    def test_prunes_sparse_old_dates_without_touching_unsafe_paths() -> None:
-        """Expire sparse old dates while preserving other paths."""
+    def test_unsafe_segments_preserve_evidence_and_allow_recovery() -> None:
+        """Refuse unsafe inventory without changing another file."""
         now = datetime(2026, 10, 3, 0, 30, tzinfo=UTC)
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            old = root / "aranami.2026-09-03.log"
+            diagnostics = root / "diagnostics"
+            diagnostics.mkdir()
+            old = diagnostics / "20260903.000.log"
             old.write_text("expired\n", encoding="utf-8")
-            retained = root / "aranami.2026-09-04.log"
+            retained = diagnostics / "20260904.000.log"
             retained.write_text("retained\n", encoding="utf-8")
-            future = root / "aranami.2026-10-04.log"
-            future.write_text("future\n", encoding="utf-8")
-            invalid = root / "aranami.2026-02-30.log"
-            invalid.write_text("invalid date\n", encoding="utf-8")
             target = root / "private.txt"
             target.write_text("untouched\n", encoding="utf-8")
-            linked = root / "aranami.2026-09-01.log"
+            linked = diagnostics / "20260901.000.log"
             linked.symlink_to(target)
-            subdirectory = root / "aranami.2026-09-02.log"
-            subdirectory.mkdir()
             with (
                 open_run_log(root) as logger,
                 patch(
@@ -513,21 +531,25 @@ class TestRunLogManagerIntegration(TestCase):
                     return_value=int(now.timestamp() * 1e9),
                 ),
             ):
-                logger.info("Current day.")
+                logger.info("Unsafe inventory must not append.")
+                assert old.exists()
+                assert linked.is_symlink()
+                assert target.read_text(encoding="utf-8") == "untouched\n"
+                assert not (diagnostics / "20261003.000.log").exists()
+                linked.unlink()
+                logger.info("Recovered append.")
             assert not old.exists()
             assert retained.read_text(encoding="utf-8") == "retained\n"
-            assert future.read_text(encoding="utf-8") == "future\n"
-            assert invalid.read_text(encoding="utf-8") == "invalid date\n"
-            assert linked.is_symlink()
-            assert target.read_text(encoding="utf-8") == "untouched\n"
-            assert subdirectory.is_dir()
+            content = (diagnostics / "20261003.000.log").read_text()
+            assert "logging recovered; dropped=1" in content
+            assert "Recovered append." in content
 
     @staticmethod
     def test_nested_contexts_capture_descendants_once() -> None:
         """Share file and terminal handlers until the last context."""
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            package_logger = logging.getLogger("backend")
+            package_logger = logging.getLogger("runtime")
             source_logger = logging.getLogger("shared.sources.quarry.query")
             original_handlers = tuple(package_logger.handlers)
             with open_run_log(root) as outer:
@@ -542,7 +564,9 @@ class TestRunLogManagerIntegration(TestCase):
                     assert outer is inner is package_logger
                     assert len(handlers) == len(("file", "terminal", "events"))
                 source_logger.warning("Outer source record.")
-            content = next(root.glob("*.log")).read_text(encoding="utf-8")
+            content = next((root / "diagnostics").glob("*.log")).read_text(
+                encoding="utf-8",
+            )
             assert content.count("Nested source record.") == 1
             assert content.count("Outer source record.") == 1
             assert "Excluded debug record." not in content
@@ -551,7 +575,7 @@ class TestRunLogManagerIntegration(TestCase):
     @staticmethod
     def test_context_restores_package_and_root_logger_configuration() -> None:
         """Restore package state and retain root logger handlers."""
-        package_logger = logging.getLogger("backend")
+        package_logger = logging.getLogger("runtime")
         root_logger = logging.getLogger()
         original_level = package_logger.level
         original_handlers = tuple(package_logger.handlers)

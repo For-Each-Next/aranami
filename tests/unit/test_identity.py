@@ -8,9 +8,9 @@ from unittest.mock import Mock, patch
 from pywikibot import config
 from pywikibot.comms import http
 
+from runtime.jobs import pexbot
 from shared.identity import USER_AGENT, configure_pywikibot
 from shared.sources import summaries, wikiwho
-from updater.jobs import pexbot
 
 
 class TestApplicationIdentity(TestCase):

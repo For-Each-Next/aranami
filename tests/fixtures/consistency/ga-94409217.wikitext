@@ -1,0 +1,331 @@
+{{NoteTA
+| G1 = Games
+}}
+
+{{WikiProject:电子游戏/Sidebar|PJ:VG/GA|专题条目=expanded}}
+
+[[File:Symbol support vote.svg|64px|left|alt=維基百科優良條目標誌]]
+
+'''[[Wikipedia:优良条目|优良条目]]'''指经[[Wikipedia:優良條目評選|社群正式评审]]，确认品质达到[[Wikipedia:优良条目标准|一定标准]]的条目。这些条目编写精心、可供查證而無原創研究、囊括主题的主要层面、观点中立、内容稳定、多伴有插图，其品质令人滿意，值得编者学习参照。
+
+电子游戏专题共有'''{{ACbPaC|project=电子游戏|formatnum=yes|FA|A|Bplus|GA|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}'''篇条目，其中优良条目有'''{{ACbPaC|project=电子游戏|formatnum=yes|GA}}'''篇（约占1/{{#expr:{{ACbPaC|project=电子游戏|FA|A|Bplus|GA|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}/{{ACbPaC|project=电子游戏|GA}} round 0}}或{{percentage|{{ACbPaC|project=电子游戏|GA}}|{{ACbPaC|project=电子游戏|FA|A|Bplus|GA|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}|1}}）。此外，专题还有[[WikiProject:电子游戏/典范内容|典范（特色）内容]]'''{{ACbPaC|project=电子游戏|formatnum=yes|FA|FL}}'''篇，故专题中达到或超越优良水准的条目有'''{{ACbPaC|project=电子游戏|formatnum=yes|FA|GA|FL}}'''篇（约占1/{{#expr:{{ACbPaC|project=电子游戏|FA|A|Bplus|GA|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}/{{ACbPaC|project=电子游戏|FA|GA|FL}} round 0}}或{{percentage|{{ACbPaC|project=电子游戏|FA|FL|GA}}|{{ACbPaC|project=电子游戏|FA|A|Bplus|GA|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}|1}}）。从全站角度看，中文維基百科{{NUMBEROFARTICLES}}篇条目中共有{{FORMATNUM:{{#expr:{{FA number}}+{{GA number}}+{{FL number}}}}}}篇典范和优良内容，占本站条目数{{percentage|{{ACbPaC|project=电子游戏|FA|A|Bplus|GA|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}|{{NUMBEROFARTICLES}}|1}}的游戏类条目为本站贡献了{{percentage|{{ACbPaC|project=电子游戏|FA|GA|FL}}|{{#expr:{{FA number}}+{{GA number}}+{{FL number}}}}|1}}的典范和优良内容。
+
+下方列出专题中的优良条目。列表依照条目主题分节，再以入选时间逆序排列。本表係手动維護，未必能及時更新，完整名单请參見[[WikiProject:电子游戏/认证条目#当前优良条目|機械人自动更新名單]]。
+
+== 参评内容 ==
+
+{{div col|colwidth=22em}}
+{{#section:WikiProject:电子游戏/认证条目/GAN|list}}
+{{div col end}}
+
+== 当前优良条目 ==
+
+=== 遊戲作品 ===
+
+==== 早期及1970年代 ====
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:俄勒冈之旅]]<small>（2026-04-11）</small>
+# {{icon|GA}} [[:潛望鏡 (電子遊戲)]]<small>（2024-05-19）</small>
+# {{icon|GA}} [[:魔域]]<small>（2024-02-25）</small>
+# {{icon|GA}} [[:雙人網球]]<small>（2023-03-07）</small>
+# {{icon|GA}} [[:OXO]]<small>（2023-02-22）</small>
+# {{icon|GA}} [[:銀河遊戲]]<small>（2022-12-13）</small>
+# {{icon|GA}} [[:漢摩拉比 (遊戲)|-{zh-hans:汉谟拉比; zh-hant:漢摩拉比}- (遊戲)]]<small>（2022-10-22）</small>
+# {{icon|GA}} [[:蘇美爾遊戲]]<small>（2022-10-10）</small>
+# {{icon|GA}} [[:馬倫巴|-{zh-cn:玛丽安巴德;zh-hk:馬倫巴}-]]<small>（2022-10-01）</small>
+# {{icon|GA}} [[:Turochamp]]<small>（2022-08-28）</small>
+# {{icon|GA}} [[:Nimrod]]<small>（2022-08-23）</small>
+# {{icon|GA}} [[:星际旅行 (1969年游戏)]]<small>（2022-01-16）</small>
+# {{icon|GA}} [[:大腦伯蒂]]<small>（2022-01-16）</small>
+# {{icon|GA}} [[:阴极射线管娱乐装置]]<small>（2020-03-26）</small>
+{{div col end}}
+
+==== 1980年代 ====
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:Mined-Out]]<small>（2025-02-26）</small>
+# {{icon|GA}} [[:魔幻歷險]]<small>（2024-04-17）</small>
+# {{icon|GA}} [[:福克蘭'82]]<small>（2023-09-03）</small>
+# {{icon|GA}} [[:劍與魔法 (電子遊戲)]]<small>（2023-02-15）</small>
+# {{icon|GA}} [[:洛克人 (1987年游戏)]]<small>（2021-09-24）</small>
+# {{icon|GA}} [[:Girl's Garden]]<small>（2020-08-07）</small>
+# {{icon|GA}} [[:百事侵略者]]<small>（2020-01-25）</small>
+# {{icon|GA}} [[:Deactivators]]<small>（2020-01-07）</small>
+# {{icon|GA}} [[:失蹤行李]]<small>（2019-08-12）</small>
+{{div col end}}
+
+==== 1990年代 ====
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:刺猬索尼克 (1991年游戏)]]<small>（2023-07-02）</small>
+# {{icon|GA}} [[:死之岛 (游戏)]]<small>（2022-07-11）</small>
+# {{icon|GA}} [[:大蜜蜂'91]]<small>（2021-07-30）</small>
+# {{icon|GA}} [[:火焰之纹章外传]]<small>（2021-01-19）</small>
+# {{icon|GA}} [[:无限飞行III]]<small>（2021-01-08）</small>
+# {{icon|GA}} [[:火焰之纹章 圣战之系谱]]<small>（2020-12-27）</small>
+# {{icon|GA}} [[:火焰之纹章 多拉基亚776]]<small>（2020-11-14）</small>
+# {{icon|GA}} [[:火焰之纹章 纹章之谜]]<small>（2020-10-19）</small>
+# {{icon|GA}} [[:火焰之纹章 暗黑龙与光之剑]]<small>（2020-09-28）</small>
+# {{icon|GA}} [[:刺激賽車]]<small>（2020-08-12）</small>
+# {{icon|GA}} [[:T&E虚拟高尔夫]]<small>（2020-08-01）</small>
+# {{icon|GA}} [[:星风血雨]]<small>（2020-07-13）</small>
+# {{icon|GA}} [[:通往黑暗之路]]<small>（2020-06-21）</small>
+# {{icon|GA}} [[:櫻花大戰 (遊戲)]]<small>（2020-04-21）</small>
+# {{icon|GA}} [[:寂静岭 (游戏)]]<small>（2019-01-04）</small>
+# {{icon|GA}} [[:薩爾達傳說 時之笛]]<small>（2009-05-12）</small>
+{{div col end}}
+
+==== 2000年代 ====
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:超执刀2]]<small>（2026-09-05）</small>
+# {{icon|GA}} [[:墨丘利神之杖Z 双超执刀]]<small>（2026-06-21）</small>
+# {{icon|GA}} [[:超執刀 神使之杖]]<small>（2026-03-19）</small>
+# {{icon|GA}} [[:世嘉嘉嘉]]<small>（2025-09-22）</small>
+# {{icon|GA}} [[:玩具車大冒險]]<small>（2024-02-01）</small>
+# {{icon|GA}} [[:水銀融化]]<small>（2023-06-10）</small>
+# {{icon|GA}} [[:水銀 (遊戲)]]<small>（2023-06-04）</small>
+# {{icon|GA}} [[:Edge (2008年遊戲)]]<small>（2022-10-20）</small>
+# {{icon|GA}} [[:杀出重围：隐形战争]]<small>（2022-04-08）</small>
+# {{icon|GA}} [[:战锁]]<small>（2022-04-05）</small>
+# {{icon|GA}} [[:火焰之纹章 烈火之剑]]<small>（2022-03-17）</small>
+# {{icon|GA}} [[:火焰之纹章 晓之女神]]<small>（2021-09-12）</small>
+# {{icon|GA}} [[:火焰之纹章 封印之剑]]<small>（2021-02-04）</small>
+# {{icon|GA}} [[:火焰之纹章 圣魔之光石]]<small>（2020-12-13）</small>
+# {{icon|GA}} [[:火焰之纹章 新·暗黑龙与光之剑]]<small>（2020-08-30）</small>
+# {{icon|GA}} [[:火焰之纹章 苍炎之轨迹]]<small>（2020-03-13）</small>
+# {{icon|GA}} [[:戰都天鷹]]<small>（2019-07-21）</small>
+# {{icon|GA}} [[:戰慄時空2首部曲：浩劫重生]]<small>（2019-01-12）</small>
+# {{icon|GA}} [[:质量效应 (游戏)]]<small>（2018-11-15）</small>
+# {{icon|GA}} [[:特技摩托賽HD]]<small>（2018-10-28）</small>
+# {{icon|GA}} [[:逆轉裁判3]]<small>（2016-09-08）</small>
+# {{icon|GA}} [[:偶像大師 為你而唱！]]<small>（2015-12-05）</small>
+# {{icon|GA}} [[:偶像大師 深情之星]]<small>（2015-11-26）</small>
+# {{icon|GA}} [[:寶可夢 紅寶石／藍寶石]]<small>（2013-07-13）</small>
+# {{icon|GA}} [[:逆轉裁判4]]<small>（2013-06-17）</small>
+# {{icon|GA}} [[:失落的星球：极限状态]]<small>（2013-04-26）</small>
+# {{icon|GA}} [[:黃金太陽 開啟的封印]]<small>（2012-01-10）</small>
+# {{icon|GA}} [[:薩爾達傳說 魔吉拉的面具]]<small>（2009-06-29）</small>
+# {{icon|GA}} [[:压缩空间]]<small>（2009-05-17）</small>
+# {{icon|GA}} [[:镜之边缘]]<small>（2009-03-28）</small>
+{{div col end}}
+
+==== 2010年代 ====
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:星露谷物语]]<small>（2026-04-02）</small>
+# {{icon|GA}} [[:像素星际海盗]]<small>（2025-07-18）</small>
+# {{icon|GA}} [[:像素海盗]]<small>（2025-07-17）</small>
+# {{icon|GA}} [[:小小諾亞]]<small>（2025-04-18）</small>
+# {{icon|GA}} [[:拣爱]]<small>（2025-02-04）</small>
+# {{icon|GA}} [[:Blek]]<small>（2024-12-24）</small>
+# {{icon|GA}} [[:遊魂2 -you're the only one-]]<small>（2024-09-14）</small>
+# {{icon|GA}} [[:2048 (遊戲)]]<small>（2023-12-28）</small>
+# {{icon|GA}} [[:纪念碑谷 (游戏)]]<small>（2023-12-14）</small>
+# {{icon|GA}} [[:極地戰嚎3：血龍]]<small>（2023-08-22）</small>
+# {{icon|GA}} [[:太阳系行星2]]<small>（2023-07-12）</small>
+# {{icon|GA}} [[:Threes!]]<small>（2023-06-23）</small>
+# {{icon|GA}} [[:兩人的童年花園]]<small>（2023-06-15）</small>
+# {{icon|GA}} [[:生化危機7 惡靈古堡]]<small>（2022-05-28）</small>
+# {{icon|GA}} [[:恐龙游戏]]<small>（2022-05-04）</small>
+# {{icon|GA}} [[:火焰之纹章 风花雪月]]<small>（2022-04-24）</small>
+# {{icon|GA}} [[:岛屿：虚无之地]]<small>（2022-04-06）</small>
+# {{icon|GA}} [[:火焰之纹章 回声 另一位英雄王]]<small>（2022-03-26）</small>
+# {{icon|GA}} [[:火焰之纹章if]]<small>（2022-02-28）</small>
+# {{icon|GA}} [[:反重力赛车2048]]<small>（2022-02-17）</small>
+# {{icon|GA}} [[:火焰之纹章 觉醒]]<small>（2021-12-27）</small>
+# {{icon|GA}} [[:永恒之柱]]<small>（2021-11-29）</small>
+# {{icon|GA}} [[:地平線 黎明時分]]<small>（2021-07-25）</small>
+# {{icon|GA}} [[:超级马力欧银河2]]<small>（2021-07-20）</small>
+# {{icon|GA}} [[:駭客入侵：人類革命]]<small>（2021-06-25）</small>
+# {{icon|GA}} [[:迷你地铁]]<small>（2021-05-29）</small>
+# {{icon|GA}} [[:幽灵诡计]]<small>（2021-03-11）</small>
+# {{icon|GA}} [[:海岛文明]]<small>（2021-01-23）</small>
+# {{icon|GA}} [[:秘境探險：失落的遺產]]<small>（2021-01-10）</small>
+# {{icon|GA}} [[:蔚藍 (遊戲)]]<small>（2020-12-28）</small>
+# {{icon|GA}} [[:三十航班之恋]]<small>（2020-10-12）</small>
+# {{icon|GA}} [[:城市：天际线]]<small>（2020-10-08）</small>
+# {{icon|GA}} [[:杀手Go]]<small>（2020-09-26）</small>
+# {{icon|GA}} [[:杀出重围Go]]<small>（2020-09-18）</small>
+# {{icon|GA}} [[:刺客任務：狙擊挑戰]]<small>（2020-09-11）</small>
+# {{icon|GA}} [[:劳拉Go]]<small>（2020-08-29）</small>
+# {{icon|GA}} [[:火焰之纹章 新·纹章之谜 ～光与影的英雄～]]<small>（2020-08-23）</small>
+# {{icon|GA}} [[:異塵餘生：庇護所]]<small>（2020-06-14）</small>
+# {{icon|GA}} [[:变形 (游戏)]]<small>（2020-03-23）</small>
+# {{icon|GA}} [[:生化危机2 重制版]]<small>（2020-02-17）</small>
+# {{icon|GA}} [[:Kinect 運動大會]]<small>（2019-09-06）</small>
+# {{icon|GA}} [[:古墓丽影 (2013年游戏)]]<small>（2019-08-18）</small>
+# {{icon|GA}} [[:极限脱出ADV 善人死亡]]<small>（2019-07-28）</small>
+# {{icon|GA}} [[:奧托的歷險]]<small>（2019-06-12）</small>
+# {{icon|GA}} [[:质量效应3]]<small>（2018-12-09）</small>
+# {{icon|GA}} [[:雷霆归来 最终幻想XIII]]<small>（2018-07-26）</small>
+# {{icon|GA}} [[:巫师3：狂猎]]<small>（2018-01-19）</small>
+# {{icon|GA}} [[:看火人]]<small>（2017-04-19）</small>
+# {{icon|GA}} [[:见证者]]<small>（2016-08-27）</small>
+# {{icon|GA}} [[:末日之戰3]]<small>（2016-07-21）</small>
+# {{icon|GA}} [[:偶像大師 閃耀祭典]]<small>（2016-01-29）</small>
+# {{icon|GA}} [[:孤岛惊魂4]]<small>（2015-12-06）</small>
+# {{icon|GA}} [[:德軍總部：新秩序]]<small>（2015-08-31）</small>
+# {{icon|GA}} [[:偶像大師2]]<small>（2015-05-30）</small>
+# {{icon|GA}} [[:风之旅人]]<small>（2015-03-05）</small>
+# {{icon|GA}} [[:Cross Days]]<small>（2014-03-12）</small>
+# {{icon|GA}} [[:黃金太陽 漆黑的黎明]]<small>（2012-05-13）</small>
+{{div col end}}
+
+==== 2020年代 ====
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:Unhinged]]<small>（2026-09-08）</small>
+# {{icon|GA}} [[:模擬美景攝影]]<small>（2026-02-19）</small>
+# {{icon|GA}} [[:漁帆暗湧]]<small>（2026-02-07）</small>
+# {{icon|GA}} [[:Summerhouse]]<small>（2026-02-06）</small>
+# {{icon|GA}} [[:Pokémon Friends]]<small>（2026-01-10）</small>
+# {{icon|GA}} [[:築夢頌]]<small>（2025-08-13）</small>
+# {{icon|GA}} [[:三角洲行动]]<small>（2025-04-05）</small>
+# {{icon|GA}} [[:深岩银河|-{zh-cn:深岩银河; zh-tw:銀河洞穴大冒險}-]]<small>（2025-01-28）</small>
+# {{icon|GA}} [[:蔑視 (遊戲)]]<small>（2024-07-20）</small>
+# {{icon|GA}} [[:质量效应 传奇版]]<small>（2023-09-17）</small>
+# {{icon|GA}} [[:小小諾亞：樂園的後繼者]]<small>（2023-08-22）</small>
+# {{icon|GA}} [[:崩坏：星穹铁道]]<small>（2023-07-09）</small>
+# {{icon|GA}} [[:火焰之纹章 Engage]]<small>（2023-02-12）</small>
+# {{icon|GA}} [[:Carto]]<small>（2021-12-17）</small>
+# {{icon|GA}} [[:丸子與銀河龍]]<small>（2021-12-16）</small>
+# {{icon|GA}} [[:終結者莉莉：騎士救贖]]<small>（2021-11-19）</small>
+# {{icon|GA}} [[:傾聽畫語：最美好的景色]]<small>（2021-11-03）</small>
+# {{icon|GA}} [[:全網公敵]]<small>（2021-09-25）</small>
+# {{icon|GA}} [[:纸片马力欧：折纸国王]]<small>（2020-12-17）</small>
+{{div col end}}
+
+==== 製作中止 ====
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:范布倫 (遊戲)]]<small>（2025-11-03）</small>
+# {{icon|GA}} [[:Cry On]]<small>（2022-01-28）</small>
+# {{icon|GA}} [[:星際之刃 藍星行動]]<small>（2020-01-23）</small>
+{{div col end}}
+
+=== 遊戲系列 ===
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:火焰之纹章系列]]<small>（2023-01-25）</small>
+# {{icon|GA}} [[:善待动物组织的讽刺网页游戏]]<small>（2016-08-10）</small>
+# {{icon|GA}} [[:黃金太陽系列]]<small>（2014-04-25）</small>
+{{div col end}}
+
+=== 游戏类型 ===
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:踩地雷|-{zh-cn:扫雷游戏; zh-tw:踩地雷; zh-hk:踩地雷}-]]<small>（2025-02-25）</small>
+# {{icon|GA}} [[:登陸月球類電子遊戲]]<small>（2022-11-04）</small>
+{{div col end}}
+
+=== 虚构角色 ===
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:史蒂夫 (Minecraft)]]<small>（2025-12-26）</small>
+# {{icon|GA}} [[:末影人]]<small>（2025-08-04）</small>
+# {{icon|GA}} [[:苦力怕]]<small>（2025-07-04）</small>
+# {{icon|GA}} [[:砂金 (崩壞：星穹鐵道)]]<small>（2025-03-14）</small>
+# {{icon|GA}} [[:流螢 (崩壞：星穹鐵道)]]<small>（2025-03-09）</small>
+# {{icon|GA}} [[:椎名立希]]<small>（2025-02-20）</small>
+# {{icon|GA}} [[:長崎爽世]]<small>（2025-02-19）</small>
+# {{icon|GA}} [[:要樂奈]]<small>（2025-02-17）</small>
+# {{icon|GA}} [[:千早愛音]]<small>（2025-02-16）</small>
+# {{icon|GA}} [[:高松燈]]<small>（2025-02-12）</small>
+# {{icon|GA}} [[:流浪者 (原神)]]<small>（2024-03-08）</small>
+# {{icon|GA}} [[:钟离 (原神)]]<small>（2024-02-07）</small>
+# {{icon|GA}} [[:芙宁娜]]<small>（2023-12-23）</small>
+# {{icon|GA}} [[:愛旭莉·葛拉漢]]<small>（2023-11-09）</small>
+# {{icon|GA}} [[:納西妲]]<small>（2022-12-10）</small>
+# {{icon|GA}} [[:刻晴]]<small>（2022-08-20）</small>
+# {{icon|GA}} [[:神里綾華]]<small>（2022-08-07）</small>
+# {{icon|GA}} [[:亞絲娜]]<small>（2022-07-04）</small>
+# {{icon|GA}} [[:雷電將軍]]<small>（2022-05-02）</small>
+# {{icon|GA}} [[:八重神子]]<small>（2022-04-26）</small>
+# {{icon|GA}} [[:雲堇]]<small>（2022-02-03）</small>
+# {{icon|GA}} [[:艾爾馬克]]<small>（2021-07-31）</small>
+# {{icon|GA}} [[:艾薇·瓦倫汀]]<small>（2020-09-01）</small>
+# {{icon|GA}} [[:閃光]]<small>（2017-07-11）</small>
+{{div col end}}
+
+=== 游戏元素 ===
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:終末之詩]]<small>（2025-01-24）</small>
+# {{icon|GA}} [[:楓丹 (原神)]]<small>（2024-06-02）</small>
+# {{icon|GA}} [[:璃月]]<small>（2023-07-29）</small>
+# {{icon|GA}} [[:稻妻]]<small>（2023-02-12）</small>
+# {{icon|GA}} [[:须弥 (原神)]]<small>（2023-01-17）</small>
+# {{icon|GA}} [[:刺刺龜殼]]<small>（2021-05-15）</small>
+# {{icon|GA}} [[:水之神殿]]<small>（2021-01-08）</small>
+# {{icon|GA}} [[:碧绿丘陵地带]]<small>（2019-01-12）</small>
+# {{icon|GA}} [[:孤兒院的劫掠]]<small>（2018-06-07）</small>
+{{div col end}}
+
+=== 硬件與服務 ===
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:Satellaview]]<small>（2025-05-08）</small>
+# {{icon|GA}} [[:Kids Computer PICO]]<small>（2020-03-02）</small>
+# {{icon|GA}} [[:WonderSwan]]<small>（2019-12-26）</small>
+# {{icon|GA}} [[:SG-1000]]<small>（2019-08-09）</small>
+# {{icon|GA}} [[:Genesis Nomad]]<small>（2019-07-16）</small>
+# {{icon|GA}} [[:SEGA Meganet]]<small>（2019-02-26）</small>
+# {{icon|GA}} [[:SEGA Channel]]<small>（2018-07-29）</small>
+{{div col end}}
+
+=== 公司與人物 ===
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:Technoblade]]<small>（2025-10-31）</small>
+# {{icon|GA}} [[:Polygon]]<small>（2025-08-10）</small>
+# {{icon|GA}} [[:Re-Logic]]<small>（2025-04-12）</small>
+# {{icon|GA}} [[:小玉理惠子]]<small>（2024-03-28）</small>
+# {{icon|GA}} [[:Quantic Dream]]<small>（2023-09-17）</small>
+# {{icon|GA}} [[:Crispy Gamer]]<small>（2020-08-21）</small>
+# {{icon|GA}} [[:Don't Nod]]<small>（2020-01-27）</small>
+# {{icon|GA}} [[:女流]]<small>（2020-01-07）</small>
+# {{icon|GA}} [[:CD Projekt]]<small>（2016-12-12）</small>
+# {{icon|GA}} [[:Key (遊戲品牌)]]<small>（2015-09-01）</small>
+{{div col end}}
+
+=== 開發與歷史 ===
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:《BanG Dream! 少女乐团派对！》的开发|《-{zh-cn:BanG Dream! 少女乐团派对！; zh-tw:BanG Dream! 少女樂團派對}-》的开发]]<small>（2025-05-06）</small>
+# {{icon|GA}} [[:早期電子遊戲史]]<small>（2023-02-22）</small>
+# {{icon|GA}} [[:早期大型電腦遊戲|早期-{zh-cn:大型计算机; zh-tw:大型電腦}-遊戲]]<small>（2022-11-28）</small>
+# {{icon|GA}} [[:雅达利游戏掩埋事件]]<small>（2017-05-18）</small>
+{{div col end}}
+
+=== 其他 ===
+
+{{div col|colwidth=22em}}
+# {{icon|GA}} [[:Face My Fears]]<small>（2026-02-01）</small>
+# {{icon|GA}} [[:生化危機之變種生還者]]<small>（2024-01-21）</small>
+# {{icon|GA}} [[:染病 (最後生還者)]]<small>（2023-08-28）</small>
+# {{icon|GA}} [[:迷失在黑暗之中]]<small>（2023-03-02）</small>
+# {{icon|GA}} [[:虛擬鏡頭系統]]<small>（2021-10-16）</small>
+# {{icon|GA}} [[:英雄联盟2016赛季全球总决赛]]<small>（2020-07-11）</small>
+# {{icon|GA}} [[:2016年Dota 2国际邀请赛]]<small>（2020-05-19）</small>
+# {{icon|GA}} [[:最後一戰4：航向黎明]]<small>（2018-06-04）</small>
+# {{icon|GA}} [[:平方根倒数速算法]]<small>（2012-05-28）</small>
+{{div col end}}
+
+== 撤销内容 ==
+
+{{div col|colwidth=22em}}
+{{#section:WikiProject:电子游戏/认证条目/DGA|list}}
+{{div col end}}
+
+== 参见 ==
+
+* [[WikiProject:电子游戏/认证条目/GA|機械人更新的完整名單]]（[[Special:History/WikiProject:电子游戏/认证条目/GA|页面历史]]）
+* {{psid|34581844|PetScan生成的优良条目名单}}（按最后编辑时间逆序排列）
+* [[WikiProject:电子游戏/话题#专题优良级话题|专题优良话题]]
+
+<noinclude>
+[[Category:电子游戏专题遴选内容|C]]
+[[Category:维基百科优良条目|專題]]
+</noinclude>

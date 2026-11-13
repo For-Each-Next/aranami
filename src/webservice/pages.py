@@ -1,4 +1,4 @@
-"""Render Jinja pages from validated, saved backend observations.
+"""Render Django pages from validated, saved runtime observations.
 
 The public application validates facts before calling these renderers.
 Templates own HTML structure and escaping; context preparation localizes
@@ -9,27 +9,37 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import operator
 import secrets
 from functools import lru_cache
 from hashlib import sha256
-from itertools import chain
 from typing import TYPE_CHECKING
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlsplit
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+import polars as pl
+from django.template import engines
 from markupsafe import Markup, escape
 
-from shared.deployment import project_version, resource_root
+from shared.assessment_profiles import assessment_profile
+from shared.config import routine_configuration
+from shared.deployment import (
+    project_build_time,
+    project_version,
+    resource_root,
+)
 from shared.newsletter import Issue
-from webservice.job_history import history_context
+from webservice.consistency import (
+    consistency_groups,
+    coverage_status,
+    finding_details,
+    latest_history_first,
+)
+from webservice.django_setup import setup_django
 from webservice.presentation import (
     Interface,
     article_extract,
     assessment_code,
     catalog,
-    event_duration,
-    failure_description,
+    display_title,
     homepage_sections,
     local_url,
     maintenance_filter,
@@ -37,42 +47,27 @@ from webservice.presentation import (
     maintenance_page,
     maintenance_sections,
     maintenance_selection,
-    next_run,
     pageviews_url,
     readable_size,
     relative_time,
-    schedule_state,
+    relative_units,
     timestamp,
     title_url,
-    uptime,
     utc_time,
     wiki_link,
 )
+from webservice.quality_analysis import quality_analysis_context
+from webservice.quality_authorship import quality_authorship_context
+from webservice.redirects import redirect_selection
+from webservice.status_view import report_context, status_context
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from django.template.backends.jinja2 import Jinja2
+
     from webservice.presentation import Record
 
-_STATES = {
-    "queued": "Queued",
-    "running": "Running",
-    "updated": "Updated",
-    "no_update": "NoUpdate",
-    "failed": "Failed",
-    "deferred": "Deferred",
-    "unknown": "Result unavailable",
-    "unconfirmed": "Result unavailable",
-}
-_REPORT_ICONS = {
-    "dyks": "lightbulb",
-    "new_pages": "article-add",
-    "assessment_lists": "article-check",
-    "assessment_log": "history",
-    "pageviews": "chart-bar",
-    "enwp_key_articles": "language",
-    "pexbot": "robot",
-}
 # Module:PJ:VG/RVW, revision 92100885, with credited vector equivalents.
 # Reassessment uses Codex history.
 _REVIEW_ICONS = {
@@ -90,6 +85,189 @@ _HIGHLIGHT_ICONS = {
     "good": ("good.svg", "Symbol_support_vote.svg"),
     "dyk": ("dyk.svg", "Symbol_question.svg"),
 }
+_SHOWCASE_TYPES = {
+    "fa": "TFA",
+    "fl": "TFL",
+    "ga": "TGA",
+    "dyk": "DYK",
+    "news": "ITN",
+    "history": "OTD",
+}
+
+
+def _review_link_key(item: Record, now: dt.datetime) -> str:
+    """Separate observed nomination outcomes from elapsed voting time.
+
+    Returns:
+        The localized link key. Unscheduled review types keep their
+        ordinary link. A deadline establishes only that voting ended.
+    """
+    if item["review_type"] not in {"dykc", "gan", "fac", "flc"}:
+        return "reviews.link"
+    result = item.get("result")
+    if result in {"passed", "failed", "ended"}:
+        return f"reviews.{result}"
+    ends = item.get("ends_at")
+    if ends is not None:
+        try:
+            deadline = dt.datetime.fromisoformat(ends)
+        except ValueError:
+            deadline = None
+        if (
+            deadline is not None
+            and deadline.tzinfo is not None
+            and now >= deadline
+        ):
+            return "reviews.ended"
+    return "reviews.ongoing"
+
+
+# Known Chinese Wikipedia talk namespaces, verified against siteinfo on
+# 9 November 2026. Legacy saved titles are canonical; local aliases also
+# resolve without creating a source client during page rendering.
+_DISCUSSION_NAMESPACE_PAIRS = (
+    ("", ("Talk", "对话", "對話", "討論", "讨论")),
+    (
+        "User",
+        (
+            "User talk",
+            "UT",
+            "使用者对话",
+            "使用者對話",
+            "使用者討論",
+            "使用者讨论",
+            "用戶對話",
+            "用戶討論",
+            "用户对话",
+            "用户讨论",
+        ),
+    ),
+    (
+        "Wikipedia",
+        (
+            "Wikipedia talk",
+            "Project talk",
+            "WT",
+            "Wikipedia对话",
+            "Wikipedia對話",
+            "Wikipedia討論",
+            "Wikipedia讨论",
+            "专案讨论",
+            "專案討論",
+            "維基百科對話",
+            "維基百科討論",
+            "维基百科对话",
+            "维基百科讨论",
+        ),
+    ),
+    (
+        "File",
+        (
+            "File talk",
+            "Image talk",
+            "图像对话",
+            "图像讨论",
+            "图片讨论",
+            "圖像對話",
+            "圖像討論",
+            "圖片討論",
+            "文件对话",
+            "文件對話",
+            "文件討論",
+            "文件讨论",
+            "档案对话",
+            "档案讨论",
+            "檔案對話",
+            "檔案討論",
+        ),
+    ),
+    ("MediaWiki", ("MediaWiki talk", "MediaWiki討論", "MediaWiki讨论")),
+    (
+        "Template",
+        (
+            "Template talk",
+            "样板对话",
+            "样板讨论",
+            "模板对话",
+            "模板對話",
+            "模板討論",
+            "模板讨论",
+            "樣板對話",
+            "樣板討論",
+        ),
+    ),
+    (
+        "Help",
+        (
+            "Help talk",
+            "使用說明討論",
+            "使用说明讨论",
+            "帮助对话",
+            "帮助讨论",
+            "幫助對話",
+            "幫助討論",
+            "說明討論",
+            "说明讨论",
+        ),
+    ),
+    (
+        "Category",
+        ("Category talk", "分类对话", "分类讨论", "分類對話", "分類討論"),
+    ),
+    (
+        "Portal",
+        ("Portal talk", "主題對話", "主題討論", "主题对话", "主题讨论"),
+    ),
+    (
+        "WikiProject",
+        (
+            "WikiProject talk",
+            "PJT",
+            "WPJT",
+            "专题对话",
+            "专题讨论",
+            "專題對話",
+            "專題討論",
+            "維基專題對話",
+            "維基專題討論",
+            "维基专题对话",
+            "维基专题讨论",
+        ),
+    ),
+    ("Draft", ("Draft talk", "草稿討論", "草稿讨论")),
+    ("MOS", ("MOS talk",)),
+    ("TimedText", ("TimedText talk",)),
+    (
+        "Module",
+        (
+            "Module talk",
+            "模块对话",
+            "模块讨论",
+            "模塊對話",
+            "模塊討論",
+            "模組對話",
+            "模組討論",
+            "模组对话",
+            "模组讨论",
+        ),
+    ),
+    ("Event", ("Event talk", "活动讨论", "活動討論")),
+)
+_DISCUSSION_SUBJECT_PREFIXES = {
+    alias.casefold(): subject
+    for subject, aliases in _DISCUSSION_NAMESPACE_PAIRS
+    for alias in aliases
+}
+_DISCUSSION_GROUPS = (
+    "week-1",
+    "week-2",
+    "week-3",
+    "week-4",
+    "drafts",
+    "projects",
+    "categories-templates",
+    "other",
+)
 # Chinese Wikipedia template images; provenance is in the credits.
 _MAINTENANCE_ICONS = {
     "afd": "icono-aviso-borrar.svg",
@@ -130,9 +308,7 @@ _MAINTENANCE_ICONS = {
     "uncategorized": "wiki-letter-w.svg",
     "expert": "ambox-important.svg",
 }
-_HOUR_SECONDS = 3600
-_DAY_SECONDS = 24 * _HOUR_SECONDS
-_MONTH_SECONDS = 365.25 / 12 * _DAY_SECONDS
+_CONSISTENCY_HISTORY_PREVIEW = 10
 
 
 @lru_cache(maxsize=64)
@@ -150,19 +326,16 @@ def _asset_url(name: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _templates() -> Environment:
+def _templates() -> Jinja2:
     """Load cached presentation templates with HTML autoescaping.
 
     Returns:
-        A Jinja environment rooted in the source template directory.
+        A Django template backend rooted in the source directory.
     """
-    environment = Environment(
-        loader=FileSystemLoader(resource_root("webservice") / "templates"),
-        autoescape=select_autoescape(["html"]),
-        auto_reload=False,
-    )
-    environment.globals["asset_url"] = _asset_url
-    return environment
+    setup_django()
+    backend = engines["jinja2"]
+    backend.env.globals["asset_url"] = _asset_url
+    return backend
 
 
 def _render(name: str, context: Record) -> str:
@@ -197,20 +370,6 @@ def _messages(locale: str) -> Record:
     return result
 
 
-def _completed_daily_report(routine: str, event: Record | None) -> bool:
-    """Identify successful daily work with a confirmed report date.
-
-    Returns:
-        Whether the saved outcome supports a dated completion label.
-    """
-    return (
-        routine in {"new_pages", "pageviews", "assessment_log"}
-        and event is not None
-        and event.get("status") in {"updated", "no_update"}
-        and bool(event.get("report_date"))
-    )
-
-
 def _time(value: object, *, seconds: bool = False) -> Record:
     """Prepare an actual UTC observation or its unknown marker.
 
@@ -236,6 +395,257 @@ def _english_ordinal(value: int) -> str:
         else {1: "st", 2: "nd", 3: "rd"}.get(value % 10, "th")
     )
     return f"{value:,}{suffix}"
+
+
+_SECTION_SIZE_INTEGER_BYTES = 10_000
+_DISCUSSION_HOT_PARTICIPANTS = 3
+_DISCUSSION_HOT_COMMENTS = 10
+
+
+def _section_size(value: object, interface: Interface) -> Record | None:
+    """Format observed topic bytes as a decimal-kilobyte label.
+
+    Returns:
+        The SI size label and exact source-byte tooltip, if known.
+    """
+    if type(value) is not int or value <= 0:
+        return None
+    kilobytes = value / 1000
+    digits = (
+        0
+        if value >= _SECTION_SIZE_INTEGER_BYTES
+        else 1
+        if kilobytes >= 1
+        else 2
+    )
+    return {
+        "label": f"{kilobytes:,.{digits}f}\u00a0kB",
+        "description": interface.text(
+            "reviews.section_size",
+            bytes=f"{value:,}",
+        ),
+    }
+
+
+def _discussion_subject(item: Record) -> tuple[str | None, str | None]:
+    """Resolve a saved topic's subject using known wiki namespaces.
+
+    Args:
+        item: Topic observations, with optional saved subject metadata.
+
+    Returns:
+        The subject title and URL, or unknown values without identity.
+        Unrecognized colon prefixes remain literal page-title content.
+    """
+    title = item.get("subject_title") or item.get("source_title")
+    if not isinstance(title, str) or not title:
+        return None, None
+    prefix, separator, name = title.partition(":")
+    subject = _DISCUSSION_SUBJECT_PREFIXES.get(
+        prefix.replace("_", " ").strip().casefold(),
+    )
+    if separator and name and subject is not None:
+        title = f"{subject}:{name}" if subject else name
+        return title, title_url(title)
+    return title, item.get("subject_url") or title_url(title)
+
+
+def _discussion_activity(item: Record, now: dt.datetime) -> str:
+    """Classify saved section totals against the latest comment time.
+
+    Args:
+        item: Observed topic timestamps and whole-section counts.
+        now: Aware render clock, shared with the displayed comment ages.
+
+    Returns:
+        The ordinary, recent, hot, or combined icon state. Missing or
+        future timestamps never establish activity. Counts describe the
+        whole section rather than a time series.
+    """
+    latest = timestamp(item.get("replied_at"))
+    if latest is None or latest > now:
+        return "ordinary"
+    age = now - latest
+    comments = item.get("comment_count")
+    participants = item.get("participant_count")
+    recent = (
+        type(comments) is int
+        and comments > 1
+        and age <= dt.timedelta(hours=24)
+    )
+    hot = (
+        type(comments) is int
+        and comments >= _DISCUSSION_HOT_COMMENTS
+        and type(participants) is int
+        and participants >= _DISCUSSION_HOT_PARTICIPANTS
+        and age <= dt.timedelta(days=7)
+    )
+    if recent:
+        return "recent-hot" if hot else "recent"
+    return "hot" if hot else "ordinary"
+
+
+def _discussion_key(value: object) -> str | None:
+    """Normalize a saved section or comment URL for exact identity.
+
+    Args:
+        value: Saved wiki URL, possibly absent or without a fragment.
+
+    Returns:
+        A host, page and fragment identity, or none for a bare page.
+        Percent escapes and equivalent wiki spaces compare equally;
+        a review of one section never excludes its entire talk page.
+    """
+    if not isinstance(value, str):
+        return None
+    parsed = urlsplit(value)
+    if not parsed.fragment:
+        return None
+    return json.dumps([
+        parsed.hostname,
+        unquote(parsed.path).replace("_", " "),
+        unquote(parsed.fragment).replace("_", " "),
+    ])
+
+
+def _discussion_selection(
+    items: list[Record],
+    now: dt.datetime,
+    *,
+    days: int,
+    reviews: list[Record],
+) -> pl.DataFrame:
+    """Select dated saved topics and assign exclusive display groups.
+
+    Args:
+        items: Saved general discussions with optional subject metadata.
+        now: Shared aware UTC render clock.
+        days: Inclusive elapsed-day activity window.
+        reviews: Recognized reviews excluded by section or comment.
+
+    Returns:
+        Source row indices, normalized comment instants and group keys,
+        ordered by page type and newest comment with stable subject
+        and topic ties.
+        Assessments determine content type; missing class observations
+        fall back to known subject namespaces. Unknown dates cannot
+        establish activity, and future dates never qualify.
+    """
+    profile = assessment_profile("zhwiki", "电子游戏")
+    review_keys = [
+        key
+        for review in reviews
+        for field in ("review_url", "latest_comment_url", "replied_url")
+        if (key := _discussion_key(review.get(field))) is not None
+    ]
+    frame = (
+        pl
+        .DataFrame(
+            [
+                {
+                    "index": index,
+                    "subject": _discussion_subject(item)[0],
+                    "assessment_class": item.get("assessment_class"),
+                    "latest": item.get("replied_at"),
+                    "title": item["title"],
+                    "review_url": item["review_url"],
+                    "topic_key": _discussion_key(item["review_url"]),
+                    "comment_key": _discussion_key(item.get("replied_url")),
+                }
+                for index, item in enumerate(items)
+            ],
+            schema={
+                "index": pl.UInt32,
+                "subject": pl.String,
+                "assessment_class": pl.String,
+                "latest": pl.String,
+                "title": pl.String,
+                "review_url": pl.String,
+                "topic_key": pl.String,
+                "comment_key": pl.String,
+            },
+        )
+        .with_columns(
+            pl.col("latest").str.to_datetime(
+                format="%+",
+                time_zone="UTC",
+                strict=False,
+            ),
+            profile.expression(
+                "assessment_class",
+                "class",
+                preserve_unknown=False,
+            ).alias("class"),
+            profile.expression(
+                "assessment_class",
+                "class",
+                field="is_article",
+                preserve_unknown=False,
+            ).alias("article"),
+            pl.col("subject").str.extract(r"^([^:]+):").alias("namespace"),
+        )
+        .filter(
+            pl.col("latest").is_between(now - dt.timedelta(days=days), now),
+            ~pl.col("topic_key").is_in(review_keys).fill_null(value=False),
+            ~pl.col("comment_key").is_in(review_keys).fill_null(value=False),
+        )
+    )
+    namespace_group = (
+        pl
+        .when(pl.col("namespace") == "Draft")
+        .then(pl.lit("drafts"))
+        .when(pl.col("namespace").is_in(["WikiProject", "Portal"]))
+        .then(pl.lit("projects"))
+        .when(pl.col("namespace").is_in(["Category", "Template"]))
+        .then(pl.lit("categories-templates"))
+        .when(
+            pl.col("namespace").is_in(
+                [
+                    name
+                    for name, _aliases in _DISCUSSION_NAMESPACE_PAIRS
+                    if name
+                ],
+            ),
+        )
+        .then(pl.lit("other"))
+        .otherwise(pl.lit("article"))
+    )
+    kind = (
+        pl
+        .when(pl.col("class") == "Draft")
+        .then(pl.lit("drafts"))
+        .when(pl.col("class").is_in(["Project", "Portal"]))
+        .then(pl.lit("projects"))
+        .when(pl.col("class").is_in(["Category", "Template"]))
+        .then(pl.lit("categories-templates"))
+        .when(pl.col("article"))
+        .then(pl.lit("article"))
+        .when(pl.col("class").is_not_null() & (pl.col("class") != "Unknown"))
+        .then(pl.lit("other"))
+        .otherwise(namespace_group)
+    )
+    week = (
+        pl
+        .when(pl.col("latest") >= now - dt.timedelta(days=7))
+        .then(pl.lit("week-1"))
+        .when(pl.col("latest") >= now - dt.timedelta(days=14))
+        .then(pl.lit("week-2"))
+        .when(pl.col("latest") >= now - dt.timedelta(days=21))
+        .then(pl.lit("week-3"))
+        .otherwise(pl.lit("week-4"))
+    )
+    return frame.with_columns(
+        pl
+        .when(kind == "article")
+        .then(week)
+        .otherwise(kind)
+        .cast(pl.Enum(_DISCUSSION_GROUPS))
+        .alias("group"),
+    ).sort(
+        ["group", "latest", "subject", "title", "review_url"],
+        descending=[False, True, False, False, False],
+        nulls_last=True,
+    )
 
 
 class _Page:
@@ -276,23 +686,6 @@ class _Page:
             ),
         }
 
-    def relative_note(
-        self,
-        value: object,
-        now: dt.datetime,
-        *,
-        inline: bool = False,
-    ) -> Record:
-        """Prepare a relative annotation only for a known timestamp.
-
-        Returns:
-            A localized relative label, without presentation wrappers.
-        """
-        label = relative_time(value, self.interface, now)
-        return {
-            "label": label[1:-1] if inline and label else label,
-        }
-
     def clock(self, schedule: Record, now: dt.datetime) -> Record:
         """Share server clock anchors between status views.
 
@@ -319,6 +712,10 @@ class _Page:
                     "duration.days",
                     "time.months_ago",
                     "time.months_ahead",
+                    "time.years_ago",
+                    "time.years_ahead",
+                    "time.weeks_ago",
+                    "time.weeks_ahead",
                     "time.minutes_ago",
                     "time.hours_ago",
                     "time.days_ago",
@@ -335,88 +732,13 @@ class _Page:
                     "time.days_ahead_one",
                     "time.months_ago_one",
                     "time.months_ahead_one",
+                    "time.years_ago_one",
+                    "time.years_ahead_one",
+                    "time.weeks_ago_one",
+                    "time.weeks_ahead_one",
                 )
             }),
         }
-
-    @staticmethod
-    def _active_progress(
-        event: Record | None,
-        schedule: Record,
-    ) -> Record | None:
-        """Select progress from the current active monitor session.
-
-        Returns:
-            Saved progress or a preparing phase while fresh and running;
-            none for inactive, stale, or superseded observations.
-        """
-        if (
-            not event
-            or event.get("status") != "running"
-            or schedule["state"] != "running"
-        ):
-            return None
-        started = timestamp(event.get("started_at"))
-        session = timestamp(schedule.get("started_at"))
-        if started is None or session is None or started < session:
-            return None
-        return event.get("progress") or {"phase": "preparing"}
-
-    def _progress_note(self, progress: Record | None) -> str | None:
-        """Describe the saved phase separately from the update subject.
-
-        Returns:
-            A phase and optional counters, or none when inactive.
-        """
-        if progress is None:
-            return None
-        phase = progress.get("phase", "preparing")
-        if phase not in {
-            "preparing",
-            "publishing",
-            "pageviews_readiness",
-            "pageviews_download",
-            "pageviews_aggregate",
-        }:
-            phase = "preparing"
-        label = self.text(f"progress.{phase}")
-        current, total = progress.get("current"), progress.get("total")
-        return (
-            self.text(
-                "progress.count",
-                phase=label,
-                current=f"{current:,}",
-                total=f"{total:,}",
-            )
-            if current is not None and total is not None
-            else label
-        )
-
-    def _outcome_label(self, event: Record | None) -> str:
-        """Describe an outcome from its saved failure observations.
-
-        Returns:
-            Localized text, with a generic label for older records.
-        """
-        if event is None:
-            return self.text("ops.no_record")
-        if event["status"] != "failed":
-            return self.text(f"state.{_STATES[event['status']]}")
-        failure_date = event.get("failure_date")
-        reason = failure_description(event, self.interface)
-        label = (
-            self.text(
-                "state.FailedRecordDate",
-                date=self.interface.date(failure_date),
-            )
-            if failure_date
-            else self.text("state.Failed")
-        )
-        return (
-            self.text("state.FailedReason", failure=label, reason=reason)
-            if reason
-            else label
-        )
 
     def article(self, item: Record) -> Record:
         """Prepare a title, assessment chips, and saved introduction.
@@ -450,8 +772,9 @@ class _Page:
                 ),
             })
         language, extract = article_extract(item, self.interface.locale)
+        title = display_title(item["title"], self.interface.locale)
         return {
-            "link": wiki_link(item["url"], item["title"], item["title"]),
+            "link": wiki_link(item["url"], title, title),
             "assessments": assessments,
             "extract": extract,
             "extract_language": Interface(language).language_tag,
@@ -476,9 +799,27 @@ class _Page:
             An article card preserving each observation's meaning.
         """
         card = self.article(item)
+        source_type = (
+            _SHOWCASE_TYPES.get(item.get("kind"))
+            if section == "recognized"
+            else None
+        )
+        card["showcase_type"] = (
+            {
+                "code": source_type,
+                "description": self.text(
+                    f"homepage.scheduled_type.{source_type.lower()}"
+                    if item.get("date_kind") in {"scheduled", "estimated"}
+                    and source_type in {"TFA", "TFL", "TGA"}
+                    else f"homepage.type.{source_type.lower()}",
+                ),
+            }
+            if source_type
+            else None
+        )
         appearance = (
             "dyk"
-            if section == "dyk"
+            if section == "dyk" or item.get("kind") == "dyk"
             else {
                 "fa": "featured",
                 "fl": "featured",
@@ -500,6 +841,7 @@ class _Page:
                 ),
             }
         if pageviews:
+            popularity_day = dt.date.fromisoformat(pageviews["date"])
             card.update(
                 rank=item["rank"],
                 date={
@@ -507,12 +849,11 @@ class _Page:
                     "label": self.interface.date(
                         pageviews["date"],
                         compact=True,
-                        reference_year=now.year,
-                    ),
+                        reference_year=popularity_day.year,
+                    )
+                    if self.interface.locale == "en"
+                    else f"{popularity_day.month}月{popularity_day.day}日",
                 },
-                date_separator=": "
-                if self.interface.locale == "en"
-                else "\uff1a",
                 pageviews_url=pageviews_url(item, pageviews["date"]),
                 views=self.text(
                     "pageviews.views_one"
@@ -555,17 +896,20 @@ class _Page:
                 "label": self.interface.date(
                     date,
                     compact=True,
-                    reference_year=now.year,
+                    reference_year=now.year
+                    if section != "recognized"
+                    else None,
                 ),
             }
             if date is not None
             else None,
             scheduled=(
-                f"({self.text('date.scheduled')}) "
+                f"{self.text('date.scheduled')} "
                 if self.interface.locale == "en"
-                else f"\uff08{self.text('date.scheduled')}\uff09"
+                else self.text("date.scheduled")
             )
-            if date is not None and item.get("date_kind") == "scheduled"
+            if date is not None
+            and item.get("date_kind") in {"scheduled", "estimated"}
             else "",
             kind=self.text(kind) if kind else None,
             date_note=self.text(note) if note else None,
@@ -589,87 +933,251 @@ class _Page:
         instant: dt.datetime,
         now: dt.datetime,
         event: str,
-    ) -> str:
-        """Describe elapsed opening and latest-reply ages.
+    ) -> Record:
+        """Describe compact and complete elapsed review ages.
 
         Returns:
-            A localized complete month, day, hour, or minute count.
-            Months use 365.25 / 12 days for both starts and replies.
+            Localized compact age and its complete event description.
+            Shared whole-unit thresholds match other relative clocks.
         """
-        seconds = (now - instant).total_seconds()
-        if seconds >= _MONTH_SECONDS:
-            unit, divisor = "months", _MONTH_SECONDS
-        elif seconds >= _DAY_SECONDS:
-            unit, divisor = "days", _DAY_SECONDS
-        else:
-            unit, divisor = "hours", _HOUR_SECONDS
-        if seconds < _HOUR_SECONDS:
-            unit, divisor = "minutes", 60
-        count = int(seconds // divisor)
-        key = f"reviews.{event}_{unit}"
-        if count == 1:
-            key += "_one"
-        return self.text(key, count=count)
+        unit, count = relative_units((now - instant).total_seconds())
+        if count == 0:
+            return {
+                "elapsed": self.text("reviews.age_just_now"),
+                "description": self.text(f"reviews.{event}_just_now"),
+            }
+        return {
+            "elapsed": self.text(f"reviews.age_{unit}", count=count),
+            "description": self.text(f"reviews.{event}_{unit}", count=count),
+        }
 
-    def reviews(self, snapshot: Record, now: dt.datetime) -> Record | None:
+    def _review_counts(self, item: Record) -> Record | None:
+        """Describe known participant and comment totals.
+
+        Args:
+            item: Saved counts, with unknown observations left unset.
+
+        Returns:
+            Known counts, even without a latest-comment timestamp.
+        """
+        participants = (
+            f"{item['participant_count']:,}"
+            if item.get("participant_count") is not None
+            else None
+        )
+        comments = (
+            f"{item['comment_count']:,}"
+            if item.get("comment_count") is not None
+            else None
+        )
+        if participants is None and comments is None:
+            return None
+        description = (
+            self.text(
+                "reviews.participants_comments"
+                if comments is not None
+                else "reviews.participants",
+                count=participants,
+                comments=comments,
+            )
+            if participants is not None
+            else self.text("reviews.comments", count=comments)
+        )
+        return {"participant_count": participants, "description": description}
+
+    def _review_dates(
+        self,
+        item: Record,
+        now: dt.datetime,
+        *,
+        discussion: bool,
+        counts: Record | None,
+    ) -> list[Record]:
+        """Keep nomination and latest signed comment facts separate.
+
+        Args:
+            item: Saved review or discussion observations.
+            now: Aware clock for elapsed labels and future-time guards.
+            discussion: Use the discussion's existing comment fields.
+            counts: Independent known section totals.
+
+        Returns:
+            Valid start and latest-comment indicators. Legacy reviews
+            use response facts only when comment fields are absent.
+            Explicit unknown latest comments never fall back.
+        """
+        latest = (
+            "latest_comment"
+            if not discussion and "latest_comment_at" in item
+            else "replied"
+        )
+        dates = []
+        for field, event, author in (
+            ("started_at", "started", "nominator"),
+            (f"{latest}_at", "replied", f"{latest}_by"),
+        ):
+            instant = timestamp(item.get(field))
+            if instant is None or instant > now:
+                continue
+            age = self._review_elapsed(instant, now, event)
+            dates.append({
+                "value": item[field],
+                "label": self.text(
+                    "reviews.author_details",
+                    event=relative_time(item[field], self.interface, now),
+                    time=utc_time(item[field]),
+                    user=item[author],
+                    action=self.text(
+                        "reviews.started_action"
+                        if event == "started"
+                        else "reviews.replied_action",
+                    ),
+                )
+                if item.get(author)
+                else self.text(
+                    "reviews.time_details",
+                    event=age["description"],
+                    time=utc_time(item[field]),
+                ),
+                "marker": "+" if event == "started" else "\u203a",
+                "url": item.get(f"{latest}_url")
+                if event == "replied"
+                else None,
+                **age,
+                "participant_count": counts["participant_count"]
+                if counts is not None and event == "replied"
+                else None,
+                "participants": counts["description"]
+                if counts is not None
+                and counts["participant_count"] is not None
+                and event == "replied"
+                else None,
+            })
+        return dates
+
+    def reviews(
+        self,
+        snapshot: Record,
+        now: dt.datetime,
+        *,
+        discussion: bool = False,
+        days: int | None = None,
+    ) -> Record | None:
         """Prepare complete review cards with observed elapsed time.
 
         Args:
             snapshot: Saved dashboard facts, possibly without reviews.
             now: Aware server time for duration calculations.
+            discussion: Select saved active discussion topics.
+            days: Optional inclusive activity window for discussions.
 
         Returns:
             The review section, or none for a confirmed empty list.
         """
         data = snapshot.get("reviews")
+        if discussion:
+            data = (
+                {"items": data["discussions"]}
+                if data is not None and "discussions" in data
+                else None
+            )
+            if data is not None and days is not None:
+                items = data["items"]
+                data = {
+                    "items": [
+                        items[index]
+                        for index in _discussion_selection(
+                            items,
+                            now,
+                            days=days,
+                            reviews=(snapshot.get("reviews") or {}).get(
+                                "items",
+                                [],
+                            ),
+                        )["index"]
+                    ],
+                }
         if data is not None and not data["items"]:
             return None
         cards = []
         for item in (data or {}).get("items", []):
-            card = self.article(item)
+            subject, subject_url = (
+                _discussion_subject(item) if discussion else (None, None)
+            )
+            card = self.article(
+                {
+                    **item,
+                    "title": subject,
+                    "url": subject_url,
+                }
+                if discussion and subject
+                else item,
+            )
             review_type = item["review_type"]
             review_label = self.text(f"reviews.{review_type}")
+            activity = _discussion_activity(item, now) if discussion else None
             icon = _REVIEW_ICONS.get(review_type)
             icon_source = icon[1] if icon else "Codex_icon_history_(v2.6).svg"
-            dates = []
-            for field, event in (
-                ("started_at", "started"),
-                ("replied_at", "replied"),
-            ):
-                instant = timestamp(item.get(field))
-                if instant is None or instant > now:
-                    continue
-                dates.append({
-                    "value": item[field],
-                    "label": utc_time(item[field], seconds=True),
-                    "elapsed": self._review_elapsed(instant, now, event),
-                    "participants": self.text(
-                        "reviews.participants",
-                        count=f"{item['participant_count']:,}",
-                    )
-                    if event == "replied"
-                    and item.get("participant_count") is not None
-                    else None,
-                })
+            counts = self._review_counts(item)
+            dates = self._review_dates(
+                item,
+                now,
+                discussion=discussion,
+                counts=counts,
+            )
             card.update(
                 review_icon=_asset_url(f"assets/icons/{icon[0]}")
                 if icon
                 else None,
-                review_icon_symbol=None if icon else "history",
+                review_icon_symbol=(
+                    "speech-bubbles"
+                    if activity == "ordinary"
+                    else f"speech-bubbles-{activity}"
+                )
+                if discussion
+                else None
+                if icon
+                else "history",
                 review_icon_label=review_label,
-                review_icon_source=(
+                review_activity=activity,
+                review_activity_label=self.text(
+                    "reviews.activity_details",
+                    activity=self.text(
+                        f"reviews.activity_{activity.replace('-', '_')}",
+                    ),
+                )
+                if activity is not None
+                else None,
+                review_icon_source="https://doc.wikimedia.org/codex/latest/icons/overview.html"
+                if discussion
+                else (
                     "https://commons.wikimedia.org/wiki/File:" + icon_source
                 ),
                 review_link=wiki_link(
-                    item["review_url"],
-                    self.text("reviews.link"),
+                    title_url(item["source_title"])
+                    if discussion and item.get("source_title")
+                    else item["review_url"],
+                    self.text(_review_link_key(item, now)),
                 ),
                 review_dates=dates,
+                review_counts=counts,
+                discussion_link=wiki_link(
+                    item["review_url"],
+                    display_title(item["title"], self.interface.locale),
+                    display_title(item["title"], self.interface.locale),
+                )
+                if discussion
+                else None,
+                review_section_size=_section_size(
+                    item.get("section_bytes"),
+                    self.interface,
+                ),
             )
             cards.append(card)
         return {
             "cards": cards,
             "is_review": True,
+            "key": "discussions" if discussion else "reviews",
             "empty": self.text("empty.section") if data is None else None,
             "updated": self.source_updated(
                 snapshot
@@ -690,7 +1198,7 @@ class _Page:
             Ordered sections retaining unavailable and empty states.
         """
         sections = []
-        for section in homepage_sections(snapshot):
+        for section in homepage_sections(snapshot, now):
             key = section["key"]
             views = snapshot.get("pageviews") if key == "pageviews" else None
             updated = (
@@ -772,350 +1280,49 @@ class _Page:
             "updated": self.source_updated(backlog["observed_at"]),
         }
 
-    def _routine_links(self, name: str, definition: Record) -> Record:
-        """Prepare a compact destination count and detailed page links.
-
-        Returns:
-            Target links, count, and localized separators.
-        """
-        targets = list(definition.get("pages", {}).values()) or definition.get(
-            "prefixes",
-            [],
-        )
-        multiple = len(targets) > 1
-        return {
-            "name": name,
-            "multiple": multiple,
-            "count": self.text("ops.page_count", count=len(targets)),
-            "opening": " (" if self.interface.locale == "en" else "\uff08",
-            "closing": ")" if self.interface.locale == "en" else "\uff09",
-            "targets": [
-                wiki_link(
-                    title_url(title),
-                    (
-                        self.text(f"report.{title.rsplit('/', 1)[-1]}")
-                        if f"report.{title.rsplit('/', 1)[-1]}" in catalog()
-                        else title.rsplit("/", 1)[-1]
-                    )
-                    if multiple
-                    else name,
-                    f"{index} · {name} · {title}"
-                    if multiple
-                    else f"{name} · {title}",
-                )
-                for index, title in enumerate(targets, 1)
-            ],
-        }
-
-    def _report(self, record: Record, now: dt.datetime) -> Record:
-        """Prepare destination outcomes and independent execution times.
-
-        Returns:
-            Localized values and an active timer anchor when observed.
-        """
-        return {
-            "key": f"{record['site']}:{record['title']}",
-            "link": wiki_link(
-                title_url(record["title"], record["site"]),
-                record["title"],
-            ),
-            "outcome": wiki_link(
-                "https://"
-                + ("zh" if record["site"] == "zhwiki" else "en")
-                + ".wikipedia.org/w/index.php?oldid="
-                + str(record["revision_id"]),
-                self._outcome_label(record),
-            )
-            if record.get("revision_id") and record["status"] == "updated"
-            else self._outcome_label(record),
-            "started": _time(
-                None
-                if record["status"] == "queued"
-                else record.get("started_at"),
-                seconds=True,
-            ),
-            "finished": _time(record.get("finished_at"), seconds=True),
-            "duration": event_duration(record, self.interface, now),
-            "timer_start": record.get("started_at")
-            if record["status"] == "running"
-            and timestamp(record.get("started_at")) is not None
-            else None,
-        }
-
-    def _latest_update_label(
-        self,
-        identifier: str,
-        pages: list[Record],
-        history: Record,
-    ) -> str:
-        """Describe the last confirmed save without using a check time.
-
-        Args:
-            identifier: Routine whose live outcomes are displayed.
-            pages: Live destination observations for this routine.
-            history: Validated retained invocations keyed by identity.
-
-        Returns:
-            Localized update time or the generic updated label.
-        """
-        updated = max(
-            filter(
-                None,
-                chain(
-                    (timestamp(page.get("last_updated_at")) for page in pages),
-                    (
-                        timestamp(stage["time"])
-                        for run in history.values()
-                        if run["routine"] == identifier
-                        for stage in run["stages"]
-                        if stage["kind"] == "saved"
-                    ),
-                ),
-            ),
-            default=None,
-        )
-        return (
-            self.text(
-                "state.UpdatedAt",
-                time=self.interface.date(updated.date().isoformat())
-                + (" " if self.interface.locale == "en" else "")
-                + updated.strftime("%H:%M"),
-            )
-            if updated is not None
-            else self.text("state.Updated")
-        )
-
-    def routine_rows(
-        self,
-        status: Record,
-        definitions: Record,
-        schedule: Record,
-        now: dt.datetime,
-    ) -> list[Record]:
-        """Prepare actual outcomes and independent configured schedules.
-
-        Returns:
-            Routine rows with progress and destination details.
-        """
-        events = (status.get("routines") or {}).get("routines", {})
-        records = (status.get("reports") or {}).get("reports", {}).values()
-        history = {
-            run["run_id"]: run
-            for run in (status.get("history") or {}).get("runs", [])
-            if run.get("dry") is not True
-        }
-        rows = []
-        for identifier, definition in definitions.items():
-            name = self.text(f"routine.{identifier}")
-            event = events.get(identifier)
-            running = (event or {}).get("status") == "running"
-            progress = self._active_progress(event, schedule)
-            fallback = self._outcome_label(event)
-            label = fallback
-            completed_daily = _completed_daily_report(identifier, event)
-            if completed_daily:
-                label = self.text(
-                    "state.UpdatedReportDate",
-                    date=self.interface.date(event["report_date"]),
-                )
-            if progress is not None:
-                label = (
-                    self.text(
-                        "progress.pageviews_date"
-                        if identifier == "pageviews"
-                        else "progress.report_date",
-                        date=self.interface.date(progress["report_date"]),
-                    )
-                    if progress.get("report_date")
-                    else self.text(f"progress.routine.{identifier}")
-                )
-            observed = (
-                event["started_at" if running else "finished_at"]
-                if event
-                else None
-            )
-            routine_schedule = schedule["routines"].get(identifier, {})
-            upcoming = (
-                routine_schedule.get("next_run_at")
-                if not routine_schedule.get("queued_since")
-                else None
-            )
-            pages = sorted(
-                (
-                    record
-                    for record in records
-                    if record["routine"] == identifier
-                    and record.get("dry") is False
-                ),
-                key=operator.itemgetter("title"),
-            )
-            if not completed_daily and (event or {}).get("status") in {
-                "updated",
-                "no_update",
-            }:
-                label = self._latest_update_label(identifier, pages, history)
-            rows.append({
-                "identifier": identifier,
-                "icon": _REPORT_ICONS.get(identifier, "article"),
-                "links": self._routine_links(name, definition),
-                "running": running,
-                "status": "updated"
-                if completed_daily
-                else (event or {}).get("status", "unknown"),
-                "state": label,
-                "progress": self._progress_note(progress),
-                "fallback": fallback,
-                "observed": _time(observed),
-                "history_popup_id": f"job-history-{event['run_id']}"
-                if history.get((event or {}).get("run_id"), {}).get("routine")
-                == identifier
-                else None,
-                "relative": self.relative_note(observed, now),
-                "next_run": next_run(schedule, identifier, self.interface),
-                "upcoming": self.relative_note(upcoming, now),
-                "schedule_expires": schedule.get("expires_at") is not None,
-                "popup_id": f"report-details-{identifier}",
-                "popup_heading": self.text("ops.details", routine=name),
-                "reports": [self._report(record, now) for record in pages],
-            })
-        return rows
-
     def live_status(
         self,
         status: Record,
         config: Record,
         now: dt.datetime,
+        *,
+        history_page: int = 0,
     ) -> Record:
-        """Prepare shared status, footer, server, and resource data.
+        """Prepare saved observations and shared live clocks.
+
+        Args:
+            status: Validated independent runtime observations.
+            config: Current source and configured report definitions.
+            now: Actual rendering clock for freshness and durations.
+            history_page: History page, or zero for report cards only.
 
         Returns:
-            Context shared by complete pages and the live fragment view.
+            Localized status contexts without reading runtime files.
         """
-        definitions = (config.get("routines") or {}).get("routines", {})
-        schedule = schedule_state(status.get("schedule"), definitions, now)
-        version = config.get("version") or self.text("ops.unavailable")
-        started = schedule.get("started_at")
-        snapshot = status.get("schedule") or {}
-        observed_start = snapshot.get("started_at")
-        server_started = (
-            _time(observed_start, seconds=True)
-            if timestamp(observed_start) is not None
-            else None
+        context = status_context(
+            self.interface,
+            status,
+            config.get("version") or self.text("ops.unavailable"),
+            now,
+            built_at=project_build_time(),
+            history_limit=0,
         )
-        events = (status.get("routines") or {}).get("routines", {})
-        return {
-            **history_context(
+        context.update(
+            report_context(
                 self.interface,
-                status.get("history") or {},
-                required_run_ids={
-                    event["run_id"]
-                    for identifier, event in events.items()
-                    if identifier in definitions and event.get("run_id")
-                },
+                status,
+                (config.get("routines") or routine_configuration())[
+                    "routines"
+                ],
+                now,
+                history_page=history_page,
             ),
-            "clock": self.clock(schedule, now),
-            "routines": self.routine_rows(status, definitions, schedule, now),
-            "footer": {
-                "label": uptime(schedule, version, self.interface, now),
-                "started": started,
-                "template": self.text(
-                    "footer.uptime",
-                    version=version,
-                    duration=self.text(
-                        "duration.days",
-                        days="{days}",
-                        hours="{hours}",
-                        minutes="{minutes}",
-                        seconds="{seconds}",
-                    ),
-                    since=utc_time(started),
-                )
-                if started
-                else None,
-                "compact_template": self.text(
-                    "footer.uptime",
-                    version=version,
-                    duration="{duration}",
-                    since=utc_time(started),
-                )
-                if started
-                else None,
-                "unknown": self.text("footer.uptime_unknown", version=version),
-            },
-            "server": {
-                "state": self.text(f"server.{schedule['state']}"),
-                "observed": _time(schedule.get("updated_at"), seconds=True),
-                "relative": self.relative_note(
-                    schedule.get("updated_at"),
-                    now,
-                ),
-                "expires": schedule.get("expires_at") is not None,
-                "started": server_started,
-                "started_relative": self.relative_note(
-                    observed_start,
-                    now,
-                    inline=True,
-                ),
-                "opening": " (" if self.interface.locale == "en" else "\uff08",
-                "separator": ", "
-                if self.interface.locale == "en"
-                else "\uff0c",
-                "closing": ")" if self.interface.locale == "en" else "\uff09",
-            },
-            "runtime": self.runtime(status, schedule, version),
-        }
-
-    def runtime(
-        self,
-        status: Record,
-        schedule: Record,
-        version: str,
-    ) -> list[Record]:
-        """Prepare version details and fresh resource observations.
-
-        Returns:
-            Table rows with unknowns for missing resource facts.
-        """
-        runtime = (status.get("schedule") or {}).get("runtime") or {}
-        unknown = self.text("ops.unavailable")
-        fresh = schedule["state"] in {"running", "paused"}
-        memory = runtime.get("memory_bytes") if fresh else None
-        limit = runtime.get("memory_limit_bytes") if fresh else None
-        cpu = runtime.get("cpu_percent") if fresh else None
-        cpu_limit = runtime.get("cpu_limit") if fresh else None
-        used_memory = readable_size(memory) if memory is not None else unknown
-        allocated_memory = (
-            readable_size(limit) if limit is not None else unknown
         )
-        cpu_use = f"{cpu:.1f}%" if cpu is not None else unknown
-        cpu_cores = (
-            self.text(
-                "server.cpu_core" if cpu_limit == 1 else "server.cpu_cores",
-                count=f"{cpu_limit:g}",
-            )
-            if cpu_limit is not None
-            else self.text("server.cpu_cores_unknown")
+        context["clock"] = self.clock(
+            {"expires_at": context.pop("clock_expires")},
+            now,
         )
-        separator = " " if self.interface.locale == "en" else ""
-        rows = (
-            ("web_version", version, False),
-            (
-                "hub_version",
-                runtime.get("aranami_version") or unknown,
-                False,
-            ),
-            ("memory", f"{used_memory} / {allocated_memory}", True),
-            ("cpu", f"{cpu_use}{separator}{cpu_cores}", True),
-        )
-        return [
-            {
-                "label": self.text(f"server.{key}"),
-                "value": value,
-                "fresh": usage and fresh,
-                "stale": unknown if usage else None,
-            }
-            for key, value, usage in rows
-        ]
+        return context
 
     def worklist_card(
         self,
@@ -1129,6 +1336,11 @@ class _Page:
             An article summary with localized issue links and dates.
         """
         card = self.article(item)
+        if item.get("consistency"):
+            card.update(
+                consistency=finding_details(item, self.interface),
+            )
+            return card
         month = item.get("oldest_issue_month")
         card.update(
             issues=[
@@ -1189,6 +1401,7 @@ def render_dashboard(  # ruff: ignore[too-many-arguments]
         ),
     )
     context.update(
+        hide_assessment_chips=True,
         notice=page.text("notice.preparing")
         if snapshot is None
         else page.text("notice.partial")
@@ -1196,8 +1409,153 @@ def render_dashboard(  # ruff: ignore[too-many-arguments]
         else None,
         sections=page.highlights(snapshot or {}, now),
         reviews=page.reviews(snapshot or {}, now),
+        discussions=page.reviews(snapshot or {}, now, discussion=True, days=7),
+        discussions_url=local_url("/discussions/", lang=locale),
     )
     return _render("dashboard.html", context)
+
+
+def render_discussions(  # ruff: ignore[too-many-arguments]
+    snapshot: Record | None,
+    status: Record | None,
+    config: Record | None,
+    locale: str,
+    now: dt.datetime | None = None,
+    *,
+    navigation: Record | None = None,
+) -> str:
+    """Render four weeks of general discussions in exclusive groups.
+
+    Args:
+        snapshot: Validated saved dashboard data, or unavailable data.
+        status: Saved runtime observations for the shared page footer.
+        config: Current routine configuration.
+        locale: Negotiated interface language.
+        now: Optional aware clock for deterministic activity windows.
+        navigation: Current route and localized language links.
+
+    Returns:
+        Complete HTML with four article age groups and four nonarticle
+        groups ordered by newest comment with stable identity ties.
+        Each article group spans seven days, through the inclusive
+        twenty-eight-day boundary. Missing saved observations remain
+        distinct from confirmed empty groups.
+    """
+    now = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
+    page = _Page(locale)
+    context = page.context(page.text("discussions.heading"), live=True)
+    context.update(page.live_status(status or {}, config or {}, now))
+    data = (snapshot or {}).get("reviews")
+    items = (data or {}).get("discussions")
+    groups = []
+    if items is not None:
+        selected = _discussion_selection(
+            items,
+            now,
+            days=28,
+            reviews=data.get("items", []),
+        )
+        indices = dict(
+            selected
+            .group_by("group", maintain_order=True)
+            .agg("index")
+            .iter_rows(),
+        )
+        for key in _DISCUSSION_GROUPS:
+            section = page.reviews(
+                {
+                    **(snapshot or {}),
+                    "reviews": {
+                        "discussions": [
+                            items[index] for index in indices.get(key, [])
+                        ],
+                    },
+                },
+                now,
+                discussion=True,
+            ) or {"cards": [], "empty": page.text("empty.period")}
+            groups.append({
+                **section,
+                "key": f"discussion-{key}",
+                "is_discussion": True,
+                "is_review": True,
+                "title": page.text(f"discussions.{key.replace('-', '_')}"),
+            })
+    context.update(
+        navigation=navigation,
+        hide_assessment_chips=True,
+        groups=groups,
+        unavailable=page.text("empty.section") if items is None else None,
+        updated=page.source_updated(
+            (snapshot or {})
+            .get("reports", {})
+            .get("reviews", {})
+            .get("last_success_at"),
+        ),
+    )
+    return _render("discussions.html", context)
+
+
+def render_quality_analysis(  # ruff: ignore[too-many-arguments] - Shared page-renderer contract.
+    data: Record,
+    status: Record | None,
+    config: Record | None,
+    locale: str,
+    now: dt.datetime | None = None,
+    *,
+    navigation: Record | None = None,
+) -> str:
+    """Render precomputed article metrics and complete native tables.
+
+    Args:
+        data: Saved quality-analysis observations and summaries.
+        status: Saved runtime observations for the shared footer.
+        config: Current version and routine definitions.
+        locale: Negotiated interface language.
+        now: Optional aware clock for deterministic status display.
+        navigation: Current route and localized language links.
+
+    Returns:
+        Escaped charts, measurement coverage and all article rows.
+    """
+    now = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
+    page = _Page(locale)
+    context = page.context(page.text("quality_analysis.heading"), live=True)
+    context.update(page.live_status(status or {}, config or {}, now))
+    context.update(quality_analysis_context(data, page.interface))
+    context["navigation"] = navigation
+    return _render("quality_analysis.html", context)
+
+
+def render_quality_authorship(  # ruff: ignore[too-many-arguments]
+    data: Record,
+    status: Record | None,
+    config: Record | None,
+    locale: str,
+    now: dt.datetime | None = None,
+    *,
+    navigation: Record | None = None,
+) -> str:
+    """Render estimated quality authors with saved article evidence.
+
+    Args:
+        data: Saved authorship and last-public-edit observations.
+        status: Saved runtime observations for the shared footer.
+        config: Current source version and routine definitions.
+        locale: Negotiated interface language.
+        now: Optional aware clock for deterministic elapsed labels.
+        navigation: Current route and localized language links.
+
+    Returns:
+        Escaped HTML with fractional credits and article detail dialogs.
+    """
+    now = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
+    page = _Page(locale)
+    context = page.context(page.text("quality_authorship.heading"), live=True)
+    context.update(page.live_status(status or {}, config or {}, now))
+    context.update(quality_authorship_context(data, page.interface, now))
+    context["navigation"] = navigation
+    return _render("quality_authorship.html", context)
 
 
 def render_live_status(
@@ -1272,6 +1630,130 @@ def render_maintenance_overview(  # ruff: ignore[too-many-arguments]
     return _render("backlog.html", context)
 
 
+def render_consistency_checks(
+    snapshot: Record | None,
+    status: Record | None,
+    config: Record | None,
+    locale: str,
+    *,
+    navigation: Record | None = None,
+) -> str:
+    """Render independent maintenance checks grouped by issue type.
+
+    Args:
+        snapshot: Validated saved website observations, when available.
+        status: Saved runtime observations for the shared footer.
+        config: Application version and routine configuration.
+        locale: Negotiated interface language.
+        navigation: Request route and language choices.
+
+    Returns:
+        Escaped issue lists with evidence links, coverage and update
+        time, independent of maintenance-category counts.
+    """
+    page = _Page(locale)
+    context = page.context(page.text("consistency.heading"), live=True)
+    context.update(
+        page.live_status(status or {}, config or {}, dt.datetime.now(dt.UTC)),
+    )
+    coverage = coverage_status(snapshot, page.interface)
+    coverage["updated"] = page.source_updated(coverage.get("observed_at"))
+    context.update(
+        navigation=navigation,
+        consistency_status=coverage,
+        consistency_sections=[
+            {
+                "key": group["key"],
+                "label": group["label"],
+                "ordered": group["ordered"],
+                "total_count": group["count"] if group["ordered"] else None,
+                "more_url": local_url(
+                    "/checks/",
+                    task="consistency_history",
+                    lang=page.interface.locale,
+                )
+                if group["ordered"]
+                and group["count"] > _CONSISTENCY_HISTORY_PREVIEW
+                else None,
+                "findings": [
+                    finding
+                    for item in (
+                        group["items"][:_CONSISTENCY_HISTORY_PREVIEW]
+                        if group["ordered"]
+                        else group["items"]
+                    )
+                    for finding in finding_details(item, page.interface)
+                ],
+            }
+            for group in consistency_groups(snapshot, page.interface)
+            if group["items"]
+        ],
+    )
+    return _render("consistency.html", context)
+
+
+def render_redirects(  # ruff: ignore[too-many-arguments]
+    snapshot: Record | None,
+    parameters: dict[str, list[str]],
+    locale: str,
+    *,
+    navigation: Record | None = None,
+    status: Record | None = None,
+    config: Record | None = None,
+    unavailable: bool = False,
+) -> str:
+    """Present redirect findings with exact source revisions.
+
+    Args:
+        snapshot: Validated saved scanner observations, when available.
+        parameters: Native page and page-size selections.
+        locale: Negotiated interface language.
+        navigation: Request route and language choices.
+        status: Saved service observations for the shared footer.
+        config: Application version and routine configuration.
+        unavailable: Saved data could not be read or validated.
+
+    Returns:
+        Escaped findings and explicit bounded-history scan coverage.
+    """
+    page = _Page(locale)
+    context = page.context(page.text("redirects.heading"), live=True)
+    context.update(
+        page.live_status(status or {}, config or {}, dt.datetime.now(dt.UTC)),
+    )
+    selection = redirect_selection(snapshot, parameters, locale)
+    state = (
+        "unavailable"
+        if unavailable
+        else (snapshot or {}).get(
+            "status",
+            "missing",
+        )
+    )
+    context.update(
+        navigation=navigation,
+        redirects=selection,
+        redirect_scan=snapshot,
+        redirect_state=page.text(f"redirects.status.{state}"),
+        redirect_updated=_time((snapshot or {}).get("updated_at")),
+        redirect_range=page.text(
+            "redirects.range",
+            first=selection["first"],
+            last=selection["last"],
+            total=selection["total"],
+        ),
+        redirect_progress=page.text(
+            "redirects.progress",
+            checked=(snapshot or {}).get("checked_count", 0),
+            discovered=(snapshot or {}).get("discovered_count", 0),
+        ),
+        redirect_identity=sha256(
+            json.dumps(snapshot, sort_keys=True).encode(),
+        ).hexdigest(),
+    )
+    return _render("redirects.html", context)
+
+
 def render_maintenance(  # ruff: ignore[too-many-arguments]
     snapshot: Record | None,
     params: Mapping[str, list[str]],
@@ -1303,11 +1785,21 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
     Invalid controls propagate ValueError from maintenance_selection.
     """
     selection = maintenance_selection(params)
-    backlog = (snapshot or {}).get("backlog")
+    page = _Page(locale)
+    consistency = selection["task"].startswith("consistency_")
+    worklist_path = "/checks/" if consistency else "/maintenance/"
+    backlog = (snapshot or {}).get("consistency" if consistency else "backlog")
     if backlog is None:
         message = "Maintenance data is unavailable."
         raise RuntimeError(message)
-    groups = {group["key"]: group for group in backlog["groups"]}
+    groups = {
+        group["key"]: group
+        for group in (
+            consistency_groups(snapshot, page.interface)
+            if consistency
+            else backlog["groups"]
+        )
+    }
     if selection["task"] not in groups:
         message = "Maintenance task not found."
         raise LookupError(message)
@@ -1320,6 +1812,8 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
         selection["order"],
         selection.get("seed", ""),
     )
+    if selection["task"] == "consistency_history":
+        items = latest_history_first(items)
     portion = maintenance_page(
         items,
         selection["page"],
@@ -1332,7 +1826,7 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
                 {
                     **language,
                     "url": local_url(
-                        "/maintenance/",
+                        worklist_path,
                         **selection,
                         lang=language["tag"].lower(),
                     ),
@@ -1340,9 +1834,11 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
                 for language in navigation["languages"]
             ],
         }
-    page = _Page(locale)
     heading = page.interface.label(selected.get("label"), selected["category"])
-    context = page.context(page.text("nav.backlog"), live=True)
+    context = page.context(
+        page.text("nav.checks" if consistency else "nav.backlog"),
+        live=True,
+    )
     context.update(
         page.live_status(
             status or {},
@@ -1352,13 +1848,16 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
     )
     context.update(
         navigation=navigation,
-        count=page.text("backlog.count", count=f"{selected['count']:,}"),
+        worklist_path=worklist_path,
         selection=selection,
+        consistency=selected.get("consistency", False),
+        consistency_ordered=selected.get("ordered", False),
+        consistency_status=coverage_status(snapshot, page.interface),
         category_heading=heading,
         task_choices=[
             {
                 "url": local_url(
-                    "/maintenance/",
+                    worklist_path,
                     **{**selection, "task": key, "page": "1"},
                 ),
                 "label": page.interface.label(
@@ -1370,19 +1869,30 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
             for key, group in groups.items()
         ],
         clear_url=local_url(
-            "/maintenance/",
+            worklist_path,
             task=selection["task"],
         ),
         range_label=page.text(
-            "backlog.range",
+            "consistency.page_range"
+            if selected.get("target_type") == "project"
+            else "backlog.range",
             start=portion["offset"] + 1 if items else 0,
             end=portion["offset"] + len(portion["items"]),
             count=f"{len(items):,}",
         ),
-        updated=page.source_updated(backlog["observed_at"]),
+        updated=page.source_updated(
+            selected.get("observed_at") or backlog.get("observed_at"),
+        ),
         sort_choices=[
             {
-                "label": page.text(key),
+                "label": page.text(
+                    "consistency.observed"
+                    if sort == "oldest" and selected.get("consistency")
+                    else "consistency.page_title"
+                    if sort == "title"
+                    and selected.get("target_type") == "project"
+                    else key,
+                ),
                 "value": sort,
                 "current": selection["order"]
                 if sort == selection["sort"]
@@ -1399,6 +1909,8 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
                 ("importance", "backlog.column.importance"),
                 ("oldest", "backlog.sort.time"),
             )
+            if selected.get("target_type") != "project"
+            or sort not in {"class", "importance"}
         ],
         cards=[
             page.worklist_card(item, groups, selection["task"])
@@ -1406,31 +1918,38 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
         ],
         start=portion["offset"] + 1,
         first=local_url(
-            "/maintenance/",
+            worklist_path,
             **{**selection, "page": 1},
         )
         if portion["page"] > 1
         else None,
         previous=local_url(
-            "/maintenance/",
+            worklist_path,
             **{**selection, "page": portion["page"] - 1},
         )
         if portion["page"] > 1
         else None,
         following=local_url(
-            "/maintenance/",
+            worklist_path,
             **{**selection, "page": portion["page"] + 1},
         )
         if portion["page"] < portion["pages"]
         else None,
         last=local_url(
-            "/maintenance/",
+            worklist_path,
             **{**selection, "page": portion["pages"]},
         )
         if portion["page"] < portion["pages"]
         else None,
         source_link=wiki_link(selected["source_url"], selected["category"]),
     )
+    if consistency:
+        context["consistency_findings"] = [
+            finding
+            for card in context["cards"]
+            for finding in card["consistency"]
+        ]
+        context["consistency_status"]["updated"] = context["updated"]
     return _render("maintenance.html", context)
 
 
@@ -1602,7 +2121,7 @@ def render_about(
         ),
         contact=escape(page.text("about.contact")).format(
             source=Markup(
-                '<a href="https://github.com/For-Each-Next/aranami">GitHub</a>',
+                '<a href="https://github.com/For-Each-Next/aranami-old">GitHub</a>',
             ),
             user=wiki_link(
                 "https://zh.wikipedia.org/wiki/User_talk:For_Each_..._Next",
@@ -1611,6 +2130,179 @@ def render_about(
         ),
     )
     return _render("about.html", context)
+
+
+def render_attribution(  # ruff: ignore[too-many-arguments]
+    path: str,
+    locale: str = "zh-hant",
+    navigation: Record | None = None,
+    *,
+    status: Record | None = None,
+    config: Record | None = None,
+    now: dt.datetime | None = None,
+) -> str:
+    """Present credits and unchanged licenses in the shared page shell.
+
+    Args:
+        path: One established public attribution or license URL.
+        locale: Negotiated interface language for navigation and labels.
+        navigation: Request route and language choices, when available.
+        status: Saved service observations for the shared uptime footer.
+        config: Application version and routine configuration.
+        now: Optional clock for deterministic freshness checks.
+
+    Returns:
+        Complete HTML with original attribution and license wording.
+
+    Raises:
+        LookupError: The URL is not an authored attribution document.
+    """
+    documents = {
+        "/assets/icons/credits.html": "content",
+        "/assets/icons/maintenance/credits.html": "maintenance",
+        "/codex-license.html": "codex",
+        "/assets/icons/gpl-2.0.html": "gpl",
+        "/assets/icons/lgpl-2.1.html": "lgpl",
+    }
+    if path not in documents:
+        message = "Attribution document not found."
+        raise LookupError(message)
+    document = documents[path]
+    page = _Page(locale)
+    context = page.context(page.text(f"credits.title.{document}"), live=True)
+    context.update(
+        page.live_status(
+            status or {},
+            config or {},
+            now or dt.datetime.now(dt.UTC),
+        ),
+    )
+    context.update(
+        navigation=navigation,
+        document=document,
+        document_template=f"attribution/{document}.html",
+    )
+    return _render("attribution.html", context)
+
+
+def render_dataset(
+    data: Record | None,
+    locale: str,
+    *,
+    navigation: Record | None = None,
+    status: Record | None = None,
+    config: Record | None = None,
+) -> str:
+    """Present original snapshot metadata and a bounded member preview.
+
+    Args:
+        data: Validated detail facts, or none for selection help.
+        locale: Selected interface language.
+        navigation: Current route and language choices.
+        status: Saved observations for the common page footer.
+        config: Public source version and routine configuration.
+
+    Returns:
+        Escaped metadata and up to fifty rows without source requests.
+    """
+    page = _Page(locale)
+    context = page.context(page.text("data.heading"), live=True)
+    context.update(
+        page.live_status(status or {}, config or {}, dt.datetime.now(dt.UTC)),
+    )
+    value = None
+    if data is not None:
+        manifest, storage = data.get("manifest", {}), data["storage"] or {}
+        metadata = manifest.get("metadata", {})
+        fields = [
+            ("file", data["file"]),
+            ("contract", storage.get("contract")),
+            (
+                "written_at",
+                utc_time(storage["written_at"], seconds=True)
+                if storage.get("written_at")
+                else None,
+            ),
+            ("schema", manifest.get("schema", storage.get("schema"))),
+            (
+                "generation",
+                manifest.get("generation", storage.get("generation")),
+            ),
+            ("row_count", f"{data['row_count']:,}"),
+        ]
+        if manifest:
+            fields.extend([
+                ("wiki", data["wiki"]),
+                ("project", data["project"]),
+                (
+                    "snapshot_date",
+                    page.interface.date(metadata["snapshot_date"]),
+                ),
+                (
+                    "boundary_date",
+                    page.interface.date(metadata["boundary_date"]),
+                ),
+                ("started_at", utc_time(manifest["started_at"], seconds=True)),
+                (
+                    "finished_at",
+                    utc_time(manifest["finished_at"], seconds=True),
+                ),
+                ("application_version", manifest.get("application_version")),
+                ("sha256", manifest["sha256"]),
+            ])
+        if data.get("size_bytes") is not None:
+            fields.append(("size_bytes", f"{data['size_bytes']:,}"))
+        current = data.get("page", 1)
+        page_count = data.get("page_count", 1)
+        offset = (current - 1) * data["preview_limit"]
+        value = {
+            **data,
+            "facts": [
+                {"label": page.text(f"data.field.{key}"), "value": item}
+                for key, item in fields
+            ],
+            "preview_note": page.text(
+                "data.preview_note",
+                start=f"{offset + 1 if data['rows'] else 0:,}",
+                end=f"{offset + len(data['rows']):,}",
+                total=f"{data['row_count']:,}",
+            ),
+            "page": current,
+            "page_count": page_count,
+            "previous": local_url(
+                "/data/",
+                file=data["file"],
+                page=current - 1,
+                lang=locale,
+            )
+            if current > 1
+            else None,
+            "next": local_url(
+                "/data/",
+                file=data["file"],
+                page=current + 1,
+                lang=locale,
+            )
+            if current < page_count
+            else None,
+            "cells": [
+                [
+                    {
+                        "value": json.dumps(
+                            item,
+                            ensure_ascii=False,
+                            default=str,
+                        )
+                        if isinstance(item, list | dict)
+                        else item,
+                    }
+                    for item in (row[name] for name in data["columns"])
+                ]
+                for row in data["rows"]
+            ],
+        }
+    context.update(navigation=navigation, dataset=value)
+    return _render("dataset.html", context)
 
 
 def render_logs(  # ruff: ignore[too-many-arguments]
@@ -1622,7 +2314,7 @@ def render_logs(  # ruff: ignore[too-many-arguments]
     now: dt.datetime | None = None,
     navigation: Record | None = None,
 ) -> str:
-    """Render diagnostic file downloads with shared footer uptime.
+    """Render log archive links for online reading and activity filters.
 
     Args:
         data: Validated daily-file listing and selection.
@@ -1638,7 +2330,7 @@ def render_logs(  # ruff: ignore[too-many-arguments]
     page = _Page(locale)
     context = page.context(page.text("logs.heading"), live=True)
     context.update(navigation=navigation)
-    context.update(_log_archive(data))
+    context.update(_log_archive(data, page.interface))
     context.update(
         page.live_status(
             status or {},
@@ -1657,6 +2349,7 @@ def render_reports(  # ruff: ignore[too-many-arguments]
     config: Record | None = None,
     now: dt.datetime | None = None,
     navigation: Record | None = None,
+    history_page: int = 1,
 ) -> str:
     """Render saved update status and per-invocation report history.
 
@@ -1667,6 +2360,7 @@ def render_reports(  # ruff: ignore[too-many-arguments]
         config: Current source version and routine definitions.
         now: Optional clock for deterministic freshness checks.
         navigation: Request route and language choices.
+        history_page: One-based page of ten execution records.
 
     Returns:
         A status panel and recent invocation history with stage dialogs.
@@ -1676,47 +2370,80 @@ def render_reports(  # ruff: ignore[too-many-arguments]
     context.update(navigation=navigation)
     context.update(
         page.live_status(
-            {
-                **(status or {}),
-                "history": (status or {}).get("history") or data,
-            },
+            status or data,
             config or {},
             now or dt.datetime.now(dt.UTC),
+            history_page=max(1, history_page),
         ),
+    )
+    events = context["events"]
+    count = context["history_total"]
+    last = max(1, (count + 9) // 10)
+    current = context["history_offset"] // 10 + 1
+    context.update(
+        history_dialogs=events,
+        history_pagination={
+            "page": current,
+            "total": count,
+            "url": local_url("/reports/", lang=locale),
+            "label": f"{current} / {last}",
+            "previous": local_url("/reports/", page=current - 1, lang=locale)
+            + "#recent-events"
+            if current > 1
+            else None,
+            "next": local_url("/reports/", page=current + 1, lang=locale)
+            + "#recent-events"
+            if current < last
+            else None,
+        },
     )
     return _render("reports.html", context)
 
 
-def _log_archive(data: Record) -> Record:
-    """Prepare diagnostic file links without interpreting log content.
+def _log_archive(data: Record, interface: Interface) -> Record:
+    """Prepare structured activity and safe per-segment viewing links.
 
     Returns:
-        File metadata, selected date, and separate download links.
+        Validated selection, escaped event fields, and file metadata.
     """
     files = data.get("files", [])
-    selected_date = data.get("date") or (files[0]["date"] if files else None)
+    selected_date = data.get("date")
     return {
         "files": [
             {
                 **row,
                 "size_label": readable_size(row["size"]),
-                "url": local_url("/logs/", date=row["date"]),
-                "download_url": local_url(
+                "stream_label": interface.text(f"logs.stream_{row['stream']}"),
+                "view_url": local_url(
                     "/logs/",
                     date=row["date"],
-                    download=1,
+                    stream=row["stream"],
+                    file=row["name"],
                 ),
             }
             for row in files
         ],
-        "selected_date": selected_date,
-        "selected_download": local_url(
-            "/logs/",
-            date=selected_date,
-            download=1,
-        )
-        if selected_date
-        else None,
+        "selected_date": selected_date or "",
+        "query": data.get("query", ""),
+        "run_id": data.get("run_id") or "",
+        "log_availability": data.get("availability", "missing"),
+        "log_truncated": data.get("truncated", False),
+        "activity": [
+            {
+                "time": _time(event["time"], seconds=True),
+                "kind": interface.text(f"logs.kind.{event['kind']}")
+                if f"logs.kind.{event['kind']}" in catalog()
+                else event["kind"],
+                "level": event["level"],
+                "fields": [
+                    (key, value)
+                    for key, value in event.items()
+                    if key not in {"schema", "time", "level"}
+                    and value is not None
+                ],
+            }
+            for event in data.get("events", [])
+        ],
     }
 
 

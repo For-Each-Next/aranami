@@ -1,43 +1,45 @@
 {% extends "base.html" %}
-{% block assets %}<script src="{{ asset_url('components.js') }}" defer></script>{% endblock %}
+{% block assets %}<script type="module" src="{{ asset_url('components.js') }}"></script>{% endblock %}
 {% block content %}
-<a href="/maintenance/" class="back">{{ t.backlog.back }}</a>
+{% if consistency %}{% include "includes/consistency_userscript.html" %}{% endif %}
+<a href="{{ worklist_path }}" class="back">{{ t.nav.checks if consistency else t.backlog.back }}</a>
 <div id="maintenance-browser">
 <nav class="maintenance-navigation" aria-label="{{ t.backlog.task }}">
   <details class="navigation-tools maintenance-menu">
-    <summary class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.backlog.task }}</summary>
+    <summary class="ui-button ui-button--action-default ui-button--weight-normal">{{ t.backlog.task }}</summary>
     <ul class="navigation-tools-list">
       {% for choice in task_choices %}<li><a href="{{ choice.url }}"{% if choice.current %} aria-current="page"{% endif %}>{{ choice.label }}</a></li>{% endfor %}
     </ul>
   </details>
 </nav>
-<div class="cdx-table maintenance-worklist">
-  <div class="cdx-table__header">
-    <div class="cdx-table__header__caption">{{ category_heading }}</div>
+<div class="{% if consistency %}consistency-worklist{% else %}ui-table maintenance-worklist{% endif %}">
+  <div class="ui-table__header">
+    <div class="ui-table__header__caption">{{ category_heading }}</div>
     <div class="maintenance-table-actions">
-      <form class="maintenance-search" role="search" action="/maintenance/" method="get">
+      <form class="maintenance-search" role="search" action="{{ worklist_path }}" method="get">
         {% for name, value in selection.items() if name not in ['page', 'q', 'regex'] %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
         <label class="visually-hidden" for="maintenance-query">{{ t.backlog.search }}</label>
-        <div class="cdx-text-input"><input class="cdx-text-input__input" id="maintenance-query" name="q" type="search" maxlength="200" value="{{ selection.get('q', '') }}" placeholder="{{ t.backlog.search }}"></div>
-        <button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.backlog.search_action }}</button>
+        <div class="ui-text-input"><input class="ui-text-input__input" id="maintenance-query" name="q" type="search" maxlength="200" value="{{ selection.get('q', '') }}" placeholder="{{ t.backlog.search }}"></div>
+        <button type="submit" class="ui-button ui-button--action-default ui-button--weight-normal">{{ t.backlog.search_action }}</button>
       </form>
       {% if selection.get('q') or selection.get('quality') or selection.get('importance') or selection.get('quality_to') or selection.get('importance_to') or selection.get('genre', 'all') != 'all' %}<a href="{{ clear_url }}">{{ t.backlog['clear'] }}</a>{% endif %}
     </div>
   </div>
-<div class="table-scroll cdx-table__table-wrapper" tabindex="0" role="region" aria-label="{{ category_heading }}">
-<table class="maintenance-table cdx-table__table" role="table">
+{% if consistency %}{% include "includes/consistency.html" %}{% else %}
+<div class="table-scroll ui-table__table-wrapper" tabindex="0" role="region" aria-label="{{ category_heading }}">
+<table class="maintenance-table ui-table__table" role="table">
   <caption>{{ category_heading }}</caption>
   <thead role="rowgroup"><tr role="row">
     <th scope="col" role="columnheader">#</th>
     {% for column in sort_choices %}
     {% if column.value == 'oldest' %}<th scope="col" role="columnheader">{{ t.backlog.column.issues }}</th>{% endif %}
-    <th scope="col" role="columnheader" class="cdx-table__table__cell--has-sort" aria-sort="{{ 'ascending' if column.current == 'asc' else 'descending' if column.current == 'desc' else 'none' }}">
-      <form action="/maintenance/" method="get">
+    <th scope="col" role="columnheader" class="ui-table__table__cell--has-sort" aria-sort="{{ 'ascending' if column.current == 'asc' else 'descending' if column.current == 'desc' else 'none' }}">
+      <form action="{{ worklist_path }}" method="get">
         {% for name, value in selection.items() if name not in ['page', 'sort', 'order'] %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
         <input type="hidden" name="sort" value="{{ column.value }}">
-        <button class="cdx-table__table__sort-button" type="submit" name="order" value="{{ column.order }}">
-          <span class="cdx-table__table__sort-label">{{ column.label }}</span>
-          <svg class="cdx-icon cdx-icon--small cdx-table__table__sort-icon--vue" width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#sort-{{ column.current or 'none' }}"></use></svg>
+        <button class="ui-table__table__sort-button" type="submit" name="order" value="{{ column.order }}">
+          <span class="ui-table__table__sort-label">{{ column.label }}</span>
+          <svg class="ui-icon ui-icon--small ui-table__table__sort-icon" width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#sort-{{ column.current or 'none' }}"></use></svg>
         </button>
       </form>
     </th>
@@ -47,16 +49,19 @@
     <td role="cell" class="row-number" data-label="#">{{ start + loop.index0 }}</td>
     <th scope="row" role="rowheader"><bdi lang="zh">{{ card.link }}</bdi></th>
     {% for dimension, label in [('class', t.backlog.sort.class), ('importance', t.backlog.column.importance)] %}<td role="cell" data-label="{{ label }}">{% for assessment in card.assessments if assessment.dimension == dimension %}{{ assessment.label }}{% else %}{{ t.assessment.class.Unassessed if dimension == 'class' else t.assessment.importance.Unknown }}{% endfor %}</td>{% endfor %}
-    <td role="cell" data-label="{{ t.backlog.column.issues }}"><ul class="issues">{% for issue in card.issues %}<li>{{ issue }}</li>{% else %}<li>—</li>{% endfor %}</ul></td>
+    <td role="cell" data-label="{{ t.backlog.column.issues }}">
+      <ul class="issues">{% for issue in card.issues %}<li>{{ issue }}</li>{% else %}<li>—</li>{% endfor %}</ul>
+    </td>
     <td role="cell" data-label="{{ t.backlog.sort.time }}">{% if card.month %}{% if card.month.url %}<a href="{{ card.month.url }}">{% endif %}<time datetime="{{ card.month.value }}">{{ card.month.label }}</time>{% if card.month.url %}</a>{% endif %}{% else %}—{% endif %}</td>
   </tr>{% else %}<tr><td colspan="6">{{ t.backlog.empty }}</td></tr>{% endfor %}</tbody>
 </table>
 </div>
+{% endif %}
 {% include "includes/maintenance_pagination.html" %}
 </div>
-<div class="maintenance-source">
+{% if not consistency %}<div class="maintenance-source">
 {% include "includes/source_updated.html" %}
 <p>{{ t.backlog.source }}: {{ source_link }}</p>
-</div>
+</div>{% endif %}
 </div>
 {% endblock %}

@@ -1,15 +1,15 @@
-<nav class="cdx-table-pager cdx-table__pagination--bottom" aria-label="{{ t.nav.backlog }}">
-  <form class="page-size cdx-table-pager__start" action="/maintenance/" method="get">
+<nav class="ui-table-pager ui-table__pagination--bottom" aria-label="{{ t.nav.backlog }}">
+  <form class="page-size ui-table-pager__start" action="{{ worklist_path }}" method="get">
     {% for name, value in selection.items() if name not in ['page', 'limit'] %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
     <label class="visually-hidden" for="maintenance-limit">{{ t.backlog.rows }}</label>
-    <select class="cdx-select" id="maintenance-limit" name="limit">{% for size in ['10', '20', '50'] %}<option value="{{ size }}"{% if size == selection.get('limit', '10') %} selected{% endif %}>{{ size }}</option>{% endfor %}</select>
-    <noscript><button class="cdx-button cdx-button--action-default cdx-button--weight-normal page-size-submit" type="submit">{{ t.backlog.go }}</button></noscript>
+    <select class="ui-select" id="maintenance-limit" name="limit">{% for size in ['10', '20', '50'] %}<option value="{{ size }}"{% if size == selection.get('limit', '10') %} selected{% endif %}>{{ size }}</option>{% endfor %}</select>
+    <noscript><button class="ui-button ui-button--action-default ui-button--weight-normal page-size-submit" type="submit">{{ t.backlog.go }}</button></noscript>
   </form>
-  <div class="cdx-table-pager__center"><div class="cdx-table__pagination-status--long">{{ range_label }}</div><div class="cdx-table__pagination-status--short">{{ range_label }}</div></div>
-  <div class="cdx-table-pager__end">
+  <div class="ui-table-pager__center"><div class="ui-table__pagination-status--long">{{ range_label }}</div><div class="ui-table__pagination-status--short">{{ range_label }}</div></div>
+  <div class="ui-table-pager__end">
     {% for name, url, label, relation in [('first', first, t.backlog.first, 'first'), ('previous', previous, t.backlog.previous, 'prev'), ('next', following, t.backlog.next, 'next'), ('last', last, t.backlog.last, 'last')] %}
-    {% if url %}<a class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--icon-only cdx-button--action-default cdx-button--weight-quiet" href="{{ url }}" rel="{{ relation }}" data-page="{{ name }}" aria-label="{{ label }}" title="{{ label }}">{% else %}<button class="cdx-button cdx-button--icon-only cdx-button--action-default cdx-button--weight-quiet" type="button" data-page="{{ name }}" aria-label="{{ label }}" title="{{ label }}" disabled>{% endif %}
-      <span class="cdx-icon cdx-icon--medium"><svg viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#page-{{ name }}"></use></svg></span>
+    {% if url %}<a class="ui-button ui-button--fake-button ui-button--fake-button--enabled ui-button--icon-only ui-button--action-default ui-button--weight-quiet" href="{{ url }}" rel="{{ relation }}" data-page="{{ name }}" aria-label="{{ label }}" title="{{ label }}">{% else %}<button class="ui-button ui-button--icon-only ui-button--action-default ui-button--weight-quiet" type="button" data-page="{{ name }}" aria-label="{{ label }}" title="{{ label }}" disabled>{% endif %}
+      <span class="ui-icon ui-icon--medium"><svg viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#page-{{ name }}"></use></svg></span>
     {% if url %}</a>{% else %}</button>{% endif %}
     {% endfor %}
   </div>

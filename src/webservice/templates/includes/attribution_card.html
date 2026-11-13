@@ -1,0 +1,11 @@
+{% macro attribution_card() %}
+<article class="ui-card attribution-card">
+  <span class="ui-card__thumbnail ui-thumbnail"><span class="ui-thumbnail__image attribution-thumbnail">{{ caller('media') }}</span></span>
+  <div class="ui-card__text">
+    <h3 class="ui-card__text__title">{{ caller('title') }}</h3>
+    <dl class="attribution-details ui-card__text__description">
+      {% for label in ['author', 'source', 'license'] %}<div><dt lang="{{ language_tag }}">{{ t.credits[label] }}</dt><dd>{{ caller(label) }}</dd></div>{% endfor %}
+    </dl>
+  </div>
+</article>
+{% endmacro %}

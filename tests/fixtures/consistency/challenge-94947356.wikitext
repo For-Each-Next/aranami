@@ -1,0 +1,444 @@
+<!-- 顶栏 -->
+<div style="background-color: #007ba7; color: white; padding: 0.5em; text-align: center;">
+
+<div style="font-family: serif; margin-top: 1em; margin-bottom: 1em;">
+<div style="font-size: 200%; letter-spacing: 0.25em; line-height: 1.25em; font-weight: 700;">基礎條目擴充挑戰</div>
+<div style="font-size: 150%; letter-spacing: 0.25em; line-height: 1.25em; font-weight: 700;">電子遊戲專題版</div>
+<div style="font-size: 120%; margin-top: 0.5em;">創建·擴充重要電子遊戲條目！</div>
+</div>
+
+<div style="margin-top: 1em; margin-bottom: 1em;">
+[[File:Video-Game-Controller-Icon-IDV-green-barnstar.svg|90px|電子遊戲專題]]
+[[File:Wikiball.svg|80px|寶可夢工作組]]
+[[File:Wikiproject Square Enix.svg|90px|史克威爾艾尼克斯工作組]]
+[[File:Micrologo Nintendo.svg|100px|任天堂工作組]]
+[[File:SEGA logo.png|100px|世嘉工作組]]
+[[File:Minecraft cube.svg|60px|我的世界工作组]]
+[[File:Genshin Impact wordmark.svg|100px|原神工作組]]
+[[File:Video-Game-Controller-Icon-IDV-green-barnstar.svg|90px|電子遊戲專題]]
+</div>
+
+<div style="margin-top: 1em; margin-bottom: 1em;">
+<section begin="percentage_bar" />{{Percentage bar (larger)|1= {{#expr: {{#invoke:PJ:VG/COUNT|main|≥Start, ≥High}} / {{#invoke:PJ:VG/COUNT|main|≥High}} * 100 round 1 }} | c= {{Quality score color|{{#invoke:PJ:VG/COUNT|main|≥High|class_weight=yes|average=yes|round=2}}|5}}}}<section end="percentage_bar" />
+</div>
+
+</div>
+<!-- 内容 -->
+<div style="border: 8px solid #C41E3A; padding: 1em;">
+{{Shortcut|PJ:VG-VA}}
+
+'''電子遊戲基礎條目擴充挑戰'''是[[WikiProject:电子游戏|电子游戏专题]]的长期挑战活动，旨在鼓勵編者完善高重要度電子遊戲条目，转变领域[[WP:VITAL|基础条目]]普遍短小乃至欠奉的缺陷。
+
+本挑戰的目標是重要條目消红补短，即'''全部[[WikiProject:电子游戏/评级#重要度评级标准|極高、高重要度条目]]至少获评[[WikiProject:电子游戏/评级#质量评级标准|初級]]'''。如果您具备一定的英文翻译能力，可參考翻译[[WikiProject:电子游戏/数据库报告/英文维基百科重要条目|英文维基相应条目]]，高效实现挑战目標。此外对于已达初级的条目，也欢迎您进一步打磨，以助实现第二目标：[[WikiProject:电子游戏/里程碑|極高、高重要度条目平均达到丙级水准]]。
+
+为鼓励编者参与，本活动同[[WikiProject:ACG/維基ACG專題創作獎|維基ACG專題創作獎]]连动；您将贡献的条目登记在下方后，可申请获得额外加分。我们还希望活动能吸引潜在的电子游戏条目编者，并为社群专题活化抛砖引玉。若您能帮助宣传此活动，我们将不胜感激。
+
+== 统计 ==
+
+{| class="wikitable plainlinks" style="text-align: center;"
+|+ 电子游戏专题极高·高重要度条目统计
+! scope="col" rowspan="2" | 时间
+! colspan="6" scope="colgroup" | 依品质
+! scope="col" colspan="2" | 依重要度
+! scope="col" rowspan="2" style="width: 2em;" | {{psid|21567446|合计}}
+! scope="col" rowspan="2" style="width: 3.5em;" | 初級<br>达成率
+! scope="col" rowspan="2" style="width: 3.5em;" | [[Template:Articles_by_Quality_and_Importance#质量指数|品质<br>指数]]
+! scope="col" rowspan="2" style="width: 3.5em;" | [[WikiProject:电子游戏/数据库报告/英文维基百科重要条目|英文版<br>条目数]]
+|-
+! scope="col" style="background-color: {{class/colour|FA}}; width: 2em;" | {{psid|44779406|典範}}
+! scope="col" style="background-color: {{class/colour|GA}}; width: 2em;" | {{psid|44779411|優良}}
+! scope="col" style="background-color: {{class/colour|B}}; width: 2em;" | {{psid|21567430|乙级}}
+! scope="col" style="background-color: {{class/colour|C}}; width: 2em;" | {{psid|21567433|丙级}}
+! scope="col" style="background-color: {{class/colour|Start}}; width: 2em;" | {{psid|21567435|初级}}
+! scope="col" style="background-color: {{class/colour|Stub}}; width: 2em;" | {{psid|46024200|小级}}
+! scope="col" style="background-color: {{importance/colour|Top}}; width: 2em;" | {{psid|21567444|极高}}
+! scope="col" style="background-color: {{importance/colour|High}}; width: 2em;" | {{psid|21567445|高}}
+|-
+! scope="row" | 2021年3月31日
+| 3
+| 2
+| 20
+| 62
+| 169
+| 189
+| 65
+| 380
+| 445
+| style="background: linear-gradient(to right, {{Quality score color|57.5}} 57.5%, transparent 57.5%);" | 57.5%
+| style="background: linear-gradient(to right, {{Quality score color|2.68|5}} 53.6%, transparent 53.6%);" | 2.68
+| 723
+|-
+! scope="row" | 2021年6月30日
+| 3
+| 2
+| 20
+| 64
+| 170
+| 190
+| 65
+| 384
+| 449
+| style="background: linear-gradient(to right, {{Quality score color|57.7}} 57.7%, transparent 57.7%);" | 57.7%
+| style="background: linear-gradient(to right, {{Quality score color|2.69|5}} 53.8%, transparent 53.8%);" | 2.69
+| 725
+|-
+! scope="row" | 2021年9月30日
+| 3
+| 4
+| 21
+| 69
+| 170
+| 194
+| 68
+| 393
+| 461
+| style="background: linear-gradient(to right, {{Quality score color|57.9}} 57.9%, transparent 57.9%);" | 57.9%
+| style="background: linear-gradient(to right, {{Quality score color|2.73|5}} 54.6%, transparent 54.6%);" | 2.73
+| 748
+|-
+! scope="row" | 2021年12月31日
+| 3
+| 4
+| 23
+| 69
+| 171
+| 191
+| 69
+| 392
+| 461
+| style="background: linear-gradient(to right, {{Quality score color|58.6}} 58.6%, transparent 58.6%);" | 58.6%
+| style="background: linear-gradient(to right, {{Quality score color|2.76|5}} 55.2%, transparent 55.2%);" | 2.76
+| 754
+|-
+! scope="row" | 2022年3月31日
+| 3
+| 4
+| 23
+| 70
+| 177
+| 193
+| 68
+| 402
+| 470
+| style="background: linear-gradient(to right, {{Quality score color|58.9}} 58.9%, transparent 58.9%);" | 58.9%
+| style="background: linear-gradient(to right, {{Quality score color|2.76|5}} 55.2%, transparent 55.2%);" | 2.76
+| 752
+|-
+! scope="row" | 2022年6月30日
+| 3
+| 5
+| 24
+| 76
+| 211
+| 178
+| 73
+| 424
+| 497
+| style="background: linear-gradient(to right, {{Quality score color|64.2}} 64.2%, transparent 64.2%);" | 64.2%
+| style="background: linear-gradient(to right, {{Quality score color|2.88|5}} 57.6%, transparent 57.6%);" | 2.88
+| 754
+|-
+! scope="row" | 2022年9月30日
+| 3
+| 6
+| 24
+| 76
+| 212
+| 179
+| 73
+| 427
+| 500
+| style="background: linear-gradient(to right, {{Quality score color|64.2}} 64.2%, transparent 64.2%);" | 64.2%
+| style="background: linear-gradient(to right, {{Quality score color|2.88|5}} 57.6%, transparent 57.6%);" | 2.88
+| 762
+|-
+! scope="row" | 2022年12月31日
+| 4
+| 8
+| 24
+| 77
+| 212
+| 179
+| 74
+| 430
+| 504
+| style="background: linear-gradient(to right, {{Quality score color|64.5}} 64.5%, transparent 64.5%);" | 64.5%
+| style="background: linear-gradient(to right, {{Quality score color|2.92|5}} 58.4%, transparent 58.4%);" | 2.92
+| 766
+|-
+! scope="row" | 2023年3月31日
+| 6
+| 10
+| 24
+| 74
+| 210
+| 180
+| 75
+| 429
+| 504
+| style="background: linear-gradient(to right, {{Quality score color|64.3}} 64.3%, transparent 64.3%);" | 64.3%
+| style="background: linear-gradient(to right, {{Quality score color|2.95|5}} 59.0%, transparent 59.0%);" | 2.95
+| 767
+|-
+! scope="row" | 2023年6月30日
+| 7
+| 9
+| 24
+| 76
+| 209
+| 179
+| 76
+| 428
+| 504
+| style="background: linear-gradient(to right, {{Quality score color|64.5}} 64.5%, transparent 64.5%);" | 64.5%
+| style="background: linear-gradient(to right, {{Quality score color|2.97|5}} 59.4%, transparent 59.4%);" | 2.97
+| 778
+|-
+! scope="row" | 2023年9月30日
+| 7
+| 10
+| 24
+| 76
+| 211
+| 179
+| 74
+| 433
+| 507
+| style="background: linear-gradient(to right, {{Quality score color|64.7}} 64.7%, transparent 64.7%);" | 64.7%
+| style="background: linear-gradient(to right, {{Quality score color|2.98|5}} 59.6%, transparent 59.6%);" | 2.98
+| 782
+|-
+! scope="row" | 2023年12月31日
+| 7
+| 10
+| 25
+| 75
+| 213
+| 180
+| 74
+| 436
+| 510
+| style="background: linear-gradient(to right, {{Quality score color|64.7}} 64.7%, transparent 64.7%);" | 64.7%
+| style="background: linear-gradient(to right, {{Quality score color|2.98|5}} 59.6%, transparent 59.6%);" | 2.98
+| 786
+|-
+! scope="row" | 2024年3月31日
+| 7
+| 11
+| 25
+| 75
+| 214
+| 177
+| 74
+| 435
+| 509
+| style="background: linear-gradient(to right, {{Quality score color|65.2}} 65.2%, transparent 65.2%);" | 65.2%
+| style="background: linear-gradient(to right, {{Quality score color|3.00|5}} 60.0%, transparent 60.0%);" | 3.00
+| 791
+|-
+! scope="row" | 2024年6月30日
+| 7
+| 13
+| 25
+| 77
+| 214
+| 178
+| 74
+| 440
+| 514
+| style="background: linear-gradient(to right, {{Quality score color|65.4}} 65.4%, transparent 65.4%);" | 65.4%
+| style="background: linear-gradient(to right, {{Quality score color|3.02|5}} 60.4%, transparent 60.4%);" | 3.02
+| 789
+|-
+! scope="row" | 2024年9月30日
+| 7
+| 13
+| 25
+| 77
+| 215
+| 179
+| 74
+| 442
+| 516
+| style="background: linear-gradient(to right, {{Quality score color|65.3}} 65.3%, transparent 65.3%);" | 65.3%
+| style="background: linear-gradient(to right, {{Quality score color|3.02|5}} 60.4%, transparent 60.4%);" | 3.02
+| 796
+|-
+! scope="row" | 2024年12月31日
+| 7
+| 13
+| 26
+| 78
+| 215
+| 179
+| 74
+| 444
+| 518
+| style="background: linear-gradient(to right, {{Quality score color|65.4}} 65.4%, transparent 65.4%);" | 65.4%
+| style="background: linear-gradient(to right, {{Quality score color|3.03|5}} 60.6%, transparent 60.6%);" | 3.03
+| 794
+|-
+! 2025年3月31日
+| 7
+| 14
+| 26
+| 80
+| 214
+| 182
+| 75
+| 448
+| 523
+| style="background: linear-gradient(to right, {{Quality score color|65.2}} 65.2%, transparent 65.2%);" | 65.2%
+| style="background: linear-gradient(to right, {{Quality score color|3.04|5}} 60.8%, transparent 60.8%);" | 3.04
+| 792
+|-
+! 2025年6月30日
+| 7
+| 14
+| 26
+| 80
+| 214
+| 182
+| 75
+| 448
+| 523
+| style="background: linear-gradient(to right, {{Quality score color|65.2}} 65.2%, transparent 65.2%);" | 65.2%
+| style="background: linear-gradient(to right, {{Quality score color|3.04|5}} 60.8%, transparent 60.8%);" | 3.04
+| 796
+|-
+! scope="row" | 2025年9月30日
+| 7
+| 14
+| 26
+| 82
+| 217
+| 180
+| 75
+| 451
+| 526
+| style="background: linear-gradient(to right, {{Quality score color|65.8}} 65.8%, transparent 65.8%);" | 65.8%
+| style="background: linear-gradient(to right, {{Quality score color|3.05|5}} 61.0%, transparent 61.0%);" | 3.05
+| 807
+|-
+! scope="row" | 2025年12月31日
+| 7
+| 14
+| 30
+| 79
+| 217
+| 181
+| 75
+| 453
+| 526
+| style="background: linear-gradient(to right, {{Quality score color|65.7}} 65.7%, transparent 65.7%);" | 65.7%
+| style="background: linear-gradient(to right, {{Quality score color|3.07|5}} 61.4%, transparent 61.4%);" | 3.07
+| 816
+|-
+! scope="row" | 2026年3月31日
+| 7
+| 14
+| 31
+| 79
+| 224
+| 173
+| 74
+| 454
+| 528
+| style="background: linear-gradient(to right, {{Quality score color|67.2}} 67.2%, transparent 67.2%);" | 67.2%
+| style="background: linear-gradient(to right, {{Quality score color|3.10|5}} 62.0%, transparent 62.0%);" | 3.10
+| 823
+|-
+! scope="row" | 2026年6月30日
+| 7
+| 15
+| 31
+| 81
+| 223
+| 171
+| 74
+| 454
+| 528
+| style="background: linear-gradient(to right, {{Quality score color|67.6}} 67.6%, transparent 67.6%);" | 67.6%
+| style="background: linear-gradient(to right, {{Quality score color|3.13|5}} 62.6%, transparent 62.6%);" | 3.13
+| 833
+|-
+! scope="row" | 2026年9月30日
+| 7 
+| 15 
+| 31
+| 82
+| 225 
+| 171 
+| 74 
+| 457
+| 531 
+| style="background: linear-gradient(to right, {{Quality score color|67.8}} 67.8%, transparent 67.8%);" |  67.8%
+| style="background: linear-gradient(to right, {{Quality score color|3.13|5}} 62.6%, transparent 62.6%);" | 3.13
+| 831 
+|-
+! scope="row" | {{#time:Y年Mj日}}
+| {{#invoke:PJ:VG/COUNT|main|FA-A, ≥High}}
+| {{#invoke:PJ:VG/COUNT|main|GA-Bplus, ≥High}}
+| {{#invoke:PJ:VG/COUNT|main|B, ≥High}}
+| {{#invoke:PJ:VG/COUNT|main|C, ≥High}}
+| {{#invoke:PJ:VG/COUNT|main|Start, ≥High}}
+| {{#invoke:PJ:VG/COUNT|main|Stub-Unassessed, ≥High}}
+| {{#invoke:PJ:VG/COUNT|main|Top}}
+| {{#invoke:PJ:VG/COUNT|main|High}}
+| {{#invoke:PJ:VG/COUNT|main|≥High}}
+| style="background: linear-gradient(to right, {{Quality score color|{{#invoke:PJ:VG/COUNT|main|≥Start, ≥High}}|{{#invoke:PJ:VG/COUNT|main|≥High}}}} {{Rnd| {{#invoke:PJ:VG/COUNT|main|≥Start, ≥High}} / {{#invoke:PJ:VG/COUNT|main|≥High}} * 100 |1}}%, transparent {{Rnd| {{#invoke:PJ:VG/COUNT|main|≥Start, ≥High}} / {{#invoke:PJ:VG/COUNT|main|≥High}} * 100 |1}}%);" | {{Rnd| {{#invoke:PJ:VG/COUNT|main|≥Start, ≥High}} / {{#invoke:PJ:VG/COUNT|main|≥High}} * 100 |1}}%
+| style="background: linear-gradient(to right, {{Quality score color|{{#invoke:PJ:VG/COUNT|main|≥High|class_weight=yes|average=yes|round=2}}|5}} {{Rnd| {{#invoke:PJ:VG/COUNT|main|≥High|class_weight=yes|average=yes|round=2}} / 5 * 100 |1}}%, transparent {{Rnd| {{#invoke:PJ:VG/COUNT|main|≥High|class_weight=yes|average=yes|round=2}} / 5 * 100 |1}}%);" | {{#invoke:PJ:VG/COUNT|main|≥High|class_weight=yes|average=yes|round=2}}
+| {{#section:WikiProject:电子游戏/数据库报告/英文维基百科重要条目|count_all}}
+|}
+
+'''说明'''
+* 甲级和乙上级品质等级于2025年12月设立。由於此兩類條目數量極少，為便於展示，分別併入典範級和優良級。
+* '''初級達成率'''指專題极高、高重要度條目中，初级或以上条目所占比重。本挑战的目标为「<u>全体</u>高重要条目品质突破初级」，即此指标'''达到100%'''。
+* '''品质指数'''指專題极高、高重要度條目的平均[[Template:Articles_by_Quality_and_Importance#质量指数|品质指數]]。典范（含甲）、优良（含乙上）、乙、丙、初、小作品（含未评级）條目依次记10、8、7、5、3、1分。本挑战的第二目标为「高重要条目<u>平均</u>品质突破丙级」，即此指标'''达到5分'''。
+* 因評級系統無法統計缺失條目，故本表列出'''英文版条目数'''一栏，標明英文維基極高、高重要條目數。理论而言，本挑战真正达成目标时，總數方面應'''同英文维基相近'''。值得一提的是，编者参考英文维基“[[Wikipedia:製作小作品|消红]]”也是正向贡献；但隨小條目數增加，前两项指标会下降。
+
+== 待完善条目 ==
+
+请见：
+* {{clc|小作品级极高重要度电子游戏条目}}
+* {{clc|小作品级高重要度电子游戏条目}}
+* [[WikiProject:电子游戏/数据库报告/英文维基百科重要条目]]
+* [[petscan:21567451|最短的極高·高重要度條目]]（外部工具）
+
+== 参与者 ==
+* {{User|Lopullinen}}
+* {{User|Ericliu1912}}
+* {{User|Easterlies}}
+* {{User|BlackShadowG}}
+* {{User|SilverReaper}}
+* {{User|Nebulatria}}
+
+== 贡献榜 ==
+
+请在下方列出您创建或扩充的条目，新项置于最底部。由於挑战進度依據[[WP:VG/AI|条目评级系统]]統計，您在下方添加内容時，請記得同時更新條目討論頁的品質评级。
+
+# [[文字式游戏]]--[[User talk:Lopullinen|<span lang="fi-Hani" style="font-family: serif;">洛普利宁</span>]] 2021年4月1日 (四) 12:19 (UTC)
+# [[探險世界 (遊戲)]]--[[User talk:Lopullinen|<span lang="fi-Hani" style="font-family: cursive;">洛普利宁</span>]] 2021年7月3日 (六) 18:18 (UTC)
+# {{icon|GA}} [[超级马力欧银河2]]--[[U:MilkyDefer|<span style="color:#0099CC">Milky</span>]]·[[UT:MilkyDefer|'''<span style="color:#E600AC">Defer</span>''']] 2021年7月13日 (二) 10:39 (UTC)
+# [[无冬之夜 (1991年游戏)]]——[[U:BlackShadowG|<span style="font-family:Constantia;font-size:17.5px;color:black;text-shadow:grey 2px 4px 4px;">BlackShadowG</span>]]（[[UT:BlackShadowG|留言]]） 2021年8月13日 (五) 06:45 (UTC)
+# [[超级马力欧兄弟主题曲]]--[[User_talk:Lopullinen|<span lang="fi-Hani" style="font-family: cursive;">洛普利寧</span>]] 2022年5月21日 (六) 13:32 (UTC)
+# [[罗伯塔·威廉斯]]--[[User_talk:Lopullinen|<span lang="fi-Hani" style="font-family: cursive;">洛普利寧</span>]] 2022年7月23日 (六) 09:10 (UTC)
+# {{icon|GA}} [[太空戰爭！]]--[[U:SilverReaper|<font color="#868A08" face="標楷體"><b>銀の死神</b></font>]]♠[[UT:SilverReaper|<font color="#848484" face="標楷體">走馬燈劇場</font>]]<sup><font color="#FF0000" face="標楷體">祝你在亂流下平安</font></sup> 2022年9月11日 (日) 04:13 (UTC)
+# {{icon|FA}} [[最后生还者]]——[[U:BlackShadowG|<span style="font-family:Constantia;font-size:17.5px;color:black;text-shadow:grey 2px 4px 4px;">BlackShadowG</span>]] <span style="background-color:#ffd700;color:#0057b7;font-size:50%;">'''Slava Ukraini!'''</span> 2022年10月20日 (四) 03:27 (UTC)
+# {{icon|GA}} [[早期大型電腦遊戲]]--[[U:SilverReaper|<font color="#868A08" face="標楷體"><b>銀の死神</b></font>]]♠[[UT:SilverReaper|<font color="#848484" face="標楷體">走馬燈劇場</font>]]<sup><font color="#FF0000" face="標楷體">祝你在亂流下平安</font></sup> 2022年11月28日 (一) 14:04 (UTC)
+# {{icon|FA}} [[辐射 (游戏)]]--[[U:SilverReaper|<font color="#868A08" face="標楷體"><b>銀の死神</b></font>]]♠[[UT:SilverReaper|<font color="#848484" face="標楷體">走馬燈劇場</font>]]<sup><font color="#FF0000" face="標楷體">祝你在亂流下平安</font></sup> 2022年11月28日 (一) 14:04 (UTC)
+# {{icon|GA}} [[早期電子遊戲史]]--[[U:SilverReaper|<font color="#868A08" face="標楷體"><b>銀の死神</b></font>]]♠[[UT:SilverReaper|<font color="#848484" face="標楷體">走馬燈劇場</font>]]<sup><font color="#FF0000" face="標楷體">祝你在亂流下平安</font></sup> 2023年2月21日 (二) 14:08 (UTC)
+# {{icon|GA}} [[雙人網球]]--[[U:SilverReaper|<font color="#868A08" face="標楷體"><b>銀の死神</b></font>]]♠[[UT:SilverReaper|<font color="#848484" face="標楷體">走馬燈劇場</font>]]<sup><font color="#FF0000" face="標楷體">祝你在亂流下平安</font></sup> 2023年3月7日 (二) 12:20 (UTC)
+# {{icon|GA}} [[魔域]]--[[U:SilverReaper|<font color="#868A08" face="標楷體"><b>銀の死神</b></font>]]♠[[UT:SilverReaper|<font color="#848484" face="標楷體">走馬燈劇場</font>]]<sup><font color="#FF0000" face="標楷體">轉轉心情人又照舊</font></sup> 2024年2月25日 (日) 08:18 (UTC)
+# {{icon|GA}} [[魔幻歷險]]--[[U:SilverReaper|<font color="#868A08" face="標楷體"><b>銀の死神</b></font>]]♠[[UT:SilverReaper|<font color="#848484" face="標楷體">走馬燈劇場</font>]]<sup><font color="#FF0000" face="標楷體">轉轉心情人又照舊</font></sup> 2024年3月7日 (四) 12:59 (UTC)
+# {{icon|GA}} [[潛望鏡 (電子遊戲)]]--[[U:SilverReaper|<font color="#868A08" face="標楷體"><b>銀の死神</b></font>]]♠[[UT:SilverReaper|<font color="#848484" face="標楷體">走馬燈劇場</font>]]<sup><font color="#FF0000" face="標楷體">轉轉心情人又照舊</font></sup> 2024年5月19日 (日) 07:58 (UTC)
+# [[威廉·希金博特姆]]--[[User talk:For Each ... Next|𝐹𝑜𝑟 𝐸𝑎𝑐ℎ ... 𝑁𝑒𝑥𝑡]] 2025年7月16日 (三) 15:04 (UTC)
+# {{icon|GA}} [[俄勒冈之旅]]--[[U:SilverReaper|<font color="#868A08" face="標楷體"><b>銀の死神</b></font>]]♠[[UT:SilverReaper|<font color="#848484" face="標楷體">走馬燈劇場</font>]]<sup><font color="#FF0000" face="標楷體">祝你在亂流下平安</font></sup> 2026年2月18日 (三) 09:33 (UTC)
+
+== 参见 ==
+
+* [[:en:Wikipedia:WikiProject Video games/The 1000 Challenge]] － 英文电子游戏专题的千文挑战活动，本挑战的灵感来源
+* [[WikiProject:电子游戏/认证条目#基础条目]] － 社群层级的真·基础条目
+</div>
+
+[[Category:电子游戏专题|B]]

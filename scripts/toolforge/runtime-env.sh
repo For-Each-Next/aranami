@@ -9,3 +9,5 @@ app_dir="$tool_dir/$source_name"
 runtime_python=$(python3 "$app_dir/scripts/toolforge/validate-source.py" runtime "$app_dir")
 export PYTHONPATH="$app_dir/src"
 export PYTHONPYCACHEPREFIX="$tool_dir/cache/pycache"
+# Bound native worker pools on hosts larger than the tool's allocation.
+export POLARS_MAX_THREADS="${POLARS_MAX_THREADS:-2}"

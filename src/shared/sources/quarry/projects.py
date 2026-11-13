@@ -14,9 +14,14 @@ from typing import TYPE_CHECKING, Literal
 import polars as pl
 import pywikibot
 from pywikibot.site import Namespace
-from sqlalchemy import and_, func, select, tuple_
+from sqlalchemy import and_, func, literal, or_, select, tuple_, union_all
 
-from shared.sources.cycle import read_membership
+from shared.sources.cycle import (
+    read_categories,
+    read_category_members,
+    read_membership,
+    read_revisions,
+)
 from shared.sources.quarry import Replica, tables
 
 if TYPE_CHECKING:
@@ -28,6 +33,9 @@ if TYPE_CHECKING:
 _BATCH_SIZE = 500
 _MAX_REDIRECT_DEPTH = 8
 _MAX_HISTORY_REDIRECTS = 100_000
+_REDIRECT_RECOVERY_BATCH_SIZE = 50
+_MAX_RECOVERY_TEMPLATES = 256
+_MAX_SOURCE_TEMPLATE_SCOPE = 64
 _PAGE_SCHEMA = {
     "page_id": pl.Int64,
     "page_namespace": pl.Int64,
@@ -44,6 +52,15 @@ _MEMBER_SCHEMA = {
     "page_id": pl.Int64,
     "page_namespace": pl.Int64,
     "page_title": pl.String,
+}
+_REDIRECT_RECOVERY_SCHEMA = {
+    "page_id": pl.Int64,
+    "page_namespace": pl.Int64,
+    "page_title": pl.String,
+    "page_revision": pl.Int64,
+    "page_is_redirect": pl.Int64,
+    "talk_page_id": pl.Int64,
+    "talk_revision": pl.Int64,
 }
 
 type TagSpec = tuple[str, Literal["main", "talk"], Literal["cat", "tl"], str]
@@ -85,6 +102,7 @@ def query_pages_by_wikiproject(
         database,
         project_name,
         lambda: _project_membership(database, project_name),
+        site=site,
     )
     return _with_titles(site, frame)
 
@@ -150,6 +168,122 @@ def query_history_redirects(
         seen = pl.concat([seen, frontier]).unique()
     message = "Article history redirect chains exceed their depth bound."
     raise ValueError(message)
+
+
+def query_redirect_recovery_candidates(
+    site: BaseSite,
+    templates: Iterable[str],
+    *,
+    after_page_id: int = 0,
+    limit: int = _REDIRECT_RECOVERY_BATCH_SIZE,
+) -> pl.DataFrame:
+    """Read tagged talks paired with current article redirects.
+
+    Current subject and discussion identities come from one replica
+    observation. Multiple selected template aliases do not repeat a
+    talk page. Reuse the final talk-page ID as the next keyset cursor;
+    replica lag means this is observed metadata, not live API state.
+
+    Args:
+        site: Wiki supplying local template titles and replica metadata.
+        templates: Resolved full local deletion-template aliases.
+        after_page_id: Exclusive lower bound on stable talk-page IDs.
+        limit: Maximum batch size, from one through fifty.
+
+    Returns:
+        Eager rows ordered by talk-page ID, with subject ``page_id``,
+        ``page_namespace``, database ``page_title``, ``page_revision``
+        and ``page_is_redirect``; paired ``talk_page_id`` and
+        ``talk_revision``; and canonical ``full_title`` and
+        ``talk_title``.
+        Empty selection or exhausted coverage returns the same schema.
+
+    Raises:
+        ValueError: Bounds or local template identities are invalid.
+    """
+    if (
+        type(after_page_id) is not int
+        or after_page_id < 0
+        or type(limit) is not int
+        or not 1 <= limit <= _REDIRECT_RECOVERY_BATCH_SIZE
+    ):
+        message = "Redirect recovery requires bounded keyset selectors."
+        raise ValueError(message)
+    names = {}
+    for title in templates:
+        prefix, separator, _ = title.partition(":")
+        if (
+            not separator
+            or site.namespaces.lookup_name(prefix) != Namespace.TEMPLATE
+        ):
+            message = "Redirect recovery requires local template identities."
+            raise ValueError(message)
+        page = pywikibot.Page(site, title)
+        names[page.title(with_ns=False).replace(" ", "_")] = page.title()
+        if len(names) > _MAX_RECOVERY_TEMPLATES:
+            message = "Redirect recovery template selection exceeds its bound."
+            raise ValueError(message)
+    if not names:
+        return _with_titles(
+            site,
+            pl.DataFrame(schema=_REDIRECT_RECOVERY_SCHEMA),
+        )
+    page = tables.Page.__table__
+    talk = page.alias("recovery_talk")
+    subject = page.alias("recovery_subject")
+    target = tables.Linktarget.__table__
+    transclusion = tables.Templatelinks.__table__
+    statement = (
+        select(
+            subject.c.page_id,
+            subject.c.page_namespace,
+            subject.c.page_title,
+            subject.c.page_latest.label("page_revision"),
+            subject.c.page_is_redirect,
+            talk.c.page_id.label("talk_page_id"),
+            talk.c.page_latest.label("talk_revision"),
+        )
+        .distinct()
+        .select_from(target)
+        .join(transclusion, transclusion.c.tl_target_id == target.c.lt_id)
+        .join(talk, talk.c.page_id == transclusion.c.tl_from)
+        .join(
+            subject,
+            and_(
+                subject.c.page_namespace == Namespace.MAIN,
+                subject.c.page_title == talk.c.page_title,
+            ),
+        )
+        .where(
+            target.c.lt_namespace == Namespace.TEMPLATE,
+            target.c.lt_title.in_(names),
+            transclusion.c.tl_from_namespace == Namespace.TALK,
+            talk.c.page_namespace == Namespace.TALK,
+            talk.c.page_is_redirect == 0,
+            subject.c.page_is_redirect == 1,
+            talk.c.page_id > after_page_id,
+        )
+        .order_by(talk.c.page_id)
+        .limit(limit)
+    )
+    return _with_titles(
+        site,
+        _replica(site.dbName())
+        .query(
+            statement,
+            schema_overrides=_REDIRECT_RECOVERY_SCHEMA,
+            purpose="page_tags",
+            scope={
+                "page_kind": "talk_pages",
+                **(
+                    {"templates": list(names.values())}
+                    if len(names) <= _MAX_SOURCE_TEMPLATE_SCOPE
+                    else {}
+                ),
+            },
+        )
+        .collect(),
+    )
 
 
 def _history_redirect_rows(
@@ -243,56 +377,6 @@ def _history_redirect_rows(
     )
 
 
-def query_project_assessments(
-    site: BaseSite,
-    project_name: str,
-) -> pl.DataFrame:
-    """Read project page identities and their observed assessments.
-
-    Args:
-        site: Wiki whose replica holds the assessment observations.
-        project_name: Exact PageAssessments project title.
-
-    Returns:
-        Eager page IDs, raw database titles, namespaces, redirect flags,
-        and nullable quality/importance observations. Talk pages and
-        revisions are resolved separately only when needed.
-    """
-    page = tables.Page
-    assessment = tables.PageAssessments
-    project = tables.PageAssessmentsProjects
-    statement = (
-        select(
-            page.page_id,
-            page.page_title,
-            page.page_namespace,
-            page.page_is_redirect,
-            assessment.pa_class,
-            assessment.pa_importance,
-        )
-        .select_from(project)
-        .join(assessment, project.pap_project_id == assessment.pa_project_id)
-        .join(page, assessment.pa_page_id == page.page_id)
-        .where(project.pap_project_title == project_name)
-        .order_by(page.page_id)
-    )
-    return (
-        _replica(site.dbName())
-        .query(
-            statement,
-            schema_overrides={
-                "page_id": pl.Int64,
-                "page_title": pl.String,
-                "page_namespace": pl.Int64,
-                "page_is_redirect": pl.Int64,
-                "pa_class": pl.String,
-                "pa_importance": pl.String,
-            },
-        )
-        .collect()
-    )
-
-
 def page_projects(
     site: BaseSite,
     page_ids: Iterable[int],
@@ -340,6 +424,55 @@ def page_projects(
         )
     ]
     return pl.concat(frames) if frames else pl.DataFrame(schema=schema)
+
+
+def pages_with_prefix(site: BaseSite, title_prefix: str) -> pl.DataFrame:
+    """List bounded page identities beneath a literal title prefix.
+
+    Args:
+        site: Wiki whose replica owns the namespace metadata.
+        title_prefix: Full title prefix including its namespace.
+
+    Returns:
+        Stable page IDs and canonical titles, without content reads.
+
+    Raises:
+        ValueError: The source prefix contains too many pages.
+    """
+    prefix = pywikibot.Page(site, title_prefix)
+    lower = prefix.title(with_ns=False).replace(" ", "_")
+    upper = lower[:-1] + chr(ord(lower[-1]) + 1)
+    page = tables.Page
+    frame = (
+        _replica(site.dbName())
+        .query(
+            select(
+                page.page_id,
+                page.page_namespace,
+                page.page_title,
+            )
+            .where(
+                page.page_namespace == int(prefix.namespace()),
+                page.page_title >= lower,
+                page.page_title < upper,
+            )
+            .order_by(page.page_id)
+            .limit(_MAX_HISTORY_REDIRECTS + 1),
+            schema_overrides={
+                "page_id": pl.Int64,
+                "page_namespace": pl.Int64,
+                "page_title": pl.String,
+            },
+        )
+        .collect()
+    )
+    if frame.height > _MAX_HISTORY_REDIRECTS:
+        message = "A source-page prefix exceeds its inventory bound."
+        raise ValueError(message)
+    return _with_titles(
+        site,
+        frame.with_columns(pl.lit(None, dtype=pl.Int64).alias("talk_page_id")),
+    ).select("page_id", "full_title")
 
 
 def query_project_intersections(
@@ -621,6 +754,8 @@ def _project_membership(database: str, project_name: str) -> pl.DataFrame:
         .query(
             statement,
             schema_overrides=_PAGE_SCHEMA,
+            purpose="project_membership",
+            scope={"project": project_name},
         )
         .collect()
     )
@@ -644,6 +779,9 @@ def category_members(
     """
     category = pywikibot.Page(site, category_title, Namespace.CATEGORY)
     title = category.title(with_ns=False, underscore=True)
+    saved = read_category_members(site.dbName(), title, namespace)
+    if saved is not None:
+        return saved
     page, links, target = tables.Page, tables.Categorylinks, tables.Linktarget
     statement = (
         select(page.page_id, page.page_namespace, page.page_title)
@@ -676,6 +814,99 @@ def category_members(
         .query(
             statement,
             schema_overrides=schema,
+            purpose="category_members",
+            scope={
+                "categories": [category.title(with_ns=False)],
+                "page_kind": "talk_pages"
+                if namespace == Namespace.TALK
+                else "pages",
+            },
+        )
+        .collect()
+    )
+
+
+def category_observations(
+    site: BaseSite,
+    category_titles: Iterable[str],
+    page_ids: Iterable[int],
+) -> pl.DataFrame:
+    """Read project categories and complete lists in one SQL call.
+
+    Args:
+        site: Wiki whose indexed page and category metadata is read.
+        category_titles: Categories needing complete global membership.
+        page_ids: Project subject and talk IDs requiring all categories.
+
+    Returns:
+        Category/page identities and replica page_latest. Known pages
+        without categories retain a null category placeholder.
+    """
+    names = [
+        pywikibot.Page(site, name, Namespace.CATEGORY).title(
+            with_ns=False,
+            underscore=True,
+        )
+        for name in category_titles
+    ]
+    ids = list(dict.fromkeys(page_ids))
+    page, links, target = tables.Page, tables.Categorylinks, tables.Linktarget
+    article = tables.Page.__table__.alias("article")
+    columns = (
+        page.page_id,
+        page.page_namespace,
+        page.page_title,
+        page.page_latest,
+        article.c.page_id.label("article_page_id"),
+        target.lt_title.label("name"),
+    )
+    article_join = and_(
+        page.page_namespace == Namespace.TALK,
+        article.c.page_namespace == Namespace.MAIN,
+        article.c.page_title == page.page_title,
+    )
+    project_rows = (
+        select(*columns, literal(value=True).label("categories_complete"))
+        .select_from(page)
+        .outerjoin(links, links.cl_from == page.page_id)
+        .outerjoin(
+            target,
+            and_(
+                target.lt_id == links.cl_target_id,
+                target.lt_namespace == Namespace.CATEGORY,
+            ),
+        )
+        .outerjoin(article, article_join)
+        .where(page.page_id.in_(ids))
+    )
+    category_rows = (
+        select(*columns, literal(value=False).label("categories_complete"))
+        .select_from(target)
+        .join(links, links.cl_target_id == target.lt_id)
+        .join(page, page.page_id == links.cl_from)
+        .outerjoin(article, article_join)
+        .where(
+            target.lt_namespace == Namespace.CATEGORY,
+            target.lt_title.in_(names),
+            page.page_id.not_in(ids),
+        )
+    )
+    schema = _MEMBER_SCHEMA | {
+        "page_latest": pl.Int64,
+        "article_page_id": pl.Int64,
+        "name": pl.String,
+        "categories_complete": pl.Boolean,
+    }
+    return (
+        _replica(site.dbName())
+        .query(
+            union_all(project_rows, category_rows),
+            schema_overrides=schema,
+            purpose="category_members",
+            scope={
+                "categories": [name.replace("_", " ") for name in names],
+                "page_kind": "pages",
+            },
         )
         .collect()
     )
@@ -695,6 +926,22 @@ def page_categories(
         Typed page IDs and category database titles in ``name``.
         Empty inputs return an empty frame without querying replicas.
         Requests are deduplicated and bounded to five hundred IDs.
+    """
+    return read_categories(
+        site.dbName(),
+        list(dict.fromkeys(page_ids)),
+        lambda selected: _page_category_batches(site, selected),
+    )
+
+
+def _page_category_batches(
+    site: BaseSite,
+    page_ids: list[int],
+) -> pl.DataFrame:
+    """Read uncovered category links through bounded database queries.
+
+    Returns:
+        Exact page/category pairs for IDs outside centralized coverage.
     """
     schema = {"page_id": pl.Int64, "name": pl.String}
     links, target = tables.Categorylinks, tables.Linktarget
@@ -793,18 +1040,47 @@ def maintenance_tags(
     return pl.concat(frames) if frames else pl.DataFrame(schema=schema)
 
 
-def latest_revisions(site: BaseSite, page_ids: Iterable[int]) -> pl.DataFrame:
+def latest_revisions(
+    site: BaseSite,
+    page_ids: Iterable[int],
+    *,
+    talk_pages: bool = False,
+) -> pl.DataFrame:
     """Read latest replica revision identifiers in bounded batches.
 
     Args:
         site: Site whose pages are requested.
         page_ids: Page identifiers to look up.
+        talk_pages: The caller selected discussion-page identities.
 
     Returns:
         Typed ``page_id`` and ``page_latest`` columns.
     """
+    return read_revisions(
+        site.dbName(),
+        list(dict.fromkeys(page_ids)),
+        lambda selected: _latest_revision_batches(
+            site,
+            selected,
+            talk_pages=talk_pages,
+        ),
+    )
+
+
+def _latest_revision_batches(
+    site: BaseSite,
+    page_ids: list[int],
+    *,
+    talk_pages: bool,
+) -> pl.DataFrame:
+    """Query uncovered revisions with explicit batch observations.
+
+    Returns:
+        Complete returned revision rows, with empty results kept typed.
+    """
     schema = {"page_id": pl.Int64, "page_latest": pl.Int64}
     page = tables.Page
+    batches = list(batched(page_ids, _BATCH_SIZE, strict=False))
     frames = [
         _replica(site.dbName())
         .query(
@@ -812,13 +1088,16 @@ def latest_revisions(site: BaseSite, page_ids: Iterable[int]) -> pl.DataFrame:
                 page.page_id.in_(batch),
             ),
             schema_overrides=schema,
+            purpose="latest_revisions",
+            scope={
+                "page_kind": "talk_pages" if talk_pages else "pages",
+                "page_count": len(batch),
+                "batch_index": index,
+                "batch_count": len(batches),
+            },
         )
         .collect()
-        for batch in batched(
-            dict.fromkeys(page_ids),
-            _BATCH_SIZE,
-            strict=False,
-        )
+        for index, batch in enumerate(batches, 1)
     ]
     return pl.concat(frames) if frames else pl.DataFrame(schema=schema)
 
@@ -994,12 +1273,90 @@ def redirect_converted_page_ids(
     )
 
 
+def page_discovery_metadata(
+    site: BaseSite,
+    page_ids: Iterable[int],
+    converted_page_ids: Iterable[int],
+    start: dt.date,
+    stop: dt.date,
+) -> pl.DataFrame:
+    """Read the responsible user and time of each discovery event.
+
+    Args:
+        site: Wiki supplying original revision and actor observations.
+        page_ids: Created or rewritten nonredirect page identities.
+        converted_page_ids: IDs prioritizing their tagged rewrite.
+        start: Inclusive UTC event date.
+        stop: Exclusive UTC event date.
+
+    Returns:
+        Earliest event per page with nullable registered user ID.
+        Anonymous or hidden users sort after known registered users.
+    """
+    schema = {
+        "page_id": pl.Int64,
+        "user_id": pl.Int64,
+        "occurred_at": pl.String,
+    }
+    identifiers = sorted(set(page_ids))
+    converted = sorted(set(converted_page_ids))
+    revision, actor = tables.Revision, tables.Actor
+    tag, definition = tables.ChangeTag, tables.ChangeTagDef
+    rewrites = (
+        select(tag.ct_rev_id)
+        .join(definition, tag.ct_tag_id == definition.ctd_id)
+        .where(definition.ctd_name == "mw-removed-redirect")
+    )
+    frames = []
+    for batch in batched(identifiers, _BATCH_SIZE, strict=False):
+        statement = (
+            select(
+                revision.rev_page.label("page_id"),
+                actor.actor_user.label("user_id"),
+                revision.rev_timestamp.label("occurred_at"),
+            )
+            .outerjoin(actor, revision.rev_actor == actor.actor_id)
+            .where(
+                revision.rev_page.in_(batch),
+                revision.rev_timestamp >= start.strftime("%Y%m%d000000"),
+                revision.rev_timestamp < stop.strftime("%Y%m%d000000"),
+                or_(
+                    and_(
+                        revision.rev_page.not_in(converted),
+                        revision.rev_parent_id == 0,
+                    ),
+                    and_(
+                        revision.rev_page.in_(converted),
+                        revision.rev_id.in_(rewrites),
+                    ),
+                ),
+            )
+        )
+        frames.append(
+            _replica(site.dbName())
+            .query(statement, schema_overrides=schema)
+            .collect(),
+        )
+    return (
+        (pl.concat(frames) if frames else pl.DataFrame(schema=schema))
+        .sort("page_id", "occurred_at", "user_id", nulls_last=True)
+        .unique("page_id", keep="first", maintain_order=True)
+        .with_columns(
+            pl.col("occurred_at").str.to_datetime(
+                "%Y%m%d%H%M%S",
+                time_zone="UTC",
+            ),
+        )
+    )
+
+
 def _tag_rows(
     site: BaseSite,
     names: Iterable[str],
     page_ids: Iterable[int],
     *,
     category: bool,
+    page_kind: Literal["pages", "talk_pages"] = "pages",
 ) -> pl.DataFrame:
     """Read tag membership while bounding each page-ID restriction.
 
@@ -1008,9 +1365,46 @@ def _tag_rows(
         names: Normalized database titles in the selected namespace.
         page_ids: Exact page identifiers permitted in the result.
         category: Whether to read category rather than template links.
+        page_kind: Explicit subject or discussion-page selection.
 
     Returns:
         Typed page identifiers and matched category or template names.
+    """
+    selected = list(dict.fromkeys(page_ids))
+    names = tuple(names)
+    if category:
+        return read_categories(
+            site.dbName(),
+            selected,
+            lambda missing: _tag_rows_query(
+                site,
+                names,
+                missing,
+                category=True,
+                page_kind=page_kind,
+            ),
+        ).filter(pl.col("name").is_in(names))
+    return _tag_rows_query(
+        site,
+        names,
+        selected,
+        category=False,
+        page_kind=page_kind,
+    )
+
+
+def _tag_rows_query(
+    site: BaseSite,
+    names: Iterable[str],
+    page_ids: Iterable[int],
+    *,
+    category: bool,
+    page_kind: Literal["pages", "talk_pages"],
+) -> pl.DataFrame:
+    """Read category or template links outside central coverage.
+
+    Returns:
+        Requested page IDs and matching target names.
     """
     schema = {"page_id": pl.Int64, "name": pl.String}
     target = tables.Linktarget
@@ -1018,6 +1412,7 @@ def _tag_rows(
     source = links.cl_from if category else links.tl_from
     target_id = links.cl_target_id if category else links.tl_target_id
     namespace = Namespace.CATEGORY if category else Namespace.TEMPLATE
+    names = tuple(names)
     statement = (
         select(source.label("page_id"), target.lt_title.label("name"))
         .select_from(target)
@@ -1029,6 +1424,13 @@ def _tag_rows(
         .query(
             statement.where(source.in_(batch)),
             schema_overrides=schema,
+            purpose="page_tags",
+            scope={
+                "categories" if category else "templates": [
+                    name.replace("_", " ") for name in names
+                ],
+                "page_kind": page_kind,
+            },
         )
         .collect()
         for batch in batched(
@@ -1077,7 +1479,13 @@ def query_tags(
         )
         if not ids:
             continue
-        matches = _tag_rows(site, names, ids, category=membership == "cat")
+        matches = _tag_rows(
+            site,
+            names,
+            ids,
+            category=membership == "cat",
+            page_kind="pages" if page_kind == "main" else "talk_pages",
+        )
         pieces.append(
             matches
             .rename({"page_id": "_source_id"})

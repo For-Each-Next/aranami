@@ -8,19 +8,24 @@ from __future__ import annotations
 
 import datetime as dt
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import override
-from unittest import TestCase
+from unittest import TestCase, addModuleCleanup
 from unittest.mock import Mock, patch
 
 import polars as pl
 from wiki_fixtures import OfflineSite
 
-from backend.services.zhwiki import assessment_log as source
-from shared.reports import ReportBundle, ReportStore, report_key
-from updater.jobs import JobContext, assessment_log as job
-from updater.services.zhwiki.assessment_log import update_text
+from data.reports import ReportBundle, ReportStore, report_key
+from runtime.jobs import JobContext, assessment_log as job
+from tasks.zhwiki import assessment_log as source
+from updater.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
+from updater.services.zhwiki.assessment_log import (
+    build_edit_summary,
+    update_text,
+)
 
 _NOW = dt.datetime(2026, 10, 25, 12, 34, tzinfo=dt.UTC)
 _TITLE = "WikiProject:电子游戏/评级/日志"
@@ -93,6 +98,13 @@ def _replica_rows(members: pl.DataFrame) -> pl.DataFrame:
         pl.col("class").alias("pa_class"),
         pl.col("importance").alias("pa_importance"),
     )
+
+
+def setUpModule() -> None:
+    """Keep summary year fixtures independent of the actual UTC year."""
+    clock = patch("updater.edit_summary._current_year", return_value=2026)
+    clock.start()
+    addModuleCleanup(clock.stop)
 
 
 class TestAssessmentChanges(TestCase):
@@ -193,7 +205,7 @@ class _AssessmentLogFixture(TestCase):
         self.enterContext(patch("pathlib.Path.cwd", return_value=self.root))
         self.enterContext(
             patch(
-                "updater.jobs._execution.open_run_log",
+                "runtime.jobs.context.open_run_log",
                 return_value=nullcontext(),
             ),
         )
@@ -278,6 +290,48 @@ class _AssessmentLogFixture(TestCase):
         return bundle
 
 
+class TestAssessmentEditSummary(_AssessmentLogFixture):
+    """Describe changes with actions while preserving date semantics."""
+
+    def test_renames_and_assessment_actions_remain_distinct(self) -> None:
+        """Count separate actions for overlapping page changes."""
+        previous = _members(
+            (1, "Old title", "C", "Low"),
+            (2, "Departed", "B", "High"),
+        )
+        current = _members(
+            (1, "New title", "B", "High"),
+            (3, "New member", "Stub", "Low"),
+        )
+        prepared = replace(
+            self._prepare(current),
+            changes=source.compare_members(previous, current),
+        )
+        assert build_edit_summary(prepared) == (
+            "Rename 1 page; change 1 assessment; add 1 assessment; "
+            "remove 1 assessment for Oct 24."
+        )
+        summary = EditSummary.with_attribution(build_edit_summary(prepared))
+        assert len(summary.encode()) <= MAX_EDIT_SUMMARY_BYTES
+        renamed = replace(
+            prepared,
+            changes=prepared.changes.filter(pl.col("kind") == "renamed"),
+        )
+        assert build_edit_summary(renamed) == "Rename 1 page for Oct 24."
+
+    def test_pending_and_empty_history_do_not_claim_fresh_changes(
+        self,
+    ) -> None:
+        """Keep retained history separate from fresh counts."""
+        prepared = self._prepare(_members((1, "Existing", "B", "High")))
+        assert build_edit_summary(prepared) == (
+            "Update assessment log for Oct 24."
+        )
+        assert build_edit_summary(replace(prepared, pending=True)) == (
+            "Publish pending assessment changes for Oct 24."
+        )
+
+
 class TestAssessmentLogEmptyDays(_AssessmentLogFixture):
     """Distinguish observed empty days from initial unknown history."""
 
@@ -313,9 +367,10 @@ class TestAssessmentLogEmptyDays(_AssessmentLogFixture):
         assert prepared.changes.is_empty()
         rendered = update_text(_TEXT, prepared)
         assert "=== 2026年10月25日 ===\n\n" in rendered
-        assert "\n\n<!-- aranami-assessment-totals:v2 " in rendered
-        assert "专题页面+0" not in rendered
-        assert "条目1 非条目0 重定向未知 专题页面1 -->\n\n無變更" in rendered
+        assert "\n\n<!-- aranami-assessment-totals schema=2 " in rendered
+        assert "±0" not in rendered
+        assert "合计未知：" in rendered
+        assert "重定向级未知" in rendered
         assert "2026年10月24日" not in rendered
         assert "====" not in rendered
         assert rendered.startswith("Introduction\n")
@@ -803,19 +858,18 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         prepared = self._prepare(members)
         rendered = update_text(_TEXT, prepared)
         assert (
-            "专题页面+1,242：条目+1,240（典范+1,233 · 特色列表+2 · 优良+1"
-            " · 乙上+1 · 乙+1 · 乙级列表+1 · 未评+1 ｜ 极高重要度+1,233"
-            " · 高重要度+2 · 中重要度+1 · 低重要度+3 · 未知重要度+1）"
+            "条目页+1,240（典范级+1,233、特色列表级+2、优良级+1"
+            "、乙上级+1、乙级+1、乙级列表级+1、未评级+1，极高重要度+1,233"
+            "、高重要度+2、中重要度+1、低重要度+3、未知重要度+1）"
         ) in rendered
         assert (
-            "<!-- aranami-assessment-totals:v2 "
-            "典范1,234 特色列表2 甲0 甲级列表0 优良1"
+            "<!-- aranami-assessment-totals schema=2 "
+            "合计未知：典范1,234、特色列表2、甲0、甲级列表0、优良1"
         ) in rendered
-        assert "条目1,241 非条目2 重定向未知 专题页面1,243 -->" in rendered
+        assert "模板级1" in rendered
+        assert "重定向级未知" in rendered
         totals = next(
-            line
-            for line in rendered.splitlines()
-            if line.startswith("专题页面")
+            line for line in rendered.splitlines() if line.startswith("条目页")
         ).split("<!--", 1)[0]
         assert "甲+" not in totals
         assert "不适用重要度" not in totals
@@ -838,8 +892,8 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         rendered = update_text(_TEXT, second)
         older = rendered[rendered.index("=== 2026年10月25日 ===") :]
         newer = rendered[: rendered.index("=== 2026年10月25日 ===")]
-        assert "专题页面+1：条目+1（丙+1 ｜ 低重要度+1）" in older
-        assert "专题页面-1：条目-1（丙-1 ｜ 低重要度-1）" in newer
+        assert "条目页+1（丙级+1，低重要度+1）" in older
+        assert "条目页-1（丙级-1，低重要度-1）" in newer
         self._retain(second, rendered, 3)
         retry = self._prepare(
             seed,
@@ -883,7 +937,7 @@ class TestAssessmentLogRendering(_AssessmentLogFixture):
         groups = ("重命名", "變更評級", "新增評級", "移除評級")
         positions = [rendered.index(f"==== {group} ====") for group in groups]
         assert positions == sorted(positions)
-        assert ("=== 2026年10月24日 ===\n\n条目+1（") in rendered
+        assert ("=== 2026年10月24日 ===\n\n条目页+1（") in rendered
         for group in groups:
             assert f"==== {group} ====\n\n* " in rendered
         assert "。\n\n==== 變更評級 ====" in rendered
@@ -1134,10 +1188,14 @@ class TestAssessmentLogJob(_AssessmentLogFixture):
             patch.object(job, "get_snapshot"),
             patch.object(job, "read_pages", return_value=[Mock(text=text)]),
             patch.object(job, "prepare_data", return_value=prepared),
-            patch("updater.jobs._execution.pywikibot.Page") as page,
+            patch(
+                "updater.publisher.pywikibot.Page",
+                return_value=Mock(get=Mock(return_value=text)),
+            ) as page,
         ):
             job.run(title=_TITLE, context=context)
-        page.assert_not_called()
+        page.return_value.get.assert_called_once_with(force=True)
+        page.return_value.save.assert_not_called()
         assert context.routine_results()[0]["status"] == "no_update"
         assert context.tasks[0].report_date == dt.date(2026, 10, 23)
 
@@ -1149,6 +1207,10 @@ class TestAssessmentLogJob(_AssessmentLogFixture):
             patch.object(job, "get_snapshot"),
             patch.object(job, "read_pages", return_value=[Mock(text=_TEXT)]),
             patch.object(job, "prepare_data", return_value=prepared),
+            patch(
+                "updater.publisher.pywikibot.Page",
+                return_value=Mock(get=Mock(return_value=_TEXT)),
+            ),
         ):
             job.run(title=_TITLE, context=context)
         assert context.routine_results()[0]["status"] == "no_update"
@@ -1170,12 +1232,15 @@ class TestAssessmentLogJob(_AssessmentLogFixture):
             patch.object(job, "read_pages", return_value=[Mock(text=_TEXT)]),
             patch.object(job, "prepare_data", return_value=prepared),
             patch(
-                "updater.jobs._execution.pywikibot.Page",
-                return_value=Mock(text=_TEXT),
+                "updater.publisher.pywikibot.Page",
+                return_value=Mock(text=_TEXT, get=Mock(return_value=_TEXT)),
             ) as page,
         ):
             job.run(title=_TITLE, context=context)
         page.return_value.save.assert_called_once()
+        assert page.return_value.save.call_args.kwargs["summary"] == (
+            "Change 1 assessment for Oct 24. ([[toolforge:aranami|Aranami]])"
+        )
         assert context.routine_results()[0]["status"] == "updated"
         assert context.tasks[0].report_date == dt.date(2026, 10, 24)
 
@@ -1191,12 +1256,13 @@ class TestAssessmentLogJob(_AssessmentLogFixture):
             started_at=_NOW + dt.timedelta(seconds=10),
         )
         page = Mock(text=_TEXT)
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         page.save.side_effect = OSError("save response lost")
         with (
             patch.object(job, "get_snapshot"),
             patch.object(job, "read_pages", return_value=[Mock(text=_TEXT)]),
             patch.object(job, "prepare_data", return_value=prepared),
-            patch("updater.jobs._execution.pywikibot.Page", return_value=page),
+            patch("updater.publisher.pywikibot.Page", return_value=page),
             self.assertRaises(OSError),
         ):
             job.run(title=_TITLE, context=context)
@@ -1219,7 +1285,7 @@ class TestAssessmentLogJob(_AssessmentLogFixture):
             patch.object(job, "read_pages", return_value=[Mock(text=_TEXT)]),
             patch.object(job, "prepare_data", return_value=prepared),
             patch.object(ReportStore, "write", side_effect=OSError("full")),
-            patch("updater.jobs._execution.pywikibot.Page") as page,
+            patch("updater.publisher.pywikibot.Page") as page,
             self.assertRaises(OSError),
         ):
             job.run(title=_TITLE, context=context)
@@ -1248,7 +1314,7 @@ class TestAssessmentLogJob(_AssessmentLogFixture):
                 "prepare_data",
                 return_value=prepared,
             ) as prepare,
-            patch("updater.jobs._execution.pywikibot.Page") as page,
+            patch("updater.publisher.pywikibot.Page") as page,
         ):
             job.run(title=_TITLE, context=context)
         assert capture.call_args.kwargs["dry"] is True
@@ -1263,8 +1329,9 @@ class TestAssessmentLogJob(_AssessmentLogFixture):
         assert preview is not None
         assert preview.tables["members"].equals(current)
         assert preview.tables["baseline"].equals(old)
-        assert context.edits[0].summary.endswith(
-            "([[toolforge:Aranami|Aranami]])",
+        assert context.edits[0].summary == (
+            "Add 1 assessment; remove 1 assessment for Oct 24. "
+            "([[toolforge:aranami|Aranami]])"
         )
         assert context.tasks[0].report_date is None
 
@@ -1383,9 +1450,9 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
         removed = prepared.changes.filter(pl.col("kind") == "removed")
         assert removed.item(0, "old_title") == "Current departed name"
         rendered = update_text(_TEXT, prepared)
-        assert "\n\n条目（乙+1" in rendered
+        assert "\n\n条目页（乙级+1" in rendered
         assert "高重要度+1" in rendered
-        assert "条目3 非条目未知" in rendered
+        assert "合计未知：" in rendered
         assert "[[:Current name]]" in rendered
         assert "重命名" not in rendered
 
@@ -1423,7 +1490,7 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
                 observed_at=_NOW,
             )
         rendered = update_text(_TEXT, prepared)
-        assert "\n\n<!-- aranami-assessment-totals:v2 " in rendered
+        assert "\n\n<!-- aranami-assessment-totals schema=2 " in rendered
         assert "无可比记录" not in rendered
         assert '<small style="color: gray;">' not in rendered
 
@@ -1488,9 +1555,9 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
             )
         rendered = update_text(_TEXT, prepared)
         for fragment in (
-            "条目-1（乙-1 ｜ 高重要度-2 · 低重要度+1）",
-            "非条目+1（模板级+1）",
-            "条目2 非条目2 重定向0 专题页面4",
+            "条目页-1（乙级-1，高重要度-2、低重要度+1）",
+            "非条目页+1（模板级+1）",
+            "合计4：",
         ):
             assert fragment in rendered
         assert "优良1" in rendered
@@ -1729,7 +1796,7 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
         summary = next(
             line
             for line in rendered.splitlines()
-            if "aranami-assessment-totals:v2" in line
+            if "aranami-assessment-totals schema=2" in line
         )
         legacy = rendered.replace(summary, "'''总条目'''2篇。")
         self._retain(prepared, legacy, 1)
@@ -1756,16 +1823,19 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
                     retry.previous_totals
                     == before.manifest["metadata"]["article_totals"]
                 )
-                assert "条目+1（乙+1 ｜ 高重要度+1）" in update_text(
+                assert "条目页+1（乙级+1，高重要度+1）" in update_text(
                     legacy,
                     retry,
                 )
             else:
                 assert retry.previous_source is None
                 assert retry.previous_totals is None
-                assert "\n\n<!-- aranami-assessment-totals:v2 " in update_text(
-                    legacy,
-                    retry,
+                assert (
+                    "\n\n<!-- aranami-assessment-totals schema=2 "
+                    in update_text(
+                        legacy,
+                        retry,
+                    )
                 )
 
     def test_failed_compact_proposal_retains_reversed_grade_changes(
@@ -1818,9 +1888,9 @@ class TestCompactAssessmentLog(_AssessmentLogFixture):
                     observed_at=observed,
                 )
             rendered = update_text(_TEXT, prepared)
-            assert "乙-1 · 丙+1 ｜ 高重要度-1 · 低重要度+1" in rendered
+            assert "乙级-1、丙级+1，高重要度-1、低重要度+1" in rendered
             if sequence == 3:  # ruff: ignore[magic-value-comparison]
-                assert "乙+1 · 丙-1 ｜ 高重要度+1 · 低重要度-1" in rendered
+                assert "乙级+1、丙级-1，高重要度+1、低重要度-1" in rendered
             self._retain(prepared, rendered, sequence, state="unconfirmed")
         assert prepared.pending
         assert prepared.changes.item(0, "old_class") == "C"

@@ -1,4 +1,4 @@
-"""Render backend-prepared new-page observations into managed ranges."""
+"""Render runtime-prepared new-page observations into managed ranges."""
 
 # Preserve the verified Chinese punctuation in report templates.
 # ruff: file-ignore[ambiguous-unicode-character-string]
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     import datetime as dt
     from collections.abc import Sequence
 
-    from backend.services.zhwiki.new_pages import (
+    from data.new_pages import (
         DailyRecord,
         LineFacts,
         PageFacts,
@@ -47,7 +47,7 @@ def _identity_comment(identity: tuple[int, dt.datetime | None]) -> str:
 
 
 def render_lines(lines: Sequence[LineFacts]) -> str:
-    """Format retained fragments using backend icon and identity facts.
+    """Format retained fragments using runtime icon and identity facts.
 
     Args:
         lines: Backend-parsed text fragments with source observations.
@@ -129,16 +129,16 @@ def render_record(record: DailyRecord) -> str:
 
 
 def update_text(original_text: str, prepared: PreparedNewPages) -> str:
-    """Replace the managed record range from backend observations.
+    """Replace the managed record range from runtime observations.
 
     Args:
         original_text: Destination content whose surroundings are kept.
-        prepared: Complete backend records and retention decisions.
+        prepared: Complete runtime records and retention decisions.
 
     Returns:
         Unchanged text for complete windows, otherwise updated records.
     """
-    if not prepared.filled_dates:
+    if not prepared.filled_dates and not prepared.pruned:
         return original_text
     records = "".join(
         render_record(record).rstrip() + "\n\n" for record in prepared.records

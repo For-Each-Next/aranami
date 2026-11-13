@@ -1,6 +1,6 @@
 """Project prepared PexBot evidence into retained report metadata.
 
-Discovery, history reads, and progress interpretation belong to backend.
+Discovery, history reads, and progress interpretation belong to runtime.
 The publication job alone requests delegated refreshes.
 """
 
@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from shared.reports import ReportResult
+from data.reports import ReportResult
 
 if TYPE_CHECKING:
-    from backend.services.zhwiki.pexbot import PexBotReport
+    from data.pexbot import PexBotReport
 
 
 def action_result(

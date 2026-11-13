@@ -12,18 +12,18 @@ from pathlib import Path
 
 import mwparserfromhell
 
-from backend.newsletter.layout import newsletter_source_banner
-from backend.newsletter.subpages import (
+from data.newsletter.subpages import (
     announcement_intro_slots,
     complete_announcement_layout,
-    prepare_subpage_layout,
     valid_subpage_layout,
     valid_subpage_layouts,
 )
 from newsletter.fixtures import subpage_layouts
 from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.subpages import prepare_subpage_layout
 from updater.services.newsletter import render_issue
 from updater.services.newsletter_editorial import render_editorial
+from updater.services.newsletter_layout import newsletter_source_banner
 
 
 def _pages() -> list[dict]:

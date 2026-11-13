@@ -1,168 +1,130 @@
-# Aranami application development
+# Developing Aranami
 
-Use this guide to prepare changes, verify them offline, and produce a source
-payload. Read [AGENTS.md](../AGENTS.md), applicable scoped instructions, and the
-relevant [Architecture contracts](architecture.md) first. Live collection,
-credentials, and publication belong on Toolforge; see [Usage](usage.md) for
-runtime commands and [Administration](administration.md) for deployment.
+Use this guide to change source, verify it offline and prepare a source
+deployment. Live source collection and wiki publication run only on Toolforge.
+[Architecture](architecture.md) defines data contracts;
+[Administration](administration.md) defines production operations.
+
+Protect Toolforge's midnight collection from 23:59 UTC until 00:02 UTC.
+Defer uploads, deployments, drains, restarts and disruptive maintenance until
+the window ends. Local source changes and offline verification may continue.
+
+## Repository layout
+
+```text
+.github/workflows/       CI and formal release automation
+src/runtime/            Scheduling, lifecycle and report coordination
+src/tasks/              Source acquisition and reusable calculations
+src/tasks/zhwiki/        Audited Chinese wiki rules and newsletter workflows
+src/data/               Schemas, stores, saved contracts and runtime records
+src/data/caching/        Disposable cache implementations (source code)
+src/shared/             Read-only adapters, configuration and common primitives
+src/updater/            Wiki projection and intentional publication
+src/webservice/         Django HTTP views, localization and saved-data readers
+src/webservice/templates/ Authored server templates and shared HTML components
+src/webservice/public_html/ Authored CSS, JavaScript and fixed assets
+scripts/toolforge/      Runtime launch, validation, promotion and drain scripts
+scripts/upload_toolforge.py  Source payload preparation and upload
+tests/unit/              Isolated component contracts
+tests/integration/       Cross-component offline workflows
+tests/toolforge/         HTTP, presentation, browser and deployment fixtures
+docs/                   Audience guides and owned component contracts
+```
+
+Root manifests stay discoverable by their tools: `pyproject.toml`, `uv.lock`,
+and `.python-version`.
+`.editorconfig` defines portable whitespace conventions. `README`, `LICENSE`,
+`CONTRIBUTING`, `CHANGELOG` and `AGENTS` remain standard root entry points.
+Generated `build/`, release archives in `dist/`, dependencies, IDE settings and
+runtime folders are ignored. Upload payload staging uses a temporary directory.
+Do not move machine-specific state into the application package.
 
 ## Prepare the workspace
 
-Use uv with Python 3.15 support and Node.js 24 or later:
+Use Python 3.15 with uv and Polars 2. Node.js 24 or later runs the offline
+browser tests; building and deploying pages needs only Python:
 
 ```shell
 uv sync --locked
-npm ci --ignore-scripts
 ```
 
-Source runs directly from `src/`; keep `tool.uv.package = false` and the locked
-`pywikibot[mwoauth]` dependency. Preserve unrelated work. Implement a focused
-change with regression coverage; docstring, Polars, version, and changelog
-rules are maintained in [AGENTS.md](../AGENTS.md), not duplicated here.
+The project runs from `src`; keep `tool.uv.package = false` and the locked
+`pywikibot[mwoauth]` dependency. No wheel backend or compatibility launcher is
+needed. In PyCharm, select the project's `.venv`, mark `src` as Sources and
+`tests` as Test Sources, and exclude `.venv`, `.cache`, `.ruff_cache`,
+`node_modules`, `dist`, `build` and runtime data folders. Interpreter libraries
+belong to the SDK, not project source roots. Use Google-style Python docstrings.
+Local `.idea` settings remain untracked, preserving each developer's workspace.
 
-## Find the right component
+## Implement a change
 
-| Change | Start here |
-|---|---|
-| Source facts, parsing, comparisons, caches | `src/backend/services/` |
-| Disposable Parquet cache contracts | `src/shared/support/cache.py`; [cache guide](backend/caching.md) |
-| Shared article history, recognition, credits, retention | `src/backend/articles/` |
-| Scheduling, execution, status, storage | `src/backend/`, `src/backend/support/` |
-| Website collection/maintenance definitions | `src/backend/website/` |
-| Read-only HTTP and saved-data readers | `src/backend/public.py`, `src/backend/support/public_data.py` |
-| Wiki destinations, formatting, publication | `src/updater/` |
-| HTML, localization, public assets | `src/webservice/` |
-| Read-only adapters/configuration/primitives | `src/shared/` |
-| Source deployment and launchers | `scripts/upload_toolforge.py`, `scripts/toolforge/` |
+Start from `trunk` on an isolated task branch and merge back after verification.
+Keep unrelated work intact. The user-selected 0.9.2 release consolidates the
+unpublished alpha work after v0.8.8. Record completed work in the active changelog
+section, with UTC timestamps. Formal 1.0.0 publication is a separate decision.
 
-Keep preparation/persistence in backend, intentional wiki writes in updater,
-and saved-data presentation in webservice. `src/shared/config.py` is the single
-schedule/target definition. See [ownership contracts](architecture.md#runtime-and-architecture).
+Daily schema/storage changes start in `data.project_data`; acquisition belongs
+to `tasks.project_data`, and source selection to `runtime.project_observations`.
+Keep the primary project capture ordinary at 00:00:00 UTC. Daily consumers,
+including assessment logs and newsletter facts, use the shared idle executor
+and read the committed Parquet snapshot. Declare idle collection jobs through
+`CollectionDefinition.idle`; never block a worker while waiting for capture.
+Use explicit Polars schemas and native joins, aggregations and expressions.
+Eager source adapters remain eager; lazy scans
+are appropriate for saved files. Preserve null, observed zero and observed
+empty as different facts. Consult the [Polars API][polars] and
+[migration guide][migration] when changing tabular calculations.
 
-## Implement and test a change
+Test with temporary runtime directories, fake wiki objects, prepared frames
+and mocked network boundaries. Imports and help must not collect. Cover first
+baseline, adjacent comparisons, gaps, concurrent capture, failed storage,
+preview isolation, lost wiki-save responses and restart recovery. Test source
+and publication dates separately. Do not put live credentials in fixtures.
 
-Edit browser behavior and Vue components under `frontend/`, with authored
-assets and page templates under `src/webservice/`. Run `npm run build:web`
-before Python or browser presentation tests. It assembles the complete
-website in ignored `dist/webservice/`, including compiled scripts, Codex CSS,
-generated component templates, and a source/output hash receipt. Commit the
-authored inputs; generated output stays outside Git.
-`npm run check:web` type-checks and reproduces the build to verify its exact
-contents. CI builds before validation. Node.js 24 or later is needed only
-for development; Toolforge serves the prepared files from Python.
-See [Frontend components](webservice/frontend.md) for component ownership and
-the native form, dialog, and live-refresh contracts.
-
-Use prepared data, fake wiki objects, temporary directories, and mocked network
-boundaries; local tests stay offline and credential-free. Cover failures as
-well as success, especially storage-before-save, unconfirmed writes, concurrent
-generations, null versus observed zero, and preview isolation. Verify templates
-and extractor mappings against each wiki's actual sources/configuration before
-changing them; see [wiki contracts](architecture.md#wikitext-templates-and-site-semantics).
-
-Run focused tests while iterating, for example:
-
-```shell
-PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s tests/unit -p 'test_enwp_key_articles.py'
-```
-
-Test `backend.run_once`/`run` with fake dependencies: both default to live
-publication. Imports and command-line help must stay inert. Real previews use
-the [Toolforge workflow](usage.md#preview-selected-routines), never local live
-clients. For HTTP and WebSocket checks use `backend.public.create_app` and
-FastAPI's test client, as in `tests/toolforge/test_public.py`;
-preserve read-only routes, security headers, bounds, and disabled debugging.
+Website changes belong under `src/webservice/`. Django owns request routing,
+responses and the configured Jinja2 template backend. Templates and static
+assets are authored runtime files: no Node dependency installation, Vue,
+TypeScript compilation or generated template copies are required.
+Document JavaScript modules and non-obvious helpers with JSDoc comments; use
+four-space indentation and plain browser APIs. Keep native GET forms, links,
+disclosures and dialog fallbacks usable without scripting. See
+[Frontend](webservice/frontend.md) for rendering and interaction contracts.
 
 ## Verification and releases
 
-Before handing off a material change, run the relevant suites and full checks:
+Run focused suites during implementation, then the required offline checks:
 
 ```shell
-npm run build:web
-npm run check:web
 PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s tests/unit
 PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s tests/integration
 PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python -m unittest discover -s tests/toolforge -p 'test_*.py'
 uv lock --check
-uv run ruff check --no-fix .
-uv run ruff format --check .
+uvx --from ruff==0.16.0 ruff check --no-fix .
+uvx --from ruff==0.16.0 ruff format --check .
 uv run python scripts/upload_toolforge.py --dry-run
+node --test tests/toolforge/test_*.cjs
 ```
 
-These include import/boundary, source-upload, persistence, publication, and
-presentation checks. Socket tests need local-loopback permission; sandbox
-denial is not an application defect. Check changed launchers with
-`sh -n scripts/toolforge/<name>.sh`.
+Shell changes additionally require `sh -n` for each changed launcher. Local
+socket tests require loopback permission. The source inventory in
+`scripts/toolforge/source-files.json` must include added runtime modules.
 
-Use the [Wikimedia Codex style guide](https://doc.wikimedia.org/codex/latest/style-guide/overview.html)
-for website design, including color, typography, spacing, controls, and
-accessible interaction. The webservice renders Jinja templates with local CSS
-and native HTML controls. Keep appearance consistent with Codex across the
-dashboard, maintenance, logs, About, and error pages.
-
-Follow [Frontend components](webservice/frontend.md) for Codex component,
-stylesheet, and attribution contracts, and [Branding](webservice/branding.md)
-for logos and icons.
-
-For website changes, verify desktop/narrow layouts, long/escaped text, sorting
-and pagination, observed dates/ranks, all three locales, and missing/stale data.
-Keep native controls usable without JavaScript. Live-status changes also cover
-timers, running/completed states, progress, dialog focus, hidden-tab behavior,
-and failed/malformed response recovery:
-
-```shell
-node --test tests/toolforge/test_live.cjs
-node --test tests/toolforge/test_newsletter.cjs
-```
-
-Newsletter checks cover literal copying, the shared native date picker,
-unavailable-date responses, and issue changes loading in place, including failed and
-stale responses. Retain native form submission and date selection when
-JavaScript is unavailable.
-Consult the [newsletter interface](webservice/newsletter.md),
-[collection contracts](backend/newsletter.md), and
-[branding guide](webservice/branding.md) when changing those components.
-
-Render synthetic pages and check all three locales at fourteen widths from
-320 to 1920 CSS pixels:
+For interface changes, render synthetic fixtures and verify desktop/narrow
+layouts, all locales, long text, controls, focus and missing-data states:
 
 ```shell
 PYTHONPATH=src PYWIKIBOT_NO_USER_CONFIG=2 uv run python tests/toolforge/test_presentation.py --render-fixtures /tmp/aranami-interface-fixtures
 node tests/toolforge/check_interface.cjs /tmp/aranami-interface-fixtures /tmp/aranami-interface-results
 ```
 
-Set `ARANAMI_CHROMIUM` to the Chromium executable when it differs from the
-macOS default. The checker uses native Node/CDP and synthetic data, without
-external services or npm dependencies. Each run snapshots the built assets
-so later rebuilds cannot change pages during verification. It writes a JSON
-result and sample screenshots, checking overflow, log download visibility/column alignment,
-and modal focus, background inertness, dismissal, and restoration. Browser
-and local-loopback permission are required. Inspect the screenshots as well.
-Focused 320- and 1440-pixel cases also verify Tools hover, click, and keyboard
-controls, language-menu keyboard focus, comparison-range endpoints, and each
-report invocation's history dialog in all locales. Calendar cases check the
-native date input, shared annual/quarter selection, saved-date bounds,
-missing captures, and in-place issue changes.
-These effective-width checks do not establish real-device touch behavior,
-Safari/Firefox behavior, screen-reader speech, forced colors, or browser zoom.
+The checker uses a fixed copy of authored assets and Chromium; set
+`ARANAMI_CHROMIUM` when needed. Inspect screenshots as well as its JSON result.
+Browser checks do not establish real-device or screen-reader behavior.
 
-Deployment tests use fake Toolforge/Kubernetes commands and temporary source
-generations. Cover current-generation upgrades, pinned source/environment paths, staged
-setup failures, individual service replacement, missing/paused jobs, and
-shutdown/restart failures without contacting Toolforge. Keep old generations
-available to running processes and require confirmed hub termination before
-starting its replacement.
+Commit cohesive changes with Conventional Commits. CI runs for `trunk` and
+any `alpha/**` task branches. Formal release tags require a base version;
+Toolforge alpha uploads use the version/digest source workflow without a formal
+release tag. A successful dry run validates a payload, not a deployment.
 
-HOT v2 Lua/TemplateStyles belong to the wiki. Preview both on-wiki before
-enabling publication; keep temporary paste/rendering artifacts outside this
-repository. Python tests verify the [Pageviews contract](architecture.md#pageviews).
-
-Uploader dry runs validate the exact payload without contacting Toolforge.
-`--archive <new-file.tar.gz>` retains the reproducible gzip-compressed tar
-at a previously nonexistent path; this
-does not authorize deployment. Follow [Administration](administration.md) for
-promotion/recovery and [AGENTS.md](../AGENTS.md) for version and changelog rules.
-
-Keep documentation in English, led by purpose and expected results. Update the
-guide that owns the behavior, link to it elsewhere, and keep README focused on
-tool results and UTC schedules rather than repeating operational procedures.
+[polars]: https://docs.pola.rs/api/python/stable/reference/index.html
+[migration]: https://docs.pola.rs/user-guide/migration/pandas/

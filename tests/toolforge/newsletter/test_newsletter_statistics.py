@@ -12,13 +12,14 @@ from unittest import TestCase
 import mwparserfromhell
 import polars as pl
 
-from backend.newsletter.statistics import (
-    QUALITY_GRADES,
+from data.newsletter.grades import QUALITY_GRADES
+from shared.newsletter import Issue
+from tasks.zhwiki.legacy.newsletter_figures import prepare_dyk_series
+from tasks.zhwiki.legacy.newsletter_popularity import parse_popularity
+from tasks.zhwiki.newsletter.statistics import (
     collect_popularity,
-    parse_popularity,
     quality_statistics,
 )
-from shared.newsletter import Issue
 from updater.services.newsletter_editorial import render_annual_feature
 
 
@@ -64,13 +65,22 @@ def _preceding_introduction(
     return prefix.rstrip().rsplit("\n\n", 1)[-1]
 
 
+def _with_dyk_series(review: dict) -> dict:
+    """Prepare explicit chart facts before invoking the pure renderer.
+
+    Returns:
+        Fixture observations with an audited cumulative series.
+    """
+    return {**review, "dyk_series": prepare_dyk_series(review, 2026)}
+
+
 def _partial_annual_review() -> dict:
     """Prepare all annual figures and lists with distinct cutoff dates.
 
     Returns:
         Partial observations whose DYK chart ends before the report.
     """
-    return {
+    return _with_dyk_series({
         "complete": False,
         "observation_end": "2026-11-01",
         "quality_statistics": [
@@ -117,7 +127,7 @@ def _partial_annual_review() -> dict:
         "revision_ranking": [{"title": "Revised", "revisions": 123}],
         "awards": [{"user": "Editor", "gained": 12, "total": 12}],
         "newcomers": ["Editor"],
-    }
+    })
 
 
 class NewsletterStatisticsTests(TestCase):
@@ -338,7 +348,7 @@ class NewsletterStatisticsTests(TestCase):
         popularity["provisional"] = True
         text = render_annual_feature(
             Issue(2027, 1),
-            {
+            _with_dyk_series({
                 "overview": {"total": 13000},
                 "previous_overview": {"total": 12497},
                 "quality_statistics": quality_statistics(
@@ -369,7 +379,7 @@ class NewsletterStatisticsTests(TestCase):
                 "revision_ranking": [{"title": "Game", "revisions": 123}],
                 "awards": [{"user": "New", "gained": 12, "total": 12}],
                 "newcomers": ["New"],
-            },
+            }),
         )
         assert "較去年年末的12,497篇淨增長503篇，日均淨增長1.65篇" in text
         assert "{{Memo|截至2026年10月31日|inline:info}}" in text

@@ -9,10 +9,7 @@ from unittest import TestCase
 
 from test_dyks import _OfflineSite  # ruff: ignore[import-private-name]
 
-from backend.services.zhwiki.article_history import (
-    CATEGORY_CANDIDATES,
-    extract_events,
-)
+from tasks.zhwiki.article_history import CATEGORY_CANDIDATES, extract_events
 
 
 class ArticleHistoryTests(TestCase):
@@ -227,6 +224,42 @@ class ArticleHistoryTests(TestCase):
             ("dyk", None),
         ]
         assert events[4]["parameter"] == "otd2"
+
+    def test_every_history_alias_retains_independent_parameter_identity(
+        self,
+    ) -> None:
+        """Keep every history with independent parameter identities."""
+        rows = extract_events(
+            "{{Article history|dykdate=2019-01-01}}"
+            "{{article history|action1=GAN|action1date=2020年8月7日"
+            "|action1result=listed|action1oldid=61028288|dykdate=2020-01-01}}"
+            "{{ArticleHistory|action1=GAN|action1date=2021-01-01"
+            "|action1result=listed|dykdate=2021-02-01}}",
+            self.site,
+            ("Template:Article history", "Template:ArticleHistory"),
+            (),
+        )
+        assert [(row["kind"], row["parameter"]) for row in rows] == [
+            ("dyk", "dyk"),
+            ("quality", "history2_action1"),
+            ("dyk", "history2_dyk"),
+            ("quality", "history3_action1"),
+            ("dyk", "history3_dyk"),
+        ]
+        assert rows[1]["date"] == date(2020, 8, 7)
+        assert rows[1]["oldid"] == 61028288  # ruff: ignore[magic-value-comparison] - Exact supplied revision.
+
+    def test_later_quoted_histories_do_not_create_quality_events(self) -> None:
+        """Ignore quoted events and preserve question markup."""
+        rows = self.extract(
+            "{{Article history|dykdate=2020-01-01"
+            "|dykentry=Which <code>example</code>?}}"
+            "<blockquote>{{Article history|action1=GAN|action1date=2025-01-01"
+            "|action1result=listed}}</blockquote>",
+        )
+        assert len(rows) == 1
+        assert rows[0]["kind"] == "dyk"
+        assert rows[0]["question"] == "Which <code>example</code>?"
 
     def test_incomplete_dates_and_missing_oldids_remain_unknown(self) -> None:
         """Do not turn a month or year into a first-day observation."""

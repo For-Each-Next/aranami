@@ -51,6 +51,7 @@ class NavigationTests(unittest.TestCase):
                 assert f"<summary>{tools}</summary>" in details[1]
                 assert f'<a href="/newsletter/">{newsletter}</a>' in details[1]
                 assert 'href="/logs/"' not in navigation
+                assert 'href="/schedule/"' not in navigation
                 about = render_about(None, locale)
                 assert 'href="/logs/"' not in about
                 assert logs not in about
@@ -58,8 +59,10 @@ class NavigationTests(unittest.TestCase):
                 assert re.findall(r'<a href="([^"]+)"', direct) == [
                     "/",
                     "/maintenance/",
-                    "/reports/",
+                    "/discussions/",
                 ]
+                assert 'href="/reports/"' in details[1]
+                assert 'href="/discussions/"' not in details[1]
                 assert navigation.count('href="/newsletter/"') == 1
                 assert 'role="menu' not in navigation
                 assert "aria-expanded" not in navigation
@@ -71,6 +74,7 @@ class NavigationTests(unittest.TestCase):
                 "/",
                 "/maintenance/",
                 "/reports/",
+                "/discussions/",
                 "/about/",
                 "/newsletter/",
             ):
@@ -85,9 +89,9 @@ class NavigationTests(unittest.TestCase):
     def test_footer_names_the_project_and_omits_logs() -> None:
         """Keep project and About footer links and omit logs."""
         for locale, project in (
-            ("en", "Video games WikiProject"),
-            ("zh-hans", "电子游戏专题"),
-            ("zh-hant", "電子遊戲專題"),
+            ("en", "Visit the Video games WikiProject"),
+            ("zh-hans", "前往电子游戏专题"),
+            ("zh-hant", "前往電子遊戲專題"),
         ):
             output = render_about(None, locale)
             footer = output.split("<footer>", 1)[1]
@@ -95,6 +99,24 @@ class NavigationTests(unittest.TestCase):
             assert 'href="/logs/"' not in footer
             assert f">{project}</a>" in footer
             assert 'href="/logs/"' not in output.split("<footer>", 1)[0]
+
+    @staticmethod
+    def test_section_targets_remain_stable_across_locales() -> None:
+        """Keep fixed IDs and localized clipboard labels."""
+        identifiers = []
+        for locale in ("en", "zh-hans", "zh-hant"):
+            output = render_about(None, locale)
+            identifiers.append(re.findall(r'<h2 id="([a-z0-9-]+)"', output))
+            for attribute in (
+                "data-heading-copy-label",
+                "data-heading-copy-success",
+                "data-heading-copy-failure",
+                "data-heading-permalink-label",
+            ):
+                assert attribute + '="' in output
+            assert 'href="#server-status-heading"' in output
+            assert 'href="#credits"' in output
+        assert identifiers[0] == identifiers[1] == identifiers[2]
 
 
 if __name__ == "__main__":

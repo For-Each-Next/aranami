@@ -11,7 +11,7 @@ from unittest.mock import patch
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from apscheduler.executors.base import MaxInstancesReachedError
 
-from backend.support.idle_scheduler import IdleScheduler
+from runtime.idle_scheduler import EVENT_SCHEDULER_STOPPING, IdleScheduler
 
 
 class TestIdleScheduler(TestCase):
@@ -76,7 +76,7 @@ class TestIdleScheduler(TestCase):
     ) -> None:
         """Count later collection work before idle work starts."""
         self._add("assessment_lists", self._idle)
-        self._add("website", self._ordinary)
+        self._add("project-data", self._ordinary)
         self._dispatch()
         assert self.entered.wait(2)
         assert not self.idle_started.is_set()
@@ -86,6 +86,165 @@ class TestIdleScheduler(TestCase):
         self.release.set()
         assert self.idle_started.wait(2)
         assert self.scheduler.pending_since("assessment_lists") is None
+
+    def test_background_admission_waits_for_ordinary_and_idle_work(
+        self,
+    ) -> None:
+        """Admit the scanner after the complete work queue drains."""
+        self._add("assessment_lists", self._idle)
+        self._add("website", self._ordinary)
+        self._dispatch()
+        assert self.entered.wait(2)
+        admitted = Event()
+        stop = Event()
+
+        def wait() -> None:
+            """Observe admission outside the executor pool."""
+            if self.scheduler.wait_until_idle(stop):
+                admitted.set()
+
+        thread = Thread(target=wait)
+        thread.start()
+        try:
+            assert not self.scheduler._work.is_idle()
+            assert not admitted.is_set()
+            self.release.set()
+            assert self.idle_started.wait(2)
+            assert not self.scheduler._work.is_idle()
+            assert not admitted.is_set()
+            self.idle_release.set()
+            assert admitted.wait(2)
+        finally:
+            stop.set()
+            thread.join(2)
+        assert not thread.is_alive()
+
+    def test_daily_newsletter_waits_outside_workers_for_ordinary_work(
+        self,
+    ) -> None:
+        """Queue midnight newsletter work behind ordinary collection."""
+        self._add("newsletter-daily", self._idle)
+        self._add("project-data", self._ordinary)
+        self._dispatch()
+        assert self.entered.wait(2)
+        assert not self.idle_started.is_set()
+        assert (
+            self.scheduler.pending_since("newsletter-daily") == self.eligible
+        )
+        self.release.set()
+        assert self.idle_started.wait(2)
+        assert self.scheduler.pending_since("newsletter-daily") is None
+
+    def test_page_list_runs_before_other_due_collections(self) -> None:
+        """Capture page lists before earlier queued collection jobs."""
+        self._add("website", self.second_started.set)
+        self._add("project-data", self._ordinary)
+        self._add("assessment_log", self._idle)
+        self._dispatch()
+        assert self.entered.wait(2)
+        assert not self.second_started.is_set()
+        assert not self.idle_started.is_set()
+        self.release.set()
+        assert self.second_started.wait(2)
+        assert self.idle_started.wait(2)
+
+    def test_new_hour_page_capture_can_start_during_older_work(self) -> None:
+        """Protect the hourly boundary while earlier work finishes."""
+        self._add("website", self._ordinary)
+        self._dispatch()
+        assert self.entered.wait(2)
+        self._add("project-data", self.second_started.set)
+        self.scheduler._process_jobs()
+        assert self.second_started.wait(2)
+        assert not self.release.is_set()
+
+    def test_website_waits_for_shared_article_evidence(self) -> None:
+        """Retain article facts before website consumers start."""
+        self._add("website", self.second_started.set)
+        self._add("newsletter-history", self._ordinary)
+        self._dispatch()
+        assert self.entered.wait(2)
+        assert not self.second_started.is_set()
+        self.release.set()
+        assert self.second_started.wait(2)
+
+    def test_newsletter_data_precedes_waiting_reports(self) -> None:
+        """Collect daily facts before admitting report consumers."""
+        self._add("assessment_log", self.second_started.set)
+        self._add("newsletter-daily", self._idle)
+        self._dispatch()
+        assert self.idle_started.wait(2)
+        assert not self.second_started.is_set()
+        self.idle_release.set()
+        assert self.second_started.wait(2)
+
+    def test_pageviews_waits_for_hourly_data_collection(self) -> None:
+        """Keep report publication behind hourly source acquisition."""
+        self._add("pageviews", self._idle)
+        self._add("newsletter-history", self._ordinary)
+        self._dispatch()
+        assert self.entered.wait(2)
+        assert not self.idle_started.is_set()
+        self.release.set()
+        assert self.idle_started.wait(2)
+
+    def test_daily_assessment_log_waits_for_primary_snapshot_collection(
+        self,
+    ) -> None:
+        """Admit daily reports after ordinary snapshot work ends."""
+        self._add("assessment_log", self._idle)
+        self._add("project-data", self._ordinary)
+        self._dispatch()
+        assert self.entered.wait(2)
+        assert not self.idle_started.is_set()
+        assert self.scheduler.pending_since("assessment_log") == self.eligible
+        self.release.set()
+        assert self.idle_started.wait(2)
+        assert self.scheduler.pending_since("assessment_log") is None
+
+    def test_hourly_dyk_checks_wait_for_ordinary_work(self) -> None:
+        """Queue revision-aware DYK checks behind ordinary work."""
+        self._add("dyks", self._idle)
+        self._add("project-data", self._ordinary)
+        self._dispatch()
+        assert self.entered.wait(2)
+        assert not self.idle_started.is_set()
+        assert self.scheduler.pending_since("dyks") == self.eligible
+        self.release.set()
+        assert self.idle_started.wait(2)
+        assert self.scheduler.pending_since("dyks") is None
+
+    def test_background_admission_is_interruptible_while_paused(
+        self,
+    ) -> None:
+        """Prevent background requests while paused or cancelled."""
+        self.scheduler.start(paused=True)
+        assert not self.scheduler._work.is_idle()
+        stop = Event()
+        stop.set()
+        assert not self.scheduler.wait_until_idle(stop)
+
+    def test_background_admission_yields_during_due_batch(self) -> None:
+        """Do not admit a scanner between ordinary job submissions."""
+        self.scheduler.start()
+        assert self.scheduler._work.is_idle()
+        self.scheduler._work.begin_dispatch()
+        try:
+            assert not self.scheduler._work.is_idle()
+        finally:
+            self.scheduler._work.finish_dispatch()
+        assert self.scheduler._work.is_idle()
+
+    def test_background_admission_rechecks_newly_due_work(self) -> None:
+        """Withdraw admission when another scheduled task starts."""
+        self.scheduler.start()
+        assert self.scheduler.wait_until_idle(Event())
+        self._add("website", self._ordinary)
+        self.scheduler._process_jobs()
+        assert self.entered.wait(2)
+        assert not self.scheduler._work.is_idle()
+        self.release.set()
+        assert self.scheduler.wait_until_idle(Event())
 
     def test_idle_jobs_serialize_and_ordinary_work_can_still_start(
         self,
@@ -132,7 +291,7 @@ class TestIdleScheduler(TestCase):
     ) -> None:
         """Reject another submission while the original waits."""
         self._add("assessment_lists", self._idle)
-        self._add("dyks", self._ordinary)
+        self._add("newsletter-history", self._ordinary)
         self._dispatch()
         assert self.entered.wait(2)
         job = self.scheduler.get_job("assessment_lists")
@@ -151,7 +310,7 @@ class TestIdleScheduler(TestCase):
             EVENT_JOB_EXECUTED,
         )
         self._add("assessment_lists", self._idle)
-        self._add("dyks", self._ordinary)
+        self._add("newsletter-history", self._ordinary)
         self._dispatch()
         assert self.entered.wait(2)
         self.scheduler.pause()
@@ -165,17 +324,26 @@ class TestIdleScheduler(TestCase):
     def test_shutdown_discards_pending_and_drains_active_work(self) -> None:
         """Discard waiting publications while shutdown joins workers."""
         self._add("assessment_lists", self._idle)
-        self._add("newsletter-daily", self._ordinary)
+        self._add("website", self._ordinary)
         self._dispatch()
         assert self.entered.wait(2)
         self.scheduler.pause()
+        stopping = Event()
+        self.scheduler.add_listener(
+            lambda _event: stopping.set(),
+            EVENT_SCHEDULER_STOPPING,
+        )
         thread = Thread(target=self.scheduler.shutdown, kwargs={"wait": True})
         thread.start()
         try:
+            assert stopping.wait(2)
+            assert self.scheduler.stopping_at is not None
+            assert self.scheduler.stopped_at is None
             assert not self.idle_started.is_set()
             self.release.set()
             thread.join(2)
             assert not thread.is_alive()
+            assert self.scheduler.stopped_at >= self.scheduler.stopping_at
             assert not self.idle_started.is_set()
             assert self.scheduler.pending_since("assessment_lists") is None
             assert not any(self.scheduler._work._instances.values())

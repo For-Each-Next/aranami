@@ -1,7 +1,7 @@
 """Verify primary-subject extraction from homepage display sources."""
 
 # The repository's offline suite runs with unittest, without pytest.
-# ruff: file-ignore[pytest-unittest-raises-assertion]
+# ruff: file-ignore[pytest-unittest-raises-assertion, magic-value-comparison]
 
 from __future__ import annotations
 
@@ -11,8 +11,120 @@ from unittest.mock import Mock
 
 import polars as pl
 from pywikibot.exceptions import NoPageError
+from wiki_fixtures import article_url
 
-from backend.website import homepage
+from tasks.zhwiki import homepage
+
+
+class HomepageProjectionTests(unittest.TestCase):
+    """Separate future projections from actual homepage evidence."""
+
+    @staticmethod
+    def test_closed_passed_queue_keeps_all_wiki_positions() -> None:
+        """Project passed subjects and preserve queue positions."""
+        now = dt.datetime(2026, 11, 10, 1, tzinfo=dt.UTC)
+        titles = ["Already shown", *[f"Other {n}" for n in range(5)], "Game"]
+        candidates = "".join(
+            f"{{{{DYKEntry|article={title}|result=^}}}}\n"
+            "{{DYKvoteH|通過}}\n{{DYKvoteF}}\n"
+            for title in titles
+        )
+        candidates += (
+            "{{DYKEntry|article=臺北狂飆|result=^}}\n"
+            "{{DYKEntry|article=Failed}}\n"
+            "{{DYKvoteH|未獲通過}}{{DYKvoteF}}\n"
+            "<!-- {{DYKEntry|article=Hidden}}"
+            "{{DYKvoteH|通過}}{{DYKvoteF}} -->"
+        )
+        read = Mock(return_value=candidates)
+        history = Mock(
+            return_value=[
+                {
+                    "timestamp": dt.datetime(2026, 11, 10, tzinfo=dt.UTC),
+                    "text": "{{Dyk/auto|0='''[[Already shown]]'''}}",
+                },
+            ],
+        )
+        rows = homepage.collect_dyk(
+            now.date(),
+            now.date() + dt.timedelta(days=1),
+            {"Game", "臺北狂飆", "Failed", "Hidden"},
+            read,
+            history=history,
+            url=article_url,
+            forecast_end=dt.date(2026, 11, 13),
+            now=now,
+        )
+        assert [row["title"] for row in rows] == ["Game"]
+        assert rows[0]["date"] == "2026-11-11"
+        assert rows[0]["scheduled_at"] == "2026-11-11T08:00:00+00:00"
+        assert rows[0]["date_kind"] == "estimated"
+        assert rows[0]["schedule_basis"] == "source-order-cadence-estimate"
+        history.assert_called_once()
+        read.assert_called_once_with("Wikipedia:新条目推荐/候选")
+
+    @staticmethod
+    def test_overdue_anchor_advances_without_consuming_queue() -> None:
+        """Keep queued articles scheduled after a missed slot."""
+        now = dt.datetime(2026, 11, 10, 13, tzinfo=dt.UTC)
+        read = Mock(
+            return_value=(
+                "{{DYKEntry|article=Game|result=^}}"
+                "{{DYKvoteH|通过}}{{DYKvoteF}}"
+            ),
+        )
+        history = Mock(
+            return_value=[
+                {
+                    "timestamp": dt.datetime(2026, 11, 9, tzinfo=dt.UTC),
+                    "text": "{{Dyk/auto}}",
+                },
+            ],
+        )
+        rows = homepage.collect_dyk(
+            now.date(),
+            now.date() + dt.timedelta(days=1),
+            {"Game"},
+            read,
+            history=history,
+            url=article_url,
+            forecast_end=dt.date(2026, 11, 13),
+            now=now,
+        )
+        assert rows[0]["title"] == "Game"
+        assert rows[0]["scheduled_at"] == "2026-11-10T18:00:00+00:00"
+        assert rows[0]["date_kind"] == "estimated"
+
+    @staticmethod
+    def test_anniversary_future_sources_are_current_and_marked() -> None:
+        """Separate future anniversary assignments from appearances."""
+        start = dt.date(2026, 11, 10)
+        read = Mock(
+            side_effect=[
+                "{{Otd/format|date=11月11日|event1='''[[Future game]]'''}}",
+                "",
+            ],
+        )
+        read_at = Mock(return_value="{{Otd/format|date=11月10日}}")
+        rows = homepage.collect_history(
+            start,
+            start + dt.timedelta(days=3),
+            {"Future game"},
+            read,
+            url=article_url,
+            read_at=read_at,
+            scheduled_from=start + dt.timedelta(days=1),
+        )
+        assert rows == [
+            {
+                "title": "Future game",
+                "url": article_url("Future game"),
+                "date": "2026-11-11",
+                "date_kind": "scheduled",
+            },
+        ]
+        read_at.assert_called_once()
+        assert read.call_count == 2
 
 
 class HomepageTests(unittest.TestCase):
@@ -35,6 +147,7 @@ class HomepageTests(unittest.TestCase):
             {"新名"},
             read,
             resolve=resolve,
+            url=article_url,
         )
         assert items == [
             {
@@ -59,7 +172,13 @@ class HomepageTests(unittest.TestCase):
                 "{{Wikipedia:优良条目/游戏}}",
             ],
         )
-        items = homepage.collect_good(self.start, self.end, {"游戏"}, read)
+        items = homepage.collect_good(
+            self.start,
+            self.end,
+            {"游戏"},
+            read,
+            url=article_url,
+        )
         assert items[0]["date"] == "2026-10-18"
         assert [call.args[0] for call in read.call_args_list] == [
             "Wikipedia:优良条目/2026年10月18日",
@@ -95,6 +214,7 @@ class HomepageTests(unittest.TestCase):
             read,
             resolve=resolve,
             resolve_many=prime,
+            url=article_url,
         )
         prime.assert_called_once_with(["Old name", "Other topic"])
         assert [item["title"] for item in items] == ["Game"]
@@ -138,6 +258,7 @@ class HomepageTests(unittest.TestCase):
             resolve=resolve,
             resolve_many=prime,
             history=history,
+            url=article_url,
         )
         prime.assert_called_once_with(["Old name", "New name", "Other"])
         assert [(item["title"], item["date_kind"]) for item in items] == [
@@ -148,7 +269,13 @@ class HomepageTests(unittest.TestCase):
         """Keep failed requests unavailable."""
         read = Mock(side_effect=RuntimeError("Read failed."))
         with self.assertRaisesRegex(RuntimeError, "Read failed"):
-            homepage.collect_good(self.start, self.end, {"游戏"}, read)
+            homepage.collect_good(
+                self.start,
+                self.end,
+                {"游戏"},
+                read,
+                url=article_url,
+            )
         read.assert_called_once()
 
     def test_unrecognised_daily_contract_is_an_error(self) -> None:
@@ -159,6 +286,7 @@ class HomepageTests(unittest.TestCase):
                 self.end,
                 {"游戏"},
                 Mock(return_value="{{Unverified|游戏}}"),
+                url=article_url,
             )
 
     def test_dyk_requires_bold_question_subjects(self) -> None:
@@ -176,7 +304,13 @@ class HomepageTests(unittest.TestCase):
 """,
         )
         members = {"游戏 甲", "游戏乙", "公司", "游戏丙", "假条目", "页脚"}
-        items = homepage.collect_dyk(self.start, self.end, members, read)
+        items = homepage.collect_dyk(
+            self.start,
+            self.end,
+            members,
+            read,
+            url=article_url,
+        )
         assert [item["title"] for item in items] == ["游戏 甲", "游戏乙"]
         assert {item["date"] for item in items} == {"2026-10-18"}
 
@@ -206,6 +340,7 @@ class HomepageTests(unittest.TestCase):
             self.end,
             members,
             sources.__getitem__,
+            url=article_url,
         )
         assert [item["title"] for item in items] == [
             "人物",
@@ -235,6 +370,7 @@ class HomepageTests(unittest.TestCase):
             self.end,
             {"游戏甲", "游戏乙", "公司", "节日"},
             read,
+            url=article_url,
         )
         assert [item["title"] for item in items] == ["游戏乙", "游戏甲"]
         assert {item["date"] for item in items} == {"2026-10-18"}
@@ -248,6 +384,7 @@ class HomepageTests(unittest.TestCase):
                 self.end,
                 set(),
                 Mock(return_value="{{Otd/format|date=10月17日}}"),
+                url=article_url,
             )
 
     def test_calendar_snapshots_exclude_later_edits(self) -> None:
@@ -268,6 +405,7 @@ class HomepageTests(unittest.TestCase):
             None,
             read,
             read_at=read_at,
+            url=article_url,
         )
         assert [item["title"] for item in items] == ["当日展示的条目"]
         read.assert_not_called()
@@ -285,6 +423,7 @@ class HomepageTests(unittest.TestCase):
                 self.end + dt.timedelta(days=1),
                 set(),
                 read,
+                url=article_url,
             )
         read.assert_not_called()
 
@@ -320,7 +459,14 @@ class HomepageTests(unittest.TestCase):
         ]
         history = Mock(return_value=revisions)
         read = Mock()
-        items = homepage.collect_dyk(start, end, None, read, history=history)
+        items = homepage.collect_dyk(
+            start,
+            end,
+            None,
+            read,
+            history=history,
+            url=article_url,
+        )
         assert [
             (item["title"], item["date"], item["date_kind"]) for item in items
         ] == [
@@ -357,6 +503,7 @@ class HomepageTests(unittest.TestCase):
             None,
             Mock(),
             history=history,
+            url=article_url,
         )
         assert items == []
 
@@ -397,6 +544,7 @@ class HomepageTests(unittest.TestCase):
             None,
             Mock(),
             history=history,
+            url=article_url,
         )
         assert [(item["title"], item["date_kind"]) for item in items] == [
             ("甲", "window_start"),
@@ -411,6 +559,7 @@ class HomepageTests(unittest.TestCase):
             dt.date(2026, 1, 3),
             None,
             read,
+            url=article_url,
         )
         assert [item["date"] for item in items] == ["2026-01-02", "2026-01-01"]
         assert [call.args[0] for call in read.call_args_list] == [
@@ -470,6 +619,7 @@ class HistoryIdentityTests(unittest.TestCase):
             member_ids={101},
             resolve_page_id=identities.__getitem__,
             retain_subjects=retain,
+            url=article_url,
         )
         assert [(row["title"], row["date"]) for row in items] == [
             ("九十五条论纲", "2026-10-31"),
@@ -511,6 +661,7 @@ class HistoryIdentityTests(unittest.TestCase):
             member_ids=set(),
             resolve_page_id=Mock(return_value=101),
             retain_subjects=retain,
+            url=article_url,
         )
         assert items == []
         retain.assert_called_once()
@@ -534,6 +685,7 @@ class HistoryIdentityTests(unittest.TestCase):
             member_ids={101},
             resolve_page_id=resolve,
             retain_subjects=retain,
+            url=article_url,
         )
         assert items == []
         resolve.assert_not_called()
@@ -552,6 +704,7 @@ class HistoryIdentityTests(unittest.TestCase):
                 None,
                 read,
                 member_ids=set(),
+                url=article_url,
             )
         read.assert_not_called()
 
@@ -562,6 +715,51 @@ class UpcomingTests(unittest.TestCase):
     def setUp(self) -> None:
         """Start at tomorrow without contacting Wikimedia."""
         self.end = dt.date(2026, 10, 19)
+
+    @staticmethod
+    def test_empty_future_page_keeps_other_scheduled_slots() -> None:
+        """Accept the blank December 2 source at revision 94201228."""
+        day = dt.date(2026, 12, 2)
+        for blank in ("", " \n\t "):
+            read = Mock(
+                side_effect=[
+                    blank,
+                    "{{Wikipedia:典范条目/Game}}",
+                    NoPageError(Mock()),
+                    NoPageError(Mock()),
+                ],
+            )
+            items = homepage.collect_upcoming(
+                day,
+                day + dt.timedelta(days=2),
+                {"Game"},
+                read,
+                url=article_url,
+            )
+            assert items == [
+                {
+                    "title": "Game",
+                    "url": article_url("Game"),
+                    "date": "2026-12-03",
+                    "kind": "fa",
+                    "date_kind": "scheduled",
+                },
+            ]
+            assert read.call_args_list[0].args == (
+                "Wikipedia:典范条目/2026年12月2日",
+            )
+
+    def test_blank_actual_display_stays_unavailable(self) -> None:
+        """Keep blank historical displays unavailable."""
+        for collect in (homepage.collect_featured, homepage.collect_good):
+            with self.assertRaisesRegex(ValueError, "unknown source format"):
+                collect(
+                    self.end,
+                    self.end + dt.timedelta(days=1),
+                    None,
+                    Mock(return_value=""),
+                    url=article_url,
+                )
 
     def test_upcoming_reads_explicit_slots_and_filters_resolved_subjects(
         self,
@@ -613,6 +811,7 @@ class UpcomingTests(unittest.TestCase):
             read,
             resolve=resolve,
             resolve_many=prime,
+            url=article_url,
         )
         prime.assert_called_once_with(["Old title", "Other", "Game"])
         assert {(item["date"], item["kind"]) for item in items} == {
@@ -633,6 +832,7 @@ class UpcomingTests(unittest.TestCase):
                 self.end + dt.timedelta(days=30),
                 None,
                 read,
+                url=article_url,
             )
             == []
         )
@@ -664,6 +864,7 @@ class UpcomingTests(unittest.TestCase):
                         self.end + dt.timedelta(days=1),
                         None,
                         read,
+                        url=article_url,
                     )
                 read.assert_called_once_with(
                     "Wikipedia:典范条目/2026年10月19日",

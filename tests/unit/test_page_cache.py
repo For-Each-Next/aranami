@@ -3,7 +3,7 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from backend.support.page_cache import PageCache
+from webservice.page_cache import PageCache
 
 
 class TestPageCache(TestCase):
@@ -14,17 +14,17 @@ class TestPageCache(TestCase):
         """Expire a popular page sixty seconds after rendering."""
         cache = PageCache()
         with patch(
-            "backend.support.page_cache.time.monotonic",
+            "webservice.page_cache.time.monotonic",
             return_value=0,
         ):
             cache.put(("/", "en"), ("snapshot",), "first")
         with patch(
-            "backend.support.page_cache.time.monotonic",
+            "webservice.page_cache.time.monotonic",
             return_value=59,
         ):
             assert cache.get(("/", "en"), ("snapshot",)) == "first"
         with patch(
-            "backend.support.page_cache.time.monotonic",
+            "webservice.page_cache.time.monotonic",
             return_value=60,
         ):
             assert cache.get(("/", "en"), ("snapshot",)) is None
@@ -43,8 +43,8 @@ class TestPageCache(TestCase):
         """Bound both cached documents and their total encoded size."""
         cache = PageCache()
         with (
-            patch("backend.support.page_cache._MAX_BYTES", 6),
-            patch("backend.support.page_cache._MAX_ENTRIES", 2),
+            patch("webservice.page_cache._MAX_BYTES", 6),
+            patch("webservice.page_cache._MAX_ENTRIES", 2),
         ):
             cache.put(("first",), (), "甲")
             cache.put(("second",), (), "乙")
@@ -57,3 +57,21 @@ class TestPageCache(TestCase):
             cache.put(("fourth",), (), "a")
             cache.put(("fifth",), (), "b")
             assert cache.get(("third",), ()) is None
+
+    @staticmethod
+    def test_idle_expiry_releases_all_old_documents() -> None:
+        """Release stale pages without another request."""
+        cache = PageCache()
+        with patch("webservice.page_cache.time.monotonic", return_value=0):
+            cache.put(("old",), (), "甲")
+        with patch("webservice.page_cache.time.monotonic", return_value=30):
+            cache.put(("newer",), (), "乙")
+        with patch("webservice.page_cache.time.monotonic", return_value=60):
+            cache.expire()
+            assert cache.get(("old",), ()) is None
+            assert cache.get(("newer",), ()) == "乙"
+        with patch("webservice.page_cache.time.monotonic", return_value=90):
+            cache.expire()
+        # A dead cache must retain neither page strings nor byte counts.
+        assert vars(cache)["_entries"] == {}
+        assert vars(cache)["_bytes"] == 0

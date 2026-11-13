@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="{{ language_tag }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="Wikipedia Video games project reports and saved observations">
+  <link rel="stylesheet" href="/styles.css">
+  <title>{{ heading }} · Aranami</title>
+</head>
+<body>
+  <a class="skip" href="#main">{{ labels.skip }}</a>
+  <header class="masthead">
+    <div class="shell header-inner">
+      <a class="brand" href="/?lang={{ locale }}" aria-label="Aranami">Aranami<span aria-hidden="true"> 〰</span></a>
+      <nav class="global-navigation" aria-label="Aranami">
+        {% for item in navigation if item.group == 'main' %}<a href="{{ item.path }}?lang={{ locale }}"{% if route.id == item.id %} aria-current="page"{% endif %}>{{ item.title }}</a>{% endfor %}
+        <details class="menu"><summary>{{ labels.tools }}</summary><ul>{% for item in navigation if item.group == 'tools' %}<li><a href="{{ item.path }}?lang={{ locale }}"{% if route.id == item.id %} aria-current="page"{% endif %}>{{ item.title }}</a></li>{% endfor %}</ul></details>
+      </nav>
+      <details class="menu language-menu"><summary aria-label="Language">文 / A</summary><ul>
+        <li><a href="{{ route.path }}?lang=en{{ selection }}" lang="en"{% if locale == 'en' %} aria-current="true"{% endif %}>English</a></li>
+        <li><a href="{{ route.path }}?lang=zh-hans{{ selection }}" lang="zh-Hans"{% if locale == 'zh-hans' %} aria-current="true"{% endif %}>简体中文</a></li>
+        <li><a href="{{ route.path }}?lang=zh-hant{{ selection }}" lang="zh-Hant"{% if locale == 'zh-hant' %} aria-current="true"{% endif %}>繁體中文</a></li>
+      </ul></details>
+    </div>
+  </header>
+  <div class="shell page-layout">
+    <aside class="contents-panel"><nav aria-label="{{ labels.contents }}"><h2>{{ labels.contents }}</h2><ul>
+      <li><a href="#main">{{ heading }}</a></li>
+      {% if saved %}{% for section in saved.sections %}<li><a href="#{{ section.id }}">{{ section.title }}</a></li>{% endfor %}{% endif %}
+    </ul></nav></aside>
+    <main id="main" tabindex="-1">
+      <h1>{{ heading }}</h1>
+      {% if route.id == 'about' %}<p class="lead">{{ labels.about }}</p><p>Aranami {{ version }}</p>{% endif %}
+      {% if route.id == 'newsletter' %}<form method="get" class="issue-selection">
+        <label>Issue <input type="month" name="issue" value="{{ selected_issue or '' }}" required></label>
+        <label>Saved date <input type="date" name="date" value="{{ selected_date or '' }}"></label>
+        <input type="hidden" name="lang" value="{{ locale }}"><button type="submit">View</button>
+      </form>{% endif %}
+      {% if error == 'missing' %}<p class="notice" role="status">{{ labels.missing }}</p>{% elif error %}<p class="notice warning" role="status">{{ labels.unavailable }}</p>{% endif %}
+      {% if freshness == 'stale' %}<p class="notice warning" role="status">{{ labels.stale }}</p>{% elif freshness == 'unknown' %}<p class="notice warning" role="status">{{ labels.unknown }}</p>{% endif %}
+      {% if availability == 'partial' %}<p class="notice" role="status">{{ labels.partial }}</p>{% elif availability == 'unavailable' %}<p class="notice warning" role="status">{{ labels.unavailable }}</p>{% endif %}
+      {% if saved %}
+        <p class="observation">{{ labels.observed }} <time datetime="{{ saved.observed_at }}">{{ observed_at }}</time> · <a href="/api/{{ route.id }}?lang={{ locale }}{{ selection }}">{{ labels.api }}</a></p>
+        {% for section in saved.sections %}
+        <section class="report-section" aria-labelledby="{{ section.id }}">
+          <h2 id="{{ section.id }}">{{ section.title }}</h2>
+          {% if section.description %}<p>{{ section.description }}</p>{% endif %}
+          <div class="cards">
+          {% for card in section.cards %}<article class="card">
+            <h3>{% if card.title.href %}<a href="{{ card.title.href }}">{{ card.title.text }}</a>{% else %}{{ card.title.text }}{% endif %}</h3>
+            {% if card.subtitle %}<p class="subtitle">{% if card.subtitle.href %}<a href="{{ card.subtitle.href }}">{{ card.subtitle.text }}</a>{% else %}{{ card.subtitle.text }}{% endif %}</p>{% endif %}
+            {% if card.description %}<p class="description">{{ card.description }}</p>{% endif %}
+            {% if card.details %}<dl>{% for detail in card.details %}<div><dt>{{ detail.label }}</dt><dd>{% if detail.value is not none %}{{ detail.value }}{% else %}<span class="unknown">{{ labels.unknown }}</span>{% endif %}</dd></div>{% endfor %}</dl>{% endif %}
+          </article>{% endfor %}
+          </div>
+          {% if section.table %}<div class="table-scroll" tabindex="0" role="region" aria-label="{{ section.table.caption }}"><table>
+            <caption>{{ section.table.caption }}</caption>
+            <thead><tr>{% for column in section.table.columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead>
+            <tbody>{% for row in section.table.rows %}<tr>{% for cell in row %}<td>{% if cell is none %}<span class="unknown">{{ labels.unknown }}</span>{% elif cell.href %}<a href="{{ cell.href }}">{{ cell.text }}</a>{% else %}{{ cell.text }}{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody>
+          </table></div>{% endif %}
+          {% if not section.cards and not section.table and page_number == 1 %}<p class="empty">{% if availability == 'ready' %}{{ labels.empty }}{% else %}{{ labels.unknown }}{% endif %}</p>{% endif %}
+        </section>
+        {% endfor %}
+        {% if pages > 1 %}<nav class="pagination" aria-label="{{ labels.page }}">
+          {% if page_number > 1 %}<a rel="prev" href="{{ route.path }}?lang={{ locale }}{{ selection }}&amp;page={{ previous_page }}">← {{ labels.previous }}</a>{% endif %}
+          <span>{{ labels.page }} {{ page_number }} / {{ pages }}</span>
+          {% if page_number < pages %}<a rel="next" href="{{ route.path }}?lang={{ locale }}{{ selection }}&amp;page={{ next_page }}">{{ labels.next }} →</a>{% endif %}
+        </nav>{% endif %}
+        <details class="provenance"><summary>Input versions</summary><dl>{% for name, version in saved.input_versions|items %}<div><dt>{{ name }}</dt><dd><code>{{ version }}</code></dd></div>{% endfor %}</dl><p><code>{{ saved.dataset_id }}</code></p></details>
+      {% endif %}
+    </main>
+  </div>
+  <footer><div class="shell footer-inner"><p>{{ labels.saved }}</p><nav aria-label="Aranami">{% for item in navigation if item.group == 'footer' %}<a href="{{ item.path }}?lang={{ locale }}">{{ item.title }}</a>{% endfor %}<a href="https://zh.wikipedia.org/wiki/WikiProject:%E7%94%B5%E5%AD%90%E6%B8%B8%E6%88%8F">Wikipedia</a></nav></div></footer>
+</body>
+</html>

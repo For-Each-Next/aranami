@@ -15,15 +15,14 @@ from unittest import TestCase
 from unittest.mock import Mock, call, patch
 
 import polars as pl
+from wiki_fixtures import offline_site
 
-from backend.articles.milestone_store import SCHEMA as MILESTONE_SCHEMA
-from backend.newsletter.schema import read_newsletter_data
-from backend.website.collect import (
-    REPORT_KEYS,
-    collect_dashboard,
-    report_intervals,
-    validate_dashboard_snapshot,
-)
+from data.articles.milestone_store import SCHEMA as MILESTONE_SCHEMA
+from data.newsletter.schema import read_newsletter_data
+from data.website import REPORT_KEYS, validate_dashboard_snapshot
+from shared.newsletter import Issue
+from shared.support.cache import latest_cache_path
+from tasks.website.collect import collect_dashboard, report_intervals
 
 
 class DashboardFixture(TestCase):
@@ -36,27 +35,47 @@ class DashboardFixture(TestCase):
         self.addCleanup(directory.cleanup)
         self.cache = Path(directory.name)
         self.reader = Mock()
+        self.reader.site = offline_site()
         self.reader.sources = {}
         self.reader.summary.return_value = ""
+        self.game_titles = self._patch(
+            "tasks.website.collect.refresh_game_titles",
+        )
         self.reviews = self._patch(
-            "backend.website.collect.reviews.collect_reviews",
+            "tasks.website.collect.reviews.collect_reviews",
             return_value={"items": []},
         )
+        self.discussions = self._patch(
+            "tasks.website.collect.discussions.collect_discussions",
+            return_value=[],
+        )
+        self.consistency = self._patch(
+            "tasks.website.collect.consistency.collect_consistency",
+            return_value={
+                "schema": 1,
+                "wiki": "zhwiki",
+                "project": "电子游戏",
+                "checked_at": self.clock.isoformat(),
+                "items": [],
+                "checks": [],
+                "sources": [],
+            },
+        )
         self.newsletter = self._patch(
-            "backend.newsletter.refresh.collection.collect_source_facts",
+            "tasks.zhwiki.newsletter.refresh.collection.collect_source_facts",
             return_value={"issues": {}},
         )
         self.article_history = self._patch(
-            "backend.website.collect.article_milestones.read_events",
+            "tasks.website.collect.article_milestones.read_events",
             return_value=pl.DataFrame(schema=MILESTONE_SCHEMA),
         )
-        self.site = self._patch("backend.website.collect.pywikibot.Site")
+        self.site = self._patch("tasks.website.collect.pywikibot.Site")
         self._patch(
-            "backend.website.collect.WikiReader",
+            "tasks.website.collect.WikiReader",
             return_value=self.reader,
         )
         self.membership = self._patch(
-            "backend.website.collect.query_pages_by_wikiproject",
+            "tasks.website.collect.query_pages_by_wikiproject",
             return_value=pl.DataFrame({
                 "page_id": [11, 22],
                 "page_namespace": [0, 14],
@@ -66,14 +85,14 @@ class DashboardFixture(TestCase):
             }),
         )
         self.page_projects = self._patch(
-            "backend.newsletter.refresh.query_project_intersections",
+            "tasks.zhwiki.newsletter.refresh.query_project_intersections",
             return_value=pl.DataFrame(
                 schema={"page_id": pl.Int64, "project": pl.String},
             ),
         )
         self.collectors = {
             key: self._patch(
-                f"backend.website.collect.homepage.collect_{key}",
+                f"tasks.website.collect.homepage.collect_{key}",
                 return_value=[],
             )
             for key in (
@@ -86,11 +105,11 @@ class DashboardFixture(TestCase):
             )
         }
         self.popularity = self._patch(
-            "backend.website.collect.pageviews.collect_pageviews",
+            "tasks.website.collect.pageviews.collect_pageviews",
             return_value=self._pageviews(),
         )
         self.backlog = self._patch(
-            "backend.website.collect.backlog.collect_backlog",
+            "tasks.website.collect.backlog.collect_backlog",
             return_value={
                 "observed_at": self.clock.isoformat(timespec="seconds"),
                 "total": 0,
@@ -166,10 +185,69 @@ class DashboardFixture(TestCase):
 class TestDashboardReportCache(DashboardFixture):
     """Select due reports and isolate refresh failures."""
 
+    def test_game_labels_cover_report_titles_and_skip_cached_pass(
+        self,
+    ) -> None:
+        """Reuse saved reports without conversion requests."""
+        self.collectors["featured"].return_value = [
+            {
+                "title": "火焰之纹章",
+                "url": "https://zh.wikipedia.org/wiki/Fire_Emblem",
+                "date": "2026-10-17",
+            },
+        ]
+        snapshot = self._collect()
+        assert validate_dashboard_snapshot(snapshot)
+        self.game_titles.assert_called_once()
+        assert set(self.game_titles.call_args.args[1]) == {
+            "Game",
+            "火焰之纹章",
+        }
+        assert self.game_titles.call_args.kwargs["path"] == (
+            self.cache / "game-title-conversions"
+        )
+        self.game_titles.reset_mock()
+        self._collect(dt.timedelta(minutes=10))
+        self.game_titles.assert_not_called()
+
+    def test_optional_label_failure_preserves_completed_reports(self) -> None:
+        """Retain reports when the optional label source fails."""
+        self.game_titles.side_effect = RuntimeError("optional source offline")
+        with self.assertLogs("tasks.website.collect", level="ERROR"):
+            snapshot = self._collect()
+        assert validate_dashboard_snapshot(snapshot)
+        assert all(
+            not report["failed"] for report in snapshot["reports"].values()
+        )
+
+    def test_dyk_projection_requires_its_explicit_estimate_basis(self) -> None:
+        """Validate projected slots and their estimate basis."""
+        self.collectors["dyk"].return_value = [
+            {
+                "title": "Game",
+                "url": "https://zh.wikipedia.org/wiki/Game",
+                "date": "2026-10-19",
+                "date_kind": "estimated",
+                "scheduled_at": "2026-10-19T04:00:00+00:00",
+                "schedule_basis": "source-order-cadence-estimate",
+            },
+        ]
+        snapshot = self._collect()
+        assert validate_dashboard_snapshot(snapshot)
+        invalid = deepcopy(snapshot)
+        invalid["homepage"]["dyk"][0]["date"] = "2026-10-22"
+        assert not validate_dashboard_snapshot(invalid)
+        invalid = deepcopy(snapshot)
+        del invalid["homepage"]["dyk"][0]["schedule_basis"]
+        assert not validate_dashboard_snapshot(invalid)
+
     def test_public_validation_reuses_complete_report_contracts(self) -> None:
         """Accept empty successful reports and reject damaged data."""
         snapshot = self._collect()
         assert validate_dashboard_snapshot(snapshot)
+        previous = deepcopy(snapshot)
+        del previous["collection"]
+        assert validate_dashboard_snapshot(previous)
         for path, invalid in (
             (("schema",), True),
             (("period", "start"), "2026-02-30"),
@@ -181,6 +259,10 @@ class TestDashboardReportCache(DashboardFixture):
             (("backlog", "total"), 1),
             (("sources",), [{"label": "bad", "url": "javascript:bad"}]),
             (("errors",), [{}]),
+            (("collection", "attempted"), True),
+            (("collection", "failed"), -1),
+            (("collection", "failed"), len(REPORT_KEYS) + 1),
+            (("collection",), None),
         ):
             with self.subTest(path=path):
                 damaged = deepcopy(snapshot)
@@ -190,17 +272,34 @@ class TestDashboardReportCache(DashboardFixture):
                 target[path[-1]] = invalid
                 assert not validate_dashboard_snapshot(damaged)
 
+    def test_cached_failure_does_not_become_a_new_failed_attempt(self) -> None:
+        """Retain old source errors while reporting a no-work pass."""
+        self.collectors["good"].side_effect = RuntimeError("source offline")
+        with self.assertLogs("tasks.website.collect", level="ERROR"):
+            failed = self._collect()
+        assert failed["collection"] == {
+            "attempted": len(REPORT_KEYS),
+            "failed": 1,
+        }
+        self.membership.reset_mock()
+        cached = self._collect(dt.timedelta(minutes=30))
+        self.membership.assert_not_called()
+        assert cached["collection"] == {"attempted": 0, "failed": 0}
+        assert cached["errors"] == failed["errors"]
+        assert cached["reports"]["recognized"]["failed"]
+        assert validate_dashboard_snapshot(cached)
+
     def test_public_validation_preserves_fallbacks(self) -> None:
         """Keep null failures and older successful data valid."""
         self.membership.side_effect = RuntimeError("offline")
-        with self.assertLogs("backend.website.collect", level="ERROR"):
+        with self.assertLogs("tasks.website.collect", level="ERROR"):
             unavailable = self._collect()
         assert validate_dashboard_snapshot(unavailable)
         self.membership.side_effect = None
         current = self._collect(dt.timedelta(hours=1))
         assert validate_dashboard_snapshot(current)
         self.popularity.side_effect = RuntimeError("offline")
-        with self.assertLogs("backend.website.collect", level="ERROR"):
+        with self.assertLogs("tasks.website.collect", level="ERROR"):
             fallback = self._collect(dt.timedelta(days=30))
         assert validate_dashboard_snapshot(fallback)
         assert fallback["pageviews"] == current["pageviews"]
@@ -347,7 +446,14 @@ class TestDashboardReportCache(DashboardFixture):
         self.membership.assert_not_called()
         assert repeated["reports"] == first["reports"]
         assert repeated["pageviews"] == first["pageviews"]
-        assert len(list(self.cache.glob("*-v2.json"))) == len(REPORT_KEYS)
+        assert all(
+            (self.cache / f"{name}.json").is_file()
+            for name in REPORT_KEYS
+            if name != "consistency"
+        )
+        generation = latest_cache_path(self.cache / "consistency")
+        assert generation is not None
+        assert generation.is_file()
 
     def test_newsletter_observes_exact_article_project_memberships(
         self,
@@ -394,7 +500,7 @@ class TestDashboardReportCache(DashboardFixture):
         self.page_projects.side_effect = RuntimeError(
             "topic project unavailable",
         )
-        with self.assertLogs("backend.website.collect", level="ERROR"):
+        with self.assertLogs("tasks.website.collect", level="ERROR"):
             failed = self._collect(dt.timedelta(days=1))
         assert failed["newsletter"] is None
         assert self._newsletter_facts() == self.newsletter.return_value
@@ -410,6 +516,34 @@ class TestDashboardReportCache(DashboardFixture):
 class TestDashboardRefreshIntervals(DashboardFixture):
     """Refresh due reports while retaining independent observations."""
 
+    def test_consistency_refresh_retains_prior_evidence_on_failure(
+        self,
+    ) -> None:
+        """Refresh hourly and preserve the last complete observation."""
+        first = self._collect()
+        assert (
+            first["reports"]["consistency"]["refresh_interval_seconds"] == 3600
+        )
+        self._collect(dt.timedelta(minutes=59))
+        assert self.consistency.call_count == 1
+        self.consistency.side_effect = OSError("source unavailable")
+        with self.assertLogs("tasks.website.collect", level="ERROR"):
+            failed = self._collect(dt.timedelta(hours=1))
+        assert failed["consistency"] == first["consistency"]
+        assert failed["reports"]["consistency"]["failed"]
+        assert (
+            failed["reports"]["consistency"]["last_success_at"]
+            == first["reports"]["consistency"]["last_success_at"]
+        )
+        assert validate_dashboard_snapshot(failed)
+        self.consistency.side_effect = None
+        recovered = self._collect(dt.timedelta(hours=2))
+        assert not recovered["reports"]["consistency"]["failed"]
+        legacy = deepcopy(first)
+        del legacy["consistency"]
+        del legacy["reports"]["consistency"]
+        assert validate_dashboard_snapshot(legacy)
+
     def test_interval_changes_refresh_only_the_selected_report(self) -> None:
         """Change popularity without refreshing other reports."""
         first = self._collect()
@@ -421,12 +555,20 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         assert self.site.call_count == 1
         assert self.membership.call_count == 2
         assert self.popularity.call_count == 2
-        for key in ("featured", "good", "upcoming", "dyk", "history"):
-            assert self.collectors[key].call_count == 1
-        self.collectors["news"].assert_not_called()
+        for key in ("featured", "good", "upcoming"):
+            assert self.collectors[key].call_count == 2
+        assert self.collectors["dyk"].call_count == 1
+        assert self.collectors["news"].call_count == 2
+        assert self.collectors["history"].call_count == 2
         assert self.backlog.call_count == 1
         for key in REPORT_KEYS:
-            if key not in {"pageviews", "reviews"}:
+            if key not in {
+                "pageviews",
+                "reviews",
+                "recognized",
+                "consistency",
+                "news_history",
+            }:
                 assert second["reports"][key] == first["reports"][key]
         assert (
             second["reports"]["pageviews"]["config_id"]
@@ -464,10 +606,15 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         assert self.reviews.call_count == 2
         self.reader.summary.assert_not_called()
         for name in REPORT_KEYS:
-            if name != "reviews":
+            if name not in {
+                "reviews",
+                "consistency",
+                "news_history",
+                "recognized",
+            }:
                 assert second["reports"][name] == first["reports"][name]
         self.reviews.side_effect = OSError("nomination source unavailable")
-        with self.assertLogs("backend.website.collect", level="ERROR"):
+        with self.assertLogs("tasks.website.collect", level="ERROR"):
             failed = self._collect(dt.timedelta(hours=2))
         assert failed["reviews"] == second["reviews"]
         assert (
@@ -481,7 +628,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         self.reviews.side_effect = None
         self.reviews.return_value = {"items": []}
         empty = self._collect(dt.timedelta(hours=3))
-        assert empty["reviews"] == {"items": []}
+        assert empty["reviews"] == {"items": [], "discussions": []}
         assert not empty["reports"]["reviews"]["failed"]
 
     def test_reviews_validate_saved_dates_links_and_older_snapshots(
@@ -507,6 +654,9 @@ class TestDashboardRefreshIntervals(DashboardFixture):
             ("started_at", "2026-10-25T12:00:00"),
             ("review_type", "unexpected"),
             ("review_url", "javascript:alert(1)"),
+            ("ends_at", "2026-10-25"),
+            ("ends_at", "2026-10-25T12:00:00"),
+            ("result", "expired-therefore-failed"),
         ):
             with self.subTest(key=key, bad=bad):
                 first["reviews"]["items"] = [{**row, key: bad}]
@@ -563,14 +713,40 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         first["reviews"]["items"] = [row]
         assert validate_dashboard_snapshot(first)
 
-    def test_participant_contract_refreshes_only_reviews(self) -> None:
-        """Refresh old review facts after adding participant counts."""
+    def test_review_deadlines_and_results_survive_restart(self) -> None:
+        """Retain deadlines independently of observed outcomes."""
+        row = {
+            "title": "Game",
+            "url": "https://zh.wikipedia.org/wiki/Game",
+            "review_type": "dykc",
+            "review_url": "https://zh.wikipedia.org/wiki/Wikipedia:DYK#Game",
+            "started_at": "2026-10-07T03:04:00Z",
+            "ends_at": "2026-10-14T03:04:00Z",
+            "result": "ended",
+        }
+        self.reviews.return_value = {"items": [row]}
         first = self._collect()
-        path = self.cache / "reviews-v2.json"
+        assert validate_dashboard_snapshot(first)
+        self.reviews.reset_mock()
+        assert (
+            self._collect(dt.timedelta(minutes=1))["reviews"]
+            == first["reviews"]
+        )
+        self.reviews.assert_not_called()
+        for result in (None, "passed", "failed", "ended"):
+            first["reviews"]["items"] = [{**row, "result": result}]
+            assert validate_dashboard_snapshot(first)
+        first["reviews"]["items"] = [{**row, "ends_at": row["started_at"]}]
+        assert not validate_dashboard_snapshot(first)
+
+    def test_deadline_contract_refreshes_only_reviews(self) -> None:
+        """Refresh older facts for nomination deadlines and outcomes."""
+        first = self._collect()
+        path = self.cache / "reviews.json"
         record = json.loads(path.read_text())
         previous_id = hashlib.sha256(
-            b"dashboard-v2:reviews:"
-            b"nomination-sources-v2:replies:extracts-v3:3600.0",
+            b"dashboard:reviews:"
+            b"nomination-sources:rendered-discussions:pending-dyk:11:3600.0",
         ).hexdigest()
         record.update(config_id=previous_id, attempt_config_id=previous_id)
         path.write_text(json.dumps(record))
@@ -578,6 +754,32 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         assert self.reviews.call_count == 2
         for name in REPORT_KEYS:
             if name != "reviews":
+                assert second["reports"][name] == first["reports"][name]
+
+    def test_empty_schedule_contract_retries_only_recognized(self) -> None:
+        """Retry the corrected parser without invalidating peers."""
+        first = self._collect()
+        path = self.cache / "recognized.json"
+        record = json.loads(path.read_text())
+        previous_source = (
+            "days:100:script-extracts:draft:"
+            + Issue.upcoming(self.clock.date()).value
+        )
+        interval = first["reports"]["recognized"]["refresh_interval_seconds"]
+        previous_id = hashlib.sha256(
+            f"dashboard:recognized:{previous_source}:{interval}".encode(),
+        ).hexdigest()
+        record.update(
+            config_id=previous_id,
+            attempt_config_id=previous_id,
+            failed=True,
+        )
+        path.write_text(json.dumps(record))
+        second = self._collect(dt.timedelta(minutes=1))
+        assert second["collection"] == {"attempted": 1, "failed": 0}
+        assert self.collectors["upcoming"].call_count == 2
+        for name in REPORT_KEYS:
+            if name != "recognized":
                 assert second["reports"][name] == first["reports"][name]
 
     def test_independent_intervals_and_original_fallback_source_day(
@@ -595,8 +797,10 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         assert self.collectors["dyk"].call_count == 1
         assert second["pageviews"]["date"] == "2026-10-12"
         assert (
-            second["reports"]["recognized"] == first["reports"]["recognized"]
+            second["reports"]["recognized"]["last_success_at"]
+            != first["reports"]["recognized"]["last_success_at"]
         )
+        assert self.collectors["featured"].call_count == 2
         self._collect(dt.timedelta(hours=2), refresh_intervals=options)
         assert self.membership.call_count == 3
         assert self.popularity.call_count == 3
@@ -654,7 +858,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
             != first["reports"]["dyk"]["last_success_at"]
         )
         assert second["homepage"]["dyk"][0]["title"] == "Game"
-        persisted = json.loads((self.cache / "recognized-v2.json").read_text())
+        persisted = json.loads((self.cache / "recognized.json").read_text())
         assert (
             persisted["observed_at"]
             == first["reports"]["recognized"]["last_success_at"]
@@ -679,7 +883,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     ) -> None:
         """Persist retry times before the first successful result."""
         self.membership.side_effect = RuntimeError("offline")
-        with self.assertLogs("backend.website.collect", level="ERROR") as logs:
+        with self.assertLogs("tasks.website.collect", level="ERROR") as logs:
             failed = self._collect()
         assert len(logs.records) == 1
         assert logs.records[0].exc_info is not None
@@ -704,7 +908,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     def test_malformed_report_recollects_only_that_report(self) -> None:
         """Keep healthy reports when one envelope is corrupt."""
         self._collect()
-        (self.cache / "dyk-v2.json").write_text('{"schema":2,"data":[]}')
+        (self.cache / "dyk.json").write_text('{"schema":2,"data":[]}')
         self._collect(dt.timedelta(minutes=1))
         assert self.collectors["dyk"].call_count == 2
         assert self.collectors["featured"].call_count == 1
@@ -714,7 +918,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     def test_incomplete_failed_envelope_requires_revalidation(self) -> None:
         """Revalidate retry envelopes with missing data."""
         self._collect()
-        path = self.cache / "dyk-v2.json"
+        path = self.cache / "dyk.json"
         record = json.loads(path.read_text())
         record.update(failed=True, observed_at=None)
         del record["data"]
@@ -748,15 +952,22 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         assert len(published) == len(REPORT_KEYS)
         assert published[-1] == result
         for collector in self.collectors.values():
-            if collector is self.collectors["news"]:
-                collector.assert_not_called()
-            else:
-                assert collector.call_args.args[2] == {"Game"}
+            assert collector.call_args.args[2] == {"Game"}
         assert self.collectors["upcoming"].call_args.args[:2] == (
             dt.date(2026, 10, 19),
             dt.date(2026, 11, 18),
         )
         assert "read_at" not in self.collectors["upcoming"].call_args.kwargs
+        assert self.collectors["history"].call_args.args[:2] == (
+            dt.date(2026, 10, 18),
+            dt.date(2026, 10, 21),
+        )
+        assert self.collectors["history"].call_args.kwargs[
+            "scheduled_from"
+        ] == (dt.date(2026, 10, 19))
+        assert self.collectors["dyk"].call_args.kwargs["forecast_end"] == (
+            dt.date(2026, 10, 21)
+        )
         assert result["period"]["start"] == "2026-07-11"
 
     def test_configuration_validation(self) -> None:

@@ -6,6 +6,7 @@
 import datetime as dt
 from contextlib import chdir, nullcontext
 from contextvars import copy_context
+from operator import itemgetter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -13,18 +14,17 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from backend.services.zhwiki import pageviews
-from backend.support.execution import RuntimeContext, routine_run
-from backend.support.routine_status import (
+from data.runtime.progress import (
     progress_updates,
-    read_routine_status,
     report_progress,
-    write_routine_status,
+    validate_progress,
 )
+from data.runtime.status import read_status, status_path
+from runtime.execution import RuntimeContext, routine_run
+from tasks.zhwiki import pageviews
 
 _DAY = dt.date(2026, 10, 20)
-_STATUS = Path("state/routine-status.json")
-_LOGGER = "backend.support.routine_status"
+_STATUS = Path("state/observability/status.json")
 
 
 def _progress(**changes: object) -> dict[str, object]:
@@ -42,27 +42,8 @@ def _progress(**changes: object) -> dict[str, object]:
     }
 
 
-def _record(**changes: object) -> dict[str, object]:
-    """Build a legacy running lifecycle record.
-
-    Returns:
-        The original eight lifecycle fields with supplied overrides.
-    """
-    return {
-        "routine": "pageviews",
-        "status": "running",
-        "dry": False,
-        "updated": None,
-        "duration_seconds": None,
-        "started_at": "2026-10-21T06:00:00.000000Z",
-        "finished_at": None,
-        "run_id": "a" * 32,
-        **changes,
-    }
-
-
 def _context(*, dry: bool = False) -> RuntimeContext:
-    """Build a backend execution with an offline wiki identity.
+    """Build a runtime execution with an offline wiki identity.
 
     Returns:
         A context whose lifecycle can be tested without publication.
@@ -79,27 +60,17 @@ def _saved() -> dict[str, object]:
     Returns:
         Its validated lifecycle and optional progress fields.
     """
-    return read_routine_status(_STATUS)["routines"]["pageviews"]
+    return max(
+        read_status(Path.cwd())["executions"].values(),
+        key=itemgetter("started_at"),
+    )
 
 
 class TestRoutineProgressValidation(TestCase):
-    """Validate optional activity in lifecycle snapshots."""
+    """Validate progress independently of execution lifecycle fields."""
 
-    @staticmethod
-    def test_legacy_and_progress_records_remain_readable() -> None:
-        """Accept optional activity while preserving old records."""
-        with TemporaryDirectory() as directory:
-            destination = Path(directory)
-            path = destination / "routine-status.json"
-            legacy = _record()
-            assert write_routine_status(legacy, directory=destination)
-            assert read_routine_status(path)["routines"]["pageviews"] == legacy
-            active = _record(progress=_progress())
-            assert write_routine_status(active, directory=destination)
-            assert read_routine_status(path)["routines"]["pageviews"] == active
-
-    def test_invalid_progress_preserves_last_valid_snapshot(self) -> None:
-        """Reject malformed fields, dates, and counters."""
+    def test_invalid_progress_is_rejected(self) -> None:
+        """Reject invalid dates, counters and phases."""
         invalid = (
             [],
             {"phase": "preparing"},
@@ -115,44 +86,15 @@ class TestRoutineProgressValidation(TestCase):
             _progress(current=206),
             _progress(total=1_000_000_001),
         )
-        with TemporaryDirectory() as directory:
-            destination = Path(directory)
-            path = destination / "routine-status.json"
-            assert write_routine_status(
-                _record(progress=_progress()),
-                directory=destination,
-            )
-            original = path.read_bytes()
-            for index, progress in enumerate(invalid):
-                with (
-                    self.subTest(progress=index),
-                    self.assertLogs(_LOGGER, level="WARNING"),
-                ):
-                    assert not write_routine_status(
-                        _record(progress=progress),
-                        directory=destination,
-                    )
-                assert path.read_bytes() == original
-
-    def test_completed_record_requires_cleared_progress(self) -> None:
-        """Never persist running activity on a completed routine."""
-        terminal = _record(
-            status="updated",
-            updated=1,
-            duration_seconds=2,
-            finished_at="2026-10-21T06:00:02.000000Z",
-        )
-        with TemporaryDirectory() as directory:
-            destination = Path(directory)
-            with self.assertLogs(_LOGGER, level="WARNING"):
-                assert not write_routine_status(
-                    {**terminal, "progress": _progress()},
-                    directory=destination,
-                )
-            assert write_routine_status(
-                {**terminal, "progress": None},
-                directory=destination,
-            )
+        for progress in invalid:
+            with (
+                self.subTest(progress=progress),
+                self.assertRaisesRegex(  # ruff: ignore[pytest-unittest-raises-assertion]
+                    ValueError,
+                    r"progress|date|day",
+                ),
+            ):
+                validate_progress(progress)
 
 
 class TestRoutineProgressLifecycle(TestCase):
@@ -165,7 +107,7 @@ class TestRoutineProgressLifecycle(TestCase):
             TemporaryDirectory() as directory,
             chdir(directory),
             patch(
-                "backend.support.execution.open_run_log",
+                "runtime.execution.open_run_log",
                 return_value=nullcontext(),
             ),
         ):
@@ -195,7 +137,7 @@ class TestRoutineProgressLifecycle(TestCase):
                 )
                 copied = copy_context()
             assert _saved()["progress"] is None
-            assert _saved()["status"] == "no_update"
+            assert _saved()["outcome"] == "succeeded"
             terminal = _STATUS.read_bytes()
             copied.run(report_progress, "preparing")
             assert _STATUS.read_bytes() == terminal
@@ -207,14 +149,15 @@ class TestRoutineProgressLifecycle(TestCase):
             TemporaryDirectory() as directory,
             chdir(directory),
             patch(
-                "backend.support.execution.open_run_log",
+                "runtime.execution.open_run_log",
                 return_value=nullcontext(),
             ),
         ):
             with routine_run("pageviews", _context()):
                 older = copy_context()
+                expected_runs = 2
                 with routine_run("pageviews", _context()):
-                    newer = _STATUS.read_bytes()
+                    newer = _saved()
                     older.run(
                         report_progress,
                         "pageviews_download",
@@ -222,9 +165,13 @@ class TestRoutineProgressLifecycle(TestCase):
                         current=100,
                         total=205,
                     )
-                    assert _STATUS.read_bytes() == newer
-                completed = _STATUS.read_bytes()
-            assert _STATUS.read_bytes() == completed
+                    assert _saved() == newer
+                    assert (
+                        len(read_status(Path.cwd())["executions"])
+                        == expected_runs
+                    )
+                completed = _saved()
+            assert _saved() == completed
 
     @staticmethod
     def test_preview_activity_never_writes_live_status() -> None:
@@ -233,10 +180,9 @@ class TestRoutineProgressLifecycle(TestCase):
             TemporaryDirectory() as directory,
             chdir(directory),
             patch(
-                "backend.support.execution.open_run_log",
+                "runtime.execution.open_run_log",
                 return_value=nullcontext(),
             ),
-            patch("backend.support.execution.write_routine_status") as write,
             routine_run("pageviews", _context(dry=True)),
         ):
             report_progress(
@@ -246,7 +192,7 @@ class TestRoutineProgressLifecycle(TestCase):
                 total=205,
             )
             assert not _STATUS.exists()
-        write.assert_not_called()
+            assert status_path(Path.cwd(), dry=True).exists()
 
     @staticmethod
     def test_new_report_attempt_restores_preparing_phase() -> None:
@@ -255,7 +201,7 @@ class TestRoutineProgressLifecycle(TestCase):
             TemporaryDirectory() as directory,
             chdir(directory),
             patch(
-                "backend.support.execution.open_run_log",
+                "runtime.execution.open_run_log",
                 return_value=nullcontext(),
             ),
             routine_run("pageviews", _context()) as active,
@@ -269,9 +215,9 @@ class TestPageviewsProgress(TestCase):
     """Bound activity updates without changing source requests."""
 
     @staticmethod
-    def test_history_and_aggregate_counters_update_every_hundred() -> None:
-        """Report hundred-record checkpoints and final totals."""
-        total = 205
+    def test_history_and_aggregate_counters_update_every_thousand() -> None:
+        """Report thousand-page groups and final completed totals."""
+        total = 2_005
         titles = [f"Article {index}" for index in range(total)]
         observations = pl.DataFrame(
             [(_DAY, 0)],
@@ -301,13 +247,66 @@ class TestPageviewsProgress(TestCase):
         assert fetch.call_count == total
         for phase in ("pageviews_download", "pageviews_aggregate"):
             selected = [row for row in updates if row["phase"] == phase]
-            assert [row["current"] for row in selected] == [0, 100, 200, 205]
+            assert [row["current"] for row in selected] == [
+                0,
+                1000,
+                2000,
+                total,
+            ]
             assert all(row["total"] == total for row in selected)
-        assert all(
-            row["report_date"] == _DAY.isoformat()
-            for row in updates
-            if row["phase"] == "pageviews_aggregate"
+        assert all(row["report_date"] == _DAY.isoformat() for row in updates)
+
+    def test_failed_page_preserves_exact_completed_partial_group(self) -> None:
+        """Flush completed work without counting the failed page."""
+        total = 2_005
+        titles = [f"Article {index}" for index in range(total)]
+        observations = pl.DataFrame(
+            [(_DAY, 0)],
+            schema={"date": pl.Date, "pageview": pl.Int64},
+            orient="row",
         )
+        for phase in ("pageviews_download", "pageviews_aggregate"):
+            for completed, expected in (
+                (0, [0]),
+                (1000, [0, 1000]),
+                (1006, [0, 1000, 1006]),
+            ):
+                updates = []
+                with (
+                    self.subTest(phase=phase, completed=completed),
+                    progress_updates(updates.append),
+                    patch.object(
+                        pageviews,
+                        "_article_observations",
+                        side_effect=[
+                            *([observations] * completed),
+                            pageviews.PageviewsDeferredError("source failed"),
+                        ],
+                    ) as fetch,
+                    self.assertRaises(  # ruff: ignore[pytest-unittest-raises-assertion]
+                        pageviews.PageviewsDeferredError,
+                    ),
+                ):
+                    if phase == "pageviews_download":
+                        pageviews._download_candidate(
+                            _context().site,
+                            titles,
+                            _DAY,
+                            _DAY,
+                            1,
+                        )
+                    else:
+                        pageviews.aggregate_views(
+                            _context().site,
+                            titles,
+                            [(_DAY, _DAY + dt.timedelta(days=1))],
+                        )
+                assert fetch.call_count == completed + 1
+                assert [row["current"] for row in updates] == expected
+                assert all(row["total"] == total for row in updates)
+                assert all(
+                    row["report_date"] == _DAY.isoformat() for row in updates
+                )
 
     @staticmethod
     def test_readiness_counts_only_real_probe_completions() -> None:
@@ -343,3 +342,4 @@ class TestPageviewsProgress(TestCase):
         total.assert_called_once()
         assert fetch.call_count == expected_requests
         assert [row["current"] for row in updates] == [None, 0, 1, 2]
+        assert all(row["report_date"] == _DAY.isoformat() for row in updates)

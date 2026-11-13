@@ -1,0 +1,207 @@
+"""Start recurring monitoring or run selected reports immediately.
+
+Use ``run`` for the monitor's per-routine UTC schedules and ``run_once``
+for a manual pass with optional tasks and a report date anchor. Previews
+write proposed edits locally in either execution mode.
+"""
+
+# Public wrappers document propagated validation errors.
+# ruff: file-ignore[docstring-extraneous-exception]
+
+from __future__ import annotations
+
+__all__ = ("run", "run_once")
+
+import datetime as dt
+import logging
+from importlib import import_module
+from time import perf_counter
+from typing import TYPE_CHECKING
+from uuid import uuid4
+
+import pywikibot
+
+from data.runtime.events import event_extra, logging_context
+from data.runtime.logs import open_run_log
+from runtime import monitor
+from runtime.jobs import JobContext
+from runtime.monitor import TASK_DEFINITIONS
+from runtime.project_observations import DAILY_REPORTS, project_cycle
+from shared.deployment import project_version
+from shared.identity import configure_pywikibot
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from types import ModuleType
+
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def run(
+    *,
+    dry: bool = False,
+    clear_cache: bool = False,
+    run_immediately: bool = True,
+) -> BackgroundScheduler:
+    """Start recurring routines using configured wiki authentication.
+
+    Return immediately while the monitor keeps dispatching each routine
+    at its configured UTC time. By default, a fresh monitor also checks
+    every routine immediately in either live or preview mode. Set
+    ``run_immediately=False`` to wait for the first scheduled times.
+    Both modes recur until the returned scheduler is stopped. Repeated
+    calls reuse an active monitor with the same output mode without
+    another initial pass, regardless of ``run_immediately``.
+
+    Args:
+        dry: Write local previews at each scheduled time instead of
+            editing wiki pages or requesting PexBot refreshes.
+        clear_cache: Delete disposable caches before starting a fresh
+            monitor. Stop an active monitor before clearing its caches.
+        run_immediately: Check every routine immediately on a fresh
+            start, then follow its UTC schedule. False waits for the
+            next cron times. This option has no effect on an active
+            monitor.
+
+    Returns:
+        Background scheduler for inspecting, pausing, or stopping the
+        monitor with ``shutdown(wait=True)``.
+
+    Raises:
+        ValueError: An active monitor uses another output mode, or cache
+            clearing was requested while a monitor is active.
+    """
+    return monitor.start(
+        dry=dry,
+        clear_cache=clear_cache,
+        run_immediately=run_immediately,
+    )
+
+
+def _select_tasks(tasks: Sequence[str] | str | None) -> tuple[ModuleType, ...]:
+    """Resolve requested routine names before any external reads.
+
+    Args:
+        tasks: One routine name or a sequence, or omit for all routines.
+
+    Returns:
+        Selected modules in caller order, with duplicate names removed.
+
+    Raises:
+        ValueError: A requested name is not a routine task.
+    """
+    names = (
+        tuple(TASK_DEFINITIONS)
+        if tasks is None
+        else (tasks,)
+        if isinstance(tasks, str)
+        else tasks
+    )
+    for name in names:
+        if name not in TASK_DEFINITIONS:
+            msg = (
+                f"Unknown routine task {name!r}. "
+                f"Choose from: {', '.join(TASK_DEFINITIONS)}."
+            )
+            raise ValueError(msg)
+    return tuple(
+        import_module(f"runtime.jobs.{name}") for name in dict.fromkeys(names)
+    )
+
+
+def run_once(
+    *,
+    date: dt.date | None = None,
+    dry: bool = False,
+    tasks: Sequence[str] | str | None = None,
+    clear_cache: bool = False,
+) -> None:
+    """Run selected reports immediately without starting schedules.
+
+    Independent jobs continue after a failure. The run reports failure
+    after finishing the remaining jobs and writing any dry-run output.
+    A supplied date sets the UTC report anchor; source reads still use
+    current wiki data. Existing monitors are not started or rescheduled.
+
+    Args:
+        date: UTC anchor date, or omit for today's UTC date. New-page
+            records stop before this date. Pageviews selects the next
+            missing day before this date, subject to the UTC 19:00
+            availability cutoff.
+        dry: Record proposed edits locally without wiki writes or
+            external PexBot refresh requests.
+        tasks: Routine names, or omit for all configured routines.
+            For example,
+            ``["new_pages"]`` runs only new-page discovery. A single
+            name is accepted. Empty selections make no wiki requests.
+        clear_cache: Delete disposable ``cache/`` data before running.
+            Stop an active monitor before requesting this option.
+
+    Raises:
+        ExceptionGroup: One or more routine jobs failed.
+        ValueError: A task name is unknown, or cache clearing was
+            requested while a monitor is active.
+    """
+    selected = _select_tasks(tasks)
+    if not selected:
+        return
+    configure_pywikibot()
+    with open_run_log(), logging_context(run_id=uuid4().hex):
+        started = perf_counter()
+        started_at = dt.datetime.now(dt.UTC)
+        _LOGGER.info(
+            "Aranami %s run started (dry=%s).",
+            project_version(),
+            dry,
+            extra=event_extra("run_started", dry=dry, tasks=len(selected)),
+        )
+        if clear_cache:
+            monitor.clear_caches()
+            _LOGGER.info("Cleared disposable runtime cache.")
+        context = JobContext(
+            pywikibot.Site("zh", "wikipedia"),
+            date if date is not None else started_at.date(),
+            dry,
+            started_at=started_at,
+        )
+        failures: list[Exception] = []
+        try:
+            for job in selected:
+                try:
+                    with project_cycle(
+                        daily=job.__name__.rsplit(".", 1)[-1] in DAILY_REPORTS,
+                        dry=dry,
+                    ):
+                        job.run(context=context)
+                except Exception as error:
+                    _LOGGER.exception(
+                        "Routine module failed: %s.",
+                        job.__name__,
+                    )
+                    failures.append(error)
+        finally:
+            context.finished_at = dt.datetime.now(dt.UTC)
+            context.write_report()
+        elapsed = perf_counter() - started
+        deferred = sum(task.status == "deferred" for task in context.tasks)
+        _LOGGER.info(
+            "Aranami run finished in %.3f seconds: "
+            "%d jobs, %d failures, %d deferred.",
+            elapsed,
+            len(selected),
+            len(failures),
+            deferred,
+            extra=event_extra(
+                "run_finished",
+                dry=dry,
+                tasks=len(selected),
+                failures=len(failures),
+                deferred=deferred,
+                duration_seconds=elapsed,
+            ),
+        )
+        if failures:
+            msg = "Aranami routine jobs failed; see the daily log."
+            raise ExceptionGroup(msg, failures)

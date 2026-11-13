@@ -1,4 +1,4 @@
-"""Render assessment lists from backend-prepared members and reviews.
+"""Render assessment lists from runtime-prepared members and reviews.
 
 Use prepare_report with AssessmentData and the current destination text.
 Rendering preserves unmanaged text and retains the same prepared rows.
@@ -13,18 +13,15 @@ from typing import TYPE_CHECKING
 import mwparserfromhell
 from mwparserfromhell.nodes import Tag, Template, Wikilink
 
-from backend.support.report_membership import MembershipReport
-from shared.reports import ReportResult
+from data.reports import ReportResult
+from data.runtime.report_membership import MembershipReport
 from shared.support.regions import replace_by_tag
 from shared.support.titles import title_sort_key
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from backend.services.zhwiki.assessment_lists import (
-        AssessmentData,
-        AssessmentList,
-    )
+    from data.assessment_lists import AssessmentData, AssessmentList
 
 _REVIEW_ICONS = {
     "acc": "A candidate.svg",

@@ -21,17 +21,22 @@ import re
 from typing import TYPE_CHECKING
 
 import polars as pl
+from opencc import OpenCC
 
-from backend.newsletter.layout import issue_contents, newsletter_source_banner
-from backend.newsletter.schema import STAT_KEYS
-from backend.newsletter.subpages import (
+from data.newsletter.schema import STAT_KEYS
+from data.newsletter.subpages import (
     announcement_intro_slots,
     complete_announcement_layout,
 )
+from shared.assessment_profiles import assessment_profile
 from shared.newsletter import ROOT, Issue
 from updater.services.newsletter_editorial import (
     LITERAL_ESCAPES,
     render_editorial,
+)
+from updater.services.newsletter_layout import (
+    issue_contents,
+    newsletter_source_banner,
 )
 
 if TYPE_CHECKING:
@@ -42,27 +47,29 @@ _ANNOUNCEMENT_PLACEHOLDER = (
     "* 电子游戏专题已建立{{Age in years, months, weeks and days|2005|6|10}}。"
     "<small>（M月D日）</small>"
 )
-_NEW_PAGE_GRADES = {
-    "FA": ("典範", "典範級", "#9cbdff"),
-    "FL": ("特色列表", "特色列表級", "#9cbdff"),
-    "A": ("甲級", "甲級", "#66ffff"),
-    "GA": ("優良", "優良級", "#66ff66"),
-    "Bplus": ("乙上", "乙上級", "#8cff66"),
-    "B": ("乙級", "乙級", "#b2ff66"),
-    "C": ("丙級", "丙級", "#ffff66"),
-    "D": ("丁級", "丁級", "#ffffaa"),
-    "Start": ("初級", "初級", "#ffaa66"),
-    "Stub": ("小作品", "小作品級", "#ffa4a4"),
-    "Substub": ("小小作品", "小小作品級", "#ff6666"),
-    "Disambig": ("消歧義", "消歧義級", "#00fa9a"),
-    "Unassessed": ("未評級", "未評級", "#dcdcdc"),
+_ASSESSMENTS = assessment_profile("zhwiki", "电子游戏")
+# Pie slices retain their order, colors, and compact/full style.
+_NEW_PAGE_STYLES = {
+    "FA": False,
+    "FL": False,
+    "A": True,
+    "GA": False,
+    "Bplus": False,
+    "B": True,
+    "C": True,
+    "D": True,
+    "Start": True,
+    "Stub": False,
+    "Substub": False,
+    "Disambig": False,
+    "Unassessed": True,
 }
 _NEW_PAGE_LEVELS = {
-    "AL": "A",
-    "BL": "B",
-    "CL": "C",
-    "List": "Start",
-    "SL": "Stub",
+    **{
+        label.code: label.article_group
+        for label in _ASSESSMENTS.classes
+        if label.article_group and label.code not in _NEW_PAGE_STYLES
+    },
     "Unknown": "Unassessed",
 }
 _QUALITY_ROWS = (
@@ -91,6 +98,32 @@ _QUALITY_IMAGES = """{{multiple image
 }}"""
 _TEN = 10
 _HUNDRED = 100
+
+
+def _new_page_grades() -> dict[str, tuple[str, str, str]]:
+    """Apply the newsletter's chart style to central assessment labels.
+
+    Returns:
+        Traditional Chinese short/full labels and existing slice colors.
+    """
+    convert = OpenCC("s2t").convert
+    result = {}
+    for code, full in _NEW_PAGE_STYLES.items():
+        label = _ASSESSMENTS.resolve(code, "class")
+        long_name = convert(label.long_name)
+        result[code] = (
+            long_name if full else long_name.removesuffix("級"),
+            long_name,
+            _ASSESSMENTS.color(
+                code,
+                "class",
+                variant="newsletter_new_pages",
+            ).lower(),
+        )
+    return result
+
+
+_NEW_PAGE_GRADES = _new_page_grades()
 
 
 def _link(target: str, label: str | None = None) -> str:

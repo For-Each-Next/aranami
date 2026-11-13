@@ -9,14 +9,11 @@ import copy
 import datetime as dt
 import unittest
 
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.publication import (
-    PUBLICATION_PAGE,
-    read_publication_plan,
-    valid_lifecycle,
-)
-from backend.newsletter.schema import valid_newsletter
+from data.newsletter.publication import PUBLICATION_PAGE, valid_lifecycle
+from data.newsletter.schema import valid_newsletter
 from newsletter.test_newsletter_data import Reader
+from tasks.zhwiki.newsletter.collection import collect_source_facts
+from tasks.zhwiki.newsletter.publication import read_publication_plan
 
 
 def _reader(records: str) -> Reader:

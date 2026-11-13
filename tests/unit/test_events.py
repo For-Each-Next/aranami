@@ -1,5 +1,8 @@
 """Verify explicit lifecycle event schemas and safe daily storage."""
 
+# Counts and nested scopes are explicit lifecycle fixtures.
+# ruff: file-ignore[magic-value-comparison, multiple-with-statements]
+
 from __future__ import annotations
 
 import datetime as dt
@@ -13,17 +16,27 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from backend.server import DashboardUpdater
-from backend.support.events import (
-    MAX_EVENT_LINE_BYTES,
-    DailyEventHandler,
+from data.runtime.events import (
+    ActivityHandler,
+    current_log_context,
     event_extra,
+    logging_context,
     validate_event,
 )
-from backend.support.logs import open_run_log
+from data.runtime.log_store import ACTIVITY_RECORD_BYTES, read_activity
+from data.runtime.logs import open_run_log
+from runtime.dashboard import DashboardUpdater
 
 _NOW = dt.datetime(2026, 10, 3, 0, 30, tzinfo=dt.UTC)
-_BASE = {"schema": 1, "time": _NOW.isoformat(), "dry": False}
+_BASE = {
+    "schema": 1,
+    "time": _NOW.isoformat(),
+    "dry": False,
+    "event_id": "e" * 32,
+    "level": "INFO",
+    **current_log_context(),
+    "run_id": "a" * 32,
+}
 
 
 def _record(
@@ -34,7 +47,7 @@ def _record(
 ) -> logging.LogRecord:
     """Return a native record with independently supplied facts."""
     record = logging.LogRecord(
-        "backend.fixture",
+        "runtime.fixture",
         logging.INFO,
         __file__,
         1,
@@ -60,16 +73,23 @@ class EventSchemaTests(unittest.TestCase):
             {
                 "kind": "routine_finished",
                 "routine": "pexbot",
-                "status": "unconfirmed",
+                "outcome": "succeeded",
                 "updated": None,
                 "duration_seconds": 1.25,
             },
             {
                 "kind": "routine_finished",
                 "routine": "dyks",
-                "status": "no_update",
+                "outcome": "succeeded",
                 "updated": 0,
                 "duration_seconds": 0,
+            },
+            {"kind": "collection_started", "task_id": "project-data"},
+            {
+                "kind": "collection_finished",
+                "task_id": "project-data",
+                "outcome": "succeeded",
+                "duration_seconds": 1.0,
             },
             {"kind": "website_started"},
             {
@@ -98,7 +118,7 @@ class EventSchemaTests(unittest.TestCase):
             **_BASE,
             "kind": "routine_finished",
             "routine": "dyks",
-            "status": "updated",
+            "outcome": "succeeded",
             "updated": 1,
             "duration_seconds": 1.0,
         }
@@ -111,8 +131,8 @@ class EventSchemaTests(unittest.TestCase):
             {"dry": 1},
             {"routine": []},
             {"routine": "private"},
-            {"status": {}},
-            {"status": "unknown"},
+            {"outcome": {}},
+            {"outcome": "unknown"},
             {"updated": True},
             {"updated": -1},
             {"duration_seconds": float("nan")},
@@ -133,147 +153,193 @@ class EventSchemaTests(unittest.TestCase):
             assert not validate_event(value)
         assert not validate_event({**base, "kind": "service_started"})
 
+    def test_publication_outcomes_keep_attempts_and_unknown_facts(
+        self,
+    ) -> None:
+        """Keep target outcomes independent from invocation success."""
+        base = {
+            **_BASE,
+            "attempt_id": "b" * 32,
+            "kind": "publication_finished",
+            "task_id": "pageviews",
+            "site": "enwiki",
+            "title": "Project:Games",
+            "outcome": "unconfirmed",
+            "confirmed_edits": None,
+            "revision_id": None,
+            "duration_seconds": None,
+        }
+        assert validate_event(base)
+        assert validate_event({
+            **base,
+            "outcome": "saved",
+            "confirmed_edits": 1,
+            "revision_id": 1_500_000_000,
+            "duration_seconds": 0.5,
+        })
+        for replacement in (
+            {"attempt_id": None},
+            {"run_id": None},
+            {"outcome": "succeeded"},
+            {"revision_id": True},
+            {"revision_id": -1},
+            {"title": "private\ntext"},
+            {"confirmed_edits": True},
+        ):
+            with self.subTest(replacement=replacement):
+                assert not validate_event({**base, **replacement})
+        started = {
+            key: value
+            for key, value in base.items()
+            if key
+            not in {
+                "outcome",
+                "confirmed_edits",
+                "revision_id",
+                "duration_seconds",
+            }
+        }
+        assert validate_event({**started, "kind": "publication_started"})
+
+    def test_accepted_data_keeps_explicit_unknown_coverage(self) -> None:
+        """Retain unknown clocks and invocation provenance."""
+        base = {
+            **_BASE,
+            "run_id": None,
+            "kind": "dataset_accepted",
+            "dataset_id": "projects:zhwiki:电子游戏",
+            "generation": "g1",
+            "digest": None,
+            "observed_at": None,
+            "coverage_start": None,
+            "coverage_end": None,
+        }
+        assert validate_event(base)
+        assert validate_event({
+            **base,
+            "digest": "a" * 64,
+            "observed_at": _NOW.isoformat(),
+            "coverage_start": "2026-10-01",
+            "coverage_end": "2026-10-02",
+        })
+        for replacement in (
+            {"digest": "not-a-digest"},
+            {"observed_at": "2026-10-03T01:00:00"},
+            {"coverage_start": "2026-02-30"},
+            {"coverage_end": []},
+            {"coverage_start": "2026-10-02", "coverage_end": "2026-10-01"},
+        ):
+            with self.subTest(replacement=replacement):
+                assert not validate_event({**base, **replacement})
+
 
 class EventStorageTests(unittest.TestCase):
-    """Write bounded events independently of diagnostic logs."""
+    """Keep activity explicit, correlated, and independent of text."""
 
     def setUp(self) -> None:
-        """Create an isolated directory and delayed event handler."""
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name).resolve()
-        self.handler = DailyEventHandler(self.root)
+        """Use an inert isolated handler and canonical segment path."""
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.handler = ActivityHandler(self.root)
         self.addCleanup(self.handler.close)
 
-    def test_construction_and_ordinary_messages_are_inert(self) -> None:
-        """Write only explicit facts independent of message wording."""
-        assert list(self.root.iterdir()) == []
+    def test_only_explicit_events_write_activity(self) -> None:
+        """Retain identities independently of diagnostic wording."""
         ordinary = _record(service="hub")
         del ordinary.major_event
         self.handler.handle(ordinary)
-        assert list(self.root.iterdir()) == []
-        record = _record(service="hub")
-        self.handler.handle(record)
-        raw = (self.root / "events.2026-10-03.jsonl").read_bytes()
-        value = json.loads(raw)
-        assert value == {**_BASE, "kind": "service_started", "service": "hub"}
-        assert b"private" not in raw
-        assert len(raw) <= MAX_EVENT_LINE_BYTES
-        assert raw.endswith(b"\n")
-
-    def test_retention_and_delayed_records_use_utc_dates(self) -> None:
-        """Keep thirty dates without recreating expired files."""
-        expired = self.root / "events.2026-09-03.jsonl"
-        expired.write_text("expired\n")
-        retained = self.root / "events.2026-09-04.jsonl"
-        retained.write_text("retained\n")
-        invalid = self.root / "events.2026-02-30.jsonl"
-        invalid.write_text("invalid\n")
-        private = self.root / "private"
-        private.write_text("untouched")
-        linked = self.root / "events.2026-09-01.jsonl"
-        linked.symlink_to(private)
-        directory = self.root / "events.2026-09-02.jsonl"
-        directory.mkdir()
-        self.handler.handle(_record(service="hub"))
-        before = _NOW.replace(hour=0, minute=0) - dt.timedelta(seconds=1)
-        self.handler.handle(_record(service="hub", when=before))
-        self.handler.handle(
-            _record(service="hub", when=_NOW - dt.timedelta(days=40)),
-        )
-        assert not expired.exists()
-        assert retained.read_text() == "retained\n"
-        assert invalid.read_text() == "invalid\n"
-        assert linked.is_symlink()
-        assert directory.is_dir()
-        assert private.read_text() == "untouched"
-        assert (self.root / "events.2026-10-02.jsonl").is_file()
-        assert (self.root / "events.2026-10-03.jsonl").is_file()
-        assert not (self.root / "events.2026-08-24.jsonl").exists()
-
-    def test_unsafe_and_full_targets_are_nonfatal(self) -> None:
-        """Reject linked targets and preserve capped regular data."""
-        target = self.root / "private"
-        target.write_text("unchanged")
-        path = self.root / "events.2026-10-03.jsonl"
-        path.symlink_to(target)
-        self.handler.handle(_record(service="hub"))
-        assert target.read_text() == "unchanged"
-        path.unlink()
-        path.mkdir()
-        self.handler.handle(_record(service="hub"))
-        assert path.is_dir()
-        path.rmdir()
-        path.write_bytes(b"full")
-        with patch("backend.support.events.MAX_EVENT_FILE_BYTES", 4):
+        assert not list(self.root.iterdir())
+        with logging_context(run_id="a" * 32):
             self.handler.handle(_record(service="hub"))
-        assert path.read_bytes() == b"full"
-        with patch(
-            "backend.support.events.os.open",
-            side_effect=OSError("unavailable"),
+        value = read_activity(self.root, "2026-10-03")
+        assert value["availability"] == "available"
+        event = value["events"][0]
+        assert event["run_id"] == "a" * 32
+        assert event["boot_id"] == current_log_context()["boot_id"]
+        assert validate_event(event)
+        raw = next((self.root / "activity").glob("*.jsonl")).read_bytes()
+        assert len(raw) <= ACTIVITY_RECORD_BYTES
+        assert b"private" not in raw
+
+    @staticmethod
+    def test_context_restores_nested_and_independent_threads() -> None:
+        """Isolate nested attempts and concurrent invocation IDs."""
+        original = current_log_context()
+        with logging_context(run_id="a" * 32, parent_run_id="f" * 32):
+            with logging_context(run_id="a" * 32, attempt_id="b" * 32):
+                assert current_log_context()["parent_run_id"] == "f" * 32
+                assert current_log_context()["attempt_id"] == "b" * 32
+            with logging_context(attempt_id="b" * 32):
+                assert current_log_context()["attempt_id"] == "b" * 32
+            assert current_log_context()["attempt_id"] is None
+            with logging_context(run_id="c" * 32):
+                assert current_log_context()["parent_run_id"] is None
+            assert current_log_context()["run_id"] == "a" * 32
+        assert current_log_context() == original
+
+        def observe(identifier: str) -> dict:
+            """Return the worker's independently bound identity."""
+            with logging_context(run_id=identifier):
+                return current_log_context()
+
+        with ThreadPoolExecutor(2) as pool:
+            values = list(pool.map(observe, ("c" * 32, "d" * 32)))
+        assert [value["run_id"] for value in values] == ["c" * 32, "d" * 32]
+        assert current_log_context() == original
+
+    def test_failed_writes_report_loss_once_then_recover(self) -> None:
+        """Keep source work alive with explicit observed loss counts."""
+        output = io.StringIO()
+        with (
+            redirect_stderr(output),
+            patch(
+                "data.runtime.events.append_log",
+                side_effect=OSError("disk"),
+            ),
         ):
             self.handler.handle(_record(service="hub"))
+            self.handler.handle(_record(service="hub"))
+        assert output.getvalue().count("logging unavailable") == 1
+        self.handler.handle(_record(service="hub"))
+        events = read_activity(self.root, "2026-10-03")["events"]
+        assert [event["kind"] for event in events] == [
+            "logging_recovered",
+            "service_started",
+        ]
+        assert events[0]["dropped"] == 2
+        assert self.handler.dropped == 0
 
-    def test_linked_directory_and_invalid_facts_are_ignored(self) -> None:
-        """Leave malformed facts and linked destinations unwritten."""
-        linked = self.root / "linked"
-        linked.symlink_to(self.root, target_is_directory=True)
-        handler = DailyEventHandler(linked)
-        self.addCleanup(handler.close)
-        handler.handle(_record(service="hub"))
-        self.handler.handle(_record(service="hub", message="secret"))
-        self.handler.handle(_record(service="hub", schema=1))
-        assert list(self.root.iterdir()) == [linked]
+    def test_failed_fallback_does_not_interrupt_source_work(self) -> None:
+        """Contain errors from a closed diagnostic fallback."""
+        with (
+            patch(
+                "data.runtime.events.append_log",
+                side_effect=OSError("disk"),
+            ),
+            patch(
+                "data.runtime.log_store.sys.stderr.write",
+                side_effect=OSError("closed"),
+            ),
+        ):
+            self.handler.handle(_record(service="hub"))
+        assert self.handler.dropped == 1
 
-    def test_independent_handlers_append_complete_lines(self) -> None:
-        """Keep concurrent appends as independent valid records."""
-        other = DailyEventHandler(self.root)
-        self.addCleanup(other.close)
-        path = self.root / "events.2026-10-03.jsonl"
-        # Creation is covered separately; isolate append locking from
-        # host-specific races when concurrent calls first create a file.
-        path.touch()
-
-        def append(index: int) -> None:
-            """Emit through independent native handler locks."""
-            handler = self.handler if index % 2 else other
-            handler.handle(_record(service="hub"))
-
-        total = 64
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            list(executor.map(append, range(total)))
-        lines = path.read_bytes().splitlines()
-        assert len(lines) == total
-        assert all(validate_event(json.loads(line)) for line in lines)
-
-    def test_nested_run_contexts_preserve_diagnostics(self) -> None:
-        """Share one event handler and preserve diagnostic details."""
+    def test_nested_handlers_preserve_one_diagnostic_and_event(self) -> None:
+        """Share outputs without configuring the root logger."""
         with redirect_stderr(io.StringIO()), open_run_log(self.root) as logger:
-            logger.info("Started dyks. This text alone is not an event.")
-            assert list(self.root.glob("events.*.jsonl")) == []
-            with open_run_log() as inner:
-                assert logger is inner
-                inner.info(
+            with open_run_log(), logging_context(run_id="a" * 32):
+                logger.info(
                     "Private diagnostic details.",
                     extra=event_extra("service_started", service="hub"),
                 )
-            logger.info(
-                "Outer diagnostic.",
-                extra=event_extra("service_stopped", service="hub"),
-            )
-        diagnostics = next(self.root.glob("aranami.*.log")).read_text()
-        raw = next(self.root.glob("events.*.jsonl")).read_text()
-        assert diagnostics.count("Private diagnostic details.") == 1
+        text = next((self.root / "diagnostics").glob("*.log")).read_text()
+        assert text.count("Private diagnostic details.") == 1
+        assert "run=" + "a" * 32 in text
+        raw = next((self.root / "activity").glob("*.jsonl")).read_text()
         assert "Private diagnostic details." not in raw
-        events = [json.loads(line) for line in raw.splitlines()]
-        assert [event["kind"] for event in events] == [
-            "service_started",
-            "service_stopped",
-        ]
-        assert all(validate_event(event) for event in events)
+        assert validate_event(json.loads(raw))
 
-    def test_website_lifecycle_emits_observed_outcomes(self) -> None:
-        """Produce facts for complete, partial, and failed refreshes."""
+    def test_website_lifecycle_emits_actual_outcomes(self) -> None:
+        """Retain actual complete, partial, and failed outcomes."""
         collect = Mock(return_value={"errors": []})
         updater = DashboardUpdater(
             self.root / "dashboard.json",
@@ -291,16 +357,14 @@ class EventStorageTests(unittest.TestCase):
                 assert not updater.refresh()
             finally:
                 updater.stop()
-        raw = next(self.root.glob("events.*.jsonl")).read_text()
-        events = [json.loads(line) for line in raw.splitlines()]
+        events = [
+            json.loads(line)
+            for path in (self.root / "activity").glob("*.jsonl")
+            for line in path.read_text().splitlines()
+        ]
         assert [
             event["status"]
             for event in events
             if event["kind"] == "website_finished"
         ] == ["updated", "partial", "failed"]
-        assert events[0]["kind"] == "service_started"
-        assert events[-1]["kind"] == "service_stopped"
-        assert "private" not in raw
-        assert all(
-            validate_event(event) and event["dry"] is False for event in events
-        )
+        assert all(validate_event(event) for event in events)

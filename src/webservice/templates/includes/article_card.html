@@ -1,0 +1,42 @@
+<article class="ui-card article-card-body" aria-labelledby="article-{{ section.key }}-{{ card_index }}">
+{% if section.is_review %}<a class="review-icon-link ui-card__icon" href="{{ card.review_icon_source }}" title="{{ card.review_icon_label }}">{% if card.review_icon %}<img class="review-icon" src="{{ card.review_icon }}" width="20" height="20" alt="{{ card.review_icon_label }}">{% else %}<svg class="review-icon" width="20" height="20" viewBox="0 0 20 20" role="img" aria-label="{{ card.review_icon_label }}" focusable="false"><title>{{ card.review_icon_label }}</title><use href="{{ asset_url('assets/icons/report-icons.svg') }}#{{ card.review_icon_symbol }}"></use></svg>{% endif %}</a>{% elif card.highlight_icon %}<a class="highlight-icon-link ui-card__icon" href="{{ card.highlight_icon.source }}" title="{{ card.highlight_icon.label }}"><img class="highlight-icon" src="{{ card.highlight_icon.url }}" width="20" height="20" alt="{{ card.highlight_icon.label }}"></a>{% elif card.pageviews_url %}<img class="article-medal ui-card__icon" src="{{ asset_url('assets/icons/medal-' ~ card.rank ~ '.svg') }}" width="22" height="22" alt="" aria-hidden="true">{% else %}<span class="article-rank ui-card__icon" aria-hidden="true"></span>{% endif %}
+<div class="ui-card__text">
+<div class="ui-card__text__title">
+<h3 id="article-{{ section.key }}-{{ card_index }}"><span class="article-summary"><bdi lang="zh">{{ card.link }}</bdi></span></h3> {% include "includes/assessment_chips.html" %}
+</div>
+<div class="ui-card__text__description">
+{% if card.extract is not none %}<p class="article-extract"><bdi lang="{{ card.extract_language }}">{{ card.extract }}</bdi></p>{% endif %}
+</div>
+<div class="ui-card__text__supporting-text">
+{% if card.review_link %}
+      <div class="card-meta review-meta">
+      <span class="card-meta-lead">{{ card.review_link }}{% if card.review_dates or card.review_counts or card.review_section_size %}{{ ': ' if language_tag == 'en' else '\uff1a' }}{% endif %}</span>
+      {% if card.review_dates or card.review_counts or card.review_section_size %}
+      <ul class="metadata-items" role="list">
+        {% for date in card.review_dates %}
+        <li><span class="review-mark" aria-hidden="true">{{ date.marker }}</span> {% if date.url %}<a href="{{ date.url }}" title="{{ date.label }}">{% endif %}<time datetime="{{ date.value }}" title="{{ date.label }}" aria-label="{{ date.description }}">{{ date.elapsed }}</time>{% if date.url %}</a>{% endif %}</li>
+        {% endfor %}
+        {% if card.review_counts %}<li>{% if card.review_counts.participant_count is not none %}<span class="review-participants" title="{{ card.review_counts.description }}"><span aria-hidden="true">☺︎ {{ card.review_counts.participant_count }}</span><span class="visually-hidden">{{ card.review_counts.description }}</span></span>{% else %}<span class="review-comments">{{ card.review_counts.description }}</span>{% endif %}</li>{% endif %}
+        {% if card.review_section_size %}<li><span class="review-section-size" title="{{ card.review_section_size.description }}">{{ card.review_section_size.label }}</span></li>{% endif %}
+      </ul>
+      {% endif %}
+      </div>
+      {% elif card.pageviews_url %}
+      <div class="card-meta popularity-meta">
+      <span class="card-meta-lead"><time datetime="{{ card.date.value }}" title="{{ card.date.value }}">{{ card.date.label }}</time></span>
+      <ul class="metadata-items" role="list">
+        <li><a href="{{ card.pageviews_url }}" class="pageviews-number">{{ card.views }}</a></li>
+        {% if card.site_rank %}<li><a class="site-rank" href="{{ card.site_rank_url }}">{{ card.site_rank }}</a></li>{% endif %}
+      </ul>
+      </div>
+      {% else %}
+      <ul class="card-meta metadata-items" role="list">
+        {% if section.key == 'recognized' %}{% if card.showcase_type %}<li><span class="homepage-type">{{ card.showcase_type.description }}</span></li>{% elif card.kind %}<li>{{ card.kind }}</li>{% endif %}{% endif %}
+        {% if card.date or card.scheduled or card.date_note %}<li>{{ card.scheduled }}{% if card.date %}<time datetime="{{ card.date.value }}" title="{{ card.date.value }}">{{ card.date.label }}</time>{% endif %}{% if card.date_note %}<abbr class="date-note-marker" title="{{ card.date_note }}" aria-label="{{ card.date_note }}">†</abbr>{% endif %}</li>{% endif %}
+        {% if section.key != 'recognized' and card.kind %}<li>{{ card.kind }}</li>{% endif %}
+      </ul>
+      {% endif %}
+</div>
+</div>
+
+</article>

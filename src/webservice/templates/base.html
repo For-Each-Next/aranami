@@ -8,13 +8,12 @@
   <link rel="icon" href="{{ asset_url('assets/images/favicon.png') }}" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="{{ asset_url('assets/images/aranami-icon.png') }}">
   <link rel="stylesheet" href="{{ asset_url('styles.css') }}">
-  <link rel="stylesheet" href="{{ asset_url('codex.css') }}">
   {% if live %}<script src="{{ asset_url('live.js') }}" defer></script>{% endif %}
-  <script src="{{ asset_url('navigation.js') }}" defer></script>
+  <script type="module" src="{{ asset_url('navigation.js') }}"></script>
   {% block assets %}{% endblock %}
   <title>{{ heading }} · Aranami</title>
 </head>
-<body>
+<body data-heading-copy-label="{{ t.nav.copy_section_link }}" data-heading-copy-success="{{ t.nav.section_link_copied }}" data-heading-copy-failure="{{ t.nav.section_link_fallback }}" data-heading-permalink-label="{{ t.nav.section_permalink }}" data-heading-page-permalink-label="{{ t.nav.page_permalink }}" data-heading-copy-close="{{ t.ops.close }}">
   <a href="#main" class="skip">{{ t.nav.skip }}</a>
   <header class="masthead">
     <div class="shell header-inner">
@@ -22,10 +21,15 @@
       <nav class="global-navigation" aria-label="{{ t.nav.global }}">
         <a href="/"{% if navigation and navigation.path == '/' %} aria-current="page"{% endif %}>{{ t.nav.dashboard }}</a>
         <a href="/maintenance/"{% if navigation and navigation.path == '/maintenance/' %} aria-current="page"{% endif %}>{{ t.nav.backlog }}</a>
-        <a href="/reports/"{% if navigation and navigation.path == '/reports/' %} aria-current="page"{% endif %}>{{ t.nav.reports }}</a>
+        <a href="/discussions/"{% if navigation and navigation.path == '/discussions/' %} aria-current="page"{% endif %}>{{ t.discussions.heading }}</a>
         <details class="navigation-tools">
           <summary>{{ t.nav.tools }}</summary>
           <ul class="navigation-tools-list">
+            <li><a href="/reports/"{% if navigation and navigation.path == '/reports/' %} aria-current="page"{% endif %}>{{ t.nav.reports }}</a></li>
+            <li><a href="/quality-analysis/"{% if navigation and navigation.path == '/quality-analysis/' %} aria-current="page"{% endif %}>{{ t.quality_analysis.heading }}</a></li>
+            <li><a href="/quality-authorship/"{% if navigation and navigation.path == '/quality-authorship/' %} aria-current="page"{% endif %}>{{ t.quality_authorship.heading }}</a></li>
+            <li><a href="/checks/"{% if navigation and navigation.path == '/checks/' %} aria-current="page"{% endif %}>{{ t.nav.checks }}</a></li>
+            <li><a href="/redirects/"{% if navigation and navigation.path == '/redirects/' %} aria-current="page"{% endif %}>{{ t.redirects.heading }}</a></li>
             <li><a href="/newsletter/"{% if navigation and navigation.path == '/newsletter/' %} aria-current="page"{% endif %}>{{ t.nav.newsletter }}</a></li>
           </ul>
         </details>

@@ -16,10 +16,10 @@ from unittest import TestCase
 from unittest.mock import MagicMock, Mock, patch
 from urllib.error import HTTPError
 
-from backend.services.zhwiki import pageviews as report_pageviews
-from backend.website import pageviews as website_pageviews
 from shared.sources import pageviews, pageviews_rate
 from shared.sources.cycle import source_cycle
+from tasks.website import pageviews as website_pageviews
+from tasks.zhwiki import pageviews as report_pageviews
 
 if TYPE_CHECKING:
     import urllib.request

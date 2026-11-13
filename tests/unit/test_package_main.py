@@ -1,4 +1,4 @@
-"""Verify the backend command configures the shared update hub."""
+"""Verify the runtime command configures the shared update hub."""
 
 # Keep unittest exception assertions consistent with the existing tests.
 # ruff: file-ignore[pytest-unittest-raises-assertion]
@@ -9,11 +9,11 @@ from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
-from backend import __main__ as package_main, hub
+from runtime import __main__ as package_main, hub
 
 
 class TestPackageMain(TestCase):
-    """Verify runtime settings reach the common backend entry point."""
+    """Verify runtime settings reach the common runtime entry point."""
 
     @staticmethod
     def test_module_entry_point_uses_the_shared_hub() -> None:
@@ -82,6 +82,7 @@ class TestPackageMain(TestCase):
         assert (config.host, config.port) == ("127.0.0.2", 9000)
         assert config.refresh_intervals == {
             "reviews": 3600,
+            "consistency": 3600,
             "recognized": 12 * 3600,
             "dyk": 6 * 3600,
             "pageviews": 2 * 3600,

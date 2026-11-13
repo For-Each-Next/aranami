@@ -1,0 +1,19 @@
+<article class="ui-card routine-row" aria-labelledby="routine-{{ routine.identifier }}-heading" id="routine-{{ routine.identifier }}">
+<svg class="report-icon ui-card__icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#{{ routine.icon }}"></use></svg>
+<div class="ui-card__text">
+<div class="ui-card__text__title">
+<h3 id="routine-{{ routine.identifier }}-heading">{% if routine.targets | length == 1 %}{{ routine.targets[0] }}{% else %}{{ routine.name }}<span class="routine-targets">{{ routine.opening }}{% for target in routine.targets %}{{ target }}{% if not loop.last %} {% endif %}{% endfor %}{{ routine.closing }}</span>{% endif %}</h3>
+</div>
+<div class="ui-card__text__description">
+<p class="routine-status"><a class="status-link" href="#{{ routine.popup_id }}" aria-controls="{{ routine.popup_id }}" aria-haspopup="dialog">{{ routine.status }}</a></p>
+{% if routine.coverage and routine.status != routine.coverage %}<p class="routine-coverage">{{ routine.coverage }}</p>{% endif %}
+</div>
+<div class="ui-card__text__supporting-text">
+<dl class="routine-meta">
+<div><dt>{{ t.reports.execution_started if routine.running else t.reports.last_execution }}</dt><dd>{% with time=routine.observed %}{% include "includes/time.html" %}{% endwith %}</dd></div>
+<div><dt>{{ t.reports.next_execution }}</dt><dd{% if routine.schedule.expires %} data-observation-expires="{{ routine.schedule.expires }}" data-stale-text="{{ t.ops.schedule_stale }}"{% endif %}>{% if routine.schedule.time.known %}{% with time=routine.schedule.time %}{% include "includes/time.html" %}{% endwith %}{% else %}{{ routine.schedule.label }}{% endif %}</dd></div>
+</dl>
+</div>
+</div>
+{% include "includes/report_details.html" %}
+</article>

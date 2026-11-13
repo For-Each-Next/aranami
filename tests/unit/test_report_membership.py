@@ -1,6 +1,7 @@
 """Verify cached identities and uncached membership comparisons."""
 
 import hashlib
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -9,8 +10,10 @@ from unittest.mock import patch
 import polars as pl
 from wiki_fixtures import OfflineSite
 
-from backend.support import report_membership as cache
-from backend.support.report_membership import membership_changes
+from data.reports import report_key
+from data.runtime import report_membership as cache
+from data.runtime.report_membership import membership_changes
+from shared.support.cache import cache_key
 
 
 class TestReportMembership(TestCase):
@@ -44,8 +47,13 @@ class TestReportMembershipCache(TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         self.site = OfflineSite("zh", "wikipedia")
-        self.target = "WikiProject:Example/Report"
+        self.target = "WikiProject:电子游戏/认证条目/甲"
         self.text = "# [[Game]]"
+        self.cache_directory = (
+            self.root
+            / "cache"
+            / cache_key("report-membership", self.site.dbName(), self.target)
+        )
         working_directory = patch.object(
             cache.Path,
             "cwd",
@@ -63,7 +71,9 @@ class TestReportMembershipCache(TestCase):
         assert (
             cache.load_membership(self.site, self.target, self.text) == members
         )
-        [path] = (self.root / "cache").glob("*.parquet")
+        [path] = self.cache_directory.glob("*.parquet")
+        assert path.relative_to(self.root).as_posix().isascii()
+        assert re.fullmatch(r"\d{8}T\d{6}\.parquet", path.name)
         assert pl.read_parquet(path).select("title", "page_id").to_dict(
             as_series=False,
         ) == {"title": ["Game", "Legacy"], "page_id": [123, None]}
@@ -96,17 +106,52 @@ class TestReportMembershipCache(TestCase):
         """Store empty membership with an explicit schema."""
         cache.save_membership(self.site, self.target, self.text, {})
         assert not cache.load_membership(self.site, self.target, self.text)
-        [path] = (self.root / "cache").glob("*.parquet")
+        [path] = self.cache_directory.glob("*.parquet")
         assert pl.read_parquet(path).schema == pl.Schema({
             "text_sha256": pl.String,
             "title": pl.String,
             "page_id": pl.Int64,
         })
 
+    def test_parquet_title_remains_a_generation_directory(self) -> None:
+        """Preserve timestamped files for file-like wiki titles."""
+        target = self.target + ".parquet"
+        cache.save_membership(self.site, target, self.text, {"Game": 123})
+        assert cache.load_membership(self.site, target, self.text) == {
+            "Game": 123,
+        }
+        directory = (
+            self.root
+            / "cache"
+            / cache_key("report-membership", self.site.dbName(), target)
+        )
+        [path] = directory.glob("*.parquet")
+        assert re.fullmatch(r"\d{8}T\d{6}\.parquet", path.name)
+
+    def test_legacy_title_paths_rebuild_without_rewriting_old_files(
+        self,
+    ) -> None:
+        """Leave former cache paths intact while saving an ASCII key."""
+        old = (
+            self.root
+            / "cache"
+            / report_key("report-membership", self.site.dbName(), self.target)
+            / "members/20260101T000000.parquet"
+        )
+        old.parent.mkdir(parents=True)
+        old.write_bytes(b"old cache")
+        assert not cache.load_membership(self.site, self.target, self.text)
+        cache.save_membership(self.site, self.target, self.text, {"游戏": 123})
+        assert cache.load_membership(self.site, self.target, self.text) == {
+            "游戏": 123,
+        }
+        assert old.read_bytes() == b"old cache"
+        assert self.cache_directory.relative_to(self.root).as_posix().isascii()
+
     def test_malformed_and_unreadable_snapshots_are_disposable(self) -> None:
         """Ignore missing fields, invalid IDs, and duplicate titles."""
         cache.save_membership(self.site, self.target, self.text, {"Game": 123})
-        [path] = (self.root / "cache").glob("*.parquet")
+        [path] = self.cache_directory.glob("*.parquet")
         identity = pl.read_parquet_metadata(path)["aranami.cache"]
         digest = hashlib.sha256(self.text.encode()).hexdigest()
         malformed = (
@@ -147,4 +192,4 @@ class TestReportMembershipCache(TestCase):
             cache.load_membership(self.site, self.target, self.text)
             == original
         )
-        assert not list((self.root / "cache").glob(".*.parquet"))
+        assert not list(self.cache_directory.glob(".*.parquet"))

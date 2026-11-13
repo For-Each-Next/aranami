@@ -11,11 +11,12 @@ from unittest import TestCase
 
 import polars as pl
 
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.newpages import collect_new_pages, valid_new_pages
-from backend.newsletter.schema import valid_newsletter
+from data.newsletter.schema import valid_newsletter
+from data.newsletter.validation import valid_new_pages
 from newsletter.test_newsletter_data import Reader
 from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.collection import collect_source_facts
+from tasks.zhwiki.newsletter.newpages import collect_new_pages
 from updater.services.newsletter import render_issue
 
 _REGISTER = "WikiProject:电子游戏/新进条目"
@@ -50,6 +51,35 @@ class DailyRegisterReader(Reader):
 
 class TestDailyNewArticleRefresh(TestCase):
     """Use current reads with bounded quarter membership and grades."""
+
+    @staticmethod
+    def test_later_draft_keeps_daily_membership_observation_time() -> None:
+        """Distinguish a reused snapshot from fresh register reads."""
+        captured = dt.datetime(2026, 11, 4, 0, 3, tzinfo=dt.UTC)
+        prepared = captured.replace(hour=13)
+        result = collect_source_facts(
+            DailyRegisterReader(),
+            now=prepared,
+            current_counts={"total": 3, "ga": 1},
+            current_assessments=pl.DataFrame({
+                "full_title": ["October", "November", "Future"],
+                "pa_class": ["B", "GA", "FA"],
+            }),
+            current_observed_at=captured,
+        )
+        facts = result["issues"]["2027-01"]
+        assert facts["updated_at"] == prepared.isoformat()
+        assert facts["overview_observed_at"] == captured.isoformat()
+        assert facts["year_review"]["overview_observed_at"] == (
+            captured.isoformat()
+        )
+        assert facts["new_pages_data"]["grades_observed_at"] == (
+            captured.isoformat()
+        )
+        assert facts["new_pages_data"]["source_observed_at"] == (
+            prepared.isoformat()
+        )
+        assert valid_newsletter(result)
 
     @staticmethod
     def test_november_second_includes_completed_november_records() -> None:

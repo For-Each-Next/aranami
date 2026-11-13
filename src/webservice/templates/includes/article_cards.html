@@ -1,10 +1,10 @@
 {% if section.empty %}
-<div class="cdx-message cdx-message--notice" aria-live="polite"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ section.empty }}</div></div>
+<div class="ui-message ui-message--notice" aria-live="polite"><svg class="ui-icon ui-message__icon" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="ui-message__content">{{ section.empty }}</div></div>
 {% else %}
 {% if section.is_review %}<ul class="card-grid article-list review-cards" role="list">{% else %}<ol class="card-grid article-list highlights" role="list">{% endif %}
   {% for card in section.cards %}
   <li class="article-card"{% if card.rank and not section.is_review %} value="{{ card.rank }}"{% endif %}>
-    {% with card_index=loop.index %}{% include "includes/generated/article_card.html" %}{% endwith %}
+    {% with card_index=loop.index %}{% include "includes/discussion_card.html" if section.key == "discussions" or section.is_discussion else "includes/article_card.html" %}{% endwith %}
   </li>
   {% endfor %}
 {% if section.is_review %}</ul>{% else %}</ol>{% endif %}

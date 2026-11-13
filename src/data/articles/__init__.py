@@ -1,0 +1,1 @@
+"""Provide data articles components."""

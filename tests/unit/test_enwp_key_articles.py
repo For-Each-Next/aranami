@@ -21,19 +21,16 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.sql.selectable import Select
 from wiki_fixtures import OfflineSite
 
-from backend.services.enwiki import key_articles as data_service
-from backend.services.enwiki.article_changes import (
+from data.article_changes import (
     ArticleChanges,
     QualityChange,
     compare_articles,
 )
-from backend.support.report_membership import (
-    load_membership,
-    save_membership,
-)
-from backend.support.report_status import read_report_status
+from data.runtime.report_membership import load_membership, save_membership
+from data.runtime.status import read_status
+from runtime.jobs import JobContext, enwp_key_articles as job
 from shared.sources.quarry import enwp
-from updater.jobs import JobContext, enwp_key_articles as job
+from tasks.enwiki import key_articles as data_service
 from updater.services.zhwiki import enwp_key_articles as reports
 
 if TYPE_CHECKING:
@@ -196,8 +193,8 @@ class TestEnglishReportService(TestCase):
         """Choose source reads, membership, and summaries by type."""
         site = OfflineSite("zh", "wikipedia")
         cases = (
-            (replace(job.REPORT_SPECS[0], name="quality"), False, "Added"),
-            (replace(job.REPORT_SPECS[1], name="dated"), True, "GA listed"),
+            (replace(job.REPORT_SPECS[0], name="quality"), False, "Add"),
+            (replace(job.REPORT_SPECS[1], name="dated"), True, "GA"),
         )
         for spec, dated, verb in cases:
             original = (
@@ -260,9 +257,9 @@ class TestEnglishReportService(TestCase):
                 compare_articles({}, members),
                 data.linked_titles,
             )
-            breakdown = "0 FA, 0 FL, 1 GA" if dated else "1 Top, 0 High"
+            breakdown = "FA 0, FL 0, GA 1 (+1)" if dated else "Top 1, High 0"
             assert summary.startswith(
-                f"1 article: {breakdown}. {verb} «[[:en:",
+                f"1 article (+1): {breakdown}. {verb} «[[:en:",
             )
             assert ("Example" in data.old_articles[spec.name]) is not dated
             if dated:
@@ -371,8 +368,8 @@ class TestEnglishReportService(TestCase):
             {8: "舊", 9: "新"},
         )
         assert summary == (
-            "1 article. Added «[[:en:New]]» ([[新]]); "
-            "removed «[[:en:Old]]» ([[舊]])."
+            "1 article (+1/-1). Add «[[:en:New]]» &#91;[[新]]&#93;; remove "
+            "«[[:en:Old]]» &#91;[[舊]]&#93;."
         )
         long_rows = pl.DataFrame({
             "en_title": ["中文" * 200],
@@ -385,11 +382,11 @@ class TestEnglishReportService(TestCase):
         )
         summary_budget = 50
         assert len(short.encode()) <= summary_budget
-        assert short == "1 article. Added 1 more."
+        assert short == "1 article (+1). Add 1 more."
 
     @staticmethod
     def test_summary_only_formats_prepared_metadata() -> None:
-        """Render backend facts without source reads or new analysis."""
+        """Render runtime facts without source reads or new analysis."""
         previous = data_service.OldArticle("Before", 1, 10, "GA")
         current = data_service.OldArticle("After", 2, 20, "FA")
         changes = ArticleChanges(
@@ -403,7 +400,7 @@ class TestEnglishReportService(TestCase):
         links = {1: "前", 2: "後"}
         with (
             patch(
-                "backend.services.enwiki.article_changes.compare_articles",
+                "data.article_changes.compare_articles",
                 side_effect=AssertionError("Formatting must not compare."),
             ) as compare,
             patch.object(
@@ -420,26 +417,26 @@ class TestEnglishReportService(TestCase):
             summary = reports.build_edit_summary(changes, links)
             quality = reports.build_edit_summary(changes, links, quality=True)
         assert summary == (
-            "1 article: 0 Top, 1 High. Added «[[:en:After]]» ([[後]]); "
-            "removed «[[:en:Before]]» ([[前]])."
+            "1 article (+1/-1): Top 0, High 1. Add «[[:en:After]]» "
+            "&#91;[[後]]&#93;; remove «[[:en:Before]]» &#91;[[前]]&#93;."
         )
         assert quality == (
-            "1 article: 1 FA, 0 FL, 0 GA. "
-            "FA prompted «[[:en:After]]» ([[後]]); "
-            "GA delisted «[[:en:Before]]» ([[前]])."
+            "1 article (+1/-1): FA 1 (+1), FL 0, GA 0 (-1). FA "
+            "«[[:en:After]]» &#91;[[後]]&#93;; DGA «[[:en:Before]]» "
+            "&#91;[[前]]&#93;."
         )
         compare.assert_not_called()
         source.assert_not_called()
         dates.assert_not_called()
 
     @staticmethod
-    def test_summary_links_parenthesized_chinese_counterpart() -> None:
+    def test_summary_links_bracketed_chinese_counterpart() -> None:
         """Keep both titles linked with distinct delimiters."""
         english = "Blade (Honkai)"
         chinese = "刃 (崩壞：星穹鐵道)"
         mention = reports.format_summary_article(english, chinese)
         assert mention == (
-            "«[[:en:Blade (Honkai)]]» ([[刃 (崩壞：星穹鐵道)]])"
+            "«[[:en:Blade (Honkai)]]» &#91;[[刃 (崩壞：星穹鐵道)]]&#93;"
         )
         parsed = mwparserfromhell.parse(mention)
         assert str(parsed) == mention
@@ -451,7 +448,7 @@ class TestEnglishReportService(TestCase):
             node.normalize()
             for node in parsed.nodes
             if isinstance(node, HTMLEntity)
-        ] == []
+        ] == ["[", "]"]
 
     @staticmethod
     def test_summary_omits_missing_or_empty_chinese_counterpart() -> None:
@@ -479,7 +476,7 @@ class TestEnglishReportService(TestCase):
             "en_importance": ["Top"],
         })
         assert reports.build_edit_summary(compare_articles(old, new), {}) == (
-            "1 article: 1 Top, 0 High."
+            "1 article: Top 1, High 0."
         )
 
     @staticmethod
@@ -492,12 +489,12 @@ class TestEnglishReportService(TestCase):
             "item_id": [8],
         })
         assert reports.build_edit_summary(compare_articles(old, new), {}) == (
-            "1 article. Added «[[:en:Same]]»; removed «[[:en:Same]]»."
+            "1 article (+1/-1). Add «[[:en:Same]]»; remove «[[:en:Same]]»."
         )
 
     @staticmethod
     def test_summary_matches_wikidata_and_formats_totals() -> None:
-        """Match Wikidata IDs and separate thousands in the total."""
+        """Match Wikidata IDs and keep label-led decimal totals."""
         old = {"Old": data_service.OldArticle("Old", 8)}
         new = pl.DataFrame({
             "page_id": [123],
@@ -519,12 +516,12 @@ class TestEnglishReportService(TestCase):
             for index, title in enumerate(titles, start=1)
         }
         assert reports.build_edit_summary(compare_articles(old, new), {}) == (
-            "1,234 articles."
+            "1\u202f234 articles."
         )
 
     @staticmethod
     def test_summary_formats_all_assessment_counts_and_attribution() -> None:
-        """Keep count order and thousands separators when saving."""
+        """Keep label-led decimal counts in order when saving."""
         changes = ArticleChanges(
             current_total=3032,
             added=(),
@@ -534,16 +531,52 @@ class TestEnglishReportService(TestCase):
             importance_counts=(("Top", 32), ("High", 3000)),
         )
         for quality, expected in (
-            (True, "3,032 articles: 100 FA, 32 FL, 2,900 GA."),
-            (False, "3,032 articles: 32 Top, 3,000 High."),
+            (True, "3\u202f032 articles: FA 100, FL 32, GA 2\u202f900."),
+            (False, "3\u202f032 articles: Top 32, High 3\u202f000."),
         ):
             summary = reports.build_edit_summary(changes, {}, quality=quality)
             assert summary == expected
             attributed = reports.EditSummary.with_attribution(summary)
             assert attributed == (
-                expected + " ([[toolforge:Aranami|Aranami]])"
+                expected + " ([[toolforge:aranami|Aranami]])"
             )
             assert len(attributed.encode()) <= reports.MAX_EDIT_SUMMARY_BYTES
+
+    @staticmethod
+    def test_unknown_assessment_counts_are_not_reported_as_zero() -> None:
+        """Omit unknown assessment composition while keeping totals."""
+        changes = ArticleChanges(1, (), (), ())
+        for quality in (False, True):
+            summary = reports.EditSummary.with_attribution(
+                reports.build_edit_summary(changes, {}, quality=quality),
+            )
+            assert summary == ("1 article. ([[toolforge:aranami|Aranami]])")
+
+    @staticmethod
+    def test_change_counts_survive_oversized_optional_quality_links() -> None:
+        """Keep composition and observed deltas ahead of titles."""
+        changes = compare_articles(
+            {
+                "Before": data_service.OldArticle("Before", 1, 10, "GA"),
+                "Gone": data_service.OldArticle("Gone", 2, 20, "FL"),
+            },
+            pl.DataFrame({
+                "en_title": ["長標題" * 100, "新標題" * 100],
+                "page_id": [10, 30],
+                "item_id": [1, 3],
+                "en_class": ["FA", "GA"],
+            }),
+        )
+        summary = reports.EditSummary.with_attribution(
+            reports.build_edit_summary(changes, {}, quality=True),
+        )
+        assert summary.startswith(
+            "2 articles (+1/-1): FA 1 (+1), FL 0 (-1), GA 1 (+1/-1).",
+        )
+        assert summary.endswith(" ([[toolforge:aranami|Aranami]])")
+        assert len(summary.encode()) <= reports.MAX_EDIT_SUMMARY_BYTES
+        assert summary.count("[[") == summary.count("]]")
+        assert summary.count("«") == summary.count("»")
 
     @staticmethod
     def test_summary_caps_utf8_bytes_and_preserves_complete_links() -> None:
@@ -562,7 +595,7 @@ class TestEnglishReportService(TestCase):
                 max_bytes=requested,
             )
             assert len(summary.encode("utf-8")) <= budget
-            assert summary.startswith("10 articles.")
+            assert summary.startswith("10 articles (+10/-1).")
             assert summary.count("[[") == summary.count("]]")
             assert summary.count("«") == summary.count("»")
             assert summary.count("(") == summary.count(")")
@@ -582,12 +615,16 @@ class TestEnglishReportService(TestCase):
             spec.name: _old_text(spec, old_item) for spec in job.REPORT_SPECS
         }
         existing["quality"] = existing["quality"].replace(
+            old_item,
+            old_item + "{{PJ:VG/DBR/EN/item|en=Withdrawn|wd=9|en_cls=B/GAN}}",
+        )
+        existing["quality"] = existing["quality"].replace(
             "Before",
             "Before {{PJ:VG/DBR/EN/item|en=Example|wd=99|en_cls=GA}}",
         )
         sitelinks = pl.DataFrame({
-            "item_id": [1, 8],
-            "zh_title": ["阿爾法", "舊"],
+            "item_id": [1, 8, 9],
+            "zh_title": ["阿爾法", "舊", "Withdrawn companion"],
         })
         labels = pl.DataFrame({"item_id": [2], "label": ["閃電"]})
         states = pl.DataFrame(
@@ -639,9 +676,11 @@ class TestEnglishReportService(TestCase):
             )
             for spec in job.REPORT_SPECS
         }
-        links.assert_called_once_with([1, 2, 8])
+        links.assert_called_once_with([1, 2, 8, 9])
         label.assert_called_once_with([1, 2])
         assert "Example" not in data.old_articles["quality"]
+        assert "Withdrawn" not in data.old_articles["quality"]
+        assert data.linked_titles[9] == "Withdrawn companion"
         assert "en=Example|wd=99|en_cls=GA" in texts["quality"]
         assert list(texts) == [spec.name for spec in job.REPORT_SPECS]
         assert "en=Alpha Game" in texts["important"]
@@ -678,7 +717,7 @@ class TestEnglishReportService(TestCase):
             for text in texts.values()
         )
         assert all(
-            "removed «[[:en:Old]]» ([[舊]])" in summary
+            "remove «[[:en:Old]]» &#91;[[舊]]&#93;" in summary
             for summary in summaries.values()
         )
         custom = reports.ImportanceReportSpec(
@@ -909,16 +948,18 @@ class TestEnglishReportJob(TestCase):
             TemporaryDirectory() as temporary,
             patch("pathlib.Path.cwd", return_value=Path(temporary)),
             patch(
-                "backend.support.execution.perf_counter",
+                "runtime.execution.perf_counter",
                 side_effect=lambda: elapsed[0],
             ),
             patch(
-                "backend.support.report_status.perf_counter",
+                "runtime.publication_status.perf_counter",
                 side_effect=lambda: elapsed[0],
             ),
             patch(
-                "backend.support.report_status._utc_now",
-                side_effect=lambda: started + dt.timedelta(seconds=elapsed[0]),
+                "runtime.publication_status.utc_now",
+                side_effect=lambda: (
+                    started + dt.timedelta(seconds=elapsed[0])
+                ).isoformat(timespec="microseconds"),
             ),
             patch.object(
                 job,
@@ -928,18 +969,38 @@ class TestEnglishReportJob(TestCase):
                 ],
             ),
             patch.object(job, "prepare_reports", side_effect=shared_reads),
-            patch.object(job, "get_snapshot"),
+            patch.object(
+                job,
+                "get_snapshot",
+                return_value=Mock(
+                    manifest={"metadata": {"snapshot_date": "2026-10-23"}},
+                ),
+            ),
             patch.object(job, "prepare_publication", side_effect=prepare),
             patch.object(reports, "build_reports", return_value=existing),
             patch.object(data_service, "load_membership", return_value={}),
             patch.object(job, "record_publication"),
+            patch(
+                "updater.publisher.pywikibot.Page",
+                side_effect=lambda _site, title: Mock(
+                    get=Mock(
+                        return_value=existing[
+                            next(
+                                name
+                                for name, target in job.REPORT_TARGETS.items()
+                                if target == title
+                            )
+                        ],
+                    ),
+                ),
+            ),
         ):
             job.run(context=context)
             records = {
                 row["title"]: row
-                for row in read_report_status(
-                    Path(temporary) / "state" / "report-updates.json",
-                )["reports"].values()
+                for row in read_status(Path(temporary))[
+                    "publications"
+                ].values()
             }
         first, second = [
             records[title] for title in job.REPORT_TARGETS.values()
@@ -948,11 +1009,12 @@ class TestEnglishReportJob(TestCase):
             2,
             3,
         ]
-        assert first["started_at"] == "2026-10-24T00:00:10.000000Z"
-        assert second["started_at"] == "2026-10-24T00:00:12.000000Z"
-        assert all(row["status"] == "no_update" for row in records.values())
+        assert first["started_at"] == "2026-10-24T00:00:10.000000+00:00"
+        assert second["started_at"] == "2026-10-24T00:00:12.000000+00:00"
+        assert all(row["outcome"] == "unchanged" for row in records.values())
         expected_total = 15
         assert context.tasks[0].elapsed_seconds == expected_total
+        assert context.tasks[0].report_date == dt.date(2026, 10, 23)
 
     @staticmethod
     def test_job_publishes_proposed_edits_through_context() -> None:
@@ -1023,12 +1085,14 @@ class TestEnglishReportJob(TestCase):
             assert edit.text == texts[name]
             assert edit.original_text == existing[name]
             assert edit.tags == ("enwp-key-articles", name)
-            verb = "GA listed" if name == "quality" else "Added"
+            verb = "GA" if name == "quality" else "Add"
             breakdown = (
-                "0 FA, 0 FL, 1 GA" if name == "quality" else "1 Top, 0 High"
+                "FA 0, FL 0, GA 1 (+1)"
+                if name == "quality"
+                else "Top 1, High 0"
             )
             assert edit.summary.startswith(
-                f"1 article: {breakdown}. {verb} «[[:en:",
+                f"1 article (+1): {breakdown}. {verb} «[[:en:",
             )
 
     @staticmethod
@@ -1058,15 +1122,15 @@ class TestEnglishReportJob(TestCase):
             )
             for spec, edit in zip(job.REPORT_SPECS, edits, strict=True):
                 added_title = f"New {spec.name}"
-                verb = "GA listed" if spec.name == "quality" else "Added"
-                removed = "Removed" if spec.name == "quality" else "removed"
+                verb = "GA" if spec.name == "quality" else "Add"
+                removed = "Remove" if spec.name == "quality" else "remove"
                 breakdown = (
-                    "0 FA, 0 FL, 2 GA"
+                    "FA 0, FL 0, GA 2 (+1)"
                     if spec.name == "quality"
-                    else "1 Top, 1 High"
+                    else "Top 1, High 1"
                 )
                 assert edit.summary == (
-                    f"2 articles: {breakdown}. "
+                    f"2 articles (+1/-1): {breakdown}. "
                     f"{verb} «[[:en:{added_title}]]»; "
                     f"{removed} «[[:en:Gone]]»."
                 )

@@ -4,11 +4,11 @@ from http import HTTPStatus
 from unittest import TestCase
 from urllib.error import HTTPError, URLError
 
-from backend.services.zhwiki.pageviews import PageviewsUnavailableError
-from backend.support.failure_status import (
+from data.runtime.failure_status import (
     exception_failure_details,
     validate_failure_details,
 )
+from tasks.zhwiki.pageviews import PageviewsUnavailableError
 
 
 class TestFailureDetails(TestCase):

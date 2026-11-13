@@ -1,6 +1,6 @@
 """Verify Pageviews readiness probes before full history downloads."""
 
-# Exercise backend seams and ordinary unittest exception assertions.
+# Exercise runtime seams and ordinary unittest exception assertions.
 # ruff: file-ignore[private-member-access, pytest-unittest-raises-assertion]
 
 import datetime as dt
@@ -13,8 +13,8 @@ from urllib.error import HTTPError, URLError
 
 import polars as pl
 
-from backend.services.zhwiki import pageviews
-from updater.jobs import pageviews as job
+from runtime.jobs import pageviews as job
+from tasks.zhwiki import pageviews
 
 _DAY = dt.date(2026, 10, 18)
 _STOP = _DAY + dt.timedelta(days=1)

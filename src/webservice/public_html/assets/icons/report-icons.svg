@@ -7,6 +7,9 @@
     License: https://creativecommons.org/licenses/by/4.0/
     License notice: https://doc.wikimedia.org/codex/latest/style-guide/icons.html
     Adaptation: unchanged SVG geometry grouped into currentColor symbols.
+    Discussion activity variants: original plus and flame modifiers by Aranami
+    contributors, composed with a scaled, unchanged Codex speech-bubbles icon.
+    These derived variants are also available under CC BY 4.0.
   </metadata>
   <symbol id="message-notice" viewBox="0 0 20 20" fill="currentColor">
     <path d="M10 1a9 9 0 110 18 9 9 0 010-18M8 9v2h1v2H8v2h4v-2h-1V9zm1-4v2h2V5z"/>
@@ -38,6 +41,9 @@
   <symbol id="article" viewBox="0 0 20 20" fill="currentColor">
     <path d="M2 0h16v20H2zm2 2v16h12V2zm2 2h3v1H6zm0 2h3v1H6zm0 2h3v1H6zm0 3h8v1H6zm0 2h8v1H6zm0 2h8v1H6zm4-11h4v5h-4z"/>
   </symbol>
+  <symbol id="template" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M8 3a1 1 0 002 0V1h7v6a3 3 0 110 6v6H1V1h7zM3 17h12v-6h2a1 1 0 100-2h-2V3h-3a3 3 0 11-6 0H3z"/>
+  </symbol>
   <symbol id="lightbulb" viewBox="0 0 20 20" fill="currentColor">
     <path d="M13 20H7v-2h6zM10 0c1.938 0 3.58.556 4.745 1.644C15.918 2.738 16.5 4.27 16.5 6c0 2.22-1.15 3.732-2.04 4.727-.644.72-.96 1.633-.96 2.662V16h-7v-2.611c0-1.029-.317-1.942-.96-2.662C4.65 9.732 3.5 8.22 3.5 6c0-1.627.593-3.145 1.743-4.255C6.395.634 8.032 0 10 0"/>
   </symbol>
@@ -47,6 +53,24 @@
   </symbol>
   <symbol id="article-check" viewBox="0 0 20 20" fill="currentColor">
     <path d="M18 0v20H2V0zM4 2v16h12V6.799l-5.341 6.97h-1.3l-3.767-3.141 1.28-1.536 2.967 2.471L16 3.508V2z"/>
+  </symbol>
+  <symbol id="speech-bubbles" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M15 6h4v14h-2.602l-3.75-3H5v-4.12L3.601 14H1V0h14zm0 5H7.352L7 11.281V15h6.35l.275.219L17 17.918V8h-2zm-12 .918 3.375-2.7L6.649 9H13V2H3z"/>
+  </symbol>
+  <symbol id="speech-bubbles-recent" viewBox="0 0 20 20" fill="currentColor">
+    <use href="#speech-bubbles" width="17" height="17" y="1.5"/>
+    <circle cx="15" cy="5" r="4.25" fill="#36c" stroke="#fff" stroke-width="1.25"/>
+    <path d="M15 2.75v4.5M12.75 5h4.5" fill="none" stroke="#fff" stroke-width="1.5"/>
+  </symbol>
+  <symbol id="speech-bubbles-hot" viewBox="0 0 20 20" fill="currentColor">
+    <use href="#speech-bubbles" width="17" height="17" y="1.5"/>
+    <path d="M15 9c.5 2.5 4 4 4 7a4 4 0 0 1-8 0c0-1.5.75-2.75 2-4l.25 2C14.5 13 15 11.5 15 9Z" fill="#ac6600" stroke="#fff" stroke-width="1.25" stroke-linejoin="round" paint-order="stroke"/>
+    <path d="M15.5 14.5c.25 1 1.25 1.5 1.25 2.5a1.5 1.5 0 0 1-3 0c0-.75.75-1.5 1.75-2.5Z" fill="#fff"/>
+  </symbol>
+  <symbol id="speech-bubbles-recent-hot" viewBox="0 0 20 20" fill="currentColor">
+    <use href="#speech-bubbles-hot" width="20" height="20"/>
+    <circle cx="15" cy="5" r="4.25" fill="#36c" stroke="#fff" stroke-width="1.25"/>
+    <path d="M15 2.75v4.5M12.75 5h4.5" fill="none" stroke="#fff" stroke-width="1.5"/>
   </symbol>
   <symbol id="history" viewBox="0 0 20 20" fill="currentColor">
     <path d="M10 1a9 9 0 1 1 0 18v-2a7 7 0 1 0-4-1.257V13h2.001L8 18l-1 1H2v-2l2.346-.001A8.97 8.97 0 0 1 1 10a9 9 0 0 1 9-9"/>

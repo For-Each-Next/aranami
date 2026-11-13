@@ -15,11 +15,11 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from backend.services.zhwiki import assessment_lists as source
-from backend.support.report_membership import MembershipReport
-from backend.support.report_status import read_report_status
+from data.runtime.report_membership import MembershipReport
+from data.runtime.status import read_status
+from runtime.jobs import JobContext, assessment_lists as job
+from tasks.zhwiki import assessment_lists as source
 from updater.edit_summary import MAX_EDIT_SUMMARY_BYTES
-from updater.jobs import JobContext, assessment_lists as job
 from updater.services.zhwiki import assessment_lists as service
 
 _TEXT = (
@@ -49,7 +49,7 @@ def _render_source(
     config: source.AssessmentList,
     text: str,
 ) -> MembershipReport:
-    """Render real backend data under the test's source mocks.
+    """Render real runtime data under the test's source mocks.
 
     Args:
         site: Offline wiki identity and source adapter input.
@@ -57,7 +57,7 @@ def _render_source(
         text: Original destination text with managed ranges.
 
     Returns:
-        Complete rendered report from real backend observations.
+        Complete rendered report from real runtime observations.
     """
     return service.prepare_report(
         source.prepare_data(site, config, text),
@@ -74,18 +74,18 @@ def _source_data(  # ruff: ignore[too-many-arguments]
     assessments: pl.DataFrame | None = None,
     previous_members: dict[str, int | None] | None = None,
 ) -> source.AssessmentData:
-    """Supply replica facts for real backend interpretation.
+    """Supply replica facts for real runtime interpretation.
 
     Args:
         members: Current category members and their article IDs.
         site: Offline wiki identity passed through the publication job.
         config: Category and review configuration selected by the job.
-        text: Current destination text interpreted by backend.
+        text: Current destination text interpreted by runtime.
         assessments: Shared project assessment observations.
         previous_members: Cached IDs validated against current text.
 
     Returns:
-        Real backend data prepared from deterministic source fixtures.
+        Real runtime data prepared from deterministic source fixtures.
     """
     rows = pl.DataFrame(
         {
@@ -114,7 +114,7 @@ def _source_data(  # ruff: ignore[too-many-arguments]
 
         Args:
             _site: Unused offline wiki identity.
-            titles: Talk-page titles requested by backend.
+            titles: Talk-page titles requested by runtime.
 
         Returns:
             Preloaded empty talk texts with their exact source titles.
@@ -242,7 +242,7 @@ class TestReviewSources(TestCase):
 
     @staticmethod
     def test_prepared_changes_and_rows_render_without_source_reads() -> None:
-        """Keep source identities and assessments behind backend."""
+        """Keep source identities and assessments behind runtime."""
         site = MagicMock()
         site.dbName.return_value = "zhwiki"
         assessments = pl.DataFrame({
@@ -396,15 +396,6 @@ class TestReviewSources(TestCase):
             second = _render_source(site, _A_CONFIG, first.text)
         assert second.members == {"Old": 1}
         assert first == second
-        assert (
-            job._content_summary(
-                first.text,
-                second.text,
-                previous_members=first.members,
-                current_members=second.members,
-            )
-            == "1 item total."
-        )
 
 
 class TestAssessmentJob(TestCase):
@@ -483,7 +474,7 @@ class TestAssessmentJob(TestCase):
         assert edit.original_text == _TEXT
         assert edit.tags == ("assessment-lists",)
         assert edit.summary == (
-            "2 items total. Added «[[Another]]», «[[New]]»; removed «[[Old]]»."
+            "2 items (+2/-1). Add «[[Another]]», «[[New]]»; remove «[[Old]]»."
         )
         save.assert_called_once_with(
             context.site,
@@ -493,91 +484,16 @@ class TestAssessmentJob(TestCase):
         )
 
     @staticmethod
-    def test_empty_category_summary_describes_removed_articles() -> None:
-        """Derive removals from original and returned content."""
-        text = service.update_text(_BPLUS_CONFIG, _TEXT, [], {})
-        assert job._content_summary(_TEXT, text) == (
-            "0 items total. Removed «[[Old]]»."
-        )
-
-    @staticmethod
     def test_long_multibyte_titles_fit_summary_limit() -> None:
         """Fall back to change counts if even one title is too long."""
         summary = job._edit_summary(["遊戲" * 150], ["旧" * 200], 1)
         assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
-        assert summary == "1 item total. Added 1 more; removed 1 more."
-
-    @staticmethod
-    def test_rename_and_review_anchor_changes_only_report_total() -> None:
-        """Recognize the stable article page ID across a move."""
-        original = service.update_text(
-            _ACC_CONFIG,
-            _TEXT,
-            ["Old"],
-            {"Old": "Talk:Old#甲级评审"},
-        )
-        updated = service.update_text(
-            _ACC_CONFIG,
-            original,
-            ["Renamed"],
-            {"Renamed": "Talk:Renamed#甲级评审 2"},
-        )
-        assert (
-            job._content_summary(
-                original,
-                updated,
-                previous_members={"Old": 11},
-                current_members={"Renamed": 11},
-            )
-            == "1 item total."
-        )
-        assert source.article_members(updated) == {"Renamed": None}
-        assert "aranami-member" not in updated
-
-    @staticmethod
-    def test_uncached_unchanged_titles_only_report_total() -> None:
-        """Compare unchanged titles when cached IDs are unavailable."""
-        updated = service.update_text(
-            _A_CONFIG,
-            _TEXT,
-            ["Old"],
-            {},
-        )
-        assert (
-            job._content_summary(
-                _TEXT,
-                updated,
-                current_members={"Old": 11},
-            )
-            == "1 item total."
-        )
-
-    @staticmethod
-    def test_recreated_title_reports_actual_replacement() -> None:
-        """Distinguish a replacement using its changed source ID."""
-        original = service.update_text(
-            _A_CONFIG,
-            _TEXT,
-            ["Old"],
-            {},
-        )
-        updated = service.update_text(
-            _A_CONFIG,
-            original,
-            ["Old"],
-            {},
-        )
-        assert job._content_summary(
-            original,
-            updated,
-            previous_members={"Old": 11},
-            current_members={"Old": 12},
-        ) == ("1 item total. Added «[[Old]]»; removed «[[Old]]».")
+        assert summary == ("1 item (+1/-1). Add 1 more; remove 1 more.")
 
     @staticmethod
     def test_unchanged_list_uses_comma_separated_total() -> None:
         """Format large totals without repeating the page's purpose."""
-        assert job._edit_summary([], [], 1234) == "1,234 items total."
+        assert job._edit_summary([], [], 1234) == "1\u202f234 items."
 
     def test_failure_continues_other_targets(self) -> None:
         """Attempt all targets before reporting failures."""
@@ -653,16 +569,18 @@ class TestAssessmentJob(TestCase):
             TemporaryDirectory() as temporary,
             patch("pathlib.Path.cwd", return_value=Path(temporary)),
             patch(
-                "backend.support.execution.perf_counter",
+                "runtime.execution.perf_counter",
                 side_effect=lambda: elapsed[0],
             ),
             patch(
-                "backend.support.report_status.perf_counter",
+                "runtime.publication_status.perf_counter",
                 side_effect=lambda: elapsed[0],
             ),
             patch(
-                "backend.support.report_status._utc_now",
-                side_effect=lambda: started + dt.timedelta(seconds=elapsed[0]),
+                "runtime.publication_status.utc_now",
+                side_effect=lambda: (
+                    started + dt.timedelta(seconds=elapsed[0])
+                ).isoformat(timespec="microseconds"),
             ),
             patch.object(job, "read_pages", side_effect=preload),
             patch.object(job, "prepare_data", side_effect=prepare),
@@ -673,8 +591,12 @@ class TestAssessmentJob(TestCase):
             ),
             patch.object(job, "load_membership", return_value={}),
             patch.object(job, "save_membership"),
+            patch(
+                "updater.publisher.pywikibot.Page",
+                return_value=MagicMock(get=MagicMock(return_value=_TEXT)),
+            ),
             self.assertLogs(job.logger, level="ERROR"),
-            self.assertLogs("backend.support.execution", level="INFO"),
+            self.assertLogs("runtime.execution", level="INFO"),
         ):
             with self.assertRaises(ExceptionGroup):
                 job.run(
@@ -683,19 +605,26 @@ class TestAssessmentJob(TestCase):
                 )
             records = {
                 record["title"]: record
-                for record in read_report_status(
-                    Path(temporary) / "state" / "report-updates.json",
-                )["reports"].values()
+                for record in read_status(Path(temporary))[
+                    "publications"
+                ].values()
             }
-        assert records["First"]["status"] == "no_update"
+        assert records["First"]["outcome"] == "unchanged"
         assert [
             records[title]["duration_seconds"] for title in ("First", "Second")
         ] == [2, 3]
-        assert records["First"]["started_at"] == "2026-10-24T00:00:10.000000Z"
-        assert records["Second"]["status"] == "failed"
-        assert records["Second"]["started_at"] == "2026-10-24T00:00:12.000000Z"
         assert (
-            records["Second"]["finished_at"] == "2026-10-24T00:00:15.000000Z"
+            records["First"]["started_at"]
+            == "2026-10-24T00:00:10.000000+00:00"
+        )
+        assert records["Second"]["outcome"] == "failed"
+        assert (
+            records["Second"]["started_at"]
+            == "2026-10-24T00:00:12.000000+00:00"
+        )
+        assert (
+            records["Second"]["finished_at"]
+            == "2026-10-24T00:00:15.000000+00:00"
         )
         expected_total = 15
         assert context.tasks[0].elapsed_seconds == expected_total
@@ -769,7 +698,7 @@ class TestAssessmentJob(TestCase):
                             context=context,
                         )
                 assert context.publish.call_args.args[0].summary == (
-                    "2 items total. Added «[[Added]]»; removed «[[Removed]]»."
+                    "2 items (+1/-1). Add «[[Added]]»; remove «[[Removed]]»."
                 )
                 if failed:
                     save.assert_not_called()
@@ -799,7 +728,7 @@ class TestAssessmentJob(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "backend.support.report_membership.Path.cwd",
+                "data.runtime.report_membership.Path.cwd",
                 return_value=Path(directory),
             ),
             patch.object(job, "job_run", return_value=nullcontext(context)),
@@ -829,4 +758,51 @@ class TestAssessmentJob(TestCase):
         summaries = [
             call.args[0].summary for call in context.publish.call_args_list
         ]
-        assert summaries == ["2 items total. Added «[[New]]»."] * previews
+        assert summaries == ["2 items (+1). Add «[[New]]»."] * previews
+
+    def test_daily_coverage_requires_every_destination(self) -> None:
+        """Confirm coverage after every destination succeeds."""
+        for outcomes in ((True, True), (True, False)):
+            context = MagicMock(dry=False)
+            context.site.dbName.return_value = "zhwiki"
+            context.report_attempt.side_effect = lambda _title: nullcontext()
+            with (
+                self.subTest(outcomes=outcomes),
+                patch.object(
+                    job,
+                    "job_run",
+                    return_value=nullcontext(context),
+                ),
+                patch.object(
+                    job,
+                    "read_pages",
+                    return_value=[MagicMock(text=_TEXT)] * len(outcomes),
+                ),
+                patch.object(
+                    job,
+                    "read_assessments",
+                    return_value=pl.DataFrame(),
+                ),
+                patch.object(job, "_publish_list", side_effect=outcomes),
+                patch.object(
+                    job,
+                    "project_snapshot_references",
+                    return_value=[
+                        {
+                            "wiki": "zhwiki",
+                            "project": "电子游戏",
+                            "snapshot_date": "2026-11-02",
+                        },
+                    ],
+                ),
+            ):
+                job.run(
+                    lists=(("First", _A_CONFIG), ("Second", _ACC_CONFIG)),
+                    context=context,
+                )
+            if all(outcomes):
+                context.confirm_report_date.assert_called_once_with(
+                    dt.date(2026, 11, 2),
+                )
+            else:
+                context.confirm_report_date.assert_not_called()

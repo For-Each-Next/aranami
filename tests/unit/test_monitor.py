@@ -4,21 +4,21 @@
 # ruff: file-ignore[pytest-unittest-raises-assertion]
 
 import datetime as dt
-import json
 from contextlib import ExitStack
 from functools import partial
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Event
+from threading import Event, Thread
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from apscheduler.schedulers.base import STATE_PAUSED
 from apscheduler.triggers.cron import CronTrigger
 
-from backend import monitor
-from backend.support.idle_scheduler import IdleScheduler
-from updater.jobs import (
+from data.runtime.status import read_status
+from runtime import monitor
+from runtime.idle_scheduler import IdleScheduler
+from runtime.jobs import (
     assessment_lists,
     assessment_log,
     dyks,
@@ -27,6 +27,7 @@ from updater.jobs import (
     pageviews,
     pexbot,
 )
+from runtime.schedule_status import write_schedule_status
 
 _PAGEVIEWS_GRACE_SECONDS = 3_500
 _FUTURE_SCHEDULE_YEAR = 2099
@@ -107,7 +108,7 @@ class TestMonitor(TestCase):
         scheduler.shutdown(wait=True)
         content = "".join(
             path.read_text()
-            for path in (self.root / "logs").glob("aranami.*.log")
+            for path in (self.root / "logs/diagnostics").glob("*.log")
         )
         assert content.count("Aranami monitor started") == 1
         assert content.count("Aranami monitor stopped.") == 1
@@ -119,19 +120,64 @@ class TestMonitor(TestCase):
     ) -> None:
         """Retain session start until a fresh monitor is created."""
         scheduler = monitor.start(run_immediately=False)
-        path = self.root / "state" / "schedule-status.json"
-        first = json.loads(path.read_text())
+        first = read_status(self.root)["services"]["scheduler"]
         assert first["started_at"] is not None
         assert monitor.start(run_immediately=False) is scheduler
-        reused = json.loads(path.read_text())
+        reused = read_status(self.root)["services"]["scheduler"]
         assert reused["started_at"] == first["started_at"]
         scheduler.shutdown(wait=True)
-        stopped = json.loads(path.read_text())
+        stopped = read_status(self.root)["services"]["scheduler"]
         assert stopped["started_at"] == first["started_at"]
-        assert stopped["state"] == "stopped"
+        assert stopped["lifecycle"] == "stopped"
         monitor.start(run_immediately=False)
-        restarted = json.loads(path.read_text())
+        restarted = read_status(self.root)["services"]["scheduler"]
         assert restarted["started_at"] != first["started_at"]
+
+    def test_shutdown_records_draining_until_workers_finish(self) -> None:
+        """Retain stop-request timing until the executor finishes."""
+        scheduler = monitor.start(run_immediately=False)
+        first = read_status(self.root)["services"]["scheduler"]
+        draining, release = Event(), Event()
+        executor = scheduler._work  # ruff: ignore[private-member-access]
+        shutdown = executor.shutdown
+
+        def drain(*, wait: bool = True) -> None:
+            """Hold shutdown after the scheduler changes its state."""
+            draining.set()
+            assert release.wait(5)
+            shutdown(wait=wait)
+
+        thread = Thread(target=scheduler.shutdown, kwargs={"wait": True})
+        with patch.object(
+            executor,
+            "shutdown",
+            side_effect=lambda wait: drain(wait=wait),
+        ):
+            thread.start()
+            try:
+                assert draining.wait(2)
+                requested = read_status(self.root)["services"]["scheduler"]
+                assert requested["lifecycle"] == "draining"
+                assert requested["stopping_at"] is not None
+                assert requested["stopped_at"] is None
+                assert requested["started_at"] == first["started_at"]
+                assert not scheduler.running
+                write_schedule_status(
+                    scheduler,
+                    started_at=dt.datetime.fromisoformat(first["started_at"]),
+                )
+                refreshed = read_status(self.root)["services"]["scheduler"]
+                assert refreshed["lifecycle"] == "draining"
+                assert refreshed["stopping_at"] == requested["stopping_at"]
+                assert refreshed["sequence"] > requested["sequence"]
+            finally:
+                release.set()
+                thread.join(2)
+        assert not thread.is_alive()
+        stopped = read_status(self.root)["services"]["scheduler"]
+        assert stopped["lifecycle"] == "stopped"
+        assert stopped["stopping_at"] == requested["stopping_at"]
+        assert stopped["stopped_at"] >= stopped["stopping_at"]
 
     @staticmethod
     def test_registered_jobs_match_standalone_routines() -> None:
@@ -158,8 +204,14 @@ class TestMonitor(TestCase):
             assert job.trigger.timezone == dt.UTC
         assert len({job.next_run_time for job in jobs.values()}) == 1
         assert jobs["pageviews"].misfire_grace_time == _PAGEVIEWS_GRACE_SECONDS
-        assert jobs["dyks"].misfire_grace_time == 1
-        for name in ("assessment_lists", "enwp_key_articles", "pexbot"):
+        for name in (
+            "dyks",
+            "new_pages",
+            "assessment_log",
+            "assessment_lists",
+            "enwp_key_articles",
+            "pexbot",
+        ):
             assert jobs[name].misfire_grace_time is None
 
     @staticmethod
@@ -175,7 +227,7 @@ class TestMonitor(TestCase):
         )
         expected = {
             "dyks": dt.datetime(2026, 10, 3, 1, 0, tzinfo=dt.UTC),
-            "new_pages": dt.datetime(2026, 10, 3, 0, 7, tzinfo=dt.UTC),
+            "new_pages": dt.datetime(2026, 10, 3, 1, 0, tzinfo=dt.UTC),
             "assessment_lists": dt.datetime(
                 2026,
                 10,
@@ -184,7 +236,7 @@ class TestMonitor(TestCase):
                 0,
                 tzinfo=dt.UTC,
             ),
-            "pageviews": dt.datetime(2026, 10, 3, 0, 59, tzinfo=dt.UTC),
+            "pageviews": dt.datetime(2026, 10, 3, 1, 0, tzinfo=dt.UTC),
             "assessment_log": dt.datetime(2026, 10, 4, 0, 0, tzinfo=dt.UTC),
             "enwp_key_articles": dt.datetime(
                 2026,
@@ -226,7 +278,7 @@ class TestMonitor(TestCase):
         with ExitStack() as patches:
             for name, callback in callbacks.items():
                 patches.enter_context(
-                    patch(f"updater.jobs.{name}.run", callback),
+                    patch(f"runtime.jobs.{name}.run", callback),
                 )
             scheduler = monitor.start(dry=True)
         for callback in callbacks.values():
@@ -234,7 +286,7 @@ class TestMonitor(TestCase):
         job = scheduler.get_job("new_pages")
         assert job is not None
         with patch(
-            "updater.jobs.new_pages.run",
+            "runtime.jobs.new_pages.run",
             callbacks["new_pages"],
         ):
             job.func(*job.args, **job.kwargs)
@@ -356,7 +408,7 @@ class TestMonitor(TestCase):
                 for name, callback in callbacks.items():
                     patches.enter_context(
                         patch(
-                            f"updater.jobs.{name}.run",
+                            f"runtime.jobs.{name}.run",
                             callback,
                         ),
                     )

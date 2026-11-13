@@ -5,20 +5,21 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 import mwparserfromhell
 
-from backend.newsletter.layout import (
-    newsletter_source_banner,
-    prepare_main_layout,
-)
-from backend.newsletter.subpages import prepare_subpage_layout
 from newsletter.fixtures import subpage_layouts
 from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.layout import prepare_main_layout
+from tasks.zhwiki.newsletter.newpages import collect_new_pages
+from tasks.zhwiki.newsletter.subpages import prepare_subpage_layout
 from updater.services.newsletter import render_issue
+from updater.services.newsletter_layout import newsletter_source_banner
 
 
 def _render(facts: dict) -> list[dict]:
@@ -51,6 +52,28 @@ def _render(facts: dict) -> list[dict]:
 
 class NewsletterAnnouncementHintTests(unittest.TestCase):
     """Align quarterly cutoff hints with saved observations."""
+
+    @staticmethod
+    def test_november_new_page_count_advances_each_completed_day() -> None:
+        """Render new November registrations as each day completes."""
+        issue = Issue.parse("2027-01")
+        register = (
+            "== 2026年 ==\n"
+            "* 11月1日 - {{vgc|First}}\n"
+            "* 11月2日 - {{vgc|Second}}、{{vgc|Third}}\n"
+        )
+        for cutoff, expected in (
+            (dt.date(2026, 11, 2), 1),
+            (dt.date(2026, 11, 3), 3),
+        ):
+            read = Mock(side_effect=[register, ""])
+            figures = collect_new_pages(read, issue, through=cutoff)
+            text = _render({
+                "observation_end": cutoff.isoformat(),
+                "complete": False,
+                "new_pages_data": figures,
+            })[2]["text"]
+            assert f"* 11月計{expected}篇" in text
 
     def test_empty_notices_use_the_dated_example(self) -> None:
         """Keep the example date without replacing authored news."""

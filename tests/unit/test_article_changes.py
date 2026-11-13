@@ -1,4 +1,4 @@
-"""Verify backend membership and quality-class differences."""
+"""Verify runtime membership and quality-class differences."""
 
 from __future__ import annotations
 
@@ -6,11 +6,7 @@ from unittest import TestCase
 
 import polars as pl
 
-from backend.services.enwiki.article_changes import (
-    OldArticle,
-    QualityChange,
-    compare_articles,
-)
+from data.article_changes import OldArticle, QualityChange, compare_articles
 
 
 def _rows(*articles: tuple[str, int, int | None, str | None]) -> pl.DataFrame:

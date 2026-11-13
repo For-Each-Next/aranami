@@ -11,14 +11,15 @@ from unittest import TestCase
 import mwparserfromhell
 import polars as pl
 
-from backend.newsletter.annual import (
+from data.newsletter.schema import valid_newsletter
+from newsletter.test_newsletter_data import Reader
+from shared.newsletter import Issue
+from tasks.zhwiki.legacy.newsletter_figures import prepare_dyk_series
+from tasks.zhwiki.newsletter.annual import (
     prepare_year_dyk_current,
     prepare_year_dyk_quarters,
 )
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.schema import valid_newsletter
-from newsletter.test_newsletter_data import Reader
-from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.collection import collect_source_facts
 from updater.services.newsletter_editorial import render_annual_feature
 
 
@@ -244,6 +245,7 @@ class NewsletterDykCurrentTests(TestCase):
                 ),
                 "dyk_current": prepare_year_dyk_current(_events(), issue, day),
             }
+            review["dyk_series"] = prepare_dyk_series(review, issue.year - 1)
             text = render_annual_feature(issue, review)
             chart = next(
                 template
@@ -292,10 +294,9 @@ class NewsletterDykCurrentTests(TestCase):
     @staticmethod
     def test_current_point_requires_supported_historical_baseline() -> None:
         """Leave unsupported years unextended and old facts readable."""
-        text = render_annual_feature(
-            Issue(2028, 1),
-            {"dyk_current": {"date": "2027-11-01", "count": 12}},
-        )
+        review = {"dyk_current": {"date": "2027-11-01", "count": 12}}
+        review["dyk_series"] = prepare_dyk_series(review, 2027)
+        text = render_annual_feature(Issue(2028, 1), review)
         chart = next(
             template
             for template in mwparserfromhell.parse(text).filter_templates()
@@ -307,4 +308,5 @@ class NewsletterDykCurrentTests(TestCase):
             Issue(2027, 1),
             {"dyk_new_quarters": [{"date": "2026-03-31", "count": 1}]},
         )
-        assert "2026-03-31" in legacy
+        assert "2026-03-31" not in legacy
+        assert "尚未取得累計新條目推薦數量的完整歷史資料。" in legacy

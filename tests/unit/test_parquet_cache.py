@@ -3,19 +3,68 @@
 # unittest exceptions and fixture bounds express the cache contract.
 # ruff: file-ignore[pytest-unittest-raises-assertion, magic-value-comparison]
 
+import datetime as dt
 import json
 import os
+import re
+from contextlib import chdir
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import polars as pl
 
-from shared.support.cache import ParquetCache, write_parquet_cache
+from shared.support.cache import ParquetCache, cache_key, write_parquet_cache
 
 _IDENTITY = {"aranami.cache": '{"schema":1,"contract":"fixture:1"}'}
+
+
+class CacheKeyTests(TestCase):
+    """Keep logical cache identities in bounded ASCII namespaces."""
+
+    @staticmethod
+    def test_unicode_and_long_names_have_stable_bounded_ascii_keys() -> None:
+        """Hash complete source names without path delimiters."""
+        identity = "电子游戏/认证条目/甲級列表.parquet" * 100
+        key = cache_key("report-membership", "zhwiki", identity)
+        assert key == cache_key("report-membership", "zhwiki", identity)
+        assert key.isascii()
+        assert re.fullmatch(r"report-membership/[a-f0-9]{64}", key)
+
+    @staticmethod
+    def test_identity_order_and_boundaries_prevent_key_collisions() -> None:
+        """Keep wiki and title components distinct."""
+        keys = {
+            cache_key("source", *identities)
+            for identities in (
+                ("zhwiki", "电子游戏"),
+                ("enwiki", "电子游戏"),
+                ("zhwiki", "電子遊戲"),
+                ("电子游戏", "zhwiki"),
+                ("ab", "c"),
+                ("a", "bc"),
+                ("a/b", "c"),
+                ("a", "b/c"),
+            )
+        }
+        assert len(keys) == 8
+        assert cache_key("source", "same") != cache_key("other", "same")
+
+    def test_invalid_families_and_missing_identities_are_rejected(
+        self,
+    ) -> None:
+        """Reject unsafe namespaces without creating runtime paths."""
+        for family in ("", "../cache", "/absolute", "中文", "a" * 65):
+            with self.subTest(family=family), self.assertRaises(ValueError):
+                cache_key(family, "valid")
+        for identities in ((), ("",), (" ",), (None,)):
+            with (
+                self.subTest(identities=identities),
+                self.assertRaises(ValueError),
+            ):
+                cache_key("source", *identities)
 
 
 class ParquetCacheTests(TestCase):
@@ -246,3 +295,110 @@ class ParquetCacheTests(TestCase):
                 self.assertRaises(ValueError),
             ):
                 replace(cache, **settings)
+
+
+class TimestampedCacheTests(TestCase):
+    """Keep readable cache generations isolated and recoverable."""
+
+    def setUp(self) -> None:
+        """Prepare bounded data and separate cache identities."""
+        self.root = Path(self.enterContext(TemporaryDirectory()))
+        self.directory = self.root / "observations"
+        self.cache = ParquetCache(
+            schema={"value": pl.Int64},
+            contract="timestamp-tests:1",
+            max_rows=10,
+            max_bytes=4096,
+        )
+        self.frame = pl.DataFrame({"value": [1, None]})
+
+    def test_timestamp_files_are_reused_after_restart(self) -> None:
+        """Select the latest UTC generation by filename."""
+        self.cache.write(self.directory, self.frame)
+        files = list(self.directory.iterdir())
+        assert len(files) == 1
+        assert re.fullmatch(r"\d{8}T\d{6}\.parquet", files[0].name)
+        assert self.cache.read(self.directory).equals(self.frame)
+        assert self.cache.read(self.root / "missing").is_empty()
+
+    def test_same_second_writes_keep_identities_separate(self) -> None:
+        """Atomically replace one cache without changing another."""
+        clock = Mock(wraps=dt)
+        clock.datetime = Mock(wraps=dt.datetime)
+        clock.datetime.now.return_value = dt.datetime(
+            2026,
+            11,
+            10,
+            tzinfo=dt.UTC,
+        )
+        other = self.root / "other"
+        replacement = pl.DataFrame({"value": [2]})
+        with patch("shared.support.cache.dt", clock):
+            self.cache.write(self.directory, self.frame)
+            self.cache.write(other, self.frame)
+            self.cache.write(self.directory, replacement)
+        assert self.cache.read(self.directory).equals(replacement)
+        assert self.cache.read(other).equals(self.frame)
+        assert len(list(self.directory.iterdir())) == 1
+
+    def test_failed_generation_preserves_previous_and_success_retires_it(
+        self,
+    ) -> None:
+        """Retire old files only after a complete new write."""
+        clock = Mock(wraps=dt)
+        clock.datetime = Mock(wraps=dt.datetime)
+        clock.datetime.now.return_value = dt.datetime(
+            2026,
+            11,
+            9,
+            tzinfo=dt.UTC,
+        )
+        with patch("shared.support.cache.dt", clock):
+            self.cache.write(self.directory, self.frame)
+            clock.datetime.now.return_value += dt.timedelta(days=1)
+            with (
+                patch.object(
+                    pl.DataFrame,
+                    "write_parquet",
+                    side_effect=OSError,
+                ),
+                self.assertRaises(OSError),
+            ):
+                self.cache.write(self.directory, self.frame)
+            assert self.cache.read(self.directory).equals(self.frame)
+            assert len(list(self.directory.iterdir())) == 1
+            self.cache.write(self.directory, self.frame)
+        assert [path.name for path in self.directory.iterdir()] == [
+            "20261110T000000.parquet",
+        ]
+        (self.directory / "20261111T000000.parquet").write_bytes(b"broken")
+        assert self.cache.read(self.directory).is_empty()
+
+    def test_unsafe_generation_directories_remain_untouched(self) -> None:
+        """Reject linked and non-directory cache namespaces."""
+        self.directory.mkdir()
+        linked = self.root / "linked"
+        linked.symlink_to(self.directory, target_is_directory=True)
+        regular = self.root / "regular"
+        regular.write_bytes(b"preserve")
+        for path in (linked, regular):
+            with self.subTest(path=path), self.assertRaises(OSError):
+                self.cache.write(path, self.frame)
+            assert self.cache.read(path).is_empty()
+        assert regular.read_bytes() == b"preserve"
+        assert list(self.directory.iterdir()) == []
+
+    def test_nested_runtime_cache_rejects_linked_ancestor(self) -> None:
+        """Reject linked runtime roots before creating owner paths."""
+        runtime = self.root / "runtime"
+        runtime.mkdir()
+        outside = self.root / "outside"
+        outside.mkdir()
+        with chdir(runtime):
+            Path("cache").symlink_to(outside, target_is_directory=True)
+            relative = Path("cache/family/wiki/identity/observations")
+            for path in (relative, Path.cwd() / relative):
+                with self.subTest(path=path), self.assertRaises(OSError):
+                    self.cache.write(path, self.frame)
+                assert self.cache.read(path).is_empty()
+        assert list(outside.iterdir()) == []

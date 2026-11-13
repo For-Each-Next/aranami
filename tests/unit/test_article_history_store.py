@@ -14,11 +14,12 @@ from unittest.mock import patch
 
 import polars as pl
 
-from backend.articles.history_store import (
+from data.articles.history_store import (
     EVENT_SCHEMA,
     SCHEMA,
     load,
     merge_save,
+    read_versions,
 )
 
 
@@ -148,7 +149,7 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
         stale = _snapshot(1, revision=15, hour=1)
         result = merge_save(self.path, stale)
         assert result.equals(pl.concat([newer, _snapshot(2)]))
-        archived = pl.read_parquet(self.path)
+        archived = read_versions(self.path)
         assert archived.filter(pl.col("page_id") == 1)[
             "revision_id"
         ].to_list() == [10, 15, 20]
@@ -175,7 +176,7 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
         )
         assert merge_save(self.path, empty).equals(empty)
         assert load(self.path).equals(empty)
-        archived = pl.read_parquet(self.path)
+        archived = read_versions(self.path)
         assert archived.height == 2
         assert archived.filter(pl.col("revision_id") == 10).equals(original)
         assert merge_save(self.path, empty).equals(empty)
@@ -186,7 +187,7 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
         source = _snapshot()
         merge_save(self.path, source)
         previous = self.path.read_bytes()
-        with patch("backend.articles.history_store._write") as writer:
+        with patch("data.articles.history_store._write") as writer:
             assert merge_save(self.path, source).equals(source)
             empty = pl.DataFrame(schema=SCHEMA)
             assert merge_save(self.path, empty).equals(source)
@@ -262,7 +263,7 @@ class NewsletterHistoryStoreTests(unittest.TestCase):
         source = _snapshot()
         merge_save(self.path, source)
         with (
-            patch("backend.articles.history_store._MAX_BYTES", 1),
+            patch("data.articles.history_store._MAX_BYTES", 1),
             self.assertRaises(ValueError),
         ):
             load(self.path)

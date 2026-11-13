@@ -81,7 +81,7 @@ class TestArticleSummarySource(TestCase):
         assert self.open.call_args.args[0].headers["Accept-language"] == "zh"
 
     def test_transport_errors_propagate_without_retries(self) -> None:
-        """Let the backend retain old text on transient errors."""
+        """Let the runtime retain old text on transient errors."""
         for error in (
             HTTPError(
                 "https://example.invalid",

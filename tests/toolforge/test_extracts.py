@@ -13,7 +13,7 @@ from unittest.mock import Mock, call, patch
 
 import polars as pl
 
-from backend.website.extracts import ExtractCache
+from data.caching.extracts import ExtractCache
 from shared.support.cache import ParquetCache
 
 
@@ -44,7 +44,7 @@ class TestArticleExtractCache(TestCase):
     def _write(
         self,
         frame: pl.DataFrame,
-        contract: str = "article-extracts:2",
+        contract: str = "article-extracts:3",
     ) -> None:
         """Write typed fixture observations with a parser contract.
 

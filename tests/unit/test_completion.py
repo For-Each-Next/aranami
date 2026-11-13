@@ -16,14 +16,14 @@ from unittest.mock import Mock, patch
 import polars as pl
 from pywikibot.page import Revision
 
-from backend import runner
-from backend.support import completion
-from shared.reports import ReportResult, ReportStore, report_key
+from data.reports import ReportResult, ReportStore, report_key
+from data.runtime import completion
+from runtime import runner
+from runtime.jobs import JobContext, new_pages, pageviews
 from shared.support.regions import managed_region
-from updater.jobs import JobContext, new_pages, pageviews
 from updater.services.zhwiki.pageviews import PageviewReport
 
-_NOW = dt.datetime(2026, 10, 20, 18, 59, tzinfo=dt.UTC)
+_NOW = dt.datetime(2026, 10, 20, 19, 0, tzinfo=dt.UTC)
 _DAY = dt.date(2026, 10, 19)
 
 
@@ -159,7 +159,7 @@ class TestDailyCompletion(TestCase):
             else pageviews.REPORT_TITLE
         )
         settings = (
-            "new-pages-v1:电子游戏"
+            "new-pages:calendar-month-events-v2:电子游戏"
             if routine == "new_pages"
             else repr(pageviews.REPORT_SETTINGS)
         )
@@ -186,7 +186,7 @@ class TestDailyCompletion(TestCase):
                 self._checkpoint(routine)
                 with (
                     patch(
-                        "updater.jobs._execution.pywikibot.Site",
+                        "runtime.jobs.context.pywikibot.Site",
                     ) as site,
                     patch.object(job, "read_pages") as read,
                     patch.object(job, "job_run") as lifecycle,
@@ -205,7 +205,7 @@ class TestDailyCompletion(TestCase):
             (
                 "new_pages",
                 _NOW,
-                dt.datetime(2026, 10, 21, 0, 1, tzinfo=dt.UTC),
+                dt.datetime(2026, 10, 20, 23, 59, tzinfo=dt.UTC),
             ),
             (
                 "pageviews",
@@ -230,18 +230,17 @@ class TestDailyCompletion(TestCase):
     ) -> None:
         """Keep an early successful run complete for its UTC date."""
         completed_at = _NOW.replace(hour=0, minute=1)
-        next_run = (_NOW + dt.timedelta(days=1)).replace(hour=0, minute=7)
+        next_run = (_NOW + dt.timedelta(days=1)).replace(hour=0, minute=0)
         key = self._checkpoint("new_pages", now=completed_at)
         for restarted in (
             completed_at + dt.timedelta(minutes=1),
             _NOW.replace(hour=0, minute=7),
             _NOW.replace(hour=23, minute=59, second=59),
-            (_NOW + dt.timedelta(days=1)).replace(hour=0, minute=1),
         ):
             with (
                 self.subTest(restarted=restarted),
                 patch.object(new_pages, "_utc_now", return_value=restarted),
-                patch("updater.jobs._execution.pywikibot.Site") as site,
+                patch("runtime.jobs.context.pywikibot.Site") as site,
                 patch.object(new_pages, "read_pages") as read,
                 patch.object(new_pages, "job_run") as lifecycle,
                 patch.object(new_pages.data, "prepare_report") as prepare,
@@ -266,17 +265,17 @@ class TestDailyCompletion(TestCase):
     def test_pageviews_success_spans_midnight_and_next_readiness_boundary(
         self,
     ) -> None:
-        """Reuse each completed 18:00 cycle until the next trigger."""
+        """Reuse each completed 19:00 cycle until the next trigger."""
         next_date = _NOW + dt.timedelta(days=1)
-        next_run = next_date.replace(hour=18, minute=59)
+        next_run = next_date.replace(hour=19, minute=0)
         for completed_at in (
             _NOW.replace(hour=19, minute=13),
-            next_date.replace(hour=0, minute=7),
+            next_date.replace(hour=0, minute=0),
         ):
             key = self._checkpoint("pageviews", now=completed_at)
             for restarted in (
                 completed_at + dt.timedelta(minutes=1),
-                next_date.replace(hour=17, minute=59, second=59),
+                next_date.replace(hour=18, minute=59, second=59),
                 next_date.replace(hour=18, minute=0),
                 next_run - dt.timedelta(seconds=1),
             ):
@@ -287,7 +286,7 @@ class TestDailyCompletion(TestCase):
                         "_utc_now",
                         return_value=restarted,
                     ),
-                    patch("updater.jobs._execution.pywikibot.Site") as site,
+                    patch("runtime.jobs.context.pywikibot.Site") as site,
                     patch.object(pageviews, "read_pages") as read,
                     patch.object(pageviews, "job_run") as lifecycle,
                     patch.object(pageviews.data, "prepare_report") as prepare,
@@ -362,7 +361,7 @@ class TestDailyCompletion(TestCase):
     def test_pageviews_crossing_readiness_cannot_complete_older_date(
         self,
     ) -> None:
-        """Retry when an older eligible day finishes after 18:00 UTC."""
+        """Retry when an older eligible day finishes after 19:00 UTC."""
         key = completion.identity(
             "pageviews",
             pageviews.REPORT_TITLE,
@@ -373,8 +372,8 @@ class TestDailyCompletion(TestCase):
                 key,
                 routine="pageviews",
                 through=_DAY - dt.timedelta(days=1),
-                now=_NOW.replace(hour=18, minute=0),
-                started_at=_NOW.replace(hour=17, minute=59),
+                now=_NOW.replace(hour=19, minute=0),
+                started_at=_NOW.replace(hour=18, minute=59),
                 confirmed_save=True,
                 dry=False,
             )
@@ -386,6 +385,7 @@ class TestDailyCompletion(TestCase):
         self,
     ) -> None:
         """Require complete evidence for the exact configuration."""
+        self._check_renamed_identity_revalidation()
         key = self._checkpoint("new_pages")
         path = self.root / "cache" / "completion" / f"{key}.json"
         assert (
@@ -476,6 +476,57 @@ class TestDailyCompletion(TestCase):
         assert bundle.manifest["calculated_at"] is None
         page.save.assert_not_called()
 
+    def _check_renamed_identity_revalidation(
+        self,
+    ) -> None:
+        """Recheck old completion without editing accepted dates."""
+        old_key = completion.identity(
+            "new_pages",
+            new_pages._TARGET,
+            "new-pages-v1:电子游戏",
+        )
+        completion.record_completion(
+            old_key,
+            routine="new_pages",
+            through=_DAY,
+            now=_NOW,
+            started_at=_NOW,
+            confirmed_save=True,
+            dry=False,
+        )
+        context = _context()
+        page = Mock(
+            text=_new_pages_text(),
+            latest_revision=Revision(
+                revid=123,
+                timestamp="2026-10-19T22:00:00Z",
+            ),
+        )
+        with (
+            patch.object(
+                new_pages,
+                "job_run",
+                return_value=nullcontext(context),
+            ),
+            patch.object(new_pages, "read_pages", return_value=[page]) as read,
+            patch.object(new_pages.data, "collect_day") as discover,
+        ):
+            advice = new_pages.run(automatic=True)
+        read.assert_called_once()
+        discover.assert_not_called()
+        page.save.assert_not_called()
+        assert context.edits == []
+        assert advice == completion.next_daily_run("new_pages", _NOW)
+        key = completion.identity(
+            "new_pages",
+            new_pages._TARGET,
+            "new-pages:calendar-month-events-v2:电子游戏",
+        )
+        record = json.loads(
+            (self.root / "cache" / "completion" / f"{key}.json").read_text(),
+        )
+        assert record["evidence"] == "verified-wiki"
+
     def test_manual_pageviews_and_changed_configuration_read_current_wiki(
         self,
     ) -> None:
@@ -530,7 +581,7 @@ class TestDailyCompletion(TestCase):
                 return_value=_pageview_data(),
             ),
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
                 return_value=page,
             ),
             self.assertRaises(RuntimeError),
@@ -566,7 +617,7 @@ class TestDailyCompletion(TestCase):
                 return_value=_pageview_data(),
             ),
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
             ) as page,
         ):
             assert pageviews.run(context=context) is None
@@ -583,6 +634,7 @@ class TestDailyCompletion(TestCase):
         context = _context()
         day = _DAY - dt.timedelta(days=1)
         page = Mock(text=_pageviews_text(day - dt.timedelta(days=1)))
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with (
             patch.object(
                 pageviews,
@@ -598,7 +650,7 @@ class TestDailyCompletion(TestCase):
                 ),
             ) as build,
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
                 return_value=page,
             ),
         ):
@@ -623,6 +675,7 @@ class TestDailyCompletion(TestCase):
         accepted = _DAY - dt.timedelta(days=1)
         first = accepted - dt.timedelta(days=1)
         page = Mock(text=_pageviews_text(first - dt.timedelta(days=1)))
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         self.downloads.side_effect = None
         self.downloads.return_value = accepted
         with (
@@ -640,7 +693,7 @@ class TestDailyCompletion(TestCase):
                 ),
             ),
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
                 return_value=page,
             ),
         ):
@@ -686,7 +739,7 @@ class TestDailyCompletion(TestCase):
                 return_value=_pageview_data(),
             ),
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
             ) as page,
         ):
             assert pageviews.run(context=context) is None
@@ -821,7 +874,7 @@ class TestDailyCompletion(TestCase):
                 return_value=_new_pages_text(),
             ),
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
                 return_value=page,
             ),
             self.assertRaises(RuntimeError),
@@ -836,8 +889,8 @@ class TestDailyReadiness(TestCase):
     @staticmethod
     def test_pageviews_completion_waits_for_next_readiness_boundary() -> None:
         """Resume after tomorrow's boundary when already current."""
-        before = _NOW.replace(hour=17, minute=59)
-        at = _NOW.replace(hour=18, minute=0)
+        before = _NOW.replace(hour=18, minute=59)
+        at = _NOW.replace(hour=19, minute=0)
         assert completion.latest_required_date(
             "pageviews",
             before,
@@ -853,6 +906,6 @@ class TestDailyReadiness(TestCase):
             10,
             21,
             0,
-            7,
+            0,
             tzinfo=dt.UTC,
         )

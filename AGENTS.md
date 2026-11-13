@@ -13,13 +13,18 @@ offline verification.
 
 - This repository is only for developing, testing, and preparing Aranami source
   deployments on a development computer. Runtime targets Toolforge only.
+- Protect midnight collection on Toolforge: do not upload, deploy, drain,
+  restart, or run other disruptive maintenance from 23:59:00 through
+  00:01:59 UTC. Resume at 00:02 UTC; local development and offline checks
+  may continue during this window.
 
 ## Scoped instructions
 
 The root instructions remain in force throughout the repository.
-[Backend instructions][1] add runtime, storage, and data-preparation rules
-for `src/backend/`. [Updater instructions][7] cover wikitext rendering and
-publication in `src/updater/`.
+[Runtime instructions][1] cover scheduling and coordination;
+[data instructions](src/data/AGENTS.md) cover schemas and storage;
+[task instructions](src/tasks/AGENTS.md) cover acquisition and calculations.
+[Updater instructions][7] cover wikitext projection and publication.
 
 ## Documentation focus
 
@@ -69,6 +74,10 @@ publication in `src/updater/`.
 
 ## Change management
 
+The final archived source is v0.9.2. Further development belongs in a fork
+with a new explicit version. Toolforge operation remains independent of
+GitHub's read-only archive status.
+
 ### Task branches
 
 - At the start of every repository task, create and switch to a new branch
@@ -77,6 +86,9 @@ publication in `src/updater/`.
   task's changes and merge its branch back into `trunk`.
 - Preserve unrelated work and include only the task's changes in its commits
   and merge.
+- The user-selected 0.9.2 release consolidates unpublished 1.0 alpha development
+  after v0.8.8. Continue version decisions from that source line; do not infer
+  formal 1.0.0 from the earlier alpha history.
 
 ### Versioning
 
@@ -161,12 +173,12 @@ suites, source import/boundary/upload checks, and the checks below:
 
 ```text
 uv lock --check
-uv run ruff check --no-fix .
-uv run ruff format --check .
+uvx --from ruff==0.16.0 ruff check --no-fix .
+uvx --from ruff==0.16.0 ruff format --check .
 uv run python scripts/upload_toolforge.py --dry-run
 ```
 
-[1]: src/backend/AGENTS.md
+[1]: src/runtime/AGENTS.md
 [2]: https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings
 [3]: https://semver.org/
 [4]: https://www.conventionalcommits.org/en/v1.0.0/

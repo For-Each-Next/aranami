@@ -1,4 +1,4 @@
-"""Verify configured publication targets use backend-prepared data."""
+"""Verify configured publication targets use runtime-prepared data."""
 
 from contextlib import nullcontext
 from dataclasses import replace
@@ -12,11 +12,11 @@ from unittest.mock import Mock, patch
 import polars as pl
 from pywikibot.page import Revision
 
-from backend.services.enwiki.key_articles import ReportData
-from backend.support.report_membership import MembershipReport
+from data.runtime.report_membership import MembershipReport
+from runtime.jobs import assessment_lists, dyks, enwp_key_articles, new_pages
 from shared.config import TASK_DEFINITIONS
 from shared.support.regions import managed_region
-from updater.jobs import assessment_lists, dyks, enwp_key_articles, new_pages
+from tasks.enwiki.key_articles import ReportData
 
 
 def _context() -> Mock:
@@ -33,7 +33,7 @@ def _context() -> Mock:
 
 
 def _new_pages(context: Mock) -> Mock:
-    """Provide backend discovery metadata without making source reads.
+    """Provide runtime discovery metadata without making source reads.
 
     Args:
         context: Context whose anchor date defines the completed record.
@@ -51,7 +51,7 @@ def _new_pages(context: Mock) -> Mock:
 
 
 class TestJobDestinations(TestCase):
-    """Check target overrides preserve backend data scope."""
+    """Check target overrides preserve runtime data scope."""
 
     def setUp(self) -> None:
         """Isolate disposable membership checkpoints."""
@@ -111,7 +111,7 @@ class TestJobDestinations(TestCase):
 
     @staticmethod
     def test_new_pages_custom_destination_preserves_keyword_scope() -> None:
-        """Pass destination text to backend and keep discovery scope."""
+        """Pass destination text to runtime and keep discovery scope."""
         context = _context()
         target = "User:Example/New pages"
         original = managed_region("new-pages", "Existing")
@@ -173,6 +173,8 @@ class TestJobDestinations(TestCase):
         changes = Mock(
             articles=1,
             nominees=0,
+            added_articles=None,
+            removed_nominees=None,
             new=(),
             passed=(),
             failed=(),
@@ -225,7 +227,7 @@ class TestJobDestinations(TestCase):
 
     @staticmethod
     def test_assessment_custom_destination_preserves_category() -> None:
-        """Keep discovery in backend when overriding the edit target."""
+        """Keep discovery in runtime when overriding the edit target."""
         context = _context()
         target = "User:Example/Assessment report"
         config = assessment_lists.ASSESSMENT_LISTS[0][1]
@@ -290,6 +292,12 @@ class TestJobDestinations(TestCase):
             name: f"User:Example/{name}"
             for name in enwp_key_articles.REPORT_TARGETS
         }
+        originals = [
+            managed_region(spec.membership_region, "")
+            if spec.membership_region is not None
+            else "old"
+            for spec in enwp_key_articles.REPORT_SPECS
+        ]
         data = ReportData(
             rows=pl.DataFrame(
                 schema={"en_importance": pl.String, "en_class": pl.String},
@@ -307,7 +315,7 @@ class TestJobDestinations(TestCase):
             patch.object(
                 enwp_key_articles,
                 "read_pages",
-                return_value=[Mock(text="old") for _ in targets],
+                return_value=[Mock(text=original) for original in originals],
             ) as read,
             patch.object(
                 enwp_key_articles,
@@ -333,3 +341,7 @@ class TestJobDestinations(TestCase):
         assert [
             call.args[0].title for call in context.publish.call_args_list
         ] == list(targets.values())
+        assert [
+            call.args[0].original_text
+            for call in context.publish.call_args_list
+        ] == originals

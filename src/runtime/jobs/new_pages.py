@@ -1,0 +1,168 @@
+"""Publish new-page report text from runtime-prepared observations."""
+
+from __future__ import annotations
+
+import datetime as dt
+import logging
+from typing import TYPE_CHECKING
+
+from data.reports import report_key
+from data.runtime.completion import completed_until, identity
+from runtime.jobs import ProposedEdit, job_run
+from shared.config import TASK_DEFINITIONS
+from shared.sources.wiki import read_pages
+from tasks.zhwiki import new_pages as data
+from updater.edit_summary import EditSummary, format_summary_number
+from updater.services.zhwiki.new_pages import update_text
+
+if TYPE_CHECKING:
+    from runtime.jobs import JobContext
+
+_TARGET = TASK_DEFINITIONS["new_pages"].pages["report"]
+_LOGGER = logging.getLogger(__name__)
+
+
+def _utc_now() -> dt.datetime:
+    """Read actual time for readiness and confirmed completion.
+
+    Returns:
+        Current aware UTC instant, independent of the report anchor.
+    """
+    return dt.datetime.now(dt.UTC)
+
+
+def _edit_summary(prepared: data.PreparedNewPages) -> str:
+    """Format runtime discovery counts and backfill metadata.
+
+    Args:
+        prepared: Backend-prepared report dates and observation totals.
+
+    Returns:
+        A dated count summary or historical backfill description.
+    """
+    day = prepared.latest_date
+    filled_dates = prepared.filled_dates
+    older = len(filled_dates - {day})
+    backfill = (
+        f"Backfill {format_summary_number(older)} older daily "
+        f"{'record' if older == 1 else 'records'}."
+    )
+    if day in filled_dates:
+        articles, non_articles = prepared.articles, prepared.non_articles
+        summary = EditSummary.daily(
+            day,
+            action=(
+                f"Add {format_summary_number(articles)} "
+                f"{'article' if articles == 1 else 'articles'} and "
+                f"{format_summary_number(non_articles)} "
+                f"{'non-article' if non_articles == 1 else 'non-articles'}"
+            ),
+        )
+        if older:
+            summary.append(backfill)
+    elif older:
+        summary = EditSummary(backfill).append("Update class icons.")
+    elif prepared.pruned:
+        summary = EditSummary("Remove expired new-page records.")
+    else:
+        summary = EditSummary("Update class icons.")
+    return summary.render()
+
+
+def run(
+    *,
+    title: str = _TARGET,
+    dry: bool = False,
+    context: JobContext | None = None,
+    automatic: bool = False,
+) -> dt.datetime | None:
+    """Publish missing daily records using runtime-owned source facts.
+
+    Args:
+        title: Caller-selected destination.
+        dry: Write a preview without wiki publication.
+        context: Optional shared report execution context.
+        automatic: Permit a valid runtime completion checkpoint to skip.
+
+    Returns:
+        Scheduling advice after confirmed current completion.
+    """
+    now = _utc_now()
+    key = identity(
+        "new_pages",
+        title,
+        "new-pages:calendar-month-events-v2:电子游戏",
+    )
+    if automatic and context is None and not dry:
+        next_run = completed_until(
+            key,
+            required_date=now.date() - dt.timedelta(days=1),
+            now=now,
+        )
+        if next_run is not None:
+            return next_run
+    with (
+        job_run("new_pages", dry=dry, context=context) as active,
+        active.report_attempt(title),
+    ):
+        page = read_pages(active.site, [title])[0]
+        original_text = page.text
+        revision = page.latest_revision
+        prepared = data.prepare_report(
+            original_text,
+            active.site,
+            active.today,
+            project="电子游戏",
+            source_revision=revision.revid,
+            source_timestamp=revision.timestamp.replace(tzinfo=dt.UTC),
+        )
+        text = update_text(original_text, prepared)
+        if not prepared.filled_dates and not prepared.pruned:
+            reason = "No missing retained new-page dates; skipped update."
+            active.notes.append(reason)
+            _LOGGER.info(reason)
+            retained = data.retain_current(
+                prepared,
+                active.site,
+                title,
+                original_text,
+                run_id=active.report_run_id,
+                started_at=active.started_at,
+                dry=active.dry,
+            )
+            confirmed = False
+            if not retained:
+                active.finish_report(title, "deferred", confirmed_edits=0)
+                return None
+            active.finish_report(title, "unchanged", confirmed_edits=0)
+        else:
+            confirmed = active.publish(
+                ProposedEdit(
+                    site=active.site,
+                    title=title,
+                    text=text,
+                    summary=_edit_summary(prepared),
+                    tags=(
+                        "new-pages",
+                        f"filled-{len(prepared.filled_dates)}-dates",
+                    ),
+                    original_text=original_text,
+                    report_key=report_key(
+                        "new-pages",
+                        active.site.dbName(),
+                        title,
+                    ),
+                    result=prepared.result,
+                ),
+            )
+            if confirmed is not True:
+                return None
+        active.confirm_report_date(prepared.latest_date)
+        return data.completion(
+            prepared,
+            key,
+            now=_utc_now(),
+            started_at=active.started_at,
+            confirmed_save=confirmed is True,
+            dry=active.dry,
+        )

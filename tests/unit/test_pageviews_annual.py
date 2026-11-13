@@ -13,9 +13,9 @@ from urllib.error import HTTPError
 import polars as pl
 from dateutil.relativedelta import relativedelta
 
-from backend.services.zhwiki import pageviews
-from backend.support.pageviews_cache import PageviewsCache
-from shared.reports import ReportResult, ReportStore, report_key
+from data.caching.pageviews import PageviewsCache
+from data.reports import ReportResult, ReportStore, report_key
+from tasks.zhwiki import pageviews
 
 _TITLE = "WikiProject:电子游戏/热门条目"
 _STOP = dt.date(2026, 10, 31)

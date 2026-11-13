@@ -1,231 +1,145 @@
-"""Verify recent invocation history and separate diagnostic access."""
+"""Verify the saved status and log presentation contracts."""
 
 from __future__ import annotations
 
-import datetime as dt
 import json
-import re
 import tempfile
 import unittest
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from starlette.testclient import TestClient
 
-from backend.public import create_app
-from webservice.presentation import Interface
+from webservice.server import create_app
 
-# Exact event counts and status codes describe the public interface.
+# HTTP status codes and explicit counts describe the public contract.
 # ruff: file-ignore[magic-value-comparison]
 
 
 class LogControlsTests(unittest.TestCase):
-    """Exercise HTTP pages over bounded saved job invocations."""
+    """Exercise read-only log routes in each interface language."""
 
     def setUp(self) -> None:
-        """Provide one hundred invocations and diagnostic files."""
+        """Create isolated saved observations for this test."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        runtime = Path(temporary.name)
-        logs = runtime / "logs"
-        logs.mkdir()
-        (logs / "aranami.2026-10-23.log").write_text("diagnostic details\n")
-        self.events = [
-            {
-                "schema": 1,
-                "time": (
-                    dt.datetime(2026, 10, 23, tzinfo=dt.UTC)
-                    + dt.timedelta(seconds=index)
-                ).isoformat(),
-                "kind": "routine_finished",
-                "routine": "pageviews",
-                "dry": False,
-                "status": "failed" if index % 2 else "updated",
-                "updated": None if index % 2 else 1,
-                "duration_seconds": 6.83,
-            }
-            for index in range(100)
-        ]
-        (logs / "events.2026-10-23.jsonl").write_text(
-            "\n".join(json.dumps(event) for event in self.events) + "\n",
+        self.runtime = Path(temporary.name)
+        logs = self.runtime / "logs"
+        (logs / "activity").mkdir(parents=True)
+        (logs / "diagnostics").mkdir()
+        self.event = {
+            "schema": 1,
+            "time": "2026-10-23T12:00:00Z",
+            "event_id": "1" * 32,
+            "boot_id": "2" * 32,
+            "run_id": "3" * 32,
+            "parent_run_id": None,
+            "attempt_id": None,
+            "dry": False,
+            "level": "INFO",
+            "kind": "routine_finished",
+            "routine": "pageviews",
+            "outcome": "succeeded",
+            "updated": None,
+            "duration_seconds": 6.83,
+        }
+        (logs / "activity/20261023.000.jsonl").write_text(
+            json.dumps(self.event) + "\n",
         )
-        state = runtime / "state"
-        state.mkdir()
-        (state / "job-history.json").write_text(
-            json.dumps({
-                "schema": 1,
-                "runs": [
-                    {
-                        "run_id": f"{index:032x}",
-                        "routine": event["routine"],
-                        "started_at": event["time"],
-                        "finished_at": event["time"],
-                        "status": event["status"],
-                        "duration_seconds": event["duration_seconds"],
-                        "truncated": False,
-                        "stages": [
-                            {
-                                "kind": "started",
-                                "time": event["time"],
-                                "title": "",
-                            },
-                            {
-                                "kind": "finished",
-                                "time": event["time"],
-                                "title": "",
-                            },
-                        ],
-                    }
-                    for index, event in enumerate(self.events)
-                ],
-            }),
+        (logs / "diagnostics/20261023.000.log").write_text(
+            "diagnostic details\n",
         )
-        self.runtime = runtime
-        self.client = TestClient(create_app(runtime))
+        self.client = TestClient(create_app(self.runtime))
         self.addCleanup(self.client.close)
 
-    @staticmethod
-    def _listing(output: str) -> str:
-        """Extract event rows without matching status-panel timestamps.
-
-        Returns:
-            The visible event rows inside the report table body.
-        """
-        match = re.search(r"<tbody>(.*?)</tbody>", output, re.DOTALL)
-        assert match is not None
-        return match[1]
-
-    def test_newest_history_keeps_diagnostic_downloads_reachable(
-        self,
-    ) -> None:
-        """Show invocations and separate downloads in every locale."""
+    def test_activity_and_downloads_are_separate_in_all_locales(self) -> None:
+        """Render activity controls and separate segment downloads."""
         for locale in ("en", "zh-hans", "zh-hant"):
-            with self.subTest(locale=locale):
-                interface = Interface(locale)
-                response = self.client.get(
-                    "/reports/",
-                    headers={"Accept-Language": locale},
-                )
-                assert response.status_code == 200
-                output = response.text
-                listing = self._listing(output)
-                assert listing.count("<tr ") == 20
-                assert len(re.findall(r"<td\b[^>]*>", listing)) == 60
-                assert listing.count('<th scope="row">') == 20
-                assert len(re.findall(r'<th\b[^>]*scope="col"', output)) == 4
-                assert re.findall(r'<time datetime="([^"]+)"', listing) == [
-                    event["time"] for event in reversed(self.events[-20:])
-                ]
-                assert interface.text("logs.result.updated") in listing
-                assert interface.text("logs.result.failed") in listing
-                assert '<form action="/reports/"' not in output
-                assert 'class="log-query"' not in output
-                assert 'class="log-match-count"' not in output
-                assert 'class="pagination"' not in output
-                assert interface.text("logs.download") not in output
-                assert " download>" not in output
-                assert "job-history-" in listing
-                assert listing.count('<a class="status-link"') == 20
-                assert listing.count('aria-haspopup="dialog"') == 20
-                assert "<button" not in listing
-                for index in range(80, 100):
-                    assert f'href="#job-history-{index:032x}"' in listing
-                assert f'href="#job-history-{79:032x}"' not in listing
-                archive_output = self.client.get(
-                    "/logs/",
-                    headers={"Accept-Language": locale},
-                ).text
-                table = re.search(
-                    r'<table class="[^"]*\blogs-table\b[^"]*">(.*?)</table>',
-                    archive_output,
-                    re.DOTALL,
-                )
-                assert table is not None
-                archive = table[1]
-                assert len(re.findall(r'<th\b[^>]*scope="col"', archive)) == 3
-                assert archive.count("<td") == 2
-                assert archive.count('<th scope="row">') == 1
-                assert (
-                    '<td class="log-download"><a class="filename" href="'
-                    in archive
-                )
-                assert "download>aranami.2026-10-23.log</a>" in archive
-                assert interface.text("logs.download") not in archive
-                assert 'class="log-query"' not in archive_output
-                assert 'id="recent-events"' not in archive_output
-                assert 'id="live-server-status"' not in archive_output
-                assert 'href="#live-server-status"' not in archive_output
-                assert 'id="live-uptime"' in archive_output
-                assert 'class="system-details"' not in output
-                assert (
-                    self.client.get(
-                        "/logs/?date=2026-10-23&download=1",
-                    ).text
-                    == "diagnostic details\n"
-                )
-
-    def test_obsolete_controls_leave_recent_history_visible(self) -> None:
-        """Ignore retired history controls without changing the rows."""
-        for locale in ("en", "zh-hans", "zh-hant"):
-            headers = {"Accept-Language": locale}
-            expected = self._listing(
-                self.client.get("/reports/", headers=headers).text,
-            )
-            for query in (
-                "date=2026-10-23&q=Pageview&status=failed&order=asc&page=2",
-                "q=never-match",
-                "date=2026-01-01",
-                "order=sideways",
-                "page=0",
-                "page=5",
-                "status=private-code",
-                "order=asc&order=desc",
-                "page=-1",
-            ):
-                with self.subTest(locale=locale, query=query):
-                    response = self.client.get(
-                        "/reports/?" + query,
-                        headers=headers,
-                    )
-                    assert response.status_code == 200
-                    assert self._listing(response.text) == expected
-                    assert 'class="log-query"' not in response.text
-        assert self.client.get("/api/logs?order=asc").status_code == 400
-
-    def test_empty_history_remains_localized_without_controls(self) -> None:
-        """Describe empty history in every supported locale."""
-        (self.runtime / "state" / "job-history.json").write_text(
-            json.dumps({"schema": 1, "runs": []}),
-        )
-        for locale in ("en", "zh-hans", "zh-hant"):
-            response = self.client.get(
-                "/reports/",
-                headers={"Accept-Language": locale},
-            )
+            response = self.client.get(f"/logs/?lang={locale}")
             assert response.status_code == 200
-            assert Interface(locale).text("reports.empty") in response.text
-            assert "download=1" not in response.text
-            assert " download>" not in response.text
-            assert (
-                re.search(
-                    r'<table class="[^"]*\blogs-table\b[^"]*">',
-                    response.text,
-                )
-                is None
-            )
-            assert 'class="log-query"' not in response.text
+            assert 'id="log-activity"' in response.text
+            assert 'name="run_id"' in response.text
+            assert "routine_finished" in response.text
+            assert "diagnostic details" not in response.text
+            assert "file=20261023.000.log" in response.text
+            assert "file=20261023.000.jsonl" in response.text
+            assert 'id="live-uptime"' in response.text
 
-    def test_history_is_independent_of_diagnostic_files(self) -> None:
-        """Show saved invocations after diagnostic files are removed."""
-        for path in (self.runtime / "logs").iterdir():
-            path.unlink()
-        response = self.client.get("/reports/")
+    def test_api_has_version_and_explicit_availability(self) -> None:
+        """Expose versioned events with explicit availability."""
+        value = self.client.get("/api/logs").json()
+        assert value["schema"] == 1
+        assert value["availability"] == "available"
+        assert value["events"] == [self.event]
+        assert value["events"][0]["updated"] is None
+        assert value["observed_at"]
+
+    def test_text_and_run_filters_match_saved_fields(self) -> None:
+        """Honor exact correlation IDs and case-insensitive search."""
+        response = self.client.get(
+            "/api/logs",
+            params={"run_id": "3" * 32, "q": "PAGEVIEWS"},
+        )
+        assert response.json()["events"] == [self.event]
+        assert self.client.get("/api/logs?q=absent").json()["events"] == []
+
+    def test_missing_activity_is_explicit(self) -> None:
+        """Keep absent dates empty without writing runtime files."""
+        value = self.client.get("/api/logs?date=2026-10-22").json()
+        assert value["availability"] == "missing"
+        assert not value["events"]
+        assert not (self.runtime / "state").exists()
+
+    def test_diagnostics_download_and_head_are_bounded(self) -> None:
+        """Download the selected segment with its known byte length."""
+        path = (
+            "/logs/?date=2026-10-23&stream=diagnostics"
+            "&file=20261023.000.log&download=1"
+        )
+        response = self.client.get(path)
+        assert response.text == "diagnostic details\n"
+        assert (
+            'filename="20261023.000.log"'
+            in response.headers["content-disposition"]
+        )
+        head = self.client.head(path)
+        assert head.content == b""
+        assert head.headers["content-length"] == str(len(response.content))
+
+    def test_invalid_controls_do_not_touch_files(self) -> None:
+        """Reject unsafe, repeated, and unsupported controls."""
+        for query in (
+            "q=a&q=b",
+            "file=../escape&download=1",
+            "stream=invalid",
+            "run_id=short",
+            "other=1",
+        ):
+            assert self.client.get("/api/logs?" + query).status_code == 400
+        assert self.client.post("/api/logs").status_code == 405
+
+    def test_unavailable_segment_is_never_a_successful_download(self) -> None:
+        """Return 404 for a missing download segment."""
+        response = self.client.get(
+            "/logs/?date=2026-10-23&stream=diagnostics&file=20261023.001.log&download=1",
+        )
+        assert response.status_code == 404
+
+    def test_diagnostic_selection_has_no_activity_events(self) -> None:
+        """Keep diagnostic inventory separate from parsed activity."""
+        value = self.client.get("/api/logs?stream=diagnostics").json()
+        assert value["stream"] == "diagnostics"
+        assert value["availability"] == "available"
+        assert value["events"] == []
+
+    def test_query_echo_is_escaped(self) -> None:
+        """Hostile query text remains an input value, never markup."""
+        response = self.client.get(
+            "/logs/",
+            params={"q": "<script>bad</script>"},
+        )
         assert response.status_code == 200
-        assert self._listing(response.text).count("<tr ") == 20
-        assert self.client.get("/logs/").status_code == 200
-        (self.runtime / "state" / "job-history.json").write_text("{}")
-        response = self.client.get("/reports/")
-        assert response.status_code == 200
-        assert "job-history-" not in response.text
+        assert "<script>bad</script>" not in response.text
+        assert "&lt;script&gt;bad&lt;/script&gt;" in response.text
 
 
 if __name__ == "__main__":

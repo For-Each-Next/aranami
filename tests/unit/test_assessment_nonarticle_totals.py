@@ -12,7 +12,7 @@ from unittest import TestCase
 
 import polars as pl
 
-from backend.services import project_assessments as snapshots
+from data import project_assessments as snapshots
 from updater.services.zhwiki.assessment_log import update_text
 
 
@@ -48,7 +48,8 @@ def _data(current: dict, previous: dict | None) -> SimpleNamespace:
     """
     return SimpleNamespace(
         result=SimpleNamespace(
-            metadata={"article_totals": current},
+            metadata={"article_totals": current, "project": "电子游戏"},
+            provenance={"wiki": "zhwiki"},
             tables={},
         ),
         previous_totals=previous,
@@ -80,7 +81,7 @@ def render_totals(data: SimpleNamespace) -> str:
     return next(
         line
         for line in rendered.splitlines()
-        if "aranami-assessment-totals:v2" in line
+        if "aranami-assessment-totals schema=2" in line
     )
 
 
@@ -160,29 +161,64 @@ class TestAssessmentNonarticleTotals(TestCase):
         }
         rendered = render_totals(_data(current, previous))
         assert rendered.split("<!--", 1)[0] == (
-            "专题页面+3：条目+4（典范+1 · 优良+5 · 小作品-2 ｜ 极高重要度+4）"
-            " · 非条目-1（同类索引级-1） · 重定向+4"
+            "专题页面数+7：条目页+4（典范级+1、优良级+5、小作品级-2，极高重要度+4）"
+            "；非条目页-1（同类索引级-1）；重定向页+4。"
         )
         assert (
-            "<!-- aranami-assessment-totals:v2 "
-            "典范12 特色列表0 甲0 甲级列表0 优良7"
+            "<!-- aranami-assessment-totals schema=2 "
+            "合计32：典范12、特色列表0、甲0、甲级列表0、优良7"
         ) in rendered
         assert "极高重要度24" in rendered
-        assert "条目24 非条目1 重定向7 专题页面25 -->" in rendered
+        assert "重定向级7；极高重要度24" in rendered
+        assert "不适用重要度8" in rendered
 
     @staticmethod
-    def test_vanished_grades_and_zero_change_groups_remain_comparable() -> (
-        None
-    ):
-        """Retain negative changes for grades that disappeared."""
+    def test_vanished_grades_remain_visible_without_zero_totals() -> None:
+        """Retain changed grades and omit unchanged page totals."""
         previous = snapshots.summary_totals(_source("B", "Setindex"))
         current = snapshots.summary_totals(_source("GA", "Disambig"))
         rendered = render_totals(_data(current, previous))
-        assert rendered.startswith("条目（优良+1 · 乙-1） · 非条目（")
+        assert rendered.startswith(
+            "条目页（优良级+1、乙级-1）；非条目页（",
+        )
         assert "同类索引级-1" in rendered
         assert "+0" not in rendered
+        assert "±0" not in rendered
         identical = render_totals(_data(current, current))
-        assert not identical.split("<!--", 1)[0]
+        assert identical.startswith(
+            "<!-- aranami-assessment-totals schema=2 ",
+        )
+
+    def test_redirect_only_changes_omit_unchanged_groups(self) -> None:
+        """Show signed redirect changes without zero article deltas."""
+        previous = snapshots.summary_totals(_source("B", "Setindex"))
+        previous["redirects"] = 13
+        for change in (13, -13):
+            with self.subTest(change=change):
+                current = deepcopy(previous)
+                current["redirects"] += change
+                rendered = render_totals(_data(current, previous))
+                assert rendered.split("<!--", 1)[0] == (
+                    f"专题页面数{change:+}：重定向页{change:+}。"
+                )
+
+    @staticmethod
+    def test_retained_zero_groups_are_compacted_without_recomputing() -> None:
+        """Preserve hidden totals while removing visible zero groups."""
+        data = _data(snapshots.summary_totals(_source("B")), None)
+        hidden = "<!-- aranami-assessment-totals schema=2 original counts -->"
+        summary = "专题页面数+13：条目页±0；非条目页±0；重定向页+13。" + hidden
+        data.summaries = {data.report_date: summary}
+        data.days = {data.report_date: {}}
+        data.unchanged = False
+        original = (
+            '<!-- aranami begin="assessment-log" -->\n'
+            f"=== 2026年11月1日 ===\n\n{summary}\n\n無變更\n"
+            '<!-- aranami end="assessment-log" -->'
+        )
+        rendered = update_text(original, data)
+        assert "专题页面数+13：重定向页+13。" + hidden in rendered
+        assert "±0" not in rendered
 
     @staticmethod
     def test_legacy_counts_preserve_unknown_importance() -> None:
@@ -201,11 +237,13 @@ class TestAssessmentNonarticleTotals(TestCase):
         original = deepcopy(legacy)
         current = snapshots.summary_totals(_source("B", "重定向", "同类索引"))
         rendered = render_totals(_data(current, legacy))
-        assert not rendered.split("<!--", 1)[0]
+        assert rendered.startswith(
+            "<!-- aranami-assessment-totals schema=2 ",
+        )
         assert legacy == original
         old = render_totals(_data(legacy, legacy))
         assert "重要度未知" in old
-        assert "条目1 非条目2 重定向0 专题页面3" in old
+        assert "合计3：" in old
         assert "同类索引级1" in old
         assert "重定向级1" in old
 
@@ -226,8 +264,8 @@ class TestAssessmentNonarticleTotals(TestCase):
         rendered = render_totals(
             _data(snapshots.summary_totals(_source("B")), None),
         )
-        assert rendered.startswith("<!-- aranami-assessment-totals:v2 ")
-        assert "条目1 非条目0 重定向0 专题页面1" in rendered
+        assert rendered.startswith("<!-- aranami-assessment-totals schema=2 ")
+        assert "合计1：" in rendered
         assert "无可比记录" not in rendered
         assert "+" not in rendered
 

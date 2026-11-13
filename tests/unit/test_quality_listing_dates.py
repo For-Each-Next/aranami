@@ -12,10 +12,10 @@ import polars as pl
 from sqlalchemy.dialects import mysql
 from wiki_fixtures import OfflineSite
 
-from backend.services.enwiki import quality_listing_dates as dates
-from backend.support import quality_dates_cache as cache
+from data.caching import quality_dates as cache
 from shared.sources.dyk import TalkPage
 from shared.sources.quarry import enwp
+from tasks.enwiki import quality_listing_dates as dates
 
 
 def _pages(*classes: str) -> pl.DataFrame:
@@ -268,8 +268,13 @@ class TestQualityDatesCache(TestCase):
             TemporaryDirectory() as directory,
             patch.object(cache.Path, "cwd", return_value=Path(directory)),
         ):
-            path = Path(directory) / "cache" / cache._FILENAME  # ruff: ignore[private-member-access]
-            path.parent.mkdir()
+            path = (
+                Path(directory)
+                / "cache"
+                / "enwiki-quality-listing-dates"
+                / "20261110T000000.parquet"
+            )
+            path.parent.mkdir(parents=True)
             path.write_text("invalid parquet", encoding="utf-8")
             with patch("shared.support.cache._LOGGER.warning") as warning:
                 result = cache.load()

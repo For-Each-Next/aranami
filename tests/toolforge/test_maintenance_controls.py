@@ -13,16 +13,16 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-from fastapi.testclient import TestClient
+from starlette.testclient import TestClient
 
-from backend.public import create_app
-from webservice.pages import render_maintenance
+from webservice.pages import render_maintenance, render_maintenance_overview
 from webservice.presentation import (
     Interface,
     maintenance_filter,
     maintenance_items,
     maintenance_selection,
 )
+from webservice.server import create_app
 
 
 def _snapshot() -> dict[str, object]:
@@ -139,7 +139,7 @@ class TestMaintenanceControls(unittest.TestCase):
         assert 'class="maintenance-controls"' not in output
         assert 'id="maintenance-quality-to"' not in output
         assert 'name="genre" value="list"' not in output
-        assert output.count('class="cdx-table-pager ') == 1
+        assert output.count('class="ui-table-pager ') == 1
         assert output.count('class="source-updated"') == 1
 
     @staticmethod
@@ -263,7 +263,7 @@ class TestMaintenanceControls(unittest.TestCase):
             ),
             "en",
         )
-        assert output.count('class="cdx-table-pager ') == 1
+        assert output.count('class="ui-table-pager ') == 1
         assert output.count('class="page-jump"') == 0
         assert "Articles 11\u201320 of 103" in output
         assert ">11</td>" in output
@@ -303,7 +303,7 @@ class TestMaintenanceControls(unittest.TestCase):
                     locale,
                 )
                 assert (
-                    '<table class="maintenance-table cdx-table__table"'
+                    '<table class="maintenance-table ui-table__table"'
                     in output
                 )
                 assert f'data-label="{heading}"' in output
@@ -322,6 +322,27 @@ class TestMaintenanceControls(unittest.TestCase):
                 assert Interface(locale).text("backlog.empty") in output
 
 
+class TestMaintenanceTemplateIcons(unittest.TestCase):
+    """Keep tasks without verified images consistent with icon cards."""
+
+    @staticmethod
+    def test_text_only_templates_use_a_decorative_svg_icon() -> None:
+        """Replace bare source with the shared template symbol."""
+        snapshot = _snapshot()
+        snapshot["backlog"]["total"] = 103
+        snapshot["backlog"]["groups"] = [
+            {**snapshot["backlog"]["groups"][0], "key": "citation_needed"},
+        ]
+        output = render_maintenance_overview(snapshot, {}, {}, "en")
+        assert re.search(
+            r'<svg class="maintenance-icon ui-card__icon"[^>]*'
+            r'aria-hidden="true"[^>]*><use href="[^"]+#template">',
+            output,
+        )
+        assert "{{...}}" not in output
+        assert "maintenance-template-icon" not in output
+
+
 class TestMaintenanceHttpControls(unittest.TestCase):
     """Verify real query parsing and locale changes over saved rows."""
 
@@ -333,7 +354,7 @@ class TestMaintenanceHttpControls(unittest.TestCase):
         self.client = TestClient(create_app(runtime))
         self.addCleanup(self.client.close)
         saved = patch(
-            "backend.public._PublicViews._dashboard",
+            "webservice.server._PublicViews._dashboard",
             return_value=_snapshot(),
         )
         saved.start()
@@ -380,7 +401,7 @@ class TestMaintenanceHttpControls(unittest.TestCase):
         ):
             row["assessment_class"] = grade
         with patch(
-            "backend.public._PublicViews._dashboard",
+            "webservice.server._PublicViews._dashboard",
             return_value=snapshot,
         ):
             initial = self.client.get(

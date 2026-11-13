@@ -1,17 +1,18 @@
 # Shared infrastructure instructions
 
-These modules provide read-only sources, source configuration, durable report
-storage primitives and validated readers, and generic text/date mechanics.
-Backend and presentation code depend on this layer. Shared code must not import
-`backend`, `updater`, or `webservice`, initialize clients at import time,
-select publication targets, or publish edits. Keep update workflows,
-reusable data schemas, runtime logging and state, and website collection
-in the backend. Keep wiki formatting/publication in the updater and web
-rendering in the webservice.
+Shared modules provide configuration, assessment profiles, read-only source
+adapters and generic text/date/file mechanics. Higher layers depend on them.
 
-Source-adapter rules are in [sources/AGENTS.md](sources/AGENTS.md).
-Cross-component contracts are in the
-[architecture guide](../../docs/architecture.md).
-Runtime data belongs under the caller's working directory outside `app/`.
-Use native Polars frame expressions and preserve measured zeroes and nulls.
-Never introduce compatibility imports for retired application packages.
+- Never import data, tasks, runtime, updater or webservice. Imports must not
+  initialize clients, choose publication targets or make network requests or write runtime files.
+- Keep durable schemas and domain stores in data, audited wiki extractors in
+  tasks, lifecycle in runtime, wiki projection/publication in updater and HTTP
+  presentation in webservice.
+- Assessment definitions belong to the wiki/project metadata registry. Raw
+  PageAssessments labels remain distinct from codes, aliases and presentation.
+- Runtime files belong under the caller's working directory outside source.
+  Preserve zeroes and nulls, use native Polars expressions, and keep caches
+  disposable. Do not add compatibility imports for retired packages.
+
+[Source adapters](sources/AGENTS.md) defines read-only acquisition contracts.
+[Architecture](../../docs/architecture.md) defines dependency boundaries.

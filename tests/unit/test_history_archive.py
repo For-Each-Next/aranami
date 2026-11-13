@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from backend.articles.archive import SCHEMA, DailyHistoryArchive
+from tasks.articles.history_archive import SCHEMA, DailyHistoryArchive
 
 
 def _title(day: dt.date) -> str:
@@ -49,7 +49,7 @@ def _subjects(day: dt.date, game_id: int = 1) -> pl.DataFrame:
     )
 
 
-class AnniversaryArchiveTests(unittest.TestCase):
+class AnniversaryArchiveTests(unittest.TestCase):  # ruff: ignore[too-many-public-methods] - Keep shared source/cache regression fixtures together.
     """Reuse raw sources independently of project selection."""
 
     def setUp(self) -> None:
@@ -113,6 +113,23 @@ class AnniversaryArchiveTests(unittest.TestCase):
             + title.rsplit("/", 1)[1]
             + "|event1='''[[Game]]'''|event2='''[[Unrelated]]'''}}"
         )
+
+    def test_cache_directory_reuses_saved_anniversary(
+        self,
+    ) -> None:
+        """Reopen the timestamped directory after its first refresh."""
+        path = self.path.with_suffix("")
+        day = dt.date(2026, 10, 17)
+        archive = DailyHistoryArchive(self.read, path, self.now)
+        original = archive.at(_title(day), _boundary(day))
+        archive.save()
+        assert path.is_dir()
+        assert list(path.glob("*.parquet"))
+        self.read.at.side_effect = AssertionError("Unexpected source reread")
+        repeated = DailyHistoryArchive(self.read, path, self.now)
+        assert repeated.at(_title(day), _boundary(day)) == original
+        repeated.save()
+        assert self.read.at.call_count == 1
 
     def test_raw_source_survives_overwrite_and_repeated_read(self) -> None:
         """Reuse exact source text and revision after overwrites."""
@@ -385,7 +402,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
             self._redirect_sources(pages)
             with (
                 self.subTest(message=message),
-                patch("backend.articles.archive._MAX_REDIRECTS", 1),
+                patch("tasks.articles.history_archive._MAX_REDIRECTS", 1),
                 self.assertRaisesRegex(ValueError, message),
             ):
                 archive.at(title, _boundary(day))
@@ -426,7 +443,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
         day = dt.date(2026, 10, 17)
         title, target = self._corrupt_redirect_cache(day)
         cached = DailyHistoryArchive(self.read, self.path, self.now)
-        with self.assertLogs("backend.articles.archive", "WARNING"):
+        with self.assertLogs("tasks.articles.history_archive", "WARNING"):
             assert cached.at(title, _boundary(day)) == "Final"
         assert self.read.at.call_args_list == [
             unittest.mock.call(title, _boundary(day)),
@@ -448,7 +465,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
         self.read.at.side_effect = OSError("Source unavailable")
         cached = DailyHistoryArchive(self.read, self.path, self.now)
         with (
-            self.assertLogs("backend.articles.archive", "WARNING"),
+            self.assertLogs("tasks.articles.history_archive", "WARNING"),
             self.assertRaises(OSError),
         ):
             cached.at(title, _boundary(day))
@@ -456,7 +473,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
         assert self.path.read_bytes() == original
         self._redirect_sources({title: (100, 10, f"#REDIRECT [[{title}]]")})
         with (
-            self.assertLogs("backend.articles.archive", "WARNING"),
+            self.assertLogs("tasks.articles.history_archive", "WARNING"),
             self.assertRaisesRegex(ValueError, "cycle"),
         ):
             cached.at(title, _boundary(day))
@@ -471,13 +488,13 @@ class AnniversaryArchiveTests(unittest.TestCase):
         title, target = self._corrupt_redirect_cache(day)
         first = DailyHistoryArchive(self.read, self.path, self.now)
         second = DailyHistoryArchive(self.read, self.path, self.now)
-        with self.assertLogs("backend.articles.archive", "WARNING"):
+        with self.assertLogs("tasks.articles.history_archive", "WARNING"):
             assert first.at(title, _boundary(day)) == "Final"
         self._redirect_sources({
             title: (100, 10, f"#REDIRECT [[{target}]]"),
             target: (200, 21, "Concurrent valid repair"),
         })
-        with self.assertLogs("backend.articles.archive", "WARNING"):
+        with self.assertLogs("tasks.articles.history_archive", "WARNING"):
             assert (
                 second.at(title, _boundary(day)) == "Concurrent valid repair"
             )
@@ -584,7 +601,7 @@ class AnniversaryArchiveTests(unittest.TestCase):
         archive.at(_title(next_day), _boundary(next_day))
         with (
             patch(
-                "backend.articles.archive.ParquetCache.write",
+                "tasks.articles.history_archive.ParquetCache.write",
                 side_effect=OSError,
             ),
             self.assertRaises(OSError),

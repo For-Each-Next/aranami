@@ -3,15 +3,20 @@
 # Decorator arguments are unittest mocks, not pytest fixtures.
 # ruff: file-ignore[pytest-fixture-param-without-value, ambiguous-unicode-character-string]
 
+import json
 from datetime import date
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from test_dyks import _OfflineSite  # ruff: ignore[import-private-name]
 
-from backend.articles.milestone_sources import lookup_milestone
-from backend.services.zhwiki.article_milestones import extract_credits
 from shared.sources.article_milestones import SourceRevision
+from tasks.articles.milestone_sources import lookup_milestone
+from tasks.zhwiki.article_milestones import (
+    extract_credits,
+    nomination_targets,
+    source_events,
+)
 
 _ENTRY = (
     "{{DYKEntry/archive|article=Example|author=Writer"
@@ -35,7 +40,7 @@ class RecognitionSourceTests(TestCase):
         """Prepare local namespace metadata."""
         self.site = _OfflineSite("zh", "wikipedia")
         aliases = patch(
-            "backend.articles.milestone_sources.source.template_names",
+            "tasks.articles.milestone_sources.source.template_names",
             return_value={},
         )
         aliases.start()
@@ -52,6 +57,132 @@ class RecognitionSourceTests(TestCase):
             self.site,
         )
         assert missing[0]["nominator"] is None
+
+    def test_later_history_links_stay_with_their_own_source_template(
+        self,
+    ) -> None:
+        """Never borrow a first history's similarly numbered link."""
+        aliases = {
+            "Article history": (
+                "Template:Article history",
+                "Template:ArticleHistory",
+            ),
+        }
+        text = (
+            "{{Article history|dykdate=2019-01-01|action1link=#Wrong}}"
+            "{{ArticleHistory|action1=GAN|action1result=listed"
+            "|action1date=2020-01-05|action1link=#Right}}"
+            "\n==Wrong==\n提名人：[[User:Wrong]] 2020年1月1日 (三) 00:00 (UTC)"
+            "\n==Right==\n提名人：[[User:Right]] 2020年1月1日 (三) 00:00 (UTC)"
+        )
+        rows = source_events(text, self.site, "Example", aliases)
+        quality = next(row for row in rows if row["kind"] == "quality")
+        assert quality["parameter"] == "history2_action1"
+        assert quality["nominator"] == "Right"
+        assert quality["nomination_link"] == "#Right"
+        targets = nomination_targets(
+            text.replace("#Wrong", "Project:Reviews/Example#Wrong").replace(
+                "#Right",
+                "Project:Reviews/Example#Right",
+            ),
+            {
+                **_EVENT,
+                "date": date(2020, 1, 5),
+                "kind": "quality",
+                "grade": "GA",
+                "action": "added",
+                "_aliases": aliases,
+            },
+            self.site,
+        )
+        assert targets == {"Project:Reviews/Example#Right"}
+
+    def test_old_in_progress_parser_state_restarts_without_reusing_candidates(
+        self,
+    ) -> None:
+        """Restart old parser state and preserve versioned resumes."""
+        with (
+            patch(
+                "tasks.articles.milestone_sources.source.read_revision",
+                return_value=_SOURCE,
+            ) as read,
+            patch(
+                "tasks.articles.milestone_sources.source.read_archives",
+                return_value=([], "Talk:Example/Archive 9"),
+            ) as archives,
+        ):
+            result = lookup_milestone(
+                self.site,
+                {
+                    **_EVENT,
+                    "lookup_cursor": json.dumps({
+                        "after": "Talk:Example/Archive 8",
+                        "ambiguous": True,
+                    }),
+                },
+            )
+            assert read.called
+            assert archives.call_args.kwargs["after"] is None
+            state = json.loads(result["lookup_cursor"])
+            assert "ambiguous" not in state
+            assert (
+                state["parser_contract"]
+                == "zh-recognition-sources:multiple-history-templates:1"
+            )
+            read.reset_mock()
+            lookup_milestone(
+                self.site,
+                {**_EVENT, "lookup_cursor": result["lookup_cursor"]},
+            )
+            read.assert_not_called()
+            assert (
+                archives.call_args.kwargs["after"] == "Talk:Example/Archive 9"
+            )
+
+    def test_finished_lookup_markers_are_not_reset_by_parser_changes(
+        self,
+    ) -> None:
+        """Keep finished durable evidence without new source reads."""
+        with patch(
+            "tasks.articles.milestone_sources.source.read_revision",
+        ) as read:
+            result = lookup_milestone(
+                self.site,
+                {**_EVENT, "lookup_cursor": ""},
+            )
+        assert result["lookup_cursor"] == ""  # ruff: ignore[compare-to-empty-string] - Finished differs from pending None.
+        read.assert_not_called()
+
+    def test_undated_bplus_requires_article_history_without_source_probes(
+        self,
+    ) -> None:
+        """Require Article history for missing Bplus dates."""
+        with (
+            patch(
+                "tasks.articles.milestone_sources.source.read_revision",
+            ) as read,
+            patch(
+                "tasks.articles.milestone_sources.source.read_archives",
+            ) as archives,
+            patch(
+                "tasks.articles.milestone_sources.source.template_names",
+            ) as aliases,
+        ):
+            result = lookup_milestone(
+                self.site,
+                {
+                    **_EVENT,
+                    "kind": "quality",
+                    "grade": "Bplus",
+                    "date": None,
+                },
+            )
+        assert result["status"] == "unresolved"
+        assert result["reason"] == "article_history_date_required"
+        assert "date" not in result
+        read.assert_not_called()
+        archives.assert_not_called()
+        aliases.assert_not_called()
 
     def test_wrong_future_failed_and_quoted_entries_excluded(self) -> None:
         """Unrelated rounds and examples provide no proof."""
@@ -74,11 +205,11 @@ class RecognitionSourceTests(TestCase):
             assert result[0]["contributors"] is None
 
     @patch(
-        "backend.articles.milestone_sources.source.read_archives",
+        "tasks.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
     @patch(
-        "backend.articles.milestone_sources.source.read_revision",
+        "tasks.articles.milestone_sources.source.read_revision",
         return_value=_SOURCE,
     )
     def test_unique_credit_retains_exact_provenance(
@@ -99,10 +230,10 @@ class RecognitionSourceTests(TestCase):
         assert result["nomination_link"].endswith("oldid=10")
 
     @patch(
-        "backend.articles.milestone_sources.source.read_archives",
+        "tasks.articles.milestone_sources.source.read_archives",
     )
     @patch(
-        "backend.articles.milestone_sources.source.read_revision",
+        "tasks.articles.milestone_sources.source.read_revision",
         return_value=_SOURCE,
     )
     def test_archives_resume_before_claiming_unique(
@@ -135,11 +266,11 @@ class RecognitionSourceTests(TestCase):
         assert archives.call_args.kwargs["after"] == "Talk:Example/Archive 8"
 
     @patch(
-        "backend.articles.milestone_sources.source.read_archives",
+        "tasks.articles.milestone_sources.source.read_archives",
         side_effect=OSError,
     )
     @patch(
-        "backend.articles.milestone_sources.source.read_revision",
+        "tasks.articles.milestone_sources.source.read_revision",
         return_value=_SOURCE,
     )
     def test_failure_preserves_checkpoint(
@@ -157,11 +288,11 @@ class RecognitionSourceTests(TestCase):
         assert result["lookup_cursor"] == cursor
 
     @patch(
-        "backend.articles.milestone_sources.source.read_archives",
+        "tasks.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
     @patch(
-        "backend.articles.milestone_sources.source.read_revision",
+        "tasks.articles.milestone_sources.source.read_revision",
         return_value=None,
     )
     def test_missing_sources_stay_unresolved(
@@ -175,10 +306,10 @@ class RecognitionSourceTests(TestCase):
         assert "contributors" not in result
 
     @patch(
-        "backend.articles.milestone_sources.source.read_archives",
+        "tasks.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
-    @patch("backend.articles.milestone_sources.source.read_revision")
+    @patch("tasks.articles.milestone_sources.source.read_revision")
     def test_later_complete_revision_of_same_round_wins(
         self,
         read: Mock,
@@ -197,10 +328,10 @@ class RecognitionSourceTests(TestCase):
         assert result["sources"][0]["revision_id"] == _SOURCE.revision_id
 
     @patch(
-        "backend.articles.milestone_sources.source.read_archives",
+        "tasks.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
-    @patch("backend.articles.milestone_sources.source.read_revision")
+    @patch("tasks.articles.milestone_sources.source.read_revision")
     def test_previous_dyk_round_does_not_conflict(
         self,
         read: Mock,
@@ -217,10 +348,10 @@ class RecognitionSourceTests(TestCase):
         assert result["status"] == "complete"
 
     @patch(
-        "backend.articles.milestone_sources.source.read_archives",
+        "tasks.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
-    @patch("backend.articles.milestone_sources.source.read_revision")
+    @patch("tasks.articles.milestone_sources.source.read_revision")
     def test_explicit_external_archive_target(
         self,
         read: Mock,
@@ -248,10 +379,10 @@ class RecognitionSourceTests(TestCase):
         assert result["main_author"] is None
 
     @patch(
-        "backend.articles.milestone_sources.source.read_archives",
+        "tasks.articles.milestone_sources.source.read_archives",
         return_value=([], None),
     )
-    @patch("backend.articles.milestone_sources.source.read_revision")
+    @patch("tasks.articles.milestone_sources.source.read_revision")
     def test_unique_missing_date_has_source_proof(
         self,
         read: Mock,
@@ -261,7 +392,7 @@ class RecognitionSourceTests(TestCase):
         read.return_value = SourceRevision(
             "Talk:Example",
             10,
-            "{{Article history|action1=BPAR|action1result=approved"
+            "{{Article history|action1=GAN|action1result=listed"
             "|action1date=2024-01-05}}",
         )
         result = lookup_milestone(
@@ -269,7 +400,7 @@ class RecognitionSourceTests(TestCase):
             {
                 **_EVENT,
                 "kind": "quality",
-                "grade": "Bplus",
+                "grade": "GA",
                 "action": "added",
                 "date": None,
             },
@@ -314,10 +445,10 @@ class RecognitionSourceTests(TestCase):
             assert not observed or observed[0]["question"] is None
 
     @patch(
-        "backend.articles.milestone_sources.source.read_archives",
+        "tasks.articles.milestone_sources.source.read_archives",
         return_value=([], "Talk:Example/Archive 8"),
     )
-    @patch("backend.articles.milestone_sources.source.read_revision")
+    @patch("tasks.articles.milestone_sources.source.read_revision")
     def test_question_text_does_not_overflow_continuation(
         self,
         read: Mock,

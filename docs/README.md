@@ -1,29 +1,26 @@
-# Aranami documentation
+# Documentation
 
-See the [project overview](../README.md) for reports and UTC schedules.
+Aranami 1.0 uses daily project snapshots to prepare Wikipedia reports and saved
+website data. All guides describe the alpha source tree and Toolforge runtime.
 
-| Audience | Guide | What it helps you do |
-|---|---|---|
-| Terminal user | [Usage](usage.md) | Inspect operation, understand UTC triggers, preview changes, and request immediate reports |
-| System administrator or maintainer | [Administration](administration.md) | Upload source to Toolforge, start/stop/restart services, manage runtime folders, and recover |
-| Application developer | [Development](development.md) | Prepare a workspace, change application code, run offline checks, and prepare a release |
-| System-level developer | [Architecture](architecture.md) | Preserve component ownership, data/report contracts, storage, logging, status, and lifecycle behavior |
+| Reader | Start here |
+|---|---|
+| Report operator | [Usage](usage.md): results, previews, schedules and immediate runs |
+| Toolforge maintainer | [Administration](administration.md): deploy, drain, recover and retain data |
+| Application developer | [Development](development.md): repository layout, IDE setup and verification |
+| System developer | [Architecture](architecture.md): daily data, ownership and migration contracts |
 
-## Component guides
+Data and task references are [data storage](data/storage.md),
+[assessments](data/assessments.md), [newsletters](tasks/newsletter.md)
+and [caches](data/caching.md). Website references cover
+[newsletter use](webservice/newsletter.md), [maintenance](webservice/maintenance.md),
+[frontend development](webservice/frontend.md)
+and [branding](webservice/branding.md).
 
-The top-level guides are entry points by audience. Detailed contracts live
-under the component that owns the behavior:
+[Retirement checklist](transition.md) identifies remaining historical-source
+dependencies, replacement contracts and verification gates.
 
-| Component | Guide | What it helps you do |
-|---|---|---|
-| `webservice/` | [Newsletter drafts](webservice/newsletter.md) | Select issues and retained dates, copy drafts, and interpret annual data |
-| `webservice/` | [Branding](webservice/branding.md) | Maintain the website's logo, icons, and shared visual style |
-| `webservice/` | [Frontend components](webservice/frontend.md) | Build TypeScript and Codex assets and preserve native forms and live updates |
-| `backend/` | [Newsletter collection](backend/newsletter.md) | Maintain source evidence, caches, daily archives, and history backfills |
-| `backend/` | [Saved data and Parquet fields](backend/data-storage.md) | Choose durable data paths and preserve stored schemas and observation semantics |
-| `backend/` | [Assessment fields](backend/assessment-fields.md) | Preserve source labels and their lossless Parquet encoding |
-
-Read [repository instructions](../AGENTS.md) before contributing and the
-[changelog](../CHANGELOG.md) for completed changes. Documentation is in English;
-Toolforge is the only runtime. HOT report Lua/CSS is maintained on-wiki; see
-[its contract](architecture.md#pageviews).
+Read [repository instructions](../AGENTS.md) and applicable scoped instructions
+before changing code. [CHANGELOG](../CHANGELOG.md) records completed alpha work
+for the 1.0 development line. Documentation is English; publication
+and collection run only on Toolforge.

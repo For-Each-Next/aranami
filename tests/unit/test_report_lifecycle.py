@@ -14,17 +14,17 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from backend.support.execution import RuntimeContext, routine_run
-from backend.support.report_status import report_update_key
-from shared.reports import ReportBundle, ReportResult, ReportStore, report_key
-from updater.jobs import JobContext, ProposedEdit, dyks
+from data.reports import ReportBundle, ReportResult, ReportStore, report_key
+from data.runtime.status import read_status, target_key
+from runtime.execution import RuntimeContext, routine_run
+from runtime.jobs import JobContext, ProposedEdit, dyks
 
 
 def _context(*, dry: bool = False) -> JobContext:
     """Create a publication context with explicit offline wiki identity.
 
     Returns:
-        Frontend publisher using backend lifecycle and storage behavior.
+        Frontend publisher using runtime lifecycle and storage behavior.
     """
     site = Mock()
     site.dbName.return_value = "zhwiki"
@@ -66,30 +66,26 @@ class TestReportLifecycle(TestCase):
         self.enterContext(patch("pathlib.Path.cwd", return_value=self.root))
         self.enterContext(
             patch(
-                "backend.support.execution.open_run_log",
+                "runtime.execution.open_run_log",
                 return_value=nullcontext(),
             ),
         )
         self.enterContext(
             patch(
-                "updater.jobs._execution.open_run_log",
+                "runtime.jobs.context.open_run_log",
                 return_value=nullcontext(),
             ),
-        )
-        self.enterContext(
-            patch("backend.support.execution.write_routine_status"),
         )
 
     def _status(self, title: str) -> dict[str, object]:
         """Read authoritative metadata for one destination.
 
         Returns:
-            Exact backend record without interpreting diagnostic logs.
+            Exact runtime record without interpreting diagnostic logs.
         """
-        snapshot = json.loads(
-            (self.root / "state/report-updates.json").read_text(),
-        )
-        return snapshot["reports"][report_update_key("zhwiki", title)]
+        return read_status(self.root)["publications"][
+            target_key("zhwiki", title)
+        ]
 
     def test_destination_read_failure_records_start_and_failed_result(
         self,
@@ -101,7 +97,7 @@ class TestReportLifecycle(TestCase):
 
         def fail_read(*_args: object) -> None:
             """Require a start record before a read failure."""
-            assert self._status(title)["status"] == "running"
+            assert self._status(title)["outcome"] == "running"
             raise failure
 
         with (
@@ -111,13 +107,13 @@ class TestReportLifecycle(TestCase):
         ):
             dyks.run(context=context, title=title)
         record = self._status(title)
-        assert record["status"] == "failed"
+        assert record["outcome"] == "failed"
         assert record["confirmed_edits"] == 0
         assert record["finished_at"] is not None
         assert record["run_id"] == context.tasks[0].run_id
         prepare.assert_not_called()
 
-    def test_backend_preparation_failure_records_known_zero_edits(
+    def test_acquisition_preparation_failure_records_known_zero_edits(
         self,
     ) -> None:
         """Record preparation errors before rendering or publication."""
@@ -138,7 +134,7 @@ class TestReportLifecycle(TestCase):
             self.assertRaisesRegex(RuntimeError, "source failed"),
         ):
             dyks.run(context=context, title=title)
-        assert self._status(title)["status"] == "failed"
+        assert self._status(title)["outcome"] == "failed"
         assert self._status(title)["confirmed_edits"] == 0
         render.assert_not_called()
 
@@ -146,7 +142,7 @@ class TestReportLifecycle(TestCase):
         self,
     ) -> None:
         """Finalize checks and unavailable data without edits."""
-        for outcome in ("no_update", "deferred"):
+        for outcome in ("not_attempted", "deferred"):
             context = _context()
             title = f"Wikipedia:{outcome} fixture"
             with (
@@ -154,12 +150,14 @@ class TestReportLifecycle(TestCase):
                 routine_run("pageviews", context),
             ):
                 context.register_targets([title])
-                assert self._status(title)["status"] == "queued"
+                assert self._status(title)["outcome"] == "queued"
                 if outcome == "deferred":
                     context.defer("Source not ready")
             record = self._status(title)
-            assert record["status"] == outcome
+            assert record["outcome"] == "deferred"
             assert record["confirmed_edits"] == 0
+            assert record["started_at"] is None
+            assert record["duration_seconds"] is None
             assert record["finished_at"] is not None
 
     def test_required_results_exist_before_confirmed_save_or_unchanged(
@@ -167,8 +165,8 @@ class TestReportLifecycle(TestCase):
     ) -> None:
         """Retain data before publication and count actual edits."""
         for outcome, status, edits in (
-            ("saved", "updated", 1),
-            ("unchanged", "no_update", 0),
+            ("saved", "saved", 1),
+            ("unchanged", "unchanged", 0),
         ):
             context = _context()
             title = f"Wikipedia:{outcome} fixture"
@@ -180,7 +178,7 @@ class TestReportLifecycle(TestCase):
                 Returns:
                     Explicit saved or unchanged publication evidence.
                 """
-                assert self._status(edit.title)["status"] == "running"
+                assert self._status(edit.title)["outcome"] == "running"
                 directory = self.root / "reports/records" / edit.report_key
                 selected = json.loads((directory / "latest.json").read_text())
                 generation = directory / selected["latest"]
@@ -197,7 +195,7 @@ class TestReportLifecycle(TestCase):
                 context.register_targets([title])
                 assert context.publish_proposal(proposal, save) is True
             record = self._status(title)
-            assert record["status"] == status
+            assert record["outcome"] == status
             assert record["confirmed_edits"] == edits
             assert record["finished_at"] is not None
 
@@ -217,7 +215,7 @@ class TestReportLifecycle(TestCase):
             context.publish_proposal(proposal, save)
         save.assert_called_once_with(proposal)
         record = self._status(title)
-        assert record["status"] == "failed"
+        assert record["outcome"] == "failed"
         assert record["confirmed_edits"] is None
         bundle = ReportStore().read(proposal.report_key)
         assert bundle is not None
@@ -243,7 +241,7 @@ class TestReportLifecycle(TestCase):
             context.publish_proposal(_edit(context, title), save)
         save.assert_not_called()
         record = self._status(title)
-        assert record["status"] == "failed"
+        assert record["outcome"] == "failed"
         assert record["confirmed_edits"] == 0
 
     def test_later_storage_failure_does_not_erase_a_confirmed_save(
@@ -281,7 +279,7 @@ class TestReportLifecycle(TestCase):
             context.register_targets([title])
             context.publish_proposal(proposal, save)
         save.assert_called_once_with(proposal)
-        assert self._status(title)["status"] == "updated"
+        assert self._status(title)["outcome"] == "saved"
         assert self._status(title)["confirmed_edits"] == 1
 
     def test_first_target_success_survives_later_preparation_failure(
@@ -301,9 +299,9 @@ class TestReportLifecycle(TestCase):
                 Mock(return_value="saved"),
             )
             raise failure
-        assert self._status(first)["status"] == "updated"
+        assert self._status(first)["outcome"] == "saved"
         assert self._status(first)["confirmed_edits"] == 1
-        assert self._status(second)["status"] == "failed"
+        assert self._status(second)["outcome"] == "failed"
         assert self._status(second)["confirmed_edits"] == 0
 
     def test_preview_keeps_only_preview_data_and_no_public_status(

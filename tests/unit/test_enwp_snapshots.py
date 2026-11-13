@@ -11,8 +11,8 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from backend.services.enwiki import key_articles as service
-from shared.reports import ReportBundle, ReportResult, ReportStore, report_key
+from data.reports import ReportBundle, ReportResult, ReportStore, report_key
+from tasks.enwiki import key_articles as service
 
 
 class TestEnglishSnapshotBaseline(TestCase):

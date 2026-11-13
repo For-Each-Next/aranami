@@ -11,15 +11,15 @@ from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from starlette.testclient import TestClient
 
-from backend.newsletter.archive import DEFAULT_PATH, NewsletterDraftArchive
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.observations import OBSERVATIONS_PATH, save_observation
-from backend.newsletter.publication import PUBLICATION_PAGE
-from backend.newsletter.schema import valid_newsletter
-from backend.public import create_app
+from data.newsletter.archive import DEFAULT_PATH, NewsletterDraftArchive
+from data.newsletter.observations import OBSERVATIONS_PATH, save_observation
+from data.newsletter.publication import PUBLICATION_PAGE
+from data.newsletter.schema import valid_newsletter
 from newsletter.test_newsletter_data import Reader
+from tasks.zhwiki.newsletter.collection import collect_source_facts
+from webservice.server import create_app
 
 
 class _Clock(dt.datetime):
@@ -131,7 +131,7 @@ class NewsletterIssueControlsTests(unittest.TestCase):
             2,
             tzinfo=dt.timezone(dt.timedelta(hours=8)),
         )
-        with patch("backend.public.dt.datetime", _Clock):
+        with patch("webservice.server.dt.datetime", _Clock):
             for locale in ("en", "zh-hans", "zh-hant"):
                 response = self.client.get(f"/newsletter/?lang={locale}")
                 assert response.status_code == HTTPStatus.OK
@@ -153,7 +153,7 @@ class NewsletterIssueControlsTests(unittest.TestCase):
         )
         url = "/newsletter/?issue=2026-10&date=2026-09-30&lang=en"
         _Clock.instant = dt.datetime(2026, 11, 2, tzinfo=dt.UTC)
-        with patch("backend.public.dt.datetime", _Clock):
+        with patch("webservice.server.dt.datetime", _Clock):
             before = self.client.get(url)
             assert _IssueMenu(before.text).available == {"2026-10", "2027-01"}
             facts["lifecycle"].update(
@@ -212,7 +212,7 @@ class NewsletterIssueControlsTests(unittest.TestCase):
             valid_newsletter,
         )
         _Clock.instant = dt.datetime(2026, 11, 2, tzinfo=dt.UTC)
-        with patch("backend.public.dt.datetime", _Clock):
+        with patch("webservice.server.dt.datetime", _Clock):
             response = self.client.get("/newsletter/?lang=en")
         menu = _IssueMenu(response.text)
         assert menu.selected == ["2027-07"]
@@ -223,7 +223,7 @@ class NewsletterIssueControlsTests(unittest.TestCase):
     ) -> None:
         """Switch from January to April at the exact UTC boundary."""
         _Clock.instant = dt.datetime(2026, 12, 31, 23, 59, 59, tzinfo=dt.UTC)
-        with patch("backend.public.dt.datetime", _Clock):
+        with patch("webservice.server.dt.datetime", _Clock):
             before = self.client.get("/newsletter/?lang=zh-hant")
             _Clock.instant = dt.datetime(2027, 1, 1, tzinfo=dt.UTC)
             after = self.client.get("/newsletter/?lang=zh-hant")
@@ -242,7 +242,7 @@ class NewsletterIssueControlsTests(unittest.TestCase):
         """Keep January selected until UTC reaches the new quarter."""
         local = dt.timezone(dt.timedelta(hours=8))
         _Clock.instant = dt.datetime(2027, 1, 1, tzinfo=local)
-        with patch("backend.public.dt.datetime", _Clock):
+        with patch("webservice.server.dt.datetime", _Clock):
             before = self.client.get("/newsletter/?lang=en")
             _Clock.instant = dt.datetime(2027, 1, 1, 8, tzinfo=local)
             after = self.client.get("/newsletter/?lang=en")
@@ -254,7 +254,7 @@ class NewsletterIssueControlsTests(unittest.TestCase):
     ) -> None:
         """Allow prior-issue inspection after the default advances."""
         _Clock.instant = dt.datetime(2027, 1, 1, tzinfo=dt.UTC)
-        with patch("backend.public.dt.datetime", _Clock):
+        with patch("webservice.server.dt.datetime", _Clock):
             for locale in ("en", "zh-hans", "zh-hant"):
                 response = self.client.get(
                     f"/newsletter/?issue=2027-01&lang={locale}",
@@ -277,7 +277,7 @@ class NewsletterIssueControlsTests(unittest.TestCase):
     def test_explicit_older_issue_is_kept_as_a_selected_option(self) -> None:
         """Retain valid bookmarked issue choices in the native form."""
         _Clock.instant = dt.datetime(2027, 1, 1, tzinfo=dt.UTC)
-        with patch("backend.public.dt.datetime", _Clock):
+        with patch("webservice.server.dt.datetime", _Clock):
             response = self.client.get(
                 "/newsletter/?issue=2026-07&lang=en",
             )

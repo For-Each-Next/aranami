@@ -600,14 +600,19 @@ class TestDeploymentShell(TestCase):  # ruff: ignore[too-many-public-methods]
                     'python3 "$3/$validator" select "$3"; '
                     'printf "%s\\n" "$PYTHONPATH" "$runtime_python"; '
                     'exec "$runtime_python" -c '
-                    "'import shared; print(shared.__file__)'"
+                    "'import os, shared; print(shared.__file__); "
+                    'print(os.environ["POLARS_MAX_THREADS"])\''
                 ),
                 "pin-test",
                 str(self.root),
                 str(first),
                 str(second),
             ],
-            env=self.env,
+            env={
+                key: value
+                for key, value in self.env.items()
+                if key != "POLARS_MAX_THREADS"
+            },
             capture_output=True,
             text=True,
             check=False,
@@ -618,6 +623,7 @@ class TestDeploymentShell(TestCase):  # ruff: ignore[too-many-public-methods]
             str(first / "src"),
             str(self.root / f"deployment-envs/source-{'a' * 32}/bin/python"),
             str(first / "src/shared/__init__.py"),
+            "2",
         ]
         assert (self.root / "app").resolve() == second
 

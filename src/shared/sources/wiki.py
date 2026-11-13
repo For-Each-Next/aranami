@@ -8,15 +8,15 @@ authentication.
 from __future__ import annotations
 
 import datetime as dt
-from functools import cache
 from typing import TYPE_CHECKING
 
 import mwparserfromhell
 import pywikibot
-from opencc import OpenCC
 from pywikibot import pagegenerators
 
 from shared.sources.summaries import fetch_summary
+from shared.sources.template_aliases import read_aliases
+from shared.support.activity import report_activity
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -24,19 +24,7 @@ if TYPE_CHECKING:
     from pywikibot.site import BaseSite
 
     from shared.sources.revisions import RevisionTextCache
-
-
-@cache
-def _converter(config: str) -> OpenCC:
-    """Reuse a Chinese variant converter.
-
-    Args:
-        config: OpenCC conversion configuration name.
-
-    Returns:
-        An in-memory converter using the named OpenCC configuration.
-    """
-    return OpenCC(config)
+    from shared.support.activity import SourcePurpose, SourceScope
 
 
 def read_pages(site: BaseSite, titles: Iterable[str]) -> list[pywikibot.Page]:
@@ -56,6 +44,13 @@ def read_pages(site: BaseSite, titles: Iterable[str]) -> list[pywikibot.Page]:
     pages = [pywikibot.Page(site, title) for title in dict.fromkeys(titles)]
     if not pages:
         return []
+    report_activity(
+        "mediawiki",
+        "page_text",
+        wiki=site.dbName(),
+        target=", ".join(page.title() for page in pages),
+        references=[("page", page.title()) for page in pages],
+    )
     loaded = {page: page for page in pagegenerators.PreloadingGenerator(pages)}
     missing = [page.title() for page in pages if page not in loaded]
     if missing:
@@ -67,12 +62,17 @@ def read_pages(site: BaseSite, titles: Iterable[str]) -> list[pywikibot.Page]:
 def read_page_ids(
     site: BaseSite,
     page_ids: Iterable[int],
+    *,
+    purpose: SourcePurpose | None = None,
+    scope: SourceScope | None = None,
 ) -> list[pywikibot.Page]:
     """Preload current pages selected by a replica query.
 
     Args:
         site: Existing authenticated site to read.
         page_ids: Numeric page identifiers to preload.
+        purpose: Verified selection reason for the source observation.
+        scope: Public selection counts supplied by the caller.
 
     Returns:
         Preloaded pages in first-requested identifier order. Deleted or
@@ -81,6 +81,15 @@ def read_page_ids(
     identifiers = tuple(dict.fromkeys(page_ids))
     if not identifiers:
         return []
+    report_activity(
+        "mediawiki",
+        "page_text",
+        wiki=site.dbName(),
+        target=", ".join(str(identifier) for identifier in identifiers),
+        references=[("page_id", identifier) for identifier in identifiers],
+        purpose=purpose,
+        scope=scope,
+    )
     pages = pagegenerators.PagesFromPageidGenerator(
         identifiers,
         site=site,
@@ -88,6 +97,20 @@ def read_page_ids(
     loaded = {
         page.pageid: page for page in pagegenerators.PreloadingGenerator(pages)
     }
+    if all(identifier in loaded for identifier in identifiers):
+        report_activity(
+            "mediawiki",
+            "page_text",
+            wiki=site.dbName(),
+            target=", ".join(str(identifier) for identifier in identifiers),
+            kind="source_loaded",
+            references=[
+                ("page", loaded[identifier].title())
+                for identifier in identifiers
+            ],
+            purpose=purpose,
+            scope=scope,
+        )
     return [
         loaded[identifier]
         for identifier in identifiers
@@ -131,6 +154,13 @@ def edited_by_between(
         message = "Revision-history windows must not be reversed."
         raise ValueError(message)
     page = pywikibot.Page(site, title)
+    report_activity(
+        "mediawiki",
+        "page_history",
+        wiki=site.dbName(),
+        target=title,
+        references=(("page", title),),
+    )
     for revision in page.revisions(
         content=False,
         starttime=pywikibot.Timestamp.set_timestamp(
@@ -147,33 +177,17 @@ def edited_by_between(
 
 
 def template_aliases(site: BaseSite, title: str) -> tuple[str, ...]:
-    """Read a template's redirects and Chinese title variants.
+    """Reuse template alias metadata and local script variants.
 
     Args:
         site: Site that owns the template.
         title: Template title, optionally including its namespace.
 
     Returns:
-        Unique full template titles and their applicable variants.
+        Unique full titles from a bounded twenty-four-hour metadata
+        observation. No template, redirect or module bodies are read.
     """
-    page = read_pages(site, [pywikibot.Page(site, title, 10).title()])[0]
-    if page.isRedirectPage():
-        page = page.getRedirectTarget()
-    redirects = pagegenerators.PreloadingGenerator(
-        page.backlinks(filter_redirects=True),
-    )
-    titles = [page.title(), *(redirect.title() for redirect in redirects)]
-    if site.lang == "zh":
-        titles = [
-            variant
-            for value in titles
-            for variant in (
-                value,
-                _converter("t2s").convert(value),
-                _converter("s2t").convert(value),
-            )
-        ]
-    return tuple(dict.fromkeys(titles))
+    return read_aliases(site, title)
 
 
 def _revision_timestamp(value: dt.datetime) -> pywikibot.Timestamp:
@@ -387,6 +401,13 @@ class WikiReader:
         """
         key = (title, None)
         if key not in self._texts:
+            report_activity(
+                "mediawiki",
+                "page_text",
+                wiki=self.site.dbName(),
+                target=title,
+                references=(("page", title),),
+            )
             page = pywikibot.Page(self.site, title)
             self._texts[key] = page.get()
             self._text_revisions[key] = page.latest_revision_id
@@ -415,6 +436,14 @@ class WikiReader:
         cutoff = min(before.astimezone(dt.UTC), self.now)
         key = (title, cutoff)
         if key not in self._texts:
+            report_activity(
+                "mediawiki",
+                "page_history",
+                wiki=self.site.dbName(),
+                target=title,
+                references=(("page", title),),
+                date=cutoff.date(),
+            )
             page = pywikibot.Page(self.site, title)
             revision = next(
                 iter(
@@ -503,6 +532,14 @@ class WikiReader:
             self.now,
         )
         page = pywikibot.Page(self.site, title)
+        report_activity(
+            "mediawiki",
+            "page_history",
+            wiki=self.site.dbName(),
+            target=title,
+            references=(("page", title),),
+            date=start,
+        )
         previous = list(
             page.revisions(
                 starttime=_revision_timestamp(begin - dt.timedelta(seconds=1)),

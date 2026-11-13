@@ -1,0 +1,10 @@
+<section class="section-flat consistency-section" aria-labelledby="maintenance-consistency">
+<h2 id="maintenance-consistency">{{ t.consistency.heading }}</h2>
+{% if consistency_findings %}
+<{{ 'div' if consistency_ordered else 'ul' }} class="consistency-findings consistency-cards{% if consistency_ordered %} consistency-history-cards{% endif %}">
+{% for finding in consistency_findings %}{% if consistency_ordered %}{% with finding_ordinal=start + loop.index0 %}{% include "includes/consistency_finding.html" %}{% endwith %}{% else %}<li>{% include "includes/consistency_finding.html" %}</li>{% endif %}{% endfor %}
+</{{ 'div' if consistency_ordered else 'ul' }}>
+{% elif consistency_status.empty %}<p>{{ t.consistency.empty }}</p>{% else %}<p>{{ t.backlog.empty }}</p>{% endif %}
+{% if not consistency_status.observed_at or consistency_status.incomplete %}<p>{{ consistency_status.message }}</p>{% endif %}
+{% with updated=consistency_status.updated %}{% include "includes/source_updated.html" %}{% endwith %}
+</section>

@@ -12,11 +12,9 @@ from unittest.mock import Mock
 
 import polars as pl
 
-from backend.newsletter.newpages import (
-    collect_new_pages,
-    valid_new_pages,
-)
+from data.newsletter.validation import valid_new_pages
 from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.newpages import collect_new_pages
 
 
 def _quarter(issue: Issue, replacements: dict[str, str] | None = None) -> str:

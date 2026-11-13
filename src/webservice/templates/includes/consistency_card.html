@@ -1,0 +1,31 @@
+<article class="ui-card consistency-card" aria-labelledby="{{ finding.heading_id }}">
+
+<div class="ui-card__text">
+<div class="ui-card__text__title">
+<h3 id="{{ finding.heading_id }}">{% if finding_ordinal is defined %}<span class="consistency-ordinal">{{ finding_ordinal }}.</span> {% endif %}<bdi lang="zh">{{ finding.article }}</bdi></h3>
+</div>
+<div class="ui-card__text__description">
+{% if finding.missing_fields %}<p class="consistency-missing">{{ t.consistency.missing }}{% for field in finding.missing_fields %}<code>{{ field }}</code>{% if not loop.last %}{{ ', ' if language_tag == 'en' else '、' }}{% endif %}{% endfor %}</p>{% else %}<p class="consistency-description">{{ finding.description }}</p>{% endif %}
+{% if finding.suggestion_note %}<p class="consistency-description">{{ finding.suggestion_note }}</p>{% endif %}
+{% if finding.code %}
+<div class="consistency-code">
+<div class="ui-text-area ui-text-area--status-default"><textarea id="{{ finding.code_id }}" class="ui-text-area__textarea ui-text-area__textarea--has-value" aria-label="{{ t.consistency.parameter_code }}" lang="en" dir="ltr" rows="2" spellcheck="false" readonly>{{ finding.code }}</textarea></div>
+<div class="newsletter-copy-controls consistency-copy-controls"><button type="button" class="ui-button ui-button--action-default ui-button--weight-normal" data-copy-target="{{ finding.code_id }}" data-copy-success="{{ t.consistency.code_copied }}" data-copy-failure="{{ t.newsletter.copy_failure }}">{{ t.consistency.copy_code }}</button>{% for action in finding.repair_actions %}<a href="{{ action.url }}" class="ui-button ui-button--fake-button ui-button--fake-button--enabled consistency-review-action">{{ action.label }}</a>{% endfor %}<span data-copy-status role="status" aria-live="polite"></span></div>
+</div>
+{% endif %}
+{% if finding.repair_actions and not finding.code %}<p class="consistency-review-actions">{% for action in finding.repair_actions %}<a href="{{ action.url }}" class="ui-button ui-button--fake-button ui-button--fake-button--enabled consistency-review-action">{{ action.label }}</a>{% endfor %}</p>{% endif %}
+{% if finding.obsolete_parameters and finding.code %}<p class="consistency-migration">{{ t.consistency.remove_parameters }}{% for name in finding.obsolete_parameters %}<code>{{ name }}</code>{% if not loop.last %}{{ ', ' if language_tag == 'en' else '、' }}{% endif %}{% endfor %}</p>{% endif %}
+{% if finding.legacy_dyk_count and finding.code %}<p class="consistency-migration">{{ t.consistency.remove_dyk | replace('{count}', finding.legacy_dyk_count | string) }}</p>{% endif %}
+{% if finding.suggestions %}
+<dl class="consistency-metrics">{% for metric in finding.suggestions %}<div><dt>{{ metric.label }}</dt><dd{% if metric.unknown %} class="consistency-unknown"{% endif %}>{{ metric.value }}</dd></div>{% endfor %}</dl>
+<p class="consistency-snapshot">{{ t.consistency.snapshot_note }}{% if finding.snapshot_date %} <time datetime="{{ finding.snapshot_date }}">{{ finding.snapshot_date }}</time>.{% endif %}</p>
+<p class="consistency-snapshot">{{ t.consistency.quality_note }}</p>
+{% endif %}
+</div>
+<div class="ui-card__text__supporting-text">
+<div class="consistency-card-links">{{ finding.talk }}{% if finding.latest_date %}<time datetime="{{ finding.latest_date }}">{{ finding.latest_date }}</time>{% endif %}</div>
+{% include "includes/consistency_evidence.html" %}
+</div>
+</div>
+
+</article>

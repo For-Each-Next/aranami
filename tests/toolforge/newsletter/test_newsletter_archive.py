@@ -15,16 +15,13 @@ from unittest import TestCase
 from unittest.mock import patch
 
 import test_section_cache
-from fastapi.testclient import TestClient
+from starlette.testclient import TestClient
 
-from backend.newsletter.archive import (
-    DEFAULT_PATH,
-    NewsletterDraftArchive,
-)
-from backend.newsletter.collection import collect_source_facts
-from backend.public import create_app
+from data.newsletter.archive import DEFAULT_PATH, NewsletterDraftArchive
 from newsletter import test_newsletter_data
 from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.collection import collect_source_facts
+from webservice.server import create_app
 
 
 def _data(clock: dt.datetime, total: int = 3) -> dict:
@@ -149,12 +146,12 @@ class NewsletterDraftArchiveTests(TestCase):
             review,
             generated_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
         )
-        before = {
-            str(path): path.read_bytes()
-            for path in runtime.rglob("*")
-            if path.is_file()
-        }
         with TestClient(create_app(runtime)) as client:
+            before = {
+                str(path): path.read_bytes()
+                for path in runtime.rglob("*")
+                if path.is_file()
+            }
             response = client.get(
                 "/newsletter/?issue=2027-01&feature_date=2026-01-01&lang=en",
             )
@@ -200,11 +197,11 @@ class NewsletterDraftArchiveTests(TestCase):
             )
             assert "Early game" not in missing.text
             assert "No saved draft is available for this date." in missing.text
-        assert {
-            str(path): path.read_bytes()
-            for path in runtime.rglob("*")
-            if path.is_file()
-        } == before
+            assert {
+                str(path): path.read_bytes()
+                for path in runtime.rglob("*")
+                if path.is_file()
+            } == before
 
     def test_default_early_annual_date_matches_displayed_capture(self) -> None:
         """Select March's capture from current early annual facts."""
@@ -238,7 +235,7 @@ class NewsletterDraftArchiveTests(TestCase):
             current_review["dyk_projects_observed_at"] = clock.isoformat()
             with (
                 patch(
-                    "backend.public.read_newsletter_data",
+                    "webservice.server.read_newsletter_data",
                     return_value=current,
                 ),
                 patch("pywikibot.Site") as site,
@@ -472,10 +469,10 @@ class NewsletterDraftCollectionTests(test_section_cache.DashboardFixture):
         )
         with (
             patch(
-                "backend.website.collect.NewsletterDraftArchive.save",
+                "tasks.website.collect.NewsletterDraftArchive.save",
                 side_effect=OSError("full"),
             ),
-            self.assertLogs("backend.website.collect", level="WARNING"),
+            self.assertLogs("tasks.website.collect", level="WARNING"),
         ):
             failed = self._collect(dt.timedelta(days=1))
         assert failed["newsletter"] is None

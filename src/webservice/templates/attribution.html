@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block contents_links %}<ul>
+  <li><a href="#main">{{ heading }}</a></li>
+  {% if document in ['content', 'maintenance'] %}<li><a href="#attribution-images">{{ t.credits.images }}</a></li>{% endif %}
+  {% if document == 'maintenance' %}<li><a href="#template-correspondence">{{ t.credits.correspondence }}</a></li>{% endif %}
+  {% if document == 'codex' %}<li><a href="#vue-license">Vue</a></li>{% endif %}
+  <li><a href="/about/#credits">{{ t.about.credits }}</a></li>
+</ul>{% endblock %}
+{% block content %}
+<p class="page-description">{{ t.credits.original_language }}</p>
+<div class="attribution-document" lang="en">{% include document_template %}</div>
+{% endblock %}

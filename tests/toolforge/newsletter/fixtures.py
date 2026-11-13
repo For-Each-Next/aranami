@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from backend.newsletter.subpages import prepare_subpage_layout
 from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.subpages import prepare_subpage_layout
 
 
 def subpage_layouts() -> dict:

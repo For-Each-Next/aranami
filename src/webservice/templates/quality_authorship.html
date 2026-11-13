@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "includes/popup_dialog.html" import popup with context %}
+{% block assets %}<script type="module" src="{{ asset_url('components.js') }}"></script>{% endblock %}
+{% block contents_links %}<ul><li><a href="#quality-authors">{{ t.quality_authorship.authors }}</a></li></ul>{% endblock %}
+{% macro table_labels() %}data-quality-authorship-table data-first="{{ t.reports.first }}" data-last="{{ t.reports.last }}" data-next="{{ t.backlog.next }}" data-prev="{{ t.backlog.previous }}" data-rows="{{ t.reports.rows }}" data-page-size="{{ t.reports.page_size }}" data-page-status="{{ t.reports.page_status }}" data-sort-caption="{{ t.quality_authorship.sort_caption }}"{% endmacro %}
+{% macro article_table(articles, title) %}
+<div class="quality-authorship-table" {{ table_labels() }} data-default-sort="column3">
+<div class="ui-table"><div class="ui-table__table-wrapper table-scroll" tabindex="0" role="region" aria-label="{{ title }}">
+<table class="ui-table__table"><caption class="visually-hidden">{{ title }}</caption>
+<thead><tr><th scope="col" class="ui-table__table__cell--align-number">#</th><th scope="col">{{ t.quality_authorship.article }}</th><th scope="col" data-sort-type="number">{{ t.quality_authorship.grade }}</th><th scope="col">{{ t.quality_authorship.listed }}</th></tr></thead>
+<tbody>{% for article in articles %}<tr><td class="ui-table__table__cell--align-number">{{ loop.index }}</td><td data-sort="{{ article.title_label }}"><a href="{{ article.url }}">{{ article.title_label }}</a>{% if article.coauthors_label %} <span class="quality-authorship-coauthors" role="img" title="{{ article.coauthors_label }}" aria-label="{{ article.coauthors_label }}"><svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg></span>{% endif %}</td><td data-sort="{{ article.grade_order }}">{{ article.grade }}</td><td data-sort="{{ article.date or '' }}">{% if article.date %}{% if article.listing_url %}<a href="{{ article.listing_url }}">{% endif %}<time datetime="{{ article.date }}">{{ article.date_label }}</time>{% if article.listing_url %}</a>{% endif %}<span class="context">{{ quality_authorship.parenthesis_open }}{{ article.age }}{{ quality_authorship.parenthesis_close }}</span>{% elif article.source_url %}<a href="{{ article.source_url }}">{{ t.quality_authorship.current_revision }}</a>{% else %}<span class="context">{{ t.data.unknown }}</span>{% endif %}</td></tr>{% endfor %}</tbody>
+</table></div></div></div>
+{% endmacro %}
+{% block content %}
+<p>{{ t.quality_authorship.intro }}</p>
+<p>{{ t.quality_authorship.accuracy_prefix }}<a href="{{ quality_authorship.wikiwho_url }}">WikiWho</a>{{ t.quality_authorship.accuracy_sources }}<a href="{{ quality_authorship.year_reviews_url }}">{{ t.quality_authorship.year_reviews }}</a>{{ t.quality_authorship.accuracy_sources_separator }}<a href="{{ quality_authorship.earlier_intro_url }}">{{ t.quality_authorship.earlier_intro }}</a>{{ t.quality_authorship.accuracy_end }}</p>
+<form action="/quality-authorship/" method="get" data-quality-authorship-filter data-updating="{{ t.quality_authorship.updating }}" data-update-failed="{{ t.quality_authorship.update_failed }}">
+<input type="hidden" name="lang" value="{{ quality_authorship.locale }}">
+<label class="quality-authorship-toggle" title="{{ t.quality_authorship.count_b_description }}"><input type="checkbox" role="switch" name="count_b" value="1"{% if quality_authorship.include_b %} checked{% endif %}> {{ t.quality_authorship.count_b }}</label>
+<span role="status" aria-live="polite" data-quality-authorship-status></span>
+</form>
+<noscript><p><a href="/quality-authorship/?lang={{ quality_authorship.locale }}&amp;count_b={{ 0 if quality_authorship.include_b else 1 }}">{{ t.quality_authorship.only_quality if quality_authorship.include_b else t.quality_authorship.count_b }}</a></p></noscript>
+<div data-quality-authorship-results data-count-b="{{ 1 if quality_authorship.include_b else 0 }}">
+{% if quality_authorship.include_b %}<p class="context">{{ t.quality_authorship.count_b_description }}</p>{% if quality_authorship.b_unavailable %}<p class="context">{{ t.quality_authorship.b_unavailable }}</p>{% endif %}{% if quality_authorship.b_coverage %}<p class="context">{{ quality_authorship.b_coverage_label }}</p>{% endif %}{% endif %}
+<section aria-labelledby="quality-authors">
+<h2 id="quality-authors">{{ t.quality_authorship.authors }}</h2>
+{% if quality_authorship.observed_at %}<p class="context">{{ t.quality_authorship.evidence_observed }} <time datetime="{{ quality_authorship.observed_at.value }}">{{ quality_authorship.observed_at.label }}</time></p>{% endif %}
+{% if not quality_authorship.available %}<p class="context">{{ t.quality_authorship.unavailable }}</p>
+{% elif not quality_authorship.authors %}<p class="context">{{ t.quality_authorship.empty }}</p>
+{% else %}
+<div class="quality-authorship-table" {{ table_labels() }} data-default-sort="column2">
+<div class="ui-table"><div class="ui-table__table-wrapper table-scroll" tabindex="0" role="region" aria-label="{{ t.quality_authorship.authors }}">
+<table class="ui-table__table"><caption class="visually-hidden">{{ t.quality_authorship.authors }}</caption>
+<thead><tr><th scope="col" class="ui-table__table__cell--align-number">#</th><th scope="col">{{ t.quality_authorship.user }}</th><th scope="col" data-sort-type="number">{{ t.quality_authorship.developed if quality_authorship.include_b else t.quality_authorship.contributions }}</th><th scope="col">{{ t.quality_authorship.latest_active }}</th></tr></thead>
+<tbody>{% for author in quality_authorship.authors %}<tr><td class="ui-table__table__cell--align-number">{{ author.number }}</td><td data-sort="{{ author.name }}"><a href="{{ author.url }}">{{ author.name }}</a>{{ quality_authorship.parenthesis_open }}<a href="{{ author.talk_url }}">{{ t.quality_authorship.talk }}</a>{{ quality_authorship.parenthesis_close }}</td><td data-sort="{{ author.credit }}"><a href="#{{ author.popup_id }}" aria-controls="{{ author.popup_id }}" aria-haspopup="dialog">{{ author.summary }}</a>{% if author.quality_summary or author.featured_summary %}{{ quality_authorship.parenthesis_open }}{% if author.quality_summary %}<a href="#{{ author.quality_popup_id }}" aria-controls="{{ author.quality_popup_id }}" aria-haspopup="dialog">{{ author.quality_summary }}</a>{% endif %}{% if author.quality_summary and author.featured_summary %} | {% endif %}{% if author.featured_summary %}<a href="#{{ author.featured_popup_id }}" aria-controls="{{ author.featured_popup_id }}" aria-haspopup="dialog">{{ author.featured_summary }}</a>{% endif %}{{ quality_authorship.parenthesis_close }}{% endif %}</td><td data-sort="{{ author.last_active.value if author.last_active else '' }}">{% if author.last_active %}<a href="{{ author.contributions_url }}"><time datetime="{{ author.last_active.value }}" title="{{ author.last_active.title }}">{{ author.last_active.label }}</time></a><span class="context">{{ quality_authorship.parenthesis_open }}{{ author.last_active.age }}{{ quality_authorship.parenthesis_close }}</span>{% else %}<span class="context">{{ t.data.unknown }}</span>{% endif %}</td></tr>{% endfor %}</tbody>
+</table></div></div></div>
+{% endif %}
+</section>
+{% for author in quality_authorship.authors %}
+{% call popup(author.popup_id, author.dialog_title, "#quality-authors") %}{{ article_table(author.articles, author.dialog_title) }}{% endcall %}
+{% if author.quality_summary %}{% call popup(author.quality_popup_id, author.quality_dialog_title, "#quality-authors") %}{{ article_table(author.quality_articles, author.quality_dialog_title) }}{% endcall %}{% endif %}
+{% if author.featured_summary %}{% call popup(author.featured_popup_id, author.featured_dialog_title, "#quality-authors") %}{{ article_table(author.featured_articles, author.featured_dialog_title) }}{% endcall %}{% endif %}
+{% endfor %}
+</div>
+{% endblock %}

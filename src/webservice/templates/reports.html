@@ -1,8 +1,13 @@
 {% extends "base.html" %}
+{% block assets %}<script type="module" src="{{ asset_url('components.js') }}"></script>{% endblock %}
 {% block contents_links %}
-<ul><li><a href="#tool-status">{{ t.reports.panel }}</a></li><li><a href="#recent-events">{{ t.reports.log }}</a></li></ul>
+<ul><li><a href="#tool-status-heading">{{ t.reports.panel }}</a></li><li><a href="#recent-events">{{ t.reports.log }}</a></li></ul>
 {% endblock %}
 {% block content %}
 <p class="page-description">{{ t.reports.intro }}</p>
 {% include "includes/routines.html" %}
+<div id="report-history" tabindex="-1">
+{% include "includes/report_log.html" %}
+{% include "includes/job_history_dialogs.html" %}
+</div>
 {% endblock %}

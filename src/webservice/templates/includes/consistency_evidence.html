@@ -1,0 +1,6 @@
+<details class="ui-accordion consistency-evidence">
+<summary><h4 class="ui-accordion__header">{{ t.consistency.evidence_details | replace('{count}', finding.evidence | length | string) }}</h4></summary>
+<div class="ui-accordion__content"><dl class="consistency-evidence-list">
+{% for evidence in finding.evidence %}<div><dt>{% if evidence.expected_field %}<code>{{ evidence.expected_field }}</code>{% else %}{{ evidence.event_label }}{% endif %}{% if evidence.event_date %} <time datetime="{{ evidence.event_date }}">{{ evidence.event_date }}</time>{% endif %}</dt><dd>{{ evidence.source }} · {{ evidence.checked }}</dd></div>{% endfor %}
+</dl></div>
+</details>

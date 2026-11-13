@@ -19,10 +19,11 @@ from urllib.parse import parse_qs, urlparse
 import polars as pl
 from pywikibot.site import BaseSite, Namespace
 
-from backend.services.zhwiki import pexbot as service
-from backend.support.report_status import read_report_status
-from shared.reports import ReportResult, report_key
-from updater.jobs import JobContext, pexbot as job
+from data.reports import ReportResult
+from data.runtime.status import read_status
+from runtime.jobs import JobContext, pexbot as job
+from shared.support.cache import cache_key
+from tasks.zhwiki import pexbot as service
 
 
 class _OfflineSite(BaseSite):
@@ -345,7 +346,7 @@ class TestPexbotJob(TestCase):
     def test_action_cache_keeps_only_latest_generation() -> None:
         """Replace disposable records without retaining predecessors."""
         store = service.action_store()
-        key = report_key("pexbot", "zhwiki", "Wikipedia:Report")
+        key = cache_key("pexbot", "zhwiki", "Wikipedia:Report")
         bundles = [
             store.write(
                 key,
@@ -370,8 +371,8 @@ class TestPexbotJob(TestCase):
     def test_backend_retains_action_before_delegated_publication() -> None:
         """Persist complete metadata before delegated publication."""
         context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
-        title = "Wikipedia:Report"
-        key = report_key("pexbot", context.site.dbName(), title)
+        title = "WikiProject:电子游戏/数据库报告/列表"
+        key = cache_key("pexbot", context.site.dbName(), title)
         observations = []
 
         def inspect_saved_action(_site: object, _title: str) -> None:
@@ -380,6 +381,8 @@ class TestPexbotJob(TestCase):
             selected = json.loads((directory / "latest.json").read_text())
             generation = directory / selected["latest"]
             manifest = json.loads((generation / "manifest.json").read_text())
+            assert generation.relative_to(Path.cwd()).as_posix().isascii()
+            assert manifest["target"] == {"site": "zhwiki", "title": title}
             observations.append(manifest["publication"]["state"])
             assert manifest["calculation"] == "complete"
             assert (generation / "actions.parquet").is_file()
@@ -439,15 +442,13 @@ class TestPexbotJob(TestCase):
             Raises:
                 HTTPError: The first request fails in one case.
             """
-            records = read_report_status(
-                Path.cwd() / "state" / "report-updates.json",
-            )["reports"].values()
+            records = read_status(Path.cwd())["publications"].values()
             current = next(row for row in records if row["title"] == title)
-            assert current["status"] == "running"
+            assert current["outcome"] == "running"
             assert current["finished_at"] is None
             if title == "A":
                 waiting = next(row for row in records if row["title"] == "B")
-                assert waiting["status"] == "queued"
+                assert waiting["outcome"] == "queued"
                 assert waiting["duration_seconds"] is None
                 assert waiting["finished_at"] is None
             elapsed[0] += 3 if title == "A" else 5
@@ -464,33 +465,33 @@ class TestPexbotJob(TestCase):
         def cooldown(seconds: float) -> None:
             """Advance time without performing an actual sleep."""
             elapsed[0] += seconds
-            records = read_report_status(
-                Path.cwd() / "state" / "report-updates.json",
-            )["reports"].values()
+            records = read_status(Path.cwd())["publications"].values()
             waiting = next(row for row in records if row["title"] == "B")
-            assert waiting["status"] == "queued"
+            assert waiting["outcome"] == "queued"
             assert waiting["duration_seconds"] is None
 
         with (
             TemporaryDirectory() as temporary,
             patch("pathlib.Path.cwd", return_value=Path(temporary)),
             patch(
-                "backend.support.execution.perf_counter",
+                "runtime.execution.perf_counter",
                 side_effect=lambda: elapsed[0],
             ),
             patch(
-                "backend.support.report_status.perf_counter",
+                "runtime.publication_status.perf_counter",
                 side_effect=lambda: elapsed[0],
             ),
             patch(
-                "backend.support.report_status._utc_now",
-                side_effect=lambda: started + dt.timedelta(seconds=elapsed[0]),
+                "runtime.publication_status.utc_now",
+                side_effect=lambda: (
+                    started + dt.timedelta(seconds=elapsed[0])
+                ).isoformat(timespec="microseconds"),
             ),
             patch.object(job, "subscribed_titles", side_effect=select),
             patch.object(service, "edited_by_between", side_effect=history),
             patch.object(job, "_refresh", side_effect=refresh),
             patch.object(job.time, "sleep", side_effect=cooldown) as pause,
-            self.assertLogs("backend.support.execution", level="INFO"),
+            self.assertLogs("runtime.execution", level="INFO"),
             self.assertLogs(job._LOGGER, level="INFO"),
         ):
             with (
@@ -501,28 +502,32 @@ class TestPexbotJob(TestCase):
                 job.run(context=context)
             records = {
                 row["title"]: row
-                for row in read_report_status(
-                    Path(temporary) / "state" / "report-updates.json",
-                )["reports"].values()
+                for row in read_status(Path(temporary))[
+                    "publications"
+                ].values()
             }
         pause.assert_called_once_with(15)
         assert [
             records[title]["duration_seconds"] for title in ("A", "B")
         ] == [5, 9]
-        assert records["A"]["status"] == (
+        assert records["A"]["outcome"] == (
             "failed" if fail_first else "unconfirmed"
         )
-        assert records["B"]["status"] == "unconfirmed"
+        assert records["B"]["outcome"] == "unconfirmed"
         if fail_first:
             assert (
-                records["A"]["failure_reason"],
+                records["A"]["failure"]["failure_reason"],
                 context.tasks[0].failure_reason,
             ) == ("HTTP503", "HTTP503")
         assert all(row["confirmed_edits"] is None for row in records.values())
-        assert records["A"]["started_at"] == "2026-10-24T00:00:07.000000Z"
-        assert records["A"]["finished_at"] == "2026-10-24T00:00:12.000000Z"
-        assert records["B"]["started_at"] == "2026-10-24T00:00:27.000000Z"
-        assert records["B"]["finished_at"] == "2026-10-24T00:00:36.000000Z"
+        assert records["A"]["started_at"] == "2026-10-24T00:00:07.000000+00:00"
+        assert (
+            records["A"]["finished_at"] == "2026-10-24T00:00:12.000000+00:00"
+        )
+        assert records["B"]["started_at"] == "2026-10-24T00:00:27.000000+00:00"
+        assert (
+            records["B"]["finished_at"] == "2026-10-24T00:00:36.000000+00:00"
+        )
         expected_total = 36
         assert context.tasks[0].elapsed_seconds == expected_total
         assert context.tasks[0].updated is None
@@ -555,7 +560,7 @@ class TestPexbotJob(TestCase):
         pause.assert_not_called()
         assert "Target" in context.notes[0]
         assert "Another target" in context.notes[1]
-        key = report_key("pexbot", context.site.dbName(), "Target")
+        key = cache_key("pexbot", context.site.dbName(), "Target")
         preview = service.action_store(dry=True).read(key)
         assert preview is not None
         assert preview.path.is_relative_to(Path.cwd() / "dry-run/cache/pexbot")
@@ -651,10 +656,10 @@ class TestPexbotJob(TestCase):
             call.refresh(context.site, "B"),
         ]
         failed = service.action_store().read(
-            report_key("pexbot", "zhwiki", "A"),
+            cache_key("pexbot", "zhwiki", "A"),
         )
         completed = service.action_store().read(
-            report_key("pexbot", "zhwiki", "B"),
+            cache_key("pexbot", "zhwiki", "B"),
         )
         assert failed is not None
         assert completed is not None

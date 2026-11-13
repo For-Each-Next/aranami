@@ -15,17 +15,18 @@ import mwparserfromhell
 import polars as pl
 from pywikibot.site import BaseSite, Namespace
 
-from backend.services.zhwiki import dyks
-from backend.services.zhwiki.dyk_dates import extract_dates
-from backend.support import dyk_cache, report_membership
+from data.caching import dyk as dyk_cache
+from data.runtime import report_membership
+from runtime.jobs import JobContext, dyks as dyk_job
 from shared.sources.dyk import TalkPage
 from shared.support.dates import parse_date
 from shared.support.regions import region_content
+from tasks.zhwiki import dyks
+from tasks.zhwiki.dyk_dates import extract_dates
 from updater.edit_summary import (
     MAX_EDIT_SUMMARY_BYTES,
     EditSummary,
 )
-from updater.jobs import JobContext, dyks as dyk_job
 from updater.services.zhwiki import dyks as rendering
 
 
@@ -56,7 +57,7 @@ def _prepared_fixture(text: str, members: dict[str, int | None]) -> Mock:
     """Provide prepared facts for publication-only fixtures.
 
     Returns:
-        Controlled backend metadata paired with fixture output.
+        Controlled runtime metadata paired with fixture output.
     """
     return Mock(text=text, members=members, previous_members={}, result=None)
 
@@ -146,6 +147,7 @@ class TestDykDates(TestCase):
             ("Template:DYKtalk", "Template:DYK talk"),
         )
         assert actual == [
+            date(1999, 1, 1),
             date(2020, 1, 1),
             date(2021, 3, 2),
             date(2022, 2, 3),
@@ -162,6 +164,19 @@ class TestDykDates(TestCase):
             ("Article history",),
             ("DYKtalk",),
         ) == [date(2024, 5, 6)]
+
+    @staticmethod
+    def test_all_active_history_calls_contribute_dyk_dates() -> None:
+        """Read active aliases and ignore blank slots and quotes."""
+        actual = extract_dates(
+            "{{Article history|dykdate=2020-01-01}}"
+            "{{ArticleHistory|dykdate=2021-01-01|dyk2date=|dyk2entry=PRNo}}"
+            "<blockquote>{{Article history|dykdate=2030-01-01}}</blockquote>",
+            _OfflineSite("zh", "wikipedia"),
+            ("Template:Article history", "Template:ArticleHistory"),
+            (),
+        )
+        assert actual == [date(2020, 1, 1), date(2021, 1, 1)]
 
     def test_chinese_extractor_rejects_the_english_wiki(self) -> None:
         """Keep English and Chinese template semantics separate."""
@@ -324,6 +339,35 @@ class TestDykReports(TestCase):
         membership.assert_not_called()
         query.assert_not_called()
 
+    @staticmethod
+    def test_counts_precede_optional_long_outcome_titles() -> None:
+        """Preserve totals and outcome counts at publication."""
+        long_title = "長標題" * 100
+        summary = EditSummary.with_attribution(
+            dyk_job._content_summary(
+                dyks.DykChanges(
+                    articles=12345,
+                    nominees=23456,
+                    new=(long_title,),
+                    passed=(long_title,),
+                    failed=(long_title,),
+                    removed=(long_title,),
+                    added_articles=1,
+                    removed_nominees=2,
+                ),
+            ),
+        )
+        assert summary.startswith(
+            "12\u202f345 articles (+1/-1) and "
+            "23\u202f456 nominees (+1/-2). Add nominee 1 more; "
+            "record pass for 1 more; record failure for 1 more; "
+            "remove 1 more.",
+        )
+        assert summary.endswith(" ([[toolforge:aranami|Aranami]])")
+        assert len(summary.encode()) <= MAX_EDIT_SUMMARY_BYTES
+        assert summary.count("[[") == summary.count("]]")
+        assert summary.count("«") == summary.count("»")
+
 
 class TestDykCache(TestCase):
     """Verify disposable caches keyed by the actual page revision."""
@@ -337,19 +381,19 @@ class TestDykCache(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "backend.support.dyk_cache.Path.cwd",
+                "data.caching.dyk.Path.cwd",
                 return_value=Path(directory),
             ),
             patch(
-                "backend.services.zhwiki.dyks.template_aliases",
+                "tasks.zhwiki.dyks.template_aliases",
                 side_effect=lambda _site, title: (title,),
             ),
             patch(
-                "backend.services.zhwiki.dyks.latest_revisions",
+                "tasks.zhwiki.dyks.latest_revisions",
                 return_value=revisions,
             ) as latest,
             patch(
-                "backend.services.zhwiki.dyks.read_talk_pages",
+                "tasks.zhwiki.dyks.read_talk_pages",
                 return_value=[
                     TalkPage(11, 100, "{{DYKtalk|date=2024-01-01}}"),
                 ],
@@ -402,7 +446,7 @@ class TestDykCache(TestCase):
             path.parent.mkdir()
             path.write_bytes(b"not parquet")
             with patch(
-                "backend.support.dyk_cache.Path.cwd",
+                "data.caching.dyk.Path.cwd",
                 return_value=root,
             ):
                 assert dyk_cache.load().is_empty()
@@ -529,6 +573,7 @@ class TestDykEdit(TestCase):
     def test_update_text_preserves_unmanaged_text_and_repeats() -> None:
         """Replace both lists using caller-supplied text and project."""
         site = Mock()
+        site.dbName.return_value = "zhwiki"
         original_text = (
             'Introduction\n<!-- aranami begin="dyk" -->old'
             '<!-- aranami end="dyk" -->\nMiddle\n'
@@ -554,11 +599,11 @@ class TestDykEdit(TestCase):
         )
         with (
             patch(
-                "backend.services.zhwiki.dyks.query_pages_by_wikiproject",
+                "tasks.zhwiki.dyks.query_pages_by_wikiproject",
                 return_value=members,
             ) as query_members,
             patch(
-                "backend.services.zhwiki.dyks.query_tags",
+                "tasks.zhwiki.dyks.query_tags",
                 side_effect=[
                     pl.DataFrame(
                         {"talk_page_id": [11, 12], "tags": [["DYK"], []]},
@@ -570,7 +615,7 @@ class TestDykEdit(TestCase):
                 * 2,
             ),
             patch(
-                "backend.services.zhwiki.dyks._dated_pages",
+                "tasks.zhwiki.dyks._dated_pages",
                 return_value=dated,
             ),
             patch("shared.sources.wiki.read_pages") as read_pages,
@@ -685,8 +730,8 @@ class TestDykEdit(TestCase):
         assert edit.original_text == original
         assert edit.text == updated
         assert (
-            edit.summary == "1 article, 0 nominees. "
-            "([[toolforge:Aranami|Aranami]])"
+            edit.summary
+            == "1 article and 0 nominees. ([[toolforge:aranami|Aranami]])"
         )
         assert "aranami-member" not in edit.text
         save.assert_called_once_with(site, title, original, {"Old": 1})
@@ -703,13 +748,13 @@ class TestDykEdit(TestCase):
             "# {{PJ:VG/DYK/item|Unmanaged|初级}}"
         )
         cases = (
-            ((), (), "0 articles, 0 nominees."),
-            ((), ("Candidate",), "0 articles, 1 nominee."),
-            (("Completed",), (), "1 article, 0 nominees."),
+            ((), (), "0 articles and 0 nominees."),
+            ((), ("Candidate",), "0 articles and 1 nominee."),
+            (("Completed",), (), "1 article and 0 nominees."),
             (
                 ("Repeat", "Other"),
                 ("Repeat", "Other"),
-                "2 articles, 2 nominees.",
+                "2 articles and 2 nominees.",
             ),
         )
         for completed, nominated, expected in cases:
@@ -756,8 +801,8 @@ class TestDykEdit(TestCase):
                 current_members={"Renamed": 1, "Added": 4, "Candidate": 3},
             ),
         ) == (
-            "2 articles, 1 nominee. Passed nominee «[[Added]]»; "
-            "removed «[[Removed]]»."
+            "2 articles (+1/-1) and 1 nominee. Record pass for «[[Added]]»;"
+            " remove «[[Removed]]»."
         )
         assert "Unmanaged" not in dyks.article_members(updated)
         assert dyks.article_members(updated, range_name="dykn") == {
@@ -787,7 +832,9 @@ class TestDykEdit(TestCase):
         updated = ranges.format(completed=item, nominated="\n")
         assert dyk_job._content_summary(
             dyks.compare_reports(original, updated),
-        ) == ("1 article, 0 nominees. Passed nominee «[[Game]]».")
+        ) == (
+            "1 article (+1) and 0 nominees (-1). Record pass for «[[Game]]»."
+        )
 
     @staticmethod
     def test_summary_distinguishes_new_passed_and_failed_nominees() -> None:
@@ -816,8 +863,8 @@ class TestDykEdit(TestCase):
         assert dyk_job._content_summary(
             dyks.compare_reports(original, updated),
         ) == (
-            "2 articles, 1 nominee. New nominee «[[New]]»; "
-            "passed nominee «[[Passed]]»; failed nominee «[[花园多惠]]»."
+            "2 articles (+1) and 1 nominee (+1/-2). Add nominee «[[New]]»; "
+            "record pass for «[[Passed]]»; record failure for «[[花园多惠]]»."
         )
 
     @staticmethod
@@ -840,7 +887,10 @@ class TestDykEdit(TestCase):
         )
         assert dyk_job._content_summary(
             dyks.compare_reports(original, updated),
-        ) == ("1 article, 0 nominees. Passed nominee «[[Video Game]]».")
+        ) == (
+            "1 article (+1) and 0 nominees (-1). Record pass for «[[Video "
+            "Game]]»."
+        )
 
     @staticmethod
     def test_cached_identity_recognizes_rename_during_promotion() -> None:
@@ -858,16 +908,16 @@ class TestDykEdit(TestCase):
             '<!-- aranami begin="dykn" -->\n'
             '<!-- aranami end="dykn" -->'
         )
-        assert (
-            dyk_job._content_summary(
-                dyks.compare_reports(
-                    original,
-                    updated,
-                    previous_members={"Old name": 1},
-                    current_members={"New name": 1},
-                ),
-            )
-            == "1 article, 0 nominees. Passed nominee «[[New name]]»."
+        assert dyk_job._content_summary(
+            dyks.compare_reports(
+                original,
+                updated,
+                previous_members={"Old name": 1},
+                current_members={"New name": 1},
+            ),
+        ) == (
+            "1 article (+1) and 0 nominees (-1). Record pass for «[[New "
+            "name]]»."
         )
 
     @staticmethod
@@ -887,7 +937,7 @@ class TestDykEdit(TestCase):
         ).replace("# {{PJ:VG/DYK/item|Game|初级}}\n", "")
         assert dyk_job._content_summary(
             dyks.compare_reports(original, updated),
-        ) == ("1 article, 0 nominees. Passed nominee «[[Game]]».")
+        ) == ("1 article and 0 nominees (-1). Record pass for «[[Game]]».")
 
     @staticmethod
     def test_unchanged_historical_completion_leaves_outcome_unknown() -> None:
@@ -908,7 +958,7 @@ class TestDykEdit(TestCase):
         )
         assert (
             dyk_job._content_summary(dyks.compare_reports(original, updated))
-            == "1 article, 0 nominees."
+            == "1 article and 0 nominees (-1)."
         )
 
     @staticmethod
@@ -927,10 +977,10 @@ class TestDykEdit(TestCase):
         cleaned = ranges.format(completed=completed, nominated="\n")
         assert dyk_job._content_summary(
             dyks.compare_reports(original, passed),
-        ) == ("1 article, 1 nominee. Passed nominee «[[Game]]».")
+        ) == ("1 article (+1) and 1 nominee. Record pass for «[[Game]]».")
         assert (
             dyk_job._content_summary(dyks.compare_reports(passed, cleaned))
-            == "1 article, 0 nominees."
+            == "1 article and 0 nominees (-1)."
         )
 
     @staticmethod
@@ -951,10 +1001,10 @@ class TestDykEdit(TestCase):
         cleaned = passed.replace("# {{PJ:VG/DYK/item|Game|初级}}\n", "")
         assert dyk_job._content_summary(
             dyks.compare_reports(original, passed),
-        ) == ("1 article, 1 nominee. Passed nominee «[[Game]]».")
+        ) == ("1 article and 1 nominee. Record pass for «[[Game]]».")
         assert (
             dyk_job._content_summary(dyks.compare_reports(passed, cleaned))
-            == "1 article, 0 nominees."
+            == "1 article and 0 nominees (-1)."
         )
 
     @staticmethod
@@ -974,7 +1024,7 @@ class TestDykEdit(TestCase):
         )
         assert (
             dyk_job._content_summary(dyks.compare_reports(original, updated))
-            == "1 article, 1 nominee."
+            == "1 article and 1 nominee."
         )
 
     @staticmethod
@@ -1003,8 +1053,8 @@ class TestDykEdit(TestCase):
                 current_members={"Game": 2},
             ),
         ) == (
-            "1 article, 0 nominees. Passed nominee «[[Game]]»; "
-            "failed nominee «[[Game]]»."
+            "1 article (+1) and 0 nominees (-1). Record pass for "
+            "«[[Game]]»; record failure for «[[Game]]»."
         )
 
     @staticmethod
@@ -1023,7 +1073,7 @@ class TestDykEdit(TestCase):
         )
         assert dyk_job._content_summary(
             dyks.compare_reports(original, updated),
-        ) == ("0 articles, 0 nominees. Removed «[[Historical]]».")
+        ) == ("0 articles (-1) and 0 nominees. Remove «[[Historical]]».")
 
     @staticmethod
     def test_long_nominee_summary_keeps_complete_links_with_attribution() -> (
@@ -1058,9 +1108,9 @@ class TestDykEdit(TestCase):
             dyk_job._content_summary(dyks.compare_reports(original, updated)),
         )
         assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
-        assert summary.startswith("1 article, 2 nominees.")
+        assert summary.startswith("1 article (+1) and 2 nominees (+2/-1).")
         assert summary.endswith(
-            "([[toolforge:Aranami|Aranami]])",
+            "([[toolforge:aranami|Aranami]])",
         )
         assert f"«[[{short_title}]]»" in summary
         assert summary.count("«") == summary.count("»")
@@ -1073,7 +1123,7 @@ class TestDykEdit(TestCase):
             new_title,
             passed_title,
             failed_title,
-            "toolforge:Aranami",
+            "toolforge:aranami",
         }
 
     @staticmethod
@@ -1090,7 +1140,7 @@ class TestDykEdit(TestCase):
         )
         assert (
             dyk_job._content_summary(dyks.compare_reports(original, updated))
-            == "1 article, 0 nominees."
+            == "1 article and 0 nominees."
         )
 
     @staticmethod
@@ -1155,9 +1205,8 @@ class TestDykEdit(TestCase):
         [call] = context.publish.call_args_list
         edit = call.args[0]
         assert edit.summary == (
-            "2 articles, 0 nominees. Passed nominee «[[Added]]», "
-            "«[[Renamed]]»; "
-            "removed «[[Removed]]»."
+            "2 articles (+2/-1) and 0 nominees (-1). Record pass for "
+            "«[[Added]]», «[[Renamed]]»; remove «[[Removed]]»."
         )
         assert "aranami-member" not in edit.text
         save.assert_called_once_with(
@@ -1231,7 +1280,10 @@ class TestDykEdit(TestCase):
         assert (
             summaries
             == [
-                "2 articles, 0 nominees. Passed nominee «[[Added]]».",
+                (
+                    "2 articles (+1) and 0 nominees. "
+                    "Record pass for «[[Added]]»."
+                ),
             ]
             * 2
         )

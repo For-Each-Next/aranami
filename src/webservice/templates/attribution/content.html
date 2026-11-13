@@ -1,0 +1,97 @@
+{% from "includes/attribution_card.html" import attribution_card with context %}
+<p lang="{{ language_tag }}">{{ t.credits.content_intro }}</p>
+      <p>The review selections follow the <a href="https://zh.wikipedia.org/w/index.php?title=Module:PJ:VG/RVW&amp;oldid=92100885">Chinese Wikipedia review module</a>. The maintenance overview has <a href="/assets/icons/maintenance/credits.html">separate image credits and template correspondence</a>.</p>
+      <p>Complete GNU license texts: <a href="/assets/icons/lgpl-2.1.html">LGPL version 2.1</a> and <a href="/assets/icons/gpl-2.0.html">GPL version 2</a>. The affected icons permit the stated version or any later version. Historical interface notices remain at <a href="/codex-license.html">Codex and Vue licenses</a>.</p>
+      <section class="section-flat" aria-labelledby="attribution-images"><h2 id="attribution-images" lang="{{ language_tag }}">{{ t.credits.images }}</h2><div class="attribution-grid">
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/medal-1.svg" width="28" height="28" alt=""><img src="/assets/icons/medal-2.svg" width="28" height="28" alt=""><img src="/assets/icons/medal-3.svg" width="28" height="28" alt=""><img src="/assets/icons/medal-4.svg" width="28" height="28" alt=""><img src="/assets/icons/medal-5.svg" width="28" height="28" alt=""><img src="/assets/icons/medal-6.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/medal-1.svg">Rank 1 medal</a> · <a href="/assets/icons/medal-2.svg">Rank 2 medal</a> · <a href="/assets/icons/medal-3.svg">Rank 3 medal</a> · <a href="/assets/icons/medal-4.svg">Rank 4 medal</a> · <a href="/assets/icons/medal-5.svg">Rank 5 medal</a> · <a href="/assets/icons/medal-6.svg">Rank 6 medal</a>
+{% elif slot == 'author' %}Original Aranami artwork, following the idea of Andrwsc’s public-domain medal icons. The local artwork uses Codex presentation colors and original vector numerals; ranks 4–6 share a white background.
+{% elif slot == 'source' %}Inspired by Andrwsc’s <a href="https://commons.wikimedia.org/wiki/File:Gold_medal_icon.svg">gold</a>, <a href="https://commons.wikimedia.org/wiki/File:Silver_medal_icon.svg">silver</a>, and <a href="https://commons.wikimedia.org/wiki/File:Bronze_medal_icon.svg">bronze</a> medal icons.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0 1.0</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/featured.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/featured.svg">Featured main-page appearances</a>
+{% elif slot == 'author' %}ClockworkSoul, CyberSkull, Optimager, White Cat, Erina, AzaToth, and Pbroks13, with subsequent optimization by Commons contributors.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Cscr-featured.svg">Cscr-featured.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/e/e7/Cscr-featured.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="/assets/icons/lgpl-2.1.html">LGPL-2.1-or-later</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/good.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/good.svg">Good main-page appearances</a>
+{% elif slot == 'author' %}Zscout370, Ed g2s, and Erin Silversmith, with subsequent optimization by Commons contributors.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Symbol_support_vote.svg">Symbol support vote.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/9/94/Symbol_support_vote.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Symbol_support_vote.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/dyk.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/dyk.svg">Did-you-know appearances</a>
+{% elif slot == 'author' %}author not identified on its Commons file page; based on <a href="https://commons.wikimedia.org/wiki/File:Symbol_keep_vote.svg">Symbol keep vote.svg</a>.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Symbol_question.svg">Symbol question.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/e/e0/Symbol_question.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:Symbol_question.svg#Summary">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/featured-candidate.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/featured-candidate.svg">Featured article and featured list candidates</a>
+{% elif slot == 'author' %}<a href="https://commons.wikimedia.org/wiki/User:Rastrojo">Rastrojo</a>; based on <a href="https://commons.wikimedia.org/wiki/File:Cscr-candidate.png">Cscr-candidate.png</a> and <a href="https://commons.wikimedia.org/wiki/File:Cscr-featured.svg">Cscr-featured.svg</a>.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Cscr-candidate.svg">Cscr-candidate.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/3/3d/Cscr-candidate.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="/assets/icons/lgpl-2.1.html">LGPL-2.1-or-later</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/a-candidate.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/a-candidate.svg">A-class review candidates</a>
+{% elif slot == 'author' %}<a href="https://commons.wikimedia.org/wiki/User:Weston.pace">Weston.pace</a>, <a href="https://commons.wikimedia.org/wiki/User:Ed_g2s">Ed g2s</a>, <a href="https://commons.wikimedia.org/wiki/User:SkyBon">SkyBon</a>, and <a href="https://commons.wikimedia.org/wiki/User:Pbroks13">Pbroks13</a>; based on <a href="https://commons.wikimedia.org/wiki/File:Symbol_a_class.svg">Symbol a class.svg</a> and <a href="https://commons.wikimedia.org/wiki/File:GA_candidate.svg">GA candidate.svg</a>.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:A_candidate.svg">A candidate.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/d/d2/A_candidate.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/ga-candidate.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/ga-candidate.svg">Good article candidates</a>
+{% elif slot == 'author' %}<a href="https://commons.wikimedia.org/wiki/User:Ed_g2s">Ed g2s</a> and <a href="https://commons.wikimedia.org/wiki/User:SkyBon">SkyBon</a>; based on <a href="https://commons.wikimedia.org/wiki/File:Symbol_support_vote.svg">Symbol support vote.svg</a> by <a href="https://commons.wikimedia.org/wiki/User:Zscout370">Zscout370</a>, <a href="https://commons.wikimedia.org/wiki/User:Ed_g2s">Ed g2s</a>, and <a href="https://commons.wikimedia.org/wiki/User:Erin_Silversmith">Erin Silversmith</a>.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:GA_candidate.svg">GA candidate.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/8/8c/GA_candidate.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://commons.wikimedia.org/wiki/File:GA_candidate.svg#Licensing">Public domain</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/bplus-candidate.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/bplus-candidate.svg">B-plus-class review candidates</a>
+{% elif slot == 'author' %}<a href="https://commons.wikimedia.org/wiki/User:Weston.pace">Weston.pace</a> and the contributors recorded in the histories of <a href="https://commons.wikimedia.org/wiki/File:Symbol_bplus_class.svg">Symbol bplus class.svg</a> and <a href="https://commons.wikimedia.org/wiki/File:GA_candidate.svg">GA candidate.svg</a>, including <a href="https://commons.wikimedia.org/wiki/User:Ed_g2s">Ed g2s</a> and <a href="https://commons.wikimedia.org/wiki/User:SkyBon">SkyBon</a>.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Bplus_candidate.svg">Bplus candidate.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/2/20/Bplus_candidate.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/peer-review.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/peer-review.svg">Community peer review</a>
+{% elif slot == 'author' %}<a href="https://en.wikipedia.org/wiki/David_Vignoni">David Vignoni</a> / ICON KING (Nuvola icon theme); vector version by <a href="https://commons.wikimedia.org/wiki/User:Urutseg">Urutseg</a>.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Nuvola_apps_kedit.svg">Nuvola apps kedit.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/5/55/Nuvola_apps_kedit.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="/assets/icons/lgpl-2.1.html">LGPL-2.1-or-later</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/project-peer-review.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/project-peer-review.svg">Video games project peer review</a>
+{% elif slot == 'author' %}<a href="https://en.wikipedia.org/wiki/User:WolfenSilva">WolfenSilva</a>; vector redraw for Aranami, with refined button placement, glass highlights, and clipped 1.35× magnification; original PNG optimization by <a href="https://en.wikipedia.org/wiki/User:Optimager">Optimager</a>; based on <a href="https://commons.wikimedia.org/wiki/File:Cscr-mag.png">Cscr-mag.png</a> and the public-domain <a href="https://commons.wikimedia.org/wiki/File:Gamepad_Icon.png">Gamepad Icon.png</a> by <a href="https://commons.wikimedia.org/wiki/User:Paranoid">Paranoid</a>.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Cvg_peerreview_icon.png">Project peer-review SVG</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/f/fe/Cvg_peerreview_icon.png">Original file download</a>.
+{% elif slot == 'license' %}<a href="/assets/icons/gpl-2.0.html">GPL-2.0-or-later</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<img src="/assets/icons/dyk-candidate.svg" width="28" height="28" alt="">
+{% elif slot == 'title' %}<a href="/assets/icons/dyk-candidate.svg">Did-you-know candidates</a>
+{% elif slot == 'author' %}<a href="https://commons.wikimedia.org/wiki/User:Lopullinen">Lopullinen</a>; based on <a href="https://commons.wikimedia.org/wiki/File:Symbol_question.svg">Symbol question.svg</a> and <a href="https://commons.wikimedia.org/wiki/File:GA_candidate.svg">GA candidate.svg</a>.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:DYK_candidate.svg">DYK candidate.svg</a>. <a href="https://upload.wikimedia.org/wikipedia/commons/e/ef/DYK_candidate.svg">Original file download</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0 1.0</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}<svg width="28" height="28" viewBox="0 0 20 20" aria-hidden="true"><use href="/assets/icons/report-icons.svg#history"></use></svg>
+{% elif slot == 'title' %}Reassessment history
+{% elif slot == 'author' %}Wikimedia Design, the OOUI team, and other contributors. Grouped into a currentColor symbol without further shape changes.
+{% elif slot == 'source' %}<a href="https://commons.wikimedia.org/wiki/File:Codex_icon_history_(v2.6).svg">Codex history icon</a>; <a href="https://gerrit.wikimedia.org/g/design/codex/+/dcd478e318d99a0361723557d7ed135ffb57a682/packages/codex-icons/src/images/history.svg">Codex source</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>
+{% endif %}{% endcall %}
+{% call(slot) attribution_card() %}
+{% if slot == 'media' %}{% for symbol in ['speech-bubbles', 'speech-bubbles-recent', 'speech-bubbles-hot', 'speech-bubbles-recent-hot'] %}<svg width="28" height="28" viewBox="0 0 20 20" aria-hidden="true"><use href="/assets/icons/report-icons.svg#{{ symbol }}"></use></svg>{% endfor %}
+{% elif slot == 'title' %}<span lang="{{ language_tag }}">{{ t.reviews.discussions }}</span>
+{% elif slot == 'author' %}Wikimedia Design, the OOUI team, and other contributors (base icon). Aranami contributors (plus and flame activity modifiers). Variants compose the unchanged base geometry at a smaller scale.
+{% elif slot == 'source' %}<a href="https://gerrit.wikimedia.org/g/design/codex/+/dcd478e318d99a0361723557d7ed135ffb57a682/packages/codex-icons/src/images/">Codex speech-bubbles icon source</a>.
+{% elif slot == 'license' %}<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>
+{% endif %}{% endcall %}
+</div></section>

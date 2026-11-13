@@ -19,12 +19,10 @@ from unittest.mock import Mock
 
 from pywikibot.exceptions import NoPageError
 
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.layout import (
-    prepare_main_layout,
-    valid_main_layout,
-)
+from data.newsletter.layout import valid_main_layout
 from shared.newsletter import ROOT, Issue
+from tasks.zhwiki.newsletter.collection import collect_source_facts
+from tasks.zhwiki.newsletter.layout import prepare_main_layout
 
 _FIXTURE = (
     Path(__file__).parents[2] / "fixtures/newsletter-main-2026-10.wikitext"

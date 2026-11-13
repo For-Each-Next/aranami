@@ -1,6 +1,6 @@
 """Read bounded runtime files without following their local symlinks.
 
-Use these readers for saved observations consumed by the backend or
+Use these readers for saved observations consumed by the runtime or
 website. They reject nonregular files and oversized content; callers
 retain responsibility for validating their own schemas and identities.
 """

@@ -7,10 +7,8 @@ from unittest import TestCase
 
 import polars as pl
 
-from backend.newsletter.annual import (
-    QUALITY_HISTORY_GRADES,
-    prepare_quality_year_ends,
-)
+from data.newsletter.grades import QUALITY_HISTORY_GRADES
+from tasks.zhwiki.newsletter.annual import prepare_quality_year_ends
 
 
 def _events(rows: list[tuple]) -> pl.DataFrame:

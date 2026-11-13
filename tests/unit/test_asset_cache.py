@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from backend.support.asset_cache import AssetCache
+from webservice.asset_cache import AssetCache
 
 
 class TestAssetCache(TestCase):
@@ -23,7 +23,7 @@ class TestAssetCache(TestCase):
             assert first.gzip
             assert gzip.decompress(first.compressed) == first.content
             with patch(
-                "backend.support.asset_cache.encoded_response",
+                "webservice.asset_cache.encoded_response",
                 side_effect=AssertionError(
                     "Cached assets must not recompress",
                 ),
@@ -35,8 +35,8 @@ class TestAssetCache(TestCase):
         """Bound both representations and evict least recent files."""
         with (
             TemporaryDirectory() as directory,
-            patch("backend.support.asset_cache._MAX_BYTES", 8),
-            patch("backend.support.asset_cache._MAX_ENTRIES", 2),
+            patch("webservice.asset_cache._MAX_BYTES", 8),
+            patch("webservice.asset_cache._MAX_ENTRIES", 2),
         ):
             paths = [Path(directory) / f"{index}.css" for index in range(3)]
             for path in paths:

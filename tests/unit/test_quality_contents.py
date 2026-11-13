@@ -12,19 +12,19 @@ import polars as pl
 from sqlalchemy.dialects import mysql
 from wiki_fixtures import OfflineSite
 
-from backend.services import quality_contents as contents
-from backend.services.enwiki import (
-    quality_contents as en_contents,
-    quality_dates as en_dates,
-)
-from backend.services.zhwiki import (
-    quality_contents as zh_contents,
-    quality_dates as zh_dates,
-)
 from shared.sources.quarry import quality
 from shared.support import words
 from shared.support.dates import parse_complete_date
 from shared.support.prose import extract_prose
+from tasks import quality_contents as contents
+from tasks.enwiki import (
+    quality_contents as en_contents,
+    quality_dates as en_dates,
+)
+from tasks.zhwiki import (
+    quality_contents as zh_contents,
+    quality_dates as zh_dates,
+)
 
 
 class TestQualityMilestones(TestCase):

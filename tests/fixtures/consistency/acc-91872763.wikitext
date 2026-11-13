@@ -1,0 +1,39 @@
+{{NoteTA
+| G1 = Games
+}}
+
+{{WikiProject:电子游戏/Sidebar|PJ:VG/ACC|专题条目=expanded}}
+
+[[File:Symbol a class.svg|64px|left|alt=電子遊戲專題甲級內容標誌]]
+
+'''甲级内容'''指電子遊戲專題內，经至少两名编者评审，确认品质达到[[Wikipedia:WIAACA|甲級標準]]的內容。这些內容编写专业、引據詳實、內容清晰完整，是專題最佳作品的代表，有当选[[Wikipedia:典範條目|典範]]（[[WP:FL|特色]]）內容的潜质。
+
+甲級內容的主要價值在於理論引導和評審方向示範。專題絕大多數時間並無現役甲級內容：
+* 甲級內容需多人評審，且要求較詳實的意見，故難以湊齊足夠的評審人。
+* 甲級與典範的品質要求相近，頁面即便通過甲級評審，也往往會立即送選典範內容。
+
+專題歷史上僅評審出兩篇甲級內容，即「[[BanG Dream! 少女樂團派對]]」和「[[泰拉瑞亚]]」（現均為典範條目）。
+
+== 当前甲级条目 ==
+
+{{div col|colwidth=22em}}
+# {{class/icon|a}} （無）
+{{div col end}}
+
+== 当前甲级列表 ==
+
+{{div col|colwidth=22em}}
+# {{class/icon|al}} （無）
+{{div col end}}
+
+== 参评甲级内容 ==
+
+{{div col|colwidth=22em}}
+{{#section:WikiProject:电子游戏/认证条目/ACC|list}}
+{{div col end}}
+
+== 参见 ==
+
+* [[:Category:请求甲级评审的电子游戏条目]]
+
+[[Category:电子游戏专题遴选内容|C]]

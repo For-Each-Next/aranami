@@ -1,6 +1,100 @@
 # Changelog
 
-This file records major completed changes, grouped by package release line.
+Completed releases are recorded newest first. Unpublished development after
+v0.8.8 was consolidated into the v0.9.2 release.
+
+## Until 0.10
+
+### 0.9.2 (2026-11-13 17:00 UTC)
+
+Overview: Consolidated the saved-data Django website, Toolforge scheduling,
+Wikipedia reports, newsletter sources, historical article evidence and editor
+statistics into one final release after v0.8.8. Preserved the established runtime,
+added incremental B/BL attribution and live server resources, and added
+background quality analysis with bounded runtime memory.
+
+- Replaced generated Vue/Codex assets with authored Django templates, CSS and
+  JavaScript, retaining responsive multilingual controls and native fallbacks.
+- Served maintenance worklists, consistency checks, discussions, reports,
+  newsletter drafts, editor statistics and bounded Parquet previews from saved data.
+- Added searchable and sortable maintenance categories, complete result totals,
+  local pagination and preserved URL, focus and browser-history behavior.
+- Retained accessible dialogs, heading-link copying, attribution tables and
+  browser checks across three locales, narrow layouts and missing-data states.
+- Captured fresh hourly project membership, assessment and category observations;
+  retained immutable daily Parquet inputs before dependent midnight work.
+- Queued daily and hourly deferred routines independently, coalesced missed work,
+  and protected midnight collection from disruptive maintenance.
+- Kept publication, saved datasets, lifecycle, schedule observations and failures
+  independent, with cooperative shutdown and one active publisher.
+- Pinned immutable Toolforge source generations and locked environments, verified
+  setup receipts and content digests, and retained recovery generations.
+- Recorded structured source activity, bounded progress, execution history and
+  confirmed wiki edits, distinguishing missing, unknown and observed empty data.
+- Streamed ordered live status with HTTP recovery and independent service clocks;
+  sampled About CPU and memory each second without rewriting full history.
+- Reused bounded, contract-identified Parquet caches with UTC filenames, safe
+  replacement, ASCII identities and read-only metadata previews.
+- Retained logical wiki identities separately from storage paths and preserved
+  historical evidence and verified legacy readers through format transitions.
+- Recovered new-page gaps from independent creation and redirect-conversion
+  sources, retained keyword evidence and ignored malformed/interwiki titles safely.
+- Pinned delayed Pageviews to saved closing cohorts, repaired sparse histories,
+  preserved task-force scope and exposed download and ranking progress.
+- Retained complete main-page and recognition history, reused exact revisions
+  across month boundaries and preserved earlier appearances with one active date.
+- Used Article history for Bplus listings and reported current quality articles
+  lacking a matching successful recognition event.
+- Parsed verified template aliases, nomination dates, DYK results and questions;
+  isolated ambiguous history instead of publishing guessed repairs.
+- Combined active Article history templates, preserved each event's nomination
+  source, and refreshed stale parses to recover separate DYK and quality dates.
+- Kept English quality nominees newest first and included current nominee totals
+  in applicable summaries while omitting zero-only groups.
+- Added FAC/FLC/GAN article mentions to English quality edit summaries and
+  suppressed nomination departures when the same article gained that quality.
+- Published assessment changes from adjacent daily observations, preserving
+  article, non-article, redirect, grade and importance distinctions.
+- Grouped recent discussions by subject and week, linked verified comment activity,
+  reused rendered openings and retained hot/reply indicators and relative ages.
+- Refreshed main-page highlights hourly and kept newsletter facts daily, retaining
+  quarterly drafts, January annual reviews and delayed-issue improvements.
+- Repaired anniversary cache-directory reuse, restoring newsletter collection
+  after its November 10 capture; verified a new November 13 saved capture.
+- Retained article listing-time WikiWho provenance and reference-cleanup ownership,
+  including comments and anonymous bytes in contribution denominators.
+- Credited registered greatest contributors or literal 33% coauthors once per
+  article, limited quality totals to current eligible project members and grades.
+- Added sortable editor/article details, latest public activity, Taiwan title
+  labels from both conversion groups and compact nonzero count summaries.
+- Cached B/BL talk heads, latest continuous assessment ranges and nearby article
+  revisions; fetched changed talk history incrementally in bounded content batches.
+- Attributed B/BL authors at the saved article cutoff and used that article's UTC
+  date for display; retained incomplete history as pending with fair retries.
+- Read inherited B/BL classes from verified banner shells and cached unchanged
+  ambiguous histories, correcting the first-revision stall during backfill.
+- Ran B attribution in a separate idle worker with larger resumable passes,
+  source leases and foreground priority, releasing its buffers on exit.
+- Kept author acquisition in the Toolforge background routine; the instant B-Class
+  switch only loaded saved results, with no Apply button or full-page refresh.
+- Added resumable redirect recovery with Replica discovery, preloaded pages,
+  historical banner evidence, foreground priority and reversible local hiding.
+- Added saved quality-analysis charts, percentile summaries and complete article
+  tables, including Bplus, with source-free filtering and sorting.
+- Displayed class/importance pies with standard
+  class colors, keeping annual listings in a separate full-width section.
+- Used stacked annual columns and compared FA/GA/Bplus prose, pooling those
+  grades for Top/High/Mid/Low importance summaries while retaining all listings.
+- Isolated hourly analysis in short-lived workers, reused unchanged revision
+  metrics, capped native threads and actively expired bounded HTML caches.
+- Prepared source-backed section-zero repairs and a Tampermonkey handoff that
+  filled code and summaries, then opened a diff for manual publication.
+- Kept large dashboard refreshes within eight MiB using compact JSON and
+  complete optional repair pairs, retaining all source inputs in Parquet.
+- Consolidated source after v0.8.8 as v0.9.2, pinned standalone Ruff in CI, and
+  retained release and deployment documentation.
+- Archived the renamed GitHub source while retaining the independent Toolforge
+  service, release artifact and existing v0.8.8 history.
 
 ## Until 0.9
 

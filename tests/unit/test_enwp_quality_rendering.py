@@ -9,9 +9,9 @@ from unittest import TestCase
 import mwparserfromhell
 import polars as pl
 
-from backend.services.enwiki import key_articles as data_service
+from runtime.jobs.enwp_key_articles import REPORT_SPECS
 from shared.support.regions import managed_region, region_content
-from updater.jobs.enwp_key_articles import REPORT_SPECS
+from tasks.enwiki import key_articles as data_service
 from updater.services.zhwiki import enwp_key_articles as reports
 
 

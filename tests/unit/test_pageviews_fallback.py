@@ -1,6 +1,6 @@
 """Verify fresh endpoint fallback before chronological daily reports."""
 
-# Exercise backend seams and ordinary unittest exception assertions.
+# Exercise runtime seams and ordinary unittest exception assertions.
 # ruff: file-ignore[private-member-access, pytest-unittest-raises-assertion]
 
 import datetime as dt
@@ -15,8 +15,8 @@ from urllib.error import HTTPError
 import mwparserfromhell
 import polars as pl
 
-from backend.services.zhwiki import pageviews
-from updater.jobs import pageviews as job
+from runtime.jobs import pageviews as job
+from tasks.zhwiki import pageviews
 from updater.services.zhwiki import pageviews as rendering
 
 _FIRST = dt.date(2026, 10, 16)
@@ -81,6 +81,82 @@ class TestDownloadFallback(TestCase):
         readiness = patch.object(pageviews, "_require_day_ready")
         readiness.start()
         self.addCleanup(readiness.stop)
+
+    @staticmethod
+    def test_sparse_supplement_preserves_absent_observations() -> None:
+        """Publish healthy batches with sparse refreshed histories."""
+        site = _site()
+        stop = _TARGET + dt.timedelta(days=1)
+        start = stop - dt.timedelta(days=800)
+        prefix = pl.DataFrame({
+            "date": pl.date_range(start, _TARGET, closed="left", eager=True),
+        }).with_columns(pl.lit(1, dtype=pl.Int64).alias("pageview"))
+
+        def fetch(
+            _site: MagicMock,
+            title: str,
+            begin: dt.date,
+            end: dt.date,
+        ) -> pl.DataFrame:
+            """Return one absent tail and one measured target day."""
+            assert end == stop
+            if begin == start:
+                assert title == "A0"
+                return prefix
+            assert begin == _TARGET
+            return _observations(*(() if title == "A0" else (_TARGET,)))
+
+        with (
+            TemporaryDirectory() as directory,
+            chdir(directory),
+            patch.object(
+                pageviews,
+                "_project_articles",
+                return_value=_members(),
+            ),
+            patch.object(
+                pageviews.pageviews,
+                "fetch_data_dataframe",
+                side_effect=fetch,
+            ) as requests,
+            patch.object(
+                pageviews.pageviews,
+                "fetch_top_dataframe",
+                return_value=pl.DataFrame(
+                    schema={"title": pl.String, "top": pl.Int64},
+                ),
+            ),
+        ):
+            cache = pageviews.PageviewsCache.load(site.hostname())
+            for title in ("A0", "A1"):
+                cache.replace(title, start, _TARGET, prefix)
+            cache.save(["A0", "A1"])
+            with pageviews.download_batch():
+                pageviews.prepare_downloads(
+                    site,
+                    _TARGET,
+                    _TARGET,
+                    settings=_SETTINGS,
+                )
+                prepared = pageviews.prepare_report(
+                    site,
+                    stop,
+                    settings=_SETTINGS,
+                )
+            assert prepared.data_date == _TARGET
+            daily = prepared.result.tables["rankings"].filter(
+                pl.col("period") == "daily",
+            )
+            absent = daily.filter(pl.col("title") == "A0")
+            assert absent.item(0, "views") == 0
+            assert absent.item(0, "observed") is False
+            stored = pageviews.PageviewsCache.load(site.hostname()).get("A0")
+            assert stored.filter(pl.col("date") == _TARGET).is_empty()
+            assert requests.call_args_list == [
+                call(site, "A0", _TARGET, stop),
+                call(site, "A0", start, stop),
+                call(site, "A1", _TARGET, stop),
+            ]
 
     def test_shorter_endpoints_are_fresh_and_feed_every_daily_report(
         self,
@@ -172,7 +248,8 @@ class TestDownloadFallback(TestCase):
             for day in (19, 18, 17)
             for title in ("A0", "A1")
         ]
-        load.assert_not_called()
+        assert load.call_args_list == [call(site.hostname())] * 3
+        load.return_value.save.assert_not_called()
 
     @staticmethod
     def test_sparse_articles_do_not_block_a_verified_day() -> None:

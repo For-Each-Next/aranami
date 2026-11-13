@@ -1,0 +1,2 @@
+# Wikitext fixtures preserve whitespace from their audited source revisions.
+tests/fixtures/**/*.wikitext whitespace=-blank-at-eol

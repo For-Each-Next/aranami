@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% block contents_links %}<ul><li><a href="#main">{{ t.nav.about }}</a></li><li><a href="#server-status-heading">{{ t.server.heading }}</a></li><li><a href="#credits">{{ t.about.credits }}</a></li></ul>{% endblock %}
 {% block content %}
-<div class="prose">
+<div class="about-page">
   <p class="page-description">{{ introduction }}</p>
   <p>{{ contact }}</p>
   {% include "includes/server.html" %}
-  <section aria-labelledby="credits"><h2 id="credits">{{ t.about.credits }}</h2>
-    <p>Aranami · <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0-1.0</a></p>
-    <ul>
-      <li>{{ extract_attribution.before }}<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>{{ extract_attribution.after }}</li>
-      <li>{{ t.about.codex }} <a href="https://doc.wikimedia.org/codex/latest/">Wikimedia Codex</a> · <a href="/codex-license.html">GPL-2.0-or-later</a></li>
-      <li>{{ t.about.icons }} <a href="https://doc.wikimedia.org/codex/latest/icons/overview.html">Wikimedia Design, OOUI team and other contributors</a> · <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a></li>
+  <section class="section-flat" aria-labelledby="credits"><h2 id="credits">{{ t.about.credits }}</h2>
+    <ul class="about-credits">
+      <li>Aranami · <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0-1.0</a></li>
+      <li>{{ t.about.wikipedia }} · {{ extract_attribution.before }}<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>{{ extract_attribution.after }}</li>
+      <li>{{ t.about.django }} <a href="https://www.djangoproject.com/">Django</a> · <a href="https://github.com/django/django/blob/stable/6.1.x/LICENSE">BSD-3-Clause</a> · <a href="/codex-license.html">{{ t.credits.title.codex }}</a></li>
+      <li>{{ t.credits.interface_icons }} · <a href="https://doc.wikimedia.org/codex/latest/icons/overview.html">Wikimedia Design, OOUI team and other contributors</a> · <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a></li>
       <li><a href="/assets/icons/credits.html">{{ t.about.review_icons }}</a></li>
       <li><a href="/assets/icons/maintenance/credits.html">{{ t.about.maintenance_icons }}</a></li>
     </ul>

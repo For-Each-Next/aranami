@@ -15,13 +15,12 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 import pywikibot
+from wiki_fixtures import article_url
 
-from backend.website import homepage
-from backend.website.collect import (
-    enrich_project_assessments,
-    save_snapshot,
-)
+from data.website import save_snapshot
 from shared.sources.wiki import WikiReader
+from tasks.website.collect import enrich_project_assessments
+from tasks.zhwiki import homepage
 
 
 class TestProjectAssessmentEnrichment(TestCase):
@@ -320,6 +319,7 @@ class TestRevisionBoundaries(TestCase):
                 None,
                 self.reader,
                 read_at=self.reader.at,
+                url=article_url,
             )
         page.assert_called_once_with(self.site, source)
         self.page.get.assert_not_called()
@@ -381,6 +381,7 @@ class TestRevisionBoundaries(TestCase):
                 {"Game"},
                 self.reader,
                 read_at=self.reader.at,
+                url=article_url,
             )
         assert items[0]["date"] == "2026-10-18"
         missing.revisions.assert_called_once()

@@ -1,11 +1,12 @@
 """Compose concise English edit summaries within a UTF-8 byte budget.
 
-Keep dates and totals first, then shorten optional clauses at complete
+Lead with actions and retain dates and totals, then shorten clauses at
 article boundaries so multibyte titles and wiki links stay intact.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self
 
@@ -13,11 +14,10 @@ import mwparserfromhell
 from mwparserfromhell.nodes import HTMLEntity, Text, Wikilink
 
 if TYPE_CHECKING:
-    import datetime as dt
     from collections.abc import Sequence
 
 MAX_EDIT_SUMMARY_BYTES = 255
-_ATTRIBUTION = "([[toolforge:Aranami|Aranami]])"
+_ATTRIBUTION = "([[toolforge:aranami|Aranami]])"
 _MONTHS = (
     "Jan",
     "Feb",
@@ -34,6 +34,65 @@ _MONTHS = (
 )
 
 
+def _current_year() -> int:
+    """Read the UTC year used to disambiguate historical report dates.
+
+    Returns:
+        Current UTC calendar year.
+    """
+    return dt.datetime.now(dt.UTC).year
+
+
+def format_summary_number(value: int) -> str:
+    """Group an edit-summary count with narrow no-break spaces.
+
+    Args:
+        value: Integer count or signed change, excluding dates and IDs.
+
+    Returns:
+        Decimal digits grouped by U+202F, preserving a negative sign.
+
+    Raises:
+        TypeError: The supplied value is not an integer count.
+    """
+    if type(value) is not int:
+        message = "Edit-summary counts must be integers."
+        raise TypeError(message)
+    return f"{value:,}".replace(",", "\u202f")
+
+
+def summary_change(added: int, removed: int) -> str:
+    """Append observed additions and removals beside a current total.
+
+    Args:
+        added: Known number of additions to the reported population.
+        removed: Known number of departures from that population.
+
+    Returns:
+        A spaced ``(+n/-n)`` suffix, omitting zero sides or the whole
+        suffix when neither side changed. Counts use narrow spaces.
+
+    Raises:
+        ValueError: Either change count is negative.
+        TypeError: Either change count is not an integer.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    positive, negative = (
+        format_summary_number(added),
+        format_summary_number(
+            removed,
+        ),
+    )
+    if added < 0 or removed < 0:
+        message = "Summary additions and removals cannot be negative."
+        raise ValueError(message)
+    changes = [
+        text
+        for count, text in ((added, f"+{positive}"), (removed, f"-{negative}"))
+        if count
+    ]
+    return f" ({'/'.join(changes)})" if changes else ""
+
+
 def article_mention(
     title: str,
     *,
@@ -45,15 +104,18 @@ def article_mention(
     Args:
         title: Full article title, including disambiguation parentheses.
         interwiki: Optional language code for the primary article.
-        companion: Local counterpart title enclosed in parentheses.
+        companion: Local counterpart title enclosed in square brackets.
 
     Returns:
         A guillemet-enclosed primary link and an unquoted companion,
-        for example ``«[[:en:Game]]» ([[遊戲]])``.
+        For example, ``«[[:en:Game]]» &#91;[[遊戲]]&#93;`` uses entities
+        to keep companion brackets distinct from wiki link syntax.
     """
     target = f":{interwiki}:{title}" if interwiki else title
     primary = f"«{Wikilink(target)}»"
-    return f"{primary} ({Wikilink(companion)})" if companion else primary
+    return (
+        f"{primary} &#91;{Wikilink(companion)}&#93;" if companion else primary
+    )
 
 
 @dataclass(slots=True)
@@ -83,7 +145,7 @@ class _SummaryPart:
         pieces = list(self.items[:included])
         omitted = len(self.items) - included
         if omitted:
-            pieces.append(f"{omitted:,} more")
+            pieces.append(f"{format_summary_number(omitted)} more")
         return self.prefix + self.separator.join(pieces) + self.suffix
 
 
@@ -213,21 +275,23 @@ class EditSummary:
         return self
 
     @classmethod
-    def daily(cls, day: dt.date) -> Self:
-        """Start a dated summary with a compact, English calendar date.
+    def daily(cls, day: dt.date, *, action: str = "Update report") -> Self:
+        """Start an action-led summary with a compact calendar date.
 
         Use an unpadded day and a three-letter month regardless of the
-        process locale, for example ``Updated for 15 Sep 2026.``.
+        process locale, as in ``Change 21 assessments for Nov 1.``.
+        Years outside the current UTC year remain explicit.
 
         Args:
             day: Date of the report records being updated.
+            action: Essential action and counts before the report date.
 
         Returns:
-            A builder with the report date as its essential clause.
+            A builder retaining the essential action and date clause.
         """
-        return cls(
-            f"Updated for {day.day} {_MONTHS[day.month - 1]} {day.year}.",
-        )
+        year = f" {day.year}" if day.year != _current_year() else ""
+        date = f"{_MONTHS[day.month - 1]} {day.day}{year}"
+        return cls(f"{action.strip().rstrip('.')} for {date}.")
 
     @classmethod
     def membership(
@@ -238,7 +302,7 @@ class EditSummary:
         *,
         max_bytes: int = MAX_EDIT_SUMMARY_BYTES,
     ) -> Self:
-        """Describe a current total and actual membership changes.
+        """Describe a current total and membership changes with actions.
 
         Args:
             added: Titles of newly included pages.
@@ -247,18 +311,20 @@ class EditSummary:
             max_bytes: Requested budget, capped at the universal limit.
 
         Returns:
-            A builder containing the total and quoted article links.
+            A builder with essential counts before optional links.
         """
-        summary = cls(
-            f"{count:,} {'item' if count == 1 else 'items'} total.",
-            max_bytes=max_bytes,
+        total = (
+            f"{format_summary_number(count)} "
+            f"{'item' if count == 1 else 'items'}"
+            f"{summary_change(len(added), len(removed))}."
         )
+        summary = cls(total, max_bytes=max_bytes)
         summary.add_group(
-            "Added ",
+            "Add ",
             [article_mention(title) for title in added],
         )
         summary.add_group(
-            "removed " if added else "Removed ",
+            "remove " if added else "Remove ",
             [article_mention(title) for title in removed],
             group_separator="; " if added else " ",
         )
@@ -290,7 +356,7 @@ class EditSummary:
 
         Returns:
             Summary preserving essential text and details that fit.
-            Very small custom budgets retain a UTF-8-safe plain prefix.
+            Very small budgets retain only complete essential clauses.
         """
         counts: list[int | None] = [
             len(part.alternatives) if part.alternatives else len(part.items)
@@ -331,10 +397,7 @@ class EditSummary:
             ]
             if not active:
                 return _RenderedSummary(
-                    text.encode("utf-8")[: self.max_bytes].decode(
-                        "utf-8",
-                        errors="ignore",
-                    ),
+                    _fit_existing_summary(text, self.max_bytes),
                     base=self.base,
                     parts=tuple(self._parts),
                 )
@@ -365,7 +428,7 @@ class EditSummary:
             summary: Rendered report summary or caller-supplied text.
 
         Returns:
-            Summary ending with ``([[toolforge:Aranami|Aranami]])``.
+            Summary ending with ``([[toolforge:aranami|Aranami]])``.
             Complete clauses are rebudgeted when available, and plain
             input is shortened at safe boundaries. Repeated calls retain
             exactly one final attribution.
@@ -427,7 +490,13 @@ def _fit_existing_summary(text: str, budget: int) -> str:
                         0,
                         brackets + {"[": 1, "]": -1}.get(character, 0),
                     )
-            if quote_end is None and not parentheses and not brackets:
+            boundary = not isinstance(node, Text) or piece in ",;.!?)]»”"
+            if (
+                boundary
+                and quote_end is None
+                and not parentheses
+                and not brackets
+            ):
                 candidate = (
                     prefix[:-trailing_punctuation]
                     if trailing_punctuation

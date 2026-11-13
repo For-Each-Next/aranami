@@ -36,20 +36,14 @@ jobs:
       - name: Check lockfile
         run: uv lock --check
 
-      - name: Build and verify website assets and templates
-        run: |
-          npm ci --ignore-scripts
-          npm run build:web
-          npm run check:web
-
       - name: Install locked dependencies
         run: uv sync --locked --dev
 
       - name: Lint
-        run: uv run --locked ruff check --no-fix .
+        run: uvx --from ruff==0.16.0 ruff check --no-fix .
 
       - name: Check formatting
-        run: uv run --locked ruff format --check .
+        run: uvx --from ruff==0.16.0 ruff format --check .
 
       - name: Check deployment shell syntax
         run: |
@@ -65,7 +59,7 @@ jobs:
         run: uv run --locked python -m unittest discover -s tests/toolforge -p 'test_*.py' -v
 
       - name: Run browser behavior unit tests
-        run: node --test tests/toolforge/test_live.cjs tests/toolforge/test_newsletter.cjs
+        run: node --test tests/toolforge/test_*.cjs
 
       - name: Render and check the interface in Chromium
         run: |

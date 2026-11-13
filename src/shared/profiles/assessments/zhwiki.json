@@ -1,0 +1,1204 @@
+{
+  "schema": 1,
+  "wiki": "zhwiki",
+  "profiles": [
+    {
+      "project": null,
+      "identifier": "zhwiki-general:1",
+      "class_suffixes": [
+        "级",
+        "級"
+      ],
+      "classes": [
+        {
+          "raw_value": "典范",
+          "code": "FA",
+          "long_name": "典范级",
+          "short_name": "典范",
+          "is_article": true,
+          "aliases": [
+            "fa",
+            "典範",
+            "特",
+            "特色",
+            "特色條目",
+            "特色条目",
+            "典範條目",
+            "典范条目"
+          ],
+          "rank": 10,
+          "order": 0,
+          "article_group": "FA",
+          "color": "#9CBDFF"
+        },
+        {
+          "raw_value": "特色列表",
+          "code": "FL",
+          "long_name": "特色列表级",
+          "short_name": "特表",
+          "is_article": true,
+          "aliases": [
+            "fl",
+            "特表",
+            "典表"
+          ],
+          "rank": 10,
+          "order": 1,
+          "article_group": "FA",
+          "color": "#9CBDFF"
+        },
+        {
+          "raw_value": "甲",
+          "code": "A",
+          "long_name": "甲级",
+          "short_name": "甲",
+          "is_article": true,
+          "aliases": [
+            "a",
+            "甲級"
+          ],
+          "rank": 9,
+          "order": 2,
+          "article_group": "A",
+          "color": "#66FFFF"
+        },
+        {
+          "raw_value": "甲级列表",
+          "code": "AL",
+          "long_name": "甲级列表级",
+          "short_name": "甲表",
+          "is_article": true,
+          "aliases": [
+            "al",
+            "甲級列表"
+          ],
+          "rank": 9,
+          "order": 3,
+          "article_group": "A",
+          "color": "#66FFFF"
+        },
+        {
+          "raw_value": "优良",
+          "code": "GA",
+          "long_name": "优良级",
+          "short_name": "优良",
+          "is_article": true,
+          "aliases": [
+            "ga",
+            "優良",
+            "优",
+            "優",
+            "良",
+            "优良条目",
+            "優良條目"
+          ],
+          "rank": 8,
+          "order": 4,
+          "article_group": "GA",
+          "color": "#66FF66"
+        },
+        {
+          "raw_value": "乙上",
+          "code": "Bplus",
+          "long_name": "乙上级",
+          "short_name": "乙上",
+          "is_article": true,
+          "aliases": [
+            "b+",
+            "bplus",
+            "乙+"
+          ],
+          "rank": 7,
+          "order": 5,
+          "article_group": "Bplus",
+          "color": "#8CFF66"
+        },
+        {
+          "raw_value": "乙",
+          "code": "B",
+          "long_name": "乙级",
+          "short_name": "乙",
+          "is_article": true,
+          "aliases": [
+            "b"
+          ],
+          "rank": 6,
+          "order": 6,
+          "article_group": "B",
+          "color": "#B2FF66"
+        },
+        {
+          "raw_value": "乙级列表",
+          "code": "BL",
+          "long_name": "乙级列表级",
+          "short_name": "乙表",
+          "is_article": true,
+          "aliases": [
+            "bl",
+            "乙級列表"
+          ],
+          "rank": 6,
+          "order": 7,
+          "article_group": "B",
+          "color": "#B2FF66"
+        },
+        {
+          "raw_value": "丙",
+          "code": "C",
+          "long_name": "丙级",
+          "short_name": "丙",
+          "is_article": true,
+          "aliases": [
+            "c"
+          ],
+          "rank": 5,
+          "order": 8,
+          "article_group": "C",
+          "color": "#FFFF66"
+        },
+        {
+          "raw_value": "丙级列表",
+          "code": "CL",
+          "long_name": "丙级列表级",
+          "short_name": "丙表",
+          "is_article": true,
+          "aliases": [
+            "cl",
+            "丙級列表"
+          ],
+          "rank": 5,
+          "order": 9,
+          "article_group": "C",
+          "color": "#FFFF66"
+        },
+        {
+          "raw_value": "丁",
+          "code": "D",
+          "long_name": "丁级",
+          "short_name": "丁",
+          "is_article": true,
+          "aliases": [
+            "d"
+          ],
+          "rank": 4,
+          "order": 10,
+          "article_group": "D",
+          "color": "#FFD466"
+        },
+        {
+          "raw_value": "初",
+          "code": "Start",
+          "long_name": "初级",
+          "short_name": "初",
+          "is_article": true,
+          "aliases": [
+            "start"
+          ],
+          "rank": 3,
+          "order": 11,
+          "article_group": "Start",
+          "color": "#FFAA66"
+        },
+        {
+          "raw_value": "小作品",
+          "code": "Stub",
+          "long_name": "小作品级",
+          "short_name": "小级",
+          "is_article": true,
+          "aliases": [
+            "stub",
+            "小",
+            "小作品"
+          ],
+          "rank": 2,
+          "order": 12,
+          "article_group": "Stub",
+          "color": "#FFA4A4"
+        },
+        {
+          "raw_value": "列表",
+          "code": "List",
+          "long_name": "列表级",
+          "short_name": "列表",
+          "is_article": true,
+          "aliases": [
+            "list",
+            "l",
+            "表"
+          ],
+          "rank": 3,
+          "order": 13,
+          "article_group": "Start",
+          "color": "#C7B1FF"
+        },
+        {
+          "raw_value": "小列表",
+          "code": "SL",
+          "long_name": "小列表级",
+          "short_name": "小表",
+          "is_article": true,
+          "aliases": [
+            "sl",
+            "stublist",
+            "小表",
+            "小列表"
+          ],
+          "rank": 2,
+          "order": 14,
+          "article_group": "Stub",
+          "color": "#FFA4A4"
+        },
+        {
+          "raw_value": "小小作品",
+          "code": "Substub",
+          "long_name": "小小作品级",
+          "short_name": "小小作品",
+          "is_article": true,
+          "aliases": [
+            "substub",
+            "小小"
+          ],
+          "rank": 1,
+          "order": 15,
+          "article_group": "Substub",
+          "color": "#FF9292"
+        },
+        {
+          "raw_value": "消歧义",
+          "code": "Disambig",
+          "long_name": "消歧义级",
+          "short_name": "消歧义",
+          "is_article": false,
+          "aliases": [
+            "disambig",
+            "消歧義",
+            "dab",
+            "disam",
+            "disamb",
+            "消"
+          ],
+          "rank": null,
+          "order": 16,
+          "article_group": null,
+          "color": "#00FA9A"
+        },
+        {
+          "raw_value": "未评",
+          "code": "Unassessed",
+          "long_name": "未评级",
+          "short_name": "未评",
+          "is_article": true,
+          "aliases": [
+            "unassessed",
+            "未評",
+            "未評級",
+            "un",
+            "未"
+          ],
+          "rank": null,
+          "order": 17,
+          "article_group": "Unassessed",
+          "color": "transparent"
+        },
+        {
+          "raw_value": "同类索引",
+          "code": "SIA",
+          "long_name": "同类索引级",
+          "short_name": "同类索引",
+          "is_article": false,
+          "aliases": [
+            "sia",
+            "Setindex",
+            "同類索引",
+            "索引"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#E9DAFF"
+        },
+        {
+          "raw_value": "草稿",
+          "code": "Draft",
+          "long_name": "草稿级",
+          "short_name": "草稿",
+          "is_article": false,
+          "aliases": [
+            "稿"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#E7B198"
+        },
+        {
+          "raw_value": "文件",
+          "code": "File",
+          "long_name": "文件级",
+          "short_name": "文件",
+          "is_article": false,
+          "aliases": [
+            "image",
+            "图",
+            "圖",
+            "图像",
+            "圖像",
+            "档案",
+            "檔案",
+            "多媒体",
+            "多媒體",
+            "媒体",
+            "媒體"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#DDCCFF"
+        },
+        {
+          "raw_value": "分类",
+          "code": "Category",
+          "long_name": "分类级",
+          "short_name": "分类",
+          "is_article": false,
+          "aliases": [
+            "cat",
+            "类",
+            "類",
+            "分類"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#FFDB58"
+        },
+        {
+          "raw_value": "模板",
+          "code": "Template",
+          "long_name": "模板级",
+          "short_name": "模板",
+          "is_article": false,
+          "aliases": [
+            "temp",
+            "模",
+            "板"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#FBCEB1"
+        },
+        {
+          "raw_value": "主题",
+          "code": "Portal",
+          "long_name": "主题级",
+          "short_name": "主题",
+          "is_article": false,
+          "aliases": [
+            "主",
+            "主題"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#DDB1BC"
+        },
+        {
+          "raw_value": "专题",
+          "code": "Project",
+          "long_name": "专题级",
+          "short_name": "专题",
+          "is_article": false,
+          "aliases": [
+            "专",
+            "專",
+            "專題"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#C0C090"
+        },
+        {
+          "raw_value": "重定向",
+          "code": "Redirect",
+          "long_name": "重定向级",
+          "short_name": "重定向",
+          "is_article": false,
+          "aliases": [
+            "red",
+            "redir",
+            "重",
+            "重新導向",
+            "重新导向"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#C0C0C0"
+        },
+        {
+          "raw_value": "非条目",
+          "code": "NA",
+          "long_name": "非条目级",
+          "short_name": "非条目",
+          "is_article": false,
+          "aliases": [
+            "非",
+            "非條目",
+            "n/a",
+            "不适用",
+            "不適用"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#F5F5F5"
+        },
+        {
+          "raw_value": "使用说明",
+          "code": "Help",
+          "long_name": "使用说明级",
+          "short_name": "使用说明",
+          "is_article": false,
+          "aliases": [
+            "使用說明",
+            "说明",
+            "說明"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#819BEB"
+        },
+        {
+          "raw_value": "沙盒",
+          "code": "Sandbox",
+          "long_name": "沙盒级",
+          "short_name": "沙盒",
+          "is_article": false,
+          "aliases": [
+            "砂盒",
+            "沙"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#FFCD71"
+        },
+        {
+          "raw_value": "特色图片",
+          "code": "FM",
+          "long_name": "特色图片级",
+          "short_name": "特色图片",
+          "is_article": false,
+          "aliases": [
+            "特色圖片",
+            "fi",
+            "特图",
+            "特圖"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#9CBDFF"
+        },
+        {
+          "raw_value": "用户",
+          "code": "User",
+          "long_name": "用户级",
+          "short_name": "用户",
+          "is_article": false,
+          "aliases": [
+            "使用者"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#DDD06A"
+        },
+        {
+          "raw_value": "错误",
+          "code": "Error",
+          "long_name": "错误级",
+          "short_name": "错误",
+          "is_article": false,
+          "aliases": [
+            "錯誤"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "red"
+        },
+        {
+          "raw_value": "模块",
+          "code": "Module",
+          "long_name": "模块级",
+          "short_name": "模块",
+          "is_article": false,
+          "aliases": [
+            "模組",
+            "mod",
+            "模组",
+            "模塊"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#F8EABA"
+        },
+        {
+          "raw_value": "界面",
+          "code": "Interface",
+          "long_name": "界面级",
+          "short_name": "界面",
+          "is_article": false,
+          "aliases": [
+            "介面"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#F9E59E"
+        }
+      ],
+      "importance": [
+        {
+          "raw_value": "极高",
+          "code": "Top",
+          "long_name": "极高重要度",
+          "short_name": "极高",
+          "aliases": [
+            "top",
+            "極高"
+          ],
+          "rank": 5,
+          "order": 0
+        },
+        {
+          "raw_value": "高",
+          "code": "High",
+          "long_name": "高重要度",
+          "short_name": "高",
+          "aliases": [
+            "high"
+          ],
+          "rank": 4,
+          "order": 1
+        },
+        {
+          "raw_value": "中",
+          "code": "Mid",
+          "long_name": "中重要度",
+          "short_name": "中",
+          "aliases": [
+            "mid"
+          ],
+          "rank": 3,
+          "order": 2
+        },
+        {
+          "raw_value": "低",
+          "code": "Low",
+          "long_name": "低重要度",
+          "short_name": "低",
+          "aliases": [
+            "low"
+          ],
+          "rank": 2,
+          "order": 3
+        },
+        {
+          "raw_value": "不适用",
+          "code": "NA",
+          "long_name": "不适用重要度",
+          "short_name": "不适用",
+          "aliases": [
+            "na",
+            "不適用"
+          ],
+          "rank": null,
+          "order": 5
+        },
+        {
+          "raw_value": "未知",
+          "code": "Unknown",
+          "long_name": "未知重要度",
+          "short_name": "未知",
+          "aliases": [
+            "unknown",
+            "未評",
+            "未評級",
+            "未评",
+            "未评级"
+          ],
+          "rank": null,
+          "order": null
+        }
+      ],
+      "compatibility_classes": [],
+      "compatibility_importance": [],
+      "sources": [
+        {
+          "title": "zhwiki PageAssessments project 通用評級",
+          "observed_at": "2026-11-02T16:05:00+00:00",
+          "note": "Raw class labels verified against project 1184. Importance vocabulary is shared site presentation metadata, verified against the 电子游戏 PageAssessments output; 通用評級 itself records empty importance."
+        },
+        {
+          "title": "Wikipedia:页面评级",
+          "url": "https://zh.wikipedia.org/wiki/Wikipedia:页面评级",
+          "note": "Current general assessment guideline; replaces the historical Wikipedia:通用評級 proposal."
+        },
+        {
+          "title": "Module:Class/data",
+          "url": "https://zh.wikipedia.org/wiki/Module:Class/data",
+          "note": "Class codes and read-time aliases; raw observations are never rewritten. Default class colors copied from the audited module. Named newsletter variants preserve established annual and new-page charts; colors absent from the module remain unknown."
+        }
+      ]
+    },
+    {
+      "project": "电子游戏",
+      "identifier": "zhwiki-video-games:1",
+      "class_suffixes": [
+        "级",
+        "級"
+      ],
+      "classes": [
+        {
+          "raw_value": "典范",
+          "code": "FA",
+          "long_name": "典范级",
+          "short_name": "典范",
+          "is_article": true,
+          "aliases": [
+            "fa",
+            "典範"
+          ],
+          "rank": 10,
+          "order": 0,
+          "article_group": "FA",
+          "color": "#9CBDFF",
+          "color_variants": {
+            "analysis": "#337a7f"
+          }
+        },
+        {
+          "raw_value": "特色列表",
+          "code": "FL",
+          "long_name": "特色列表级",
+          "short_name": "特表",
+          "is_article": true,
+          "aliases": [
+            "fl",
+            "典表"
+          ],
+          "rank": 10,
+          "order": 1,
+          "article_group": "FA",
+          "color": "#9CBDFF",
+          "color_variants": {
+            "analysis": "#956d21"
+          }
+        },
+        {
+          "raw_value": "甲",
+          "code": "A",
+          "long_name": "甲级",
+          "short_name": "甲",
+          "is_article": true,
+          "aliases": [
+            "a"
+          ],
+          "rank": 9,
+          "order": 2,
+          "article_group": "A",
+          "color": "#66FFFF",
+          "color_variants": {
+            "analysis": "#596ca0"
+          }
+        },
+        {
+          "raw_value": "甲级列表",
+          "code": "AL",
+          "long_name": "甲级列表级",
+          "short_name": "甲表",
+          "is_article": true,
+          "aliases": [
+            "al",
+            "甲級列表"
+          ],
+          "rank": 9,
+          "order": 3,
+          "article_group": "A",
+          "color": "#66FFFF",
+          "color_variants": {
+            "analysis": "#925983"
+          }
+        },
+        {
+          "raw_value": "优良",
+          "code": "GA",
+          "long_name": "优良级",
+          "short_name": "优良",
+          "is_article": true,
+          "aliases": [
+            "ga",
+            "優良"
+          ],
+          "rank": 8,
+          "order": 4,
+          "article_group": "GA",
+          "color": "#66FF66",
+          "color_variants": {
+            "analysis": "#7aafad"
+          }
+        },
+        {
+          "raw_value": "乙上",
+          "code": "Bplus",
+          "long_name": "乙上级",
+          "short_name": "乙上",
+          "is_article": true,
+          "aliases": [
+            "b+",
+            "bplus"
+          ],
+          "rank": 7,
+          "order": 5,
+          "article_group": "Bplus",
+          "color": "#8CFF66",
+          "color_variants": {
+            "analysis": "#b5c68b"
+          }
+        },
+        {
+          "raw_value": "乙",
+          "code": "B",
+          "long_name": "乙级",
+          "short_name": "乙",
+          "is_article": true,
+          "aliases": [
+            "b"
+          ],
+          "rank": 6,
+          "order": 6,
+          "article_group": "B",
+          "color": "#B2FF66"
+        },
+        {
+          "raw_value": "乙级列表",
+          "code": "BL",
+          "long_name": "乙级列表级",
+          "short_name": "乙表",
+          "is_article": true,
+          "aliases": [
+            "bl",
+            "乙級列表"
+          ],
+          "rank": 6,
+          "order": 7,
+          "article_group": "B",
+          "color": "#B2FF66"
+        },
+        {
+          "raw_value": "丙",
+          "code": "C",
+          "long_name": "丙级",
+          "short_name": "丙",
+          "is_article": true,
+          "aliases": [
+            "c"
+          ],
+          "rank": 5,
+          "order": 8,
+          "article_group": "C",
+          "color": "#FFFF66"
+        },
+        {
+          "raw_value": "丙级列表",
+          "code": "CL",
+          "long_name": "丙级列表级",
+          "short_name": "丙表",
+          "is_article": true,
+          "aliases": [
+            "cl",
+            "丙級列表"
+          ],
+          "rank": 5,
+          "order": 9,
+          "article_group": "C",
+          "color": "#FFFF66"
+        },
+        {
+          "raw_value": "初",
+          "code": "Start",
+          "long_name": "初级",
+          "short_name": "初",
+          "is_article": true,
+          "aliases": [
+            "start"
+          ],
+          "rank": 3,
+          "order": 11,
+          "article_group": "Start",
+          "color": "#FFAA66"
+        },
+        {
+          "raw_value": "列表",
+          "code": "List",
+          "long_name": "列表级",
+          "short_name": "列表",
+          "is_article": true,
+          "aliases": [
+            "list"
+          ],
+          "rank": 3,
+          "order": 13,
+          "article_group": "Start",
+          "color": "#C7B1FF"
+        },
+        {
+          "raw_value": "小作品",
+          "code": "Stub",
+          "long_name": "小作品级",
+          "short_name": "小级",
+          "is_article": true,
+          "aliases": [
+            "stub",
+            "小作品"
+          ],
+          "rank": 2,
+          "order": 12,
+          "article_group": "Stub",
+          "color": "#FFA4A4"
+        },
+        {
+          "raw_value": "小列表",
+          "code": "SL",
+          "long_name": "小列表级",
+          "short_name": "小表",
+          "is_article": true,
+          "aliases": [
+            "sl",
+            "stublist",
+            "小列表"
+          ],
+          "rank": 2,
+          "order": 14,
+          "article_group": "Stub",
+          "color": "#FFA4A4"
+        },
+        {
+          "raw_value": "未评",
+          "code": "Unassessed",
+          "long_name": "未评级",
+          "short_name": "未评",
+          "is_article": true,
+          "aliases": [
+            "unassessed",
+            "未評",
+            "未評級"
+          ],
+          "rank": null,
+          "order": 17,
+          "article_group": "Unassessed",
+          "color": "transparent",
+          "color_variants": {
+            "newsletter_annual": "#EEEEEE",
+            "newsletter_new_pages": "#DCDCDC"
+          }
+        },
+        {
+          "raw_value": "消歧义",
+          "code": "Disambig",
+          "long_name": "消歧义级",
+          "short_name": "消歧义",
+          "is_article": false,
+          "aliases": [
+            "disambig",
+            "消歧義"
+          ],
+          "rank": null,
+          "order": 16,
+          "article_group": null,
+          "color": "#00FA9A"
+        },
+        {
+          "raw_value": "同类索引",
+          "code": "Setindex",
+          "long_name": "同类索引级",
+          "short_name": "同类索引",
+          "is_article": false,
+          "aliases": [
+            "同類索引"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#E9DAFF"
+        },
+        {
+          "raw_value": "草稿",
+          "code": "Draft",
+          "long_name": "草稿级",
+          "short_name": "草稿",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#E7B198"
+        },
+        {
+          "raw_value": "文件",
+          "code": "File",
+          "long_name": "文件级",
+          "short_name": "文件",
+          "is_article": false,
+          "aliases": [
+            "檔案",
+            "档案"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#DDCCFF"
+        },
+        {
+          "raw_value": "分类",
+          "code": "Category",
+          "long_name": "分类级",
+          "short_name": "分类",
+          "is_article": false,
+          "aliases": [
+            "分類"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#FFDB58"
+        },
+        {
+          "raw_value": "模板",
+          "code": "Template",
+          "long_name": "模板级",
+          "short_name": "模板",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#FBCEB1"
+        },
+        {
+          "raw_value": "主题",
+          "code": "Portal",
+          "long_name": "主题级",
+          "short_name": "主题",
+          "is_article": false,
+          "aliases": [
+            "主題"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#DDB1BC"
+        },
+        {
+          "raw_value": "专题",
+          "code": "Project",
+          "long_name": "专题级",
+          "short_name": "专题",
+          "is_article": false,
+          "aliases": [
+            "專題"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#C0C090"
+        },
+        {
+          "raw_value": "重定向",
+          "code": "Redirect",
+          "long_name": "重定向级",
+          "short_name": "重定向",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#C0C0C0"
+        },
+        {
+          "raw_value": "非条目",
+          "code": "NA",
+          "long_name": "非条目级",
+          "short_name": "非条目",
+          "is_article": false,
+          "aliases": [
+            "非條目",
+            "n/a",
+            "不适用",
+            "不適用"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "#F5F5F5"
+        }
+      ],
+      "importance": [
+        {
+          "raw_value": "极高",
+          "code": "Top",
+          "long_name": "极高重要度",
+          "short_name": "极高",
+          "aliases": [
+            "top",
+            "極高"
+          ],
+          "rank": 5,
+          "order": 0
+        },
+        {
+          "raw_value": "高",
+          "code": "High",
+          "long_name": "高重要度",
+          "short_name": "高",
+          "aliases": [
+            "high"
+          ],
+          "rank": 4,
+          "order": 1
+        },
+        {
+          "raw_value": "中",
+          "code": "Mid",
+          "long_name": "中重要度",
+          "short_name": "中",
+          "aliases": [
+            "mid"
+          ],
+          "rank": 3,
+          "order": 2
+        },
+        {
+          "raw_value": "低",
+          "code": "Low",
+          "long_name": "低重要度",
+          "short_name": "低",
+          "aliases": [
+            "low"
+          ],
+          "rank": 2,
+          "order": 3
+        },
+        {
+          "raw_value": "不适用",
+          "code": "NA",
+          "long_name": "不适用重要度",
+          "short_name": "不适用",
+          "aliases": [
+            "na",
+            "不適用"
+          ],
+          "rank": null,
+          "order": 5
+        },
+        {
+          "raw_value": "未知",
+          "code": "Unknown",
+          "long_name": "未知重要度",
+          "short_name": "未知",
+          "aliases": [
+            "unknown",
+            "未評",
+            "未評級",
+            "未评",
+            "未评级"
+          ],
+          "rank": null,
+          "order": null
+        }
+      ],
+      "compatibility_classes": [
+        {
+          "raw_value": "丁",
+          "code": "D",
+          "long_name": "丁级",
+          "short_name": "丁",
+          "is_article": true,
+          "aliases": [
+            "d"
+          ],
+          "rank": 4,
+          "order": 10,
+          "article_group": "D",
+          "color": "#FFD466",
+          "color_variants": {
+            "newsletter_new_pages": "#FFFFAA"
+          }
+        },
+        {
+          "raw_value": "小小作品",
+          "code": "Substub",
+          "long_name": "小小作品级",
+          "short_name": "小小作品",
+          "is_article": true,
+          "aliases": [
+            "substub"
+          ],
+          "rank": 1,
+          "order": 15,
+          "article_group": "Substub",
+          "color": "#FF9292",
+          "color_variants": {
+            "newsletter_new_pages": "#FF6666"
+          }
+        },
+        {
+          "raw_value": "未知",
+          "code": "Unknown",
+          "long_name": "未知",
+          "short_name": "未知",
+          "is_article": false,
+          "aliases": [
+            "unknown"
+          ],
+          "rank": null,
+          "order": null,
+          "article_group": null,
+          "color": "transparent"
+        }
+      ],
+      "compatibility_importance": [
+        {
+          "raw_value": "极低",
+          "code": "Bottom",
+          "long_name": "极低重要度",
+          "short_name": "极低",
+          "aliases": [
+            "bottom",
+            "極低"
+          ],
+          "rank": 1,
+          "order": 4
+        }
+      ],
+      "sources": [
+        {
+          "title": "zhwiki PageAssessments project 电子游戏",
+          "observed_at": "2026-11-02T14:47:05.478633+00:00",
+          "note": "Exact observed raw labels; 甲 and 甲级列表 are explicitly supported project grades. Aliases and display ranks retain the previously audited renderer and newsletter vocabulary."
+        },
+        {
+          "title": "Module:Class/data",
+          "url": "https://zh.wikipedia.org/wiki/Module:Class/data",
+          "note": "Default class colors copied from the audited module. Named newsletter variants preserve established annual and new-page charts; colors absent from the module remain unknown."
+        }
+      ]
+    }
+  ]
+}

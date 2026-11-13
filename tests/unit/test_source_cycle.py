@@ -14,7 +14,6 @@ from unittest.mock import Mock, patch
 import polars as pl
 from wiki_fixtures import OfflineSite
 
-from backend.website import pageviews as website_pageviews
 from shared.sources import pageviews
 from shared.sources.cycle import (
     read_membership,
@@ -22,6 +21,7 @@ from shared.sources.cycle import (
     source_cycle,
 )
 from shared.sources.quarry import projects
+from tasks.website import pageviews as website_pageviews
 
 _DAY = ("2026", "10", "19")
 _PROJECT = "zh.wikipedia.org"
@@ -81,6 +81,20 @@ def _top_payload() -> dict[str, object]:
 
 class TestMembershipCycle(TestCase):
     """Keep eager membership reads reusable and isolated by source."""
+
+    @staticmethod
+    def test_adapter_uses_selected_durable_membership() -> None:
+        """Enrich selected rows without a new replica query."""
+        site = OfflineSite("zh", "wikipedia")
+        selected = Mock(return_value=_membership())
+        with (
+            patch("shared.sources.quarry.projects._replica") as replica,
+            source_cycle(membership_reader=selected),
+        ):
+            observed = projects.query_pages_by_wikiproject(site, "Games")
+        selected.assert_called_once_with(site, "Games")
+        replica.assert_not_called()
+        assert observed["full_title"].to_list() == ["Video game"]
 
     @staticmethod
     def test_adapter_reuses_exact_database_and_project_rows() -> None:
@@ -184,7 +198,7 @@ class TestTopPageviewsCycle(TestCase):
                         return_value=BytesIO(json.dumps(payload).encode()),
                     ) as urlopen,
                     patch(
-                        "backend.website.pageviews.http.fetch",
+                        "tasks.website.pageviews.http.fetch",
                         return_value=response,
                     ) as website_fetch,
                     patch(
@@ -219,7 +233,6 @@ class TestTopPageviewsCycle(TestCase):
                 assert observed.to_dicts() == [
                     {
                         "title": "Video game",
-                        "url": "https://zh.wikipedia.org/wiki/Video_game",
                         "views": 12,
                         "_source_rank": 37,
                     },

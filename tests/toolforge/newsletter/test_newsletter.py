@@ -18,20 +18,20 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from fastapi.testclient import TestClient
+from starlette.testclient import TestClient
 
-from backend.newsletter.archive import (
+from data.newsletter.archive import (
     DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
     NewsletterDraftArchive,
 )
-from backend.newsletter.layout import prepare_main_layout
-from backend.newsletter.observations import OBSERVATIONS_PATH, save_observation
-from backend.newsletter.schema import read_newsletter_data, valid_newsletter
-from backend.public import create_app
-from backend.website.collect import REPORT_KEYS, validate_dashboard_snapshot
+from data.newsletter.observations import OBSERVATIONS_PATH, save_observation
+from data.newsletter.schema import read_newsletter_data, valid_newsletter
+from data.website import REPORT_KEYS, validate_dashboard_snapshot
 from newsletter.fixtures import subpage_layouts
 from shared.newsletter import ROOT, SUFFIXES, Issue
+from tasks.zhwiki.newsletter.layout import prepare_main_layout
 from updater.services.newsletter import render_issue
+from webservice.server import create_app
 
 
 def _main_layout() -> dict:
@@ -295,6 +295,7 @@ class NewsletterRouteTests(unittest.TestCase):
                 "history",
             )),
             "reviews": None,
+            "consistency": None,
             "pageviews": None,
             "backlog": None,
             "newsletter": {"issues": {"2027-01": complete}},
@@ -317,7 +318,7 @@ class NewsletterRouteTests(unittest.TestCase):
         """Serve defaults without creating files or source clients."""
         with (
             patch("pywikibot.Site") as site,
-            patch("backend.website.collect.collect_dashboard") as collect,
+            patch("tasks.website.collect.collect_dashboard") as collect,
         ):
             response = self.client.get("/newsletter/?issue=2027-01&lang=en")
             head = self.client.head("/newsletter/?issue=2027-01&lang=en")
@@ -378,7 +379,7 @@ class NewsletterRouteTests(unittest.TestCase):
         """Display saved data for the automatically selected issue."""
         self._save_issue({"overview": {"total": 13025}})
         with patch(
-            "backend.public.Issue.upcoming",
+            "webservice.server.Issue.upcoming",
             return_value=Issue.parse("2027-01"),
         ) as upcoming:
             response = self.client.get("/newsletter/?lang=en")
@@ -417,11 +418,11 @@ class NewsletterRouteTests(unittest.TestCase):
         }
         with (
             patch(
-                "backend.public.Issue.upcoming",
+                "webservice.server.Issue.upcoming",
                 return_value=Issue.parse("2027-07"),
             ),
             patch("pywikibot.Site") as site,
-            patch("backend.website.collect.collect_dashboard") as collect,
+            patch("tasks.website.collect.collect_dashboard") as collect,
         ):
             response = self.client.get("/newsletter/?lang=en")
             overdue = self.client.get("/newsletter/?issue=2027-01&lang=en")
@@ -474,7 +475,7 @@ class NewsletterRouteTests(unittest.TestCase):
         }
         with (
             patch("pywikibot.Site") as site,
-            patch("backend.website.collect.collect_dashboard") as collect,
+            patch("tasks.website.collect.collect_dashboard") as collect,
         ):
             response = self.client.get("/newsletter/?issue=2027-01")
         assert response.status_code == HTTPStatus.OK
@@ -552,7 +553,7 @@ class NewsletterRouteTests(unittest.TestCase):
                 self.subTest(selection=selection),
                 patch("pywikibot.Site") as site,
                 patch(
-                    "backend.public.render_issue",
+                    "webservice.server.render_issue",
                     return_value=deepcopy(rendered),
                 ) as project,
             ):
@@ -606,7 +607,7 @@ class NewsletterRouteTests(unittest.TestCase):
         with (
             patch("pywikibot.Site") as site,
             patch(
-                "backend.public.render_issue",
+                "webservice.server.render_issue",
                 wraps=render_issue,
             ) as project,
         ):
@@ -719,7 +720,7 @@ class NewsletterRouteTests(unittest.TestCase):
         }
         with (
             patch("pywikibot.Site") as site,
-            patch("backend.website.collect.collect_dashboard") as collect,
+            patch("tasks.website.collect.collect_dashboard") as collect,
         ):
             response = self.client.get("/newsletter/?issue=2027-01&lang=en")
         assert response.status_code == HTTPStatus.OK
@@ -730,7 +731,7 @@ class NewsletterRouteTests(unittest.TestCase):
         assert 'type="date" value="2026-10-30"' in response.text
         assert 'class="context newsletter-observation"' not in response.text
         destinations = re.findall(
-            r'<a class="cdx-button[^"]*" href="([^"]+)"',
+            r'<a class="ui-button[^"]*" href="([^"]+)"',
             response.text,
         )
         assert destinations
@@ -757,7 +758,7 @@ class NewsletterRouteTests(unittest.TestCase):
         entry = self._archive_issue("2026-10-30", 13100)
         self._save_durable(14000)
         with patch(
-            "backend.public.read_newsletter_data",
+            "webservice.server.read_newsletter_data",
             wraps=read_newsletter_data,
         ) as read:
             response = self.client.get(

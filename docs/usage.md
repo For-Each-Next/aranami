@@ -1,294 +1,166 @@
-# Aranami terminal usage
+# Using Aranami
 
-Use this guide to inspect results, preview reports, or run a selected routine
-in the existing Toolforge environment. Aranami runs only on Toolforge; local
-development and verification are offline. Account access, deployment, service
-control, and recovery are in [Administration](administration.md).
+Aranami maintains Wikipedia project reports and provides saved dashboard,
+maintenance and newsletter data. Use this guide to inspect or run it on
+Toolforge. Local development remains offline; account access and service
+replacement are in [Administration](administration.md).
+
+## FA/GA editor statistics
+
+Open **Tools → FA/GA editor statistics** to find editors with retained experience
+writing high-quality video-game articles. User and talk links support contacting
+an editor for advice. Contribution totals show whole articles and the featured
+subset, such as `44 articles (7 featured)`. The total opens all counted articles;
+the featured count opens only FA and FL articles. Both dialogs show titles,
+grades, listing dates and elapsed days, newest listings first. Sort any column
+except the row number. Coauthor icons identify other qualifying editors.
+
+Only currently high-quality project articles count: FA, FL, A, AL, GA and Bplus.
+The latest saved hourly project assessment determines inclusion. Delisted
+articles leave the directory while their historical evidence remains retained.
+
+An editor qualifies when they have the largest retained byte contribution
+(including ties) or at least 33% of the full eligible source at the end of the
+listing day. References and citation templates are excluded when source alignment
+is reliable; otherwise the saved API-byte fallback includes them. Comments and
+whitespace remain in the exact-source total.
+WikiWho does not identify whitespace owners, so those bytes remain unassigned.
+Each qualified registered editor receives one whole article count. Each article
+contributes once per editor at its strongest retained grade. These automatic
+estimates can miss collaborative work; inclusion does not imply availability.
+
+The latest-active column links the latest saved public edit date to the editor's
+contributions and shows its age, or unknown when unavailable. Listing dates link
+to retained review sections when verified. Chinese title labels follow the
+selected language variant while links retain their canonical source identity.
 
 ## Inspect results and logs
 
-As the `aranami` tool account on the Toolforge bastion:
+The [dashboard](https://aranami.toolforge.org/) shows active reviews and article
+highlights. Active discussions show the last seven days of comments, ordered
+by subject type: articles, drafts, projects/portals, categories/templates, then
+other pages. Within each type, newest comments lead regardless of assessment
+grade. [Recent discussions](https://aranami.toolforge.org/discussions/) shows
+twenty-eight days with the same types, splitting articles into four week groups.
+Recognized content reviews appear only in the review section. Discussion cards omit
+assessment chips.
+[Maintenance](https://aranami.toolforge.org/maintenance/) provides
+saved category worklists. The header's Tools menu links to separate
+[maintenance checks](https://aranami.toolforge.org/checks/), grouped
+by issue type; [their guide](webservice/maintenance.md) explains the evidence.
+[Reports](https://aranami.toolforge.org/reports/) lists the on-wiki reports,
+their destinations, schedules, latest results and recent executions. Select a
+result to inspect its action log and publication details. [Logs](https://aranami.toolforge.org/logs/)
+provides structured activity and downloadable diagnostic segments. A check with
+no changed content need not save an edit; missing evidence remains unknown.
+
+As the `aranami` tool account:
 
 ```shell
 cd /data/project/aranami
 toolforge jobs list
-toolforge jobs show aranami-hub
 toolforge jobs logs aranami-hub
 toolforge jobs logs aranami-web
+tail -n 100 logs/diagnostics/YYYYMMDD.000.log
 ```
 
-The hub publishes reports; the web job serves the
-[dashboard](https://aranami.toolforge.org/), the
-[maintenance catalogue](https://aranami.toolforge.org/maintenance/), and
-[site reports](https://aranami.toolforge.org/reports/). Site reports show recorded
-outcomes, progress, timing, next runs, and a concise run-history table.
-Missing or stale observations stay unknown.
-
-```shell
-ls -1 logs/aranami.*.log
-tail -n 100 logs/aranami.YYYY-MM-DD.log
-```
-
-Choose a UTC date. Logs retain the current date and previous 29 dates.
-Use the [daily-log archive](https://aranami.toolforge.org/logs/)
-for raw diagnostic downloads. The website does not translate diagnostics into
-narrated summaries. Site-report history shows the latest 20 recorded
-invocations with date, task, result, and duration columns. Open a task's dialog
-to inspect its observed stages. Earlier diagnostics remain downloadable
-separately without inferred execution records.
-Choose English, Simplified Chinese, or Traditional Chinese; that choice lasts
-one year in the current browser. Article titles keep their source spelling.
-
-Inspect backend-owned metadata read-only:
-
-| File | Observation |
-|---|---|
-| `state/routine-status.json` | Routine starts, results, progress, duration, and confirmed saves |
-| `state/schedule-status.json` | Monitor state, actual next executions, and resource observations |
-| `state/report-updates.json` | Per-destination timing, outcome, and confirmed edits |
-| `state/job-history.json` | Retained report invocations and their observed execution stages |
-
-Collected facts are under `reports/data/`; generated reports and saved drafts
-are under `reports/records/`. Daily data uses `YYYYMMDD` folders and current
-data uses readable filenames. Report records retain timestamped complete
-bundles; `latest.json` selects their manifest, Parquet tables, and wikitext.
-Unknown edit counts are not zero. Do not modify saved observations or expose
-credentials in diagnostics; see [runtime locations](administration.md#runtime-folder-architecture).
-
-## Prepare a quarterly newsletter
-
-Open **Tools → Newsletter drafts**, or `/newsletter/`, to review and copy the
-current issue's saved wikitext. Collection refreshes daily at `00:00 UTC`;
-publication remains a manual Wikipedia edit. January also provides an annual
-feature with data to verify, while other issues have blank feature and
-interview templates.
-
-See [Newsletter drafts](webservice/newsletter.md) for issue/date selection, editing
-invitations, and annual data. [Newsletter collection](backend/newsletter.md)
-covers durable source history, listing-time attribution, prepared observations,
-and disposable source caches.
+Choose a UTC log date and segment. `state/observability/status.json` retains the
+four independent status domains; logs explain their activity. Project and traffic
+facts are under `reports/data/`; report results and newsletter archives are under
+`reports/records/`. Read these through data APIs rather than editing them.
 
 ## Routine names and UTC triggers
 
-Use these identifiers in `tasks`:
-
-| Routine | Result | UTC trigger |
+| Identifier | UTC trigger | Result |
 |---|---|---|
-| `dyks` | Completed DYK entries, nominees, and statistics | Every hour at `:00` |
-| `new_pages` | Daily keyword-matched new/conversion entries | Daily at `00:07` |
-| `assessment_lists` | Project assessment and review lists | Daily, when idle after `00:00` |
-| `assessment_log` | Full project assessment snapshot and observed changes | Daily at `00:00:00` |
-| `pageviews` | Rankings for each missing eligible date | Every hour at `:59` while behind/deferred |
-| `enwp_key_articles` | Current English importance/quality comparisons | Daily, when idle after `00:00`, after assessment capture |
-| `pexbot` | Subscribed report refresh requests | Daily, when idle after `00:00` |
+| `project-data` collection | Every hour :00; daily at 00:00:00 | Shared page lists, replica revision IDs and categories; complete daily snapshots |
+| `assessment_log` | Daily idle after 00:00 | Adjacent saved assessment differences |
+| `dyks` | Hourly :00, deferred | Revision-aware completed DYK entries, nominees and statistics |
+| `new_pages` | Idle after 00:00; hourly retries while behind | Keyword-selected creations and redirect conversions |
+| `assessment_lists` | Daily idle after 00:00 | Quality and project-review lists |
+| `enwp_key_articles` | Daily idle after 00:00 | English importance/quality comparisons |
+| `pageviews` | 19:00 normally; hourly :00 retries while behind | Project and task-force rankings from verified traffic |
+| `pexbot` | Daily idle after 00:00 | Delegated maintenance refresh requests |
+| Newsletter collection | Daily idle after 00:00, due retries | Updated saved facts for eligible unpublished drafts |
+| Website collection | Every hour :00 | Saved reviews, showcases and maintenance data |
 
-Triggers do not guarantee edits: unchanged outputs are not saved. New pages
-retains 100 complete UTC dates through yesterday, then waits for its next daily
-trigger. English comparisons and PexBot refresh current state, not daily history.
-The three idle daily tasks wait until other submitted hub work finishes and
-run one at a time. A fresh hub makes them eligible during its startup check;
-manual `run_once` requests still execute immediately.
-English comparisons first reuse or capture the completed day's assessment
-dataset. A failed capture prevents comparison publication; an assessment-log
-wiki save failure does not block it once the shared dataset is complete.
+Collection identifiers are scheduler work, not `run_once(tasks=...)` wiki-task
+names. All daily consumers obtain their required committed project data before
+preparation. Page lists are collected first, followed by source data and then
+dependent reports. Hourly work at midnight uses the daily observation; later
+hours share disposable current-hour Parquet. Startup recovery does not move
+the next hourly boundary. Idle reports run one at a time. PexBot skips reports
+updated by it within the preceding 24 hours.
 
-Pageviews publishes missing dates separately and chronologically. Yesterday
-becomes eligible at the actual `18:00 UTC` boundary, first attempted at `18:59`.
-Once current, it waits for `18:59` after the next readiness boundary. Previews and
-failed saves do not establish completion; manual runs cannot bypass readiness.
+Each filename names the completed UTC day, captured at the next midnight.
+Every file comes from a fresh full query. Missed dates stay missing; actual
+query time is recorded separately from midnight. The
+[retirement checklist](transition.md) tracks remaining historical-source
+dependencies.
+
+Pageviews uses titles, classes, importance and task-force flags from the saved
+closing observation for its report date, even on delayed retries. For example,
+November 2 traffic uses `20261102.parquet`, captured at November 3 midnight;
+it never substitutes November 3 membership. Missing historical files block the
+report. Normal first attempt is 19:00; source readiness is checked.
+Continuous retained page histories receive only missing
+tails; gapped histories and sparse supplements trigger a full-history fetch.
+Detailed daily observations are saved independently of wiki publication and
+can be reused by other consumers.
 
 ## Preview selected routines
 
-Submit a one-off job from the bastion as the tool account:
+Submit a one-off Toolforge job using the pinned runtime launcher:
 
 ```shell
 toolforge jobs run aranami-preview --image python3.13 --mount=all \
-  --command 'tool_dir=/data/project/aranami; set -eu; . "$tool_dir/app/scripts/toolforge/runtime-env.sh"; export PYWIKIBOT_DIR="$tool_dir"; exec "$runtime_python" -c "from backend import run_once; run_once(dry=True, tasks=[\"new_pages\", \"pageviews\"])"'
+  --command 'tool_dir=/data/project/aranami; set -eu; . "$tool_dir/app/scripts/toolforge/runtime-env.sh"; export PYWIKIBOT_DIR="$tool_dir"; exec "$runtime_python" -c "from runtime import run_once; run_once(dry=True, tasks=[\"new_pages\", \"pageviews\"])"'
 toolforge jobs logs aranami-preview
 ```
 
-`dry=True` suppresses wiki saves and PexBot requests. It writes Markdown summaries,
-flat `.wikitext` proposals, and isolated bundles under `dry-run/reports/`, without
-advancing production datasets, completion evidence, membership, or status.
-The shared launcher guard pins source and Python to one validated generation,
-so a later service update cannot change code underneath this one-off job.
-After completion, inspect the artifacts and delete the definition before reuse:
-
-```shell
-ls -lt dry-run/
-toolforge jobs delete aranami-preview
-```
+Preview writes are isolated under `dry-run/`. Existing production snapshots
+may be read, but new preview data cannot advance live datasets, publication
+baselines, completion status or PexBot actions. Inspect summaries and exact
+`.wikitext` proposals, then delete the completed job definition before reuse.
 
 ## Run an immediate update
 
-This example performs live publication; run it only while that routine is idle:
-
-```shell
-toolforge jobs run aranami-manual --image python3.13 --mount=all \
-  --command 'tool_dir=/data/project/aranami; set -eu; . "$tool_dir/app/scripts/toolforge/runtime-env.sh"; export PYWIKIBOT_DIR="$tool_dir"; exec "$runtime_python" -c "from backend import run_once; run_once(dry=False, tasks=[\"assessment_lists\"])"'
-toolforge jobs logs aranami-manual
-```
-
-Ask the maintainer for a maintenance window if needed. Inspect results, then
-delete the finished `aranami-manual` definition before reusing its name.
-
-`run_once(date=None, dry=False, tasks=None, clear_cache=False)` does not change
-recurring schedules. `tasks=None` selects all routines; `date` sets a report
-anchor, not wall-clock readiness. Reserve `clear_cache=True` for deliberate
-maintainer-led revalidation. Imports and `--help` do not execute reports.
-
-The hub's `--dry` mode runs recurring previews without production website
-collection or HTTP serving; see [startup options](administration.md#start-the-applications).
-PexBot selects configured Chinese-Wikipedia roots, skips reports edited by
-PexBot within the preceding 24 hours, and waits 15 seconds between live
-refresh attempts.
+When that routine is idle, use the same one-off pattern with
+`run_once(dry=False, tasks=["assessment_lists"])`. This authorizes live wiki
+publication. The public API is
+`run_once(date=None, dry=False, tasks=None, clear_cache=False)`; `tasks=None`
+selects all routines. `date` is a report anchor, not a time machine for project
+membership or Pageviews readiness. Normal startup and immediate work preserve
+recurring schedules. Reserve cache clearing for deliberate revalidation.
 
 ## Managed report settings
 
-Preserve paired markers and text outside their managed ranges:
+Generated ranges are paired comments, for example:
 
 ```wikitext
-<!-- aranami begin="new-pages" days="100" -->
-...retained daily records...
-<!-- aranami end="new-pages" -->
-
-<!-- aranami begin="page_views" history-days="800" -->
-...popularity report...
-<!-- aranami end="page_views" -->
-
 <!-- aranami begin="assessment-log" days="30" -->
-...retained assessment changes...
+...generated history...
 <!-- aranami end="assessment-log" -->
 ```
 
-Missing, malformed, duplicate, reversed, or ambiguous required markers prevent
-publication. Keep labeled-section tags outside them. Pageviews retains its
-`<!-- report date YYYY-MM-DD -->` checkpoint. See the
-[managed-range contracts](architecture.md#managed-ranges-and-on-wiki-configuration)
-for settings; changing targets, schedules, or definitions requires deployment.
+New pages uses `new-pages` and retains the previous calendar month by default;
+`days` can override that window. Traffic uses `page_views` and
+`history-days="800"`, plus `<!-- report date YYYY-MM-DD -->`. Missing,
+duplicate, reversed or ambiguous required markers prevent publication. Preserve
+attributes and text outside ranges; keep functional section tags outside them.
+Creating initial markers or historical backfills is separate wiki maintenance.
 
-### Assessment change log
+Assessment changes compare page IDs, retain removed titles, and do not equate
+project departure with page deletion. Adjacent unchanged snapshots may record
+`無變更`; initial observations and gaps do not. DYK charts require `dyk`,
+`dykn`, `dyk-chart-x` and `dyk-chart-y` ranges with comma-space CSV chart values.
 
-`assessment_log` runs daily at `00:00:00 UTC` and updates
-`WikiProject:电子游戏/评级/日志`, ordering each day's subsections as renames,
-reassessments, additions to the assessment set, and removals.
-A removal means an existing page ID disappeared from the project's assessment
-set; it does not establish that the page was deleted. Stable page IDs distinguish
-renames from departures and arrivals. Dated sections use the previous UTC day:
-the October 25 midnight observation reports October 24. The actual collection
-timestamp remains in metadata; comparisons are not a
-complete edit history. Main page links and assessment values are bold, with
-simplified assessment labels and unbolded discussion/revision links. Entries
-sort by numeric namespace and then title within each subsection.
+## Prepare a newsletter
 
-Each completed UTC date retains an immutable project PageAssessments dataset
-with `page_id`, `page_title`, `page_namespace`, `pa_class`, `pa_importance`,
-and `page_is_redirect`. The 00:00 UTC run saves
-`assessments-YYYYMMDD.parquet` for the day that just ended. It compares saved
-datasets by page ID, preserving observed titles and namespaces for pages that
-later leave the assessment set. Capture
-precedes the destination read, so a wiki read or edit failure
-does not discard that day's reusable source data. The manifest records the
-actual observation time; a delayed run never claims it collected at midnight.
-Repeated runs reuse that date's observation,
-and a manual report anchor cannot create a historical snapshot from current data.
-
-Other Toolforge workflows can call
-`backend.services.project_assessments.read_snapshot(site, project, day)` to read
-an existing date without querying sources. It returns a validated report bundle
-or `None` when that completed date has no snapshot; the assessment table
-is `bundle.tables["members"]`. Its file is
-`reports/data/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet`.
-Preview snapshots stay under
-`dry-run/reports/` and cannot replace production observations.
-Older three-column snapshots remain readable with their original integrity
-checks; missing historical page identities remain unknown.
-See [Saved data and Parquet fields](backend/data-storage.md) for the field
-contract.
-
-Each new dated section shows only comparable, nonzero changes for project
-pages, articles, nonarticles, and redirects. Changed quality classes and
-importance levels appear in assessment order, separated by a full-width `｜`.
-When no comparable values changed, the visible summary is omitted. Full totals
-remain in an HTML comment. Redirects and set-index pages are not articles,
-even in the main namespace; redirects also remain outside the project page
-total and appear separately.
-
-The `assessment-log` range retains 30 report dates by default, through yesterday;
-`days` accepts 1 through 365. Repeated checks append within the same daily
-sections. A newer daily snapshot with no changes adds its date heading and
-`無變更`; repeated checks preserve existing entries without duplicating the day.
-Unobserved dates are not filled. The first successful observation establishes
-the current baseline without claiming changes or no changes, and repeating
-that initial date does not add a no-change entry. Failed publication
-and previews do not advance the live baseline. Unsaved dated events survive
-retries, including a removal followed by a later restoration.
-
-Creating the initial marker pair and backfilling several days of verified
-historical changes is a separate, one-time wiki edit. This initialization is
-not part of the recurring source task. Historical entries require actual
-historical observations; the current assessment set alone cannot reconstruct
-past removals. Keep the markers after initialization so normal updates preserve
-all text outside the range.
-
-### DYK chart data
-
-The DYK routine updates completed entries, nominees, and the chart on
-`WikiProject:电子游戏/新条目推荐`. Initialize its `Graph:Chart` parameters once
-with paired markers around the existing comma-separated values:
-
-```wikitext
-|x=<!-- aranami begin="dyk-chart-x" -->2006-06-30, 2006-09-30<!-- aranami end="dyk-chart-x" -->
-|y1=<!-- aranami begin="dyk-chart-y" -->0, 6<!-- aranami end="dyk-chart-y" -->
-```
-
-Keep each parameter's values inline, separated by a comma and a space.
-The routine requires these ranges and the existing `dyk` and `dykn` ranges
-before preparing source data. It preserves other
-chart settings and surrounding text. Remove the obsolete Commons statistics
-JSON comment during initialization; recurring updates no longer generate it.
-
-### Pageviews data readiness
-
-The routine checks that Wikimedia has published all 24 UTC hours of site-wide
-human traffic, a positive daily total, the day's top list, and up to three
-leading articles' daily observations. It then downloads fresh full histories.
-Missing individual article records do not block a verified day at a fixed
-percentage. A batch with no selected article's target-day observation is rejected.
-Missing days try an earlier unpublished date; failed requests defer work.
-Rejected batches leave reports and healthy caches unchanged; partial catch-up
-continues hourly until current. Saved caches never substitute for fresh evidence.
-
-After an accepted batch, gaps following an article's first observation may
-contribute provisional zeroes; continuous leading absence stays missing.
-Measured zeroes remain valid, HTTP failures are not zeroes, and averages include
-calendar days. Gaps stay absent in raw histories and do not trigger same-day
-retries or rewrite published reports. Existing `missing-percent` attributes are
-preserved but do not override whole-day readiness for normal report runs.
-See [Pageviews contracts](architecture.md#pageviews) for comparison and ranking rules.
-
-## Website refresh and retained data
-
-Content reviews refresh one hour after their last successful collection;
-the other website datasets default to 24 hours.
-Failures retain prior data and retry hourly; valid empty results count as refreshed.
-Restarts preserve timestamps; page requests/status heartbeats never collect sources.
-
-Maintainers can set `--reviews-interval-hours`, `--recognized-interval-hours`,
-`--dyk-interval-hours`, `--pageviews-interval-hours`,
-`--news-history-interval-hours`, and
-`--backlog-interval-hours` independently. Reusable results in `reports/` survive
-unsuccessful wiki saves; storage failure prevents publication. Retention and
-cleanup belong to [Administration](administration.md#recovery-and-cleanup).
-
-The content-review section precedes current highlights and lists FAC, FLC,
-ACC, GAN, BPAN, PR, PPR, DYKC, then reassessment requests. Each type lists
-oldest starts first, followed by undated requests. Community reviews come
-from nomination pages even without talk-page candidate banners; project
-reviews come from their talk categories. Cards resolve article-title variants
-and redirects while keeping the original discussion anchor. A category-only
-request has no start date until a relevant dated discussion exists.
-
-Hourly refreshes check source revisions in batches and reuse unchanged
-parses from `review-sources.parquet`. Introductions share the existing
-daily article-summary cache across review cards and highlights.
+Open [Newsletter drafts](https://aranami.toolforge.org/newsletter/) and select
+an unpublished issue or retained data date. Copy the literal wikitext, review
+its evidence and fill editorial sections, then publish manually on Wikipedia.
+January combines a quarterly issue with a separate annual feature. The website
+never collects sources or publishes edits when opened. See
+[Newsletter drafts](webservice/newsletter.md) for dates, missing evidence and
+copying; [Newsletter collection](tasks/newsletter.md) explains source history.

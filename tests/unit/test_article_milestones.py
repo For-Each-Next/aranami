@@ -13,10 +13,9 @@ from unittest.mock import patch
 
 import polars as pl
 
-from backend.articles import (
-    history_store,
-    milestone_store as store,
-)
+from data.articles import history_store, milestone_store as store
+from shared.assessment_profiles import assessment_profile
+from tasks.articles import milestones
 
 
 def events() -> pl.DataFrame:
@@ -62,6 +61,40 @@ class RecognitionStoreTests(TestCase):
             rows.filter(pl.col("grade") == "Bplus")["nominator_status"].item()
             == "not_applicable"
         )
+
+    def test_undated_bplus_does_not_consume_other_grade_lookup_budget(
+        self,
+    ) -> None:
+        """Keep Bplus out of the date lookup budget."""
+        unknown = events().filter(pl.col("date").is_null())
+        selected = pl.concat([
+            unknown.with_columns(
+                pl.lit("Bplus").alias("grade"),
+                pl.lit("Bplus unknown").alias("title"),
+                pl.lit(5, dtype=pl.Int64).alias("page_id"),
+            ),
+            unknown,
+        ])
+        with patch.object(
+            milestones,
+            "lookup_milestone",
+            return_value={
+                "status": "unresolved",
+                "reason": "fixture",
+                "lookup_cursor": "",
+            },
+        ) as lookup:
+            milestones.enrich_milestones(
+                selected,
+                object(),
+                path=self.path,
+                max_requests=1,
+            )
+        lookup.assert_called_once()
+        assert lookup.call_args.args[1]["grade"] == "FA"
+        bplus = store.load(self.path).filter(pl.col("grade") == "Bplus")
+        assert bplus["date"].to_list() == [None]
+        assert bplus["date_status"].to_list() == ["pending"]
 
     def test_unchanged_merge_reads_once_and_preserves_saved_bytes(
         self,
@@ -201,10 +234,11 @@ class RecognitionStoreTests(TestCase):
             pl.DataFrame({
                 "page_id": [1],
                 "full_title": ["Unknown date"],
-                "pa_class": ["FL"],
+                "pa_class": ["特色列表"],
             }),
             self.path,
             observed_at=stamp,
+            profile=assessment_profile("zhwiki", "电子游戏"),
         )
         assert rows["date"].item() is None
         assert rows["assessment_observed_at"].item() == stamp

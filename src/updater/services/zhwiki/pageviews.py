@@ -1,6 +1,6 @@
 """Render prepared popularity rankings inside managed wiki ranges.
 
-Call :func:`build_report` with backend data and presentation settings.
+Call :func:`build_report` with runtime data and presentation settings.
 This module constructs per-list JSON and summary metadata without source
 requests, cache access, or interpretation of report-page inputs.
 """
@@ -15,17 +15,14 @@ from typing import TYPE_CHECKING
 
 from mwparserfromhell.nodes import Template
 
-from backend.services.zhwiki import pageviews as data
+from data import pageview_types as data
 from shared.support.regions import replace_by_tag
 
 if TYPE_CHECKING:
     from dateutil.relativedelta import relativedelta
 
-    from backend.services.zhwiki.pageviews import (
-        PageviewData,
-        RankingData,
-    )
-    from shared.reports import ReportResult
+    from data.pageview_types import PageviewData, RankingData
+    from data.reports import ReportResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +57,7 @@ class ReportSettings:
     project_tag: str
 
     def source_settings(self) -> data.ReportSettings:
-        """Select complete backend populations and intervals.
+        """Select complete runtime populations and intervals.
 
         Returns:
             Data-collection settings independent of headings and limits.
@@ -85,7 +82,7 @@ class ReportSettings:
 
 @dataclass(frozen=True, slots=True)
 class PageviewReport:
-    """Carry wikitext and backend-provided summary facts."""
+    """Carry wikitext and runtime-provided summary facts."""
 
     text: str
     data_date: dt.date
@@ -156,7 +153,7 @@ def _render_section(
     zero-filled totals and ranks remain unchanged for calculations.
 
     Args:
-        population: Complete backend ranking and population totals.
+        population: Complete runtime ranking and population totals.
         stop: Exclusive reporting stop date.
         config: Calendar interval, heading, and display limit.
         project: Full project name identifying this population.
@@ -210,14 +207,14 @@ def build_report(
     *,
     settings: ReportSettings,
 ) -> PageviewReport:
-    """Turn backend rankings into a report without source access.
+    """Turn runtime rankings into a report without source access.
 
     Args:
         prepared: Backend observations, rankings, and summary metadata.
         settings: Ordered headings, intervals, and presentation choices.
 
     Returns:
-        Rendered report and unchanged reusable backend result tables.
+        Rendered report and unchanged reusable runtime result tables.
     """
     stop = prepared.data_date + dt.timedelta(days=1)
     populations = {

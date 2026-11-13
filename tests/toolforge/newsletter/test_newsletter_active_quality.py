@@ -7,11 +7,11 @@ from unittest import TestCase
 
 import polars as pl
 
-from backend.newsletter.annual import (
+from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.annual import (
     prepare_quality_year_ends,
     prepare_year_history,
 )
-from shared.newsletter import Issue
 from updater.services.newsletter_editorial import render_annual_feature
 
 

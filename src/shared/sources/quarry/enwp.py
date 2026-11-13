@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import polars as pl
+from pywikibot.site import Namespace
 from sqlalchemy import (
     Integer,
     String,
@@ -48,6 +49,15 @@ _EN_SCHEMA = {
     "en_displaytitle": pl.String,
     "en_class": pl.String,
     "en_importance": pl.String,
+    "en_reviews": pl.String,
+}
+REVIEW_CATEGORIES = {
+    "Wikipedia_featured_article_candidates": "FAC",
+    "Wikipedia_featured_list_candidates": "FLC",
+    "Good_article_nominees": "GAN",
+    "Good_article_reassessment_nominees": "GAR",
+    "Wikipedia_featured_article_review_candidates": "FAR",
+    "Wikipedia_featured_list_removal_candidates": "FLRC",
 }
 _TALK_SCHEMA = {
     "page_id": pl.Int64,
@@ -135,6 +145,29 @@ def fetch_en_key_pages() -> pl.DataFrame:
     item = tables.PageProps.__table__.alias("item")
     sort = tables.PageProps.__table__.alias("sort")
     display = tables.PageProps.__table__.alias("display")
+    talk = tables.Page.__table__.alias("review_talk")
+    links, category = tables.Categorylinks, tables.Linktarget
+    reviews = (
+        select(
+            talk.c.page_title.label("review_title"),
+            func.group_concat(
+                case(
+                    REVIEW_CATEGORIES,
+                    value=category.lt_title,
+                ).distinct(),
+            ).label("en_reviews"),
+        )
+        .select_from(category)
+        .join(links, links.cl_target_id == category.lt_id)
+        .join(talk, talk.c.page_id == links.cl_from)
+        .where(
+            category.lt_namespace == Namespace.CATEGORY,
+            category.lt_title.in_(tuple(REVIEW_CATEGORIES)),
+            talk.c.page_namespace == 1,
+        )
+        .group_by(talk.c.page_title)
+        .subquery("current_reviews")
+    )
     relation = (
         page
         .join(assessment, assessment.c.pa_page_id == page.c.page_id)
@@ -161,6 +194,10 @@ def fetch_en_key_pages() -> pl.DataFrame:
             ),
         )
     )
+    relation = relation.outerjoin(
+        reviews,
+        reviews.c.review_title == page.c.page_title,
+    )
     statement = (
         select(
             page.c.page_id,
@@ -170,6 +207,7 @@ def fetch_en_key_pages() -> pl.DataFrame:
             display.c.pp_value.label("en_displaytitle"),
             assessment.c.pa_class.label("en_class"),
             assessment.c.pa_importance.label("en_importance"),
+            reviews.c.en_reviews,
         )
         .select_from(relation)
         .where(
@@ -179,6 +217,7 @@ def fetch_en_key_pages() -> pl.DataFrame:
             or_(
                 assessment.c.pa_importance.in_(("Top", "High")),
                 assessment.c.pa_class.in_(("FA", "FL", "GA")),
+                reviews.c.en_reviews.is_not(None),
             ),
         )
     )

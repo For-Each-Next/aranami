@@ -10,10 +10,10 @@ from unittest.mock import Mock, patch
 
 from wiki_fixtures import OfflineSite
 
-from backend.services.enwiki.quality_contents import PROFILE as EN_PROFILE
-from backend.services.zhwiki.quality_contents import PROFILE as ZH_PROFILE
 from shared.support import words
 from shared.support.prose import ProseProfile, extract_prose
+from tasks.enwiki.quality_contents import PROFILE as EN_PROFILE
+from tasks.zhwiki.quality_contents import PROFILE as ZH_PROFILE
 
 
 class TestProseSupport(TestCase):

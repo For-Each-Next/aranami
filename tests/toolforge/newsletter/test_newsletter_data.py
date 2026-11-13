@@ -13,12 +13,13 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 from pywikibot.exceptions import NoPageError
+from wiki_fixtures import offline_site
 
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.newpages import collect_new_pages
-from backend.newsletter.publication import PUBLICATION_PAGE
-from backend.newsletter.schema import valid_newsletter
+from data.newsletter.publication import PUBLICATION_PAGE
+from data.newsletter.schema import valid_newsletter
 from shared.newsletter import ROOT, Issue
+from tasks.zhwiki.newsletter.collection import collect_source_facts
+from tasks.zhwiki.newsletter.newpages import collect_new_pages
 from updater.services.newsletter import render_issue
 
 _DYK = """<!-- aranami begin="dyk" -->
@@ -29,6 +30,8 @@ _DYK = """<!-- aranami begin="dyk" -->
 
 class Reader:
     """Provide synthetic history and track source selection."""
+
+    site = offline_site()
 
     @staticmethod
     def resolve(title: str) -> str:
@@ -200,7 +203,7 @@ class NewsletterDataTests(unittest.TestCase):
             }
 
         with patch(
-            "backend.newsletter.collection.collect_newsletter_homepage",
+            "tasks.zhwiki.newsletter.collection.collect_newsletter_homepage",
             side_effect=homepage,
         ):
             result = collect_source_facts(
@@ -318,7 +321,7 @@ class NewsletterDataTests(unittest.TestCase):
             }
 
         with patch(
-            "backend.newsletter.collection.collect_newsletter_homepage",
+            "tasks.zhwiki.newsletter.collection.collect_newsletter_homepage",
             side_effect=homepage,
         ) as collector:
             result = collect_source_facts(
@@ -614,7 +617,7 @@ class NewsletterDataTests(unittest.TestCase):
         lookup = Mock(return_value=(previous, observed))
         now = dt.datetime(2026, 10, 31, 12, tzinfo=dt.UTC)
         with patch(
-            "backend.newsletter.collection.collect_new_pages",
+            "tasks.zhwiki.newsletter.collection.collect_new_pages",
             wraps=collect_new_pages,
         ) as collect:
             result = collect_source_facts(

@@ -19,6 +19,7 @@ from wiki_fixtures import OfflineSite
 
 from shared.sources import wiki
 from shared.sources.quarry import Replica, projects
+from shared.support.activity import activity_observer
 
 
 class TestProjectTags(TestCase):
@@ -102,6 +103,42 @@ class TestProjectTags(TestCase):
         assert unselected_projects.schema == project_memberships.schema
         assert unselected_projects.is_empty()
         assert maintenance.schema == categories.schema
+
+    @staticmethod
+    def test_tag_purpose_names_category_and_discussion_selection() -> None:
+        """Explain category selection without guessing a job."""
+        site = OfflineSite("zh", "wikipedia")
+        observer = Mock()
+        pages = pl.DataFrame({"page_id": [7], "talk_page_id": [11]})
+        with (
+            activity_observer(observer),
+            patch(
+                "shared.sources.quarry.query._fetch",
+                return_value=(("page_id", "name"), []),
+            ),
+        ):
+            projects.query_tags(
+                site,
+                pages,
+                [("DYK", "talk", "cat", "推薦的新條目")],
+            )
+            projects.query_tags(
+                site,
+                pages,
+                [("DYKN", "talk", "cat", "新條目推薦候選")],
+            )
+        complete, candidate = [
+            call.args[1] for call in observer.call_args_list
+        ]
+        assert complete["purpose"] == candidate["purpose"] == "page_tags"
+        assert complete["scope"] == {
+            "categories": ["推薦的新條目"],
+            "page_kind": "talk_pages",
+        }
+        assert candidate["scope"] == {
+            "categories": ["新條目推薦候選"],
+            "page_kind": "talk_pages",
+        }
 
 
 class TestProjectStatements(TestCase):
@@ -607,56 +644,6 @@ class TestProjectStatements(TestCase):
             "full_title": pl.String,
             "talk_title": pl.String,
         }
-
-    @staticmethod
-    def test_assessments_retain_source_titles_without_extra_metadata() -> None:
-        """Fetch page identity without talk or revision joins."""
-        site = OfflineSite("zh", "wikipedia")
-        name = "Project with ' quotes"
-        columns = (
-            "page_id",
-            "page_title",
-            "page_namespace",
-            "page_is_redirect",
-            "pa_class",
-            "pa_importance",
-        )
-        with (
-            patch(
-                "shared.sources.quarry.query._fetch",
-                return_value=(
-                    columns,
-                    [
-                        (7, "First", 0, 0, "B", None),
-                        (8, "Second", 14, 0, None, None),
-                    ],
-                ),
-            ) as fetch,
-            patch.object(projects, "_with_titles") as titles,
-            patch.object(projects, "read_membership") as shared_members,
-        ):
-            result = projects.query_project_assessments(site, name)
-        statement = fetch.call_args.args[1]
-        compiled = statement.compile()
-        assert statement.is_select
-        assert tuple(statement.selected_columns.keys()) == columns
-        assert name in compiled.params.values()
-        assert name not in str(compiled)
-        assert "page.page_title" in str(compiled)
-        assert "page_latest" not in str(compiled)
-        assert "talk" not in str(compiled)
-        assert result.schema == {
-            "page_id": pl.Int64,
-            "page_title": pl.String,
-            "page_namespace": pl.Int64,
-            "page_is_redirect": pl.Int64,
-            "pa_class": pl.String,
-            "pa_importance": pl.String,
-        }
-        assert result["page_id"].to_list() == [7, 8]
-        assert result["pa_importance"].null_count() == result.height
-        titles.assert_not_called()
-        shared_members.assert_not_called()
 
     @staticmethod
     def test_project_references_use_the_same_membership_observation() -> None:
@@ -1199,7 +1186,7 @@ class TestPageCreationMetadata(TestCase):
                     "created_at": datetime(2026, 8, 5, 11, 22, 33, tzinfo=UTC),
                 },
                 {
-                    "full_title": "Project:Good games",
+                    "full_title": "Wikipedia:Good games",
                     "page_id": 8,
                     "created_at": datetime(2024, 1, 1, tzinfo=UTC),
                 },

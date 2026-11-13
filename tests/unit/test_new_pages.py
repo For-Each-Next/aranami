@@ -7,7 +7,7 @@ import datetime as dt
 from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import TestCase
+from unittest import TestCase, addModuleCleanup
 from unittest.mock import Mock, patch
 
 import mwparserfromhell
@@ -15,16 +15,24 @@ import polars as pl
 from pywikibot.page import Revision
 from pywikibot.site import BaseSite, Namespace
 
-from backend.services.zhwiki import new_pages
+from data.runtime.status import read_status
+from runtime.jobs import JobContext, new_pages as new_pages_job
 from shared.support.regions import managed_region
+from tasks.zhwiki import new_pages
 from updater.edit_summary import (
     MAX_EDIT_SUMMARY_BYTES,
     EditSummary,
 )
-from updater.jobs import JobContext, new_pages as new_pages_job
 from updater.services.zhwiki import new_pages as rendering
 
 _DAY_HEADING_LEVEL = 3
+
+
+def setUpModule() -> None:
+    """Keep summary year fixtures independent of the actual UTC year."""
+    clock = patch("updater.edit_summary._current_year", return_value=2026)
+    clock.start()
+    addModuleCleanup(clock.stop)
 
 
 class _TitleSite(BaseSite):
@@ -106,7 +114,7 @@ def _update_report(
     *,
     project: str,
 ) -> str:
-    """Exercise backend preparation and frontend rendering together.
+    """Exercise runtime preparation and frontend rendering together.
 
     Returns:
         Proposed destination text from the complete preparation.
@@ -251,6 +259,17 @@ class TestNewPageRecords(TestCase):
             ) as conversions,
             patch.object(
                 new_pages,
+                "page_discovery_metadata",
+                return_value=pl.DataFrame(
+                    schema={
+                        "page_id": pl.Int64,
+                        "user_id": pl.Int64,
+                        "occurred_at": pl.Datetime("us", "UTC"),
+                    },
+                ),
+            ),
+            patch.object(
+                new_pages,
                 "read_page_ids",
                 return_value=pages,
             ) as preload,
@@ -286,7 +305,12 @@ class TestNewPageRecords(TestCase):
             )
         creations.assert_called_once_with(site, day, today)
         conversions.assert_called_once_with(site, day, today)
-        preload.assert_called_once_with(site, list(range(11, 19)))
+        preload.assert_called_once_with(
+            site,
+            list(range(11, 19)),
+            purpose="new_page_candidates",
+            scope={"new_page_count": 1, "redirect_count": 7},
+        )
         creation_info.assert_called_once_with(site, list(titles[:4]))
         rows = [line for line in updated.splitlines() if line.startswith("*")]
         assert len(rows) == 4  # ruff: ignore[magic-value-comparison]
@@ -328,10 +352,7 @@ class TestNewPageRecords(TestCase):
                 day,
                 {day},
             ),
-        ) == (
-            "Updated for 2 Oct 2026. "
-            "Found 3 article pages and 1 non-article page."
-        )
+        ) == ("Add 3 articles and 1 non-article for Oct 2.")
         assert repeated == updated
 
     @staticmethod
@@ -491,6 +512,17 @@ class TestNewPageRecords(TestCase):
             ),
             patch.object(
                 new_pages,
+                "page_discovery_metadata",
+                return_value=pl.DataFrame(
+                    schema={
+                        "page_id": pl.Int64,
+                        "user_id": pl.Int64,
+                        "occurred_at": pl.Datetime("us", "UTC"),
+                    },
+                ),
+            ),
+            patch.object(
+                new_pages,
                 "read_page_ids",
                 return_value=[],
             ) as preload,
@@ -534,9 +566,15 @@ class TestNewPageRecords(TestCase):
             patch.object(
                 new_pages,
                 "collect_day",
-                side_effect=lambda _site, day: new_pages.DailyRecord(
-                    day,
-                    lines=new_pages.prepare_lines(_section(day), {}, _site),
+                side_effect=lambda _site, day, **_kwargs: (
+                    new_pages.DailyRecord(
+                        day,
+                        lines=new_pages.prepare_lines(
+                            _section(day),
+                            {},
+                            _site,
+                        ),
+                    )
                 ),
             ) as build,
         ):
@@ -633,9 +671,15 @@ class TestNewPageRecords(TestCase):
             patch.object(
                 new_pages,
                 "collect_day",
-                side_effect=lambda _site, day: new_pages.DailyRecord(
-                    day,
-                    lines=new_pages.prepare_lines(_section(day), {}, _site),
+                side_effect=lambda _site, day, **_kwargs: (
+                    new_pages.DailyRecord(
+                        day,
+                        lines=new_pages.prepare_lines(
+                            _section(day),
+                            {},
+                            _site,
+                        ),
+                    )
                 ),
             ) as build,
         ):
@@ -722,8 +766,7 @@ class TestNewPageRecords(TestCase):
             assert edit.original_text == original
             assert edit.text == updated
             assert edit.summary == EditSummary.with_attribution(
-                "Updated for 2 Oct 2026. "
-                "Found 0 article pages and 0 non-article pages.",
+                "Add 0 articles and 0 non-articles for Oct 2.",
             )
             assert edit.tags == ("new-pages", "filled-1-dates")
             page.text = updated
@@ -811,9 +854,8 @@ class TestNewPageRecords(TestCase):
             new_pages_job.run(context=context)
         [edit] = context.edits
         assert edit.summary == EditSummary.with_attribution(
-            "Updated for 5 May 2025. "
-            "Found 1 article page and 1 non-article page. "
-            "Backfilled 11 older daily records.",
+            "Add 1 article and 1 non-article for May 5 2025. "
+            "Backfill 11 older daily records.",
         )
         assert len(edit.summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
         assert (
@@ -825,12 +867,14 @@ class TestNewPageRecords(TestCase):
                     older,
                 ),
             )
-            == "Updated class icons. Backfilled 11 older daily records."
+            == "Backfill 11 older daily records. Update class icons."
         )
 
     @staticmethod
-    def test_complete_date_window_preserves_existing_report_exactly() -> None:
-        """Skip icon updates, enrichment, pruning, and normalization."""
+    def test_complete_date_window_prunes_expired_records_without_sources() -> (
+        None
+    ):
+        """Expire old dates without collecting or refreshing icons."""
         today = dt.date(2026, 10, 3)
         day = today - dt.timedelta(days=1)
         original = "Manual introduction.\r\n" + managed_region(
@@ -858,7 +902,12 @@ class TestNewPageRecords(TestCase):
                 today,
                 project="电子游戏",
             )
-        assert updated == original
+        assert updated != original
+        assert "2026年10月2日" in updated
+        assert (today - dt.timedelta(days=100)).strftime(
+            "%Y年%-m月%-d日",
+        ) not in updated
+        assert "* {{class/icon|初}} [[:Game]]" in updated
         build.assert_not_called()
         metadata.assert_not_called()
         grades.assert_not_called()
@@ -867,7 +916,7 @@ class TestNewPageRecords(TestCase):
     def test_complete_date_window_job_skips_live_and_dry_publication(
         self,
     ) -> None:
-        """Record a skip without a proposal in either output mode."""
+        """Confirm retained content and defer a rejected generation."""
         today = dt.date(2026, 10, 3)
         day = today - dt.timedelta(days=1)
         original = managed_region(
@@ -875,8 +924,13 @@ class TestNewPageRecords(TestCase):
             _section(day) + "* {{class/icon|初}} [[:Game]]\n",
             {"days": "1"},
         )
-        for dry in (False, True):
-            with self.subTest(dry=dry):
+        for dry, retained in (
+            (False, True),
+            (True, True),
+            (False, False),
+            (True, False),
+        ):
+            with self.subTest(dry=dry, retained=retained):
                 context = JobContext(
                     _TitleSite("zh", "wikipedia"),
                     today,
@@ -890,10 +944,12 @@ class TestNewPageRecords(TestCase):
                     ),
                 )
                 with (
-                    patch.object(
-                        new_pages_job,
-                        "job_run",
-                        return_value=nullcontext(context),
+                    nullcontext()
+                    if retained
+                    else patch.object(
+                        new_pages,
+                        "retain_current",
+                        return_value=False,
                     ),
                     patch.object(
                         new_pages_job,
@@ -916,6 +972,15 @@ class TestNewPageRecords(TestCase):
                 assert context.notes == [
                     "No missing retained new-page dates; skipped update.",
                 ]
+                status = read_status(
+                    Path.cwd() / "dry-run" if dry else Path.cwd(),
+                )
+                publication = next(iter(status["publications"].values()))
+                assert publication["outcome"] == (
+                    "unchanged" if retained else "deferred"
+                )
+                assert publication["confirmed_edits"] == 0
+                assert publication["last_confirmed_save_at"] is None
                 assert page.text == original
                 build.assert_not_called()
                 metadata.assert_not_called()
@@ -948,6 +1013,35 @@ class TestNewPageRecords(TestCase):
     @staticmethod
     def test_legacy_keyword_literal_errors_are_repaired() -> None:
         """Recognize console games separately from category syntax."""
-        assert new_pages.matches_keywords("Console games", "")
-        assert new_pages.matches_keywords("Example", "肉鸽 game")
-        assert not new_pages.matches_keywords("Example", "Ordinary biography")
+        site = _TitleSite("zh", "wikipedia")
+        assert new_pages.matches_keywords("Console games", "", site=site)
+        assert new_pages.matches_keywords("Example", "肉鸽 game", site=site)
+        assert not new_pages.matches_keywords(
+            "Example",
+            "Ordinary biography",
+            site=site,
+        )
+
+    @staticmethod
+    def test_game_cover_templates_identify_file_pages() -> None:
+        """Recognize cover tags without matching hidden markup."""
+        site = _TitleSite("zh", "wikipedia")
+        title = "File:Aigina no Yogen Boxart.jpg"
+        for name in (
+            "Non-free use rationale video game cover",
+            "Non-free video game cover",
+            "Non-free game cover",
+            "Gamecover",
+        ):
+            assert new_pages.matches_keywords(
+                title,
+                "{{" + name + "}}",
+                site=site,
+            )
+        for markup in ("<!-- {{gamecover}} -->", "{{other|{{gamecover}}}}"):
+            assert not new_pages.matches_keywords(title, markup, site=site)
+        assert not new_pages.matches_keywords(
+            "Example",
+            "{{gamecover}}",
+            site=site,
+        )

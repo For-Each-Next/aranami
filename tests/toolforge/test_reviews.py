@@ -18,18 +18,20 @@ from unittest.mock import Mock, patch
 from urllib.parse import unquote
 
 import polars as pl
+from wiki_fixtures import article_url, offline_site
 
-from backend.articles import milestone_store as article_milestones
-from backend.website.review_cache import ReviewCache
-from backend.website.review_milestones import retain_review_milestones
-from backend.website.reviews import (
+from data.articles import milestone_store as article_milestones
+from shared.sources.wiki import WikiReader
+from shared.support.cache import latest_cache_path
+from tasks.zhwiki.review_cache import ReviewCache
+from tasks.zhwiki.review_milestones import retain_review_milestones
+from tasks.zhwiki.reviews import (
     COMMUNITY_SOURCES,
     PROJECT_CATEGORIES,
     collect_reviews,
     community_reviews,
     talk_review,
 )
-from shared.sources.wiki import WikiReader
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -64,6 +66,20 @@ def _rewrite_cache(
 class ParserTests(TestCase):
     """Keep nominee identity and timestamps tied to their own source."""
 
+    @staticmethod
+    def test_discussion_anchor_stays_outside_the_encoded_page_title() -> None:
+        """Keep the actual heading outside Pywikibot's page URL."""
+        row = talk_review(
+            "== 專題同行評審 ==\nAn unsigned request.",
+            "ppr",
+            title="A:Ordinary title",
+            talk="Talk:A:Ordinary title",
+            url=article_url,
+        )[0]
+        assert "/Talk%3AA%3AOrdinary_title#" in row["review_url"]
+        assert "%23" not in row["review_url"]
+        assert unquote(row["review_url"]).endswith("#專題同行評審")
+
     def test_community_headings_periods_and_incidental_links(self) -> None:
         """Parse all proposal types without any talk-page banner."""
         for kind in ("fac", "flc", "gan", "pr"):
@@ -82,6 +98,7 @@ class ParserTests(TestCase):
                     "=== Unrelated subsection ===\n"
                     "2026年10月8日 (四) 03:04 (UTC)",
                     kind,
+                    url=article_url,
                 )
                 assert [r["title"] for r in rows] == ["遊戲 舊名", "Undated"]
                 assert rows[0]["started_at"] == _START
@@ -98,27 +115,113 @@ class ParserTests(TestCase):
             "2026年10月21日 (三) 03:04 (UTC)\n"
             "評選延長期：2026年10月21日 (三) 03:04 (UTC)",
             "flc",
+            url=article_url,
         )[0]
         assert row["started_at"] == _START
         assert unquote(row["review_url"]).endswith("特色列表评选#Game_list")
 
     @staticmethod
-    def test_dyk_uses_explicit_subject_time_and_excludes_closed() -> None:
-        """Exclude completed and failed DYK candidates."""
+    def test_dyk_keeps_current_subjects_and_explicit_outcomes() -> None:
+        """Retain closed entries until removed from the nominee page."""
         rows = community_reviews(
             "{{DYKEntry|article=遊戲|timestamp=1791342240|result=|"
             "question=[[Other game]] {{lang|en|Game}}}}\n"
             "{{DYKEntry|article=Warning|timestamp=oops|result=@|1=len}}\n"
-            "{{DYKEntry|article=Passed|timestamp=1791342240|result=+|1=hash|2=123}}\n"
-            "{{DYKEntry|article=Ready|timestamp=1791342240|result=^}}\n"
+            "{{DYKEntry|article=Passed|timestamp=1791342240|result=+|hash=new|1=old|2=123}}\n"
+            "{{DYKEntry|article=Ready|timestamp=1791342240|"
+            "result=^|bot-hash|1794258313}}\n"
+            "{{DYKEntry|article=Queued|timestamp=1791342240|result=^}}\n"
+            "{{DYKvoteH|通過}}\n{{DYKvoteF}}\n"
             "{{DYKEntry|article=Failed|timestamp=1791342240|result=-}}\n"
+            "{{DYKvoteH|未獲通過}}\n{{DYKvoteF}}\n"
             "<!-- {{DYKEntry|article=Commented}} -->",
             "dykc",
+            url=article_url,
         )
-        assert [r["title"] for r in rows] == ["遊戲", "Warning"]
+        assert [r["title"] for r in rows] == [
+            "遊戲",
+            "Warning",
+            "Passed",
+            "Ready",
+            "Queued",
+            "Failed",
+        ]
         assert rows[0]["started_at"] == _START
         assert rows[1]["started_at"] is None
+        assert rows[2]["started_at"] == _START
+        assert [r["result"] for r in rows] == [
+            None,
+            None,
+            "passed",
+            None,
+            "passed",
+            "failed",
+        ]
+        assert rows[0]["ends_at"] == "2026-10-14T03:04:00+00:00"
         assert unquote(rows[0]["review_url"]).endswith("候选#遊戲")
+
+    @staticmethod
+    def test_deadlines_keep_automatic_extensions_and_explicit_periods() -> (
+        None
+    ):
+        """Honor known periods without guessing conditional outcomes."""
+        source = f"== Game ==\n投票期：{_SIGNATURE}\n"
+        for kind, expected in (
+            ("gan", "2026-10-14T03:04:00+00:00"),
+            ("fac", "2026-10-21T03:04:00+00:00"),
+            ("flc", "2026-11-04T03:04:00+00:00"),
+            ("pr", None),
+        ):
+            row = community_reviews(source, kind, url=article_url)[0]
+            assert row["ends_at"] == expected
+            assert row["result"] is None
+        paused = community_reviews(
+            f"== Game ==\n投票期：{_SIGNATURE}至"
+            "2026年10月24日 (六) 03:04 (UTC)\n",
+            "fac",
+            url=article_url,
+        )[0]
+        assert paused["ends_at"] == "2026-10-24T03:04:00+00:00"
+        extended = community_reviews(
+            f"== Game ==\n基礎評選期：{_SIGNATURE}至"
+            "2026年10月21日 (三) 03:04 (UTC)\n"
+            "評選延長期：2026年10月21日 (三) 03:04 (UTC)至"
+            "2026年11月4日 (三) 03:04 (UTC)\n",
+            "flc",
+            url=article_url,
+        )[0]
+        assert extended["ends_at"] == "2026-11-04T03:04:00+00:00"
+        assert (
+            community_reviews(
+                "== Undated ==\nNo nomination timestamp.",
+                "gan",
+                url=article_url,
+            )[0]["ends_at"]
+            is None
+        )
+        assert (
+            community_reviews(
+                "== Invalid ==\n投票期：9999年12月31日 (五) 03:04 (UTC)",
+                "gan",
+                url=article_url,
+            )[0]["ends_at"]
+            is None
+        )
+
+    @staticmethod
+    def test_dyk_pending_and_unverified_icons_do_not_supply_outcomes() -> None:
+        """Keep bot qualification separate from explicit outcomes."""
+        rows = community_reviews(
+            "{{DYKEntry|article=Pending|timestamp=1791342240}}"
+            "{{DYKvoteH|}}{{DYKvoteF}}"
+            "{{DYKEntry|article=Bot|timestamp=1791342240|hash=new|result=^|old|123}}"
+            "{{DYKEntry|article=Stale|timestamp=1791342240|hash=same|result=+|same|123}}"
+            "{{DYKEntry|article=Invalid|timestamp=1791342240|hash=new|result=-|old|oops}}"
+            "<!-- {{DYKvoteH|通過}} -->",
+            "dykc",
+            url=article_url,
+        )
+        assert [r["result"] for r in rows] == ["ended", None, None, None]
 
     def test_project_reviews_require_their_own_dated_discussion(self) -> None:
         """Leave category-only requests undated."""
@@ -134,11 +237,15 @@ class ParserTests(TestCase):
                     f"== Other topic ==\n{_SIGNATURE}\n"
                     f"== 優良條目評選 ==\n{_SIGNATURE}\n"
                 )
-                row = talk_review(text, kind, title="Game", talk="Talk:Game")[
-                    0
-                ]
+                row = talk_review(
+                    text,
+                    kind,
+                    title="Game",
+                    talk="Talk:Game",
+                    url=article_url,
+                )[0]
                 assert row["started_at"] is None
-                assert row["review_url"].endswith("Talk:Game")
+                assert row["review_url"].endswith("Talk%3AGame")
                 text += (
                     f"== {heading} ==\nOpening comment {_SIGNATURE}\n"
                     "== 典範條目評選 ==\n2026年10月8日 (四) 03:04 (UTC)\n"
@@ -148,6 +255,7 @@ class ParserTests(TestCase):
                     kind,
                     title="Game",
                     talk="Talk:Game",
+                    url=article_url,
                 )[0]
                 assert dated["started_at"] == _START
                 assert unquote(dated["review_url"]).endswith("#" + heading)
@@ -170,8 +278,12 @@ class ParserTests(TestCase):
         )
         for kind in ("fac", "flc", "gan", "pr"):
             with self.subTest(kind=kind):
-                single = community_reviews(opening, kind)[0]
-                replied = community_reviews(opening + other, kind)[0]
+                single = community_reviews(opening, kind, url=article_url)[0]
+                replied = community_reviews(
+                    opening + other,
+                    kind,
+                    url=article_url,
+                )[0]
                 assert single["replied_at"] is None
                 assert single["participant_count"] == 1
                 assert replied["replied_at"] == "2026-10-09T05:00:00+00:00"
@@ -193,6 +305,7 @@ class ParserTests(TestCase):
             "== Other candidate ==\n"
             "[[User:Unrelated]] 2026年10月12日 (一) 08:00 (UTC)",
             "fac",
+            url=article_url,
         )[0]
         assert row["participant_count"] == 3
         assert row["replied_at"] == "2026-10-11T07:00:00+00:00"
@@ -205,6 +318,7 @@ class ParserTests(TestCase):
             "提名人：[[User:Opening]] 2026年10月7日 (三) 03:05 (UTC)\n"
             "* [[User:Reviewer]] 2026年10月9日 (五) 04:00 (UTC)",
             "fac",
+            url=article_url,
         )[0]
         assert row["replied_at"] == "2026-10-09T04:00:00+00:00"
 
@@ -226,14 +340,14 @@ class ParserTests(TestCase):
             "Unattributed 2026年10月24日 (六) 12:00 (UTC)\n"
             "== Other ==\n[[User:Unrelated]] 2026年10月24日 (六) 12:00 (UTC)\n"
         )
-        row = community_reviews(text, "pr")[0]
+        row = community_reviews(text, "pr", url=article_url)[0]
         assert row["replied_at"] == "2026-10-10T05:00:00+00:00"
         assert row["participant_count"] == 3
         missing = (
             f"== Game ==\n投票期：{_SIGNATURE}\n"
             "* [[User:Reviewer]] 2026年10月9日 (五) 04:00 (UTC)\n"
         )
-        unidentified = community_reviews(missing, "gan")[0]
+        unidentified = community_reviews(missing, "gan", url=article_url)[0]
         assert unidentified["replied_at"] is None
         assert unidentified["participant_count"] == 1
 
@@ -249,6 +363,7 @@ class ParserTests(TestCase):
             "ppr",
             title="Game",
             talk="Talk:Game",
+            url=article_url,
         )[0]
         assert row["replied_at"] == "2026-10-09T04:00:00+00:00"
         assert row["participant_count"] == 2
@@ -272,6 +387,7 @@ class ParserTests(TestCase):
             "acc",
             title="豐川祥子",
             talk="Talk:豐川祥子",
+            url=article_url,
         )[0]
         assert row["started_at"] == "2026-02-05T14:15:00+00:00"
         assert row["replied_at"] == "2026-02-05T22:55:00+00:00"
@@ -291,6 +407,7 @@ class ParserTests(TestCase):
             "{{DYKEntry|article=Unknown|timestamp=1791342240}}\n"
             "* [[User:Reviewer]] 2026年10月9日 (五) 04:00 (UTC)\n",
             "dykc",
+            url=article_url,
         )
         assert [row["replied_at"] for row in rows] == [
             None,
@@ -306,6 +423,7 @@ class ParserTests(TestCase):
             "{{DYKEntry|article=Explicit|nominator=Opening|timestamp=oops}}\n"
             "{{DYKEntry|article=Unknown|timestamp=oops}}\n",
             "dykc",
+            url=article_url,
         )
         assert [row["participant_count"] for row in rows] == [1, None]
         assert all(row["replied_at"] is None for row in rows)
@@ -373,12 +491,12 @@ class CollectionTests(TestCase):
             "Earlier",
             "Later",
         }
-        self.site = Mock()
-        self.site.simple_request.side_effect = self._request
+        self.site = offline_site()
+        self.site.simple_request = Mock(side_effect=self._request)
         self.categories = Mock(side_effect=self._category)
-        page_patch = patch("backend.website.reviews.Page", _Page)
+        page_patch = patch("tasks.zhwiki.reviews.Page", _Page)
         category_patch = patch(
-            "backend.website.reviews.category_members",
+            "tasks.zhwiki.reviews.category_members",
             self.categories,
         )
         page_patch.start()
@@ -468,6 +586,7 @@ class CollectionTests(TestCase):
     def _collect(
         self,
         *,
+        now: dt.datetime = _NOW,
         retain: Callable[[pl.DataFrame], None] | None = None,
     ) -> dict[str, object]:
         """Collect with a fresh resolver, as after a process restart.
@@ -481,7 +600,7 @@ class CollectionTests(TestCase):
             self.members,
             resolve=reader.resolve,
             resolve_many=reader.resolve_many,
-            now=_NOW,
+            now=now,
             cache_directory=self.cache,
             retain=retain,
         )
@@ -519,11 +638,11 @@ class CollectionTests(TestCase):
         self.site.simple_request.reset_mock()
         with (
             patch(
-                "backend.website.reviews.community_reviews",
+                "tasks.zhwiki.reviews.community_reviews",
                 side_effect=AssertionError("reparsed"),
             ),
             patch(
-                "backend.website.reviews.talk_review",
+                "tasks.zhwiki.reviews.talk_review",
                 side_effect=AssertionError("reparsed"),
             ),
         ):
@@ -541,12 +660,57 @@ class CollectionTests(TestCase):
         ]
         assert downloads == [[20]]
 
+    def test_removed_current_nominees_drop_cards_but_keep_history(
+        self,
+    ) -> None:
+        """Remove current cards without deleting nomination history."""
+        self.members = {"Game list"}
+        membership = pl.DataFrame({
+            "full_title": ["Game list"],
+            "page_id": [101],
+            "talk_page_id": [201],
+            "page_namespace": [0],
+        })
+        path = self.cache / "milestones.parquet"
+        retain = partial(
+            retain_review_milestones,
+            membership=membership,
+            path=path,
+        )
+        for index, kind in enumerate(("fac", "flc", "gan", "dykc"), 30):
+            text = (
+                "{{DYKEntry|article=Game list|timestamp=1791342240}}"
+                "{{DYKvoteH|通過}}{{DYKvoteF}}"
+                if kind == "dykc"
+                else f"== Game list ==\n投票期：{_SIGNATURE}"
+            )
+            self.texts[COMMUNITY_SOURCES[kind]] = (index, text)
+        first = self._collect(retain=retain)
+        assert {r["review_type"] for r in first["items"]} == {
+            "fac",
+            "flc",
+            "gan",
+            "dykc",
+        }
+        history = article_milestones.load(path)
+        assert history.height == 4
+        for index, kind in enumerate(("fac", "flc", "gan", "dykc"), 40):
+            self.texts[COMMUNITY_SOURCES[kind]] = (index, "")
+        assert self._collect(retain=retain)["items"] == []
+        assert article_milestones.load(path).equals(history)
+        with patch(
+            "tasks.zhwiki.reviews.community_reviews",
+            side_effect=AssertionError("reparsed confirmed empty source"),
+        ):
+            assert self._collect(retain=retain)["items"] == []
+
     def test_missing_source_is_failure_and_corrupt_cache_rebuilds(
         self,
     ) -> None:
         """Require successful source checks even with saved parses."""
         first = self._collect()
-        path = self.cache / "review-sources.parquet"
+        path = latest_cache_path(self.cache / "review-sources-anchors")
+        assert path is not None
         path.write_bytes(b"damaged")
         assert self._collect() == first
         del self.texts[COMMUNITY_SOURCES["flc"]]
@@ -585,7 +749,8 @@ class CollectionTests(TestCase):
     def test_old_cache_schema_is_reparsed_for_participant_counts(self) -> None:
         """Rebuild incompatible parses to collect participant counts."""
         first = self._collect()
-        path = self.cache / "review-sources.parquet"
+        path = latest_cache_path(self.cache / "review-sources-anchors")
+        assert path is not None
         frame = pl.read_parquet(path)
         schema = dict(frame.schema)
         schema["items"] = pl.List(
@@ -612,7 +777,8 @@ class CollectionTests(TestCase):
     def test_invalid_cached_participant_count_is_reparsed(self) -> None:
         """Discard cached zero counts and rebuild source facts."""
         first = self._collect()
-        path = self.cache / "review-sources.parquet"
+        path = latest_cache_path(self.cache / "review-sources-anchors")
+        assert path is not None
         frame = pl.read_parquet(path)
         rows = frame.to_dicts()
         for row in rows:
@@ -629,7 +795,8 @@ class CollectionTests(TestCase):
     def test_outdated_parser_cache_is_reparsed(self) -> None:
         """Refresh unchanged revisions when parsing semantics change."""
         first = self._collect()
-        path = self.cache / "review-sources.parquet"
+        path = latest_cache_path(self.cache / "review-sources-anchors")
+        assert path is not None
         _rewrite_cache(
             path,
             pl.read_parquet(path),
@@ -641,6 +808,61 @@ class CollectionTests(TestCase):
             call.kwargs["prop"] == "revisions"
             for call in self.site.simple_request.call_args_list
         )
+
+    def test_bot_qualified_dyk_returns_from_old_empty_cache(self) -> None:
+        """Restore pending DYK reviews at unchanged source revisions."""
+        now = dt.datetime(2026, 11, 10, tzinfo=dt.UTC)
+        self.members.add("臺北狂飆")
+        self.texts[COMMUNITY_SOURCES["dykc"]] = (
+            20,
+            (
+                "{{ DYKEntry\n"
+                " | hash = d1a57770226a8ed46042bf1669b4472dfa935192\n"
+                " | result = ^|8e7d9e9c94adca2db006956eefd6cc548128fa3a"
+                "|1794258313\n"
+                " | nominator = Dy0ykidd\n"
+                " | timestamp = 1793707046\n"
+                " | author = Dy0ykidd\n"
+                " | article = 臺北狂飆\n"
+                "}}\n"
+                "**{{支持}}--[[User:Dragoon17cc|Dragoon17cc]]"
+                "（[[User talk:Dragoon17cc|留言]]） "
+                "2026年11月9日 (一) 17:43 (UTC)\n"
+            ),
+        )
+        first = self._collect(now=now)
+        row = next(r for r in first["items"] if r["title"] == "臺北狂飆")
+        assert row["review_type"] == "dykc"
+        assert row["started_at"] == "2026-11-03T11:57:26+00:00"
+        assert row["nominator"] == "Dy0ykidd"
+        assert row["participant_count"] == 2
+        assert row["replied_at"] == "2026-11-09T17:43:00+00:00"
+        assert unquote(row["review_url"]).endswith("候选#臺北狂飆")
+        path = latest_cache_path(self.cache / "review-sources-anchors")
+        assert path is not None
+        frame = pl.read_parquet(path)
+        _rewrite_cache(
+            path,
+            frame.with_columns(
+                pl
+                .when(pl.col("kind") == "dykc")
+                .then(pl.lit([], dtype=frame.schema["items"]))
+                .otherwise(pl.col("items"))
+                .alias("items"),
+            ),
+            contract="review-sources:10:review-comment-activity-and-section-bytes",
+        )
+        self.site.simple_request.reset_mock()
+        assert self._collect(now=now) == first
+        assert any(
+            call.kwargs.get("revids") == [1, 2, 3, 4, 20]
+            for call in self.site.simple_request.call_args_list
+        )
+        with patch(
+            "tasks.zhwiki.reviews.community_reviews",
+            side_effect=AssertionError("reparsed"),
+        ):
+            assert self._collect(now=now) == first
 
     def test_batch_boundaries_and_omitted_revision(self) -> None:
         """Bound requests and reject incomplete source batches."""
@@ -697,11 +919,11 @@ class CollectionTests(TestCase):
                 "url": "https://zh.wikipedia.org/w/index.php?oldid=1",
             },
         ]
-        assert "nominator" not in first["items"][0]
+        assert first["items"][0]["nominator"] == "Nominator"
         path.unlink()
         self.site.simple_request.reset_mock()
         with patch(
-            "backend.website.reviews.community_reviews",
+            "tasks.zhwiki.reviews.community_reviews",
             side_effect=AssertionError("reparsed"),
         ):
             assert self._collect(retain=retain) == first
@@ -767,6 +989,7 @@ class CollectionTests(TestCase):
             "|question=Which [[Game]]?}}\n"
             "[[User:Commenter]] 2026年10月7日 (三) 03:04 (UTC)",
             "dykc",
+            url=article_url,
         )[0]
         assert row["nominator"] is None
         assert row["contributors"] is None
@@ -774,7 +997,8 @@ class CollectionTests(TestCase):
     def test_invalid_cached_credit_fields_force_source_reparse(self) -> None:
         """Reject unsafe cached attribution before durable retention."""
         first = self._collect()
-        path = self.cache / "review-sources.parquet"
+        path = latest_cache_path(self.cache / "review-sources-anchors")
+        assert path is not None
         frame = pl.read_parquet(path)
         rows = frame.to_dicts()
         for source in rows:

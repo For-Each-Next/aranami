@@ -1,0 +1,340 @@
+{
+  "schema": 1,
+  "wiki": "enwiki",
+  "profiles": [
+    {
+      "project": null,
+      "identifier": "enwiki-general:1",
+      "classes": [
+        {
+          "raw_value": "FA",
+          "code": "FA",
+          "long_name": "Featured article",
+          "short_name": "FA",
+          "is_article": true,
+          "aliases": [],
+          "rank": 10,
+          "order": 0,
+          "article_group": "FA"
+        },
+        {
+          "raw_value": "FL",
+          "code": "FL",
+          "long_name": "Featured list",
+          "short_name": "FL",
+          "is_article": true,
+          "aliases": [],
+          "rank": 10,
+          "order": 1,
+          "article_group": "FA"
+        },
+        {
+          "raw_value": "A",
+          "code": "A",
+          "long_name": "A-Class",
+          "short_name": "A",
+          "is_article": true,
+          "aliases": [],
+          "rank": 9,
+          "order": 2,
+          "article_group": "A"
+        },
+        {
+          "raw_value": "GA",
+          "code": "GA",
+          "long_name": "Good article",
+          "short_name": "GA",
+          "is_article": true,
+          "aliases": [],
+          "rank": 8,
+          "order": 3,
+          "article_group": "GA"
+        },
+        {
+          "raw_value": "B",
+          "code": "B",
+          "long_name": "B-Class",
+          "short_name": "B",
+          "is_article": true,
+          "aliases": [],
+          "rank": 6,
+          "order": 4,
+          "article_group": "B"
+        },
+        {
+          "raw_value": "C",
+          "code": "C",
+          "long_name": "C-Class",
+          "short_name": "C",
+          "is_article": true,
+          "aliases": [],
+          "rank": 5,
+          "order": 5,
+          "article_group": "C"
+        },
+        {
+          "raw_value": "Start",
+          "code": "Start",
+          "long_name": "Start-Class",
+          "short_name": "Start",
+          "is_article": true,
+          "aliases": [],
+          "rank": 3,
+          "order": 6,
+          "article_group": "Start"
+        },
+        {
+          "raw_value": "List",
+          "code": "List",
+          "long_name": "List-Class",
+          "short_name": "List",
+          "is_article": true,
+          "aliases": [],
+          "rank": 3,
+          "order": 7,
+          "article_group": "Start"
+        },
+        {
+          "raw_value": "Stub",
+          "code": "Stub",
+          "long_name": "Stub-Class",
+          "short_name": "Stub",
+          "is_article": true,
+          "aliases": [],
+          "rank": 2,
+          "order": 8,
+          "article_group": "Stub"
+        },
+        {
+          "raw_value": "",
+          "code": "Unassessed",
+          "long_name": "Unassessed",
+          "short_name": "Unassessed",
+          "is_article": true,
+          "aliases": [],
+          "rank": null,
+          "order": 9,
+          "article_group": "Unassessed"
+        },
+        {
+          "raw_value": "Disambig",
+          "code": "Disambig",
+          "long_name": "Disambiguation",
+          "short_name": "Disambig",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "SIA",
+          "code": "SIA",
+          "long_name": "Set index article",
+          "short_name": "SIA",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "Redirect",
+          "code": "Redirect",
+          "long_name": "Redirect",
+          "short_name": "Redirect",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "Category",
+          "code": "Category",
+          "long_name": "Category",
+          "short_name": "Category",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "Template",
+          "code": "Template",
+          "long_name": "Template",
+          "short_name": "Template",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "File",
+          "code": "File",
+          "long_name": "File",
+          "short_name": "File",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "Portal",
+          "code": "Portal",
+          "long_name": "Portal",
+          "short_name": "Portal",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "Project",
+          "code": "Project",
+          "long_name": "Project",
+          "short_name": "Project",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "Draft",
+          "code": "Draft",
+          "long_name": "Draft",
+          "short_name": "Draft",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "Help",
+          "code": "Help",
+          "long_name": "Help",
+          "short_name": "Help",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "User",
+          "code": "User",
+          "long_name": "User",
+          "short_name": "User",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "FM",
+          "code": "FM",
+          "long_name": "Featured media",
+          "short_name": "FM",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        },
+        {
+          "raw_value": "NA",
+          "code": "NA",
+          "long_name": "Non-article",
+          "short_name": "NA",
+          "is_article": false,
+          "aliases": [],
+          "rank": null,
+          "order": null,
+          "article_group": null
+        }
+      ],
+      "importance": [
+        {
+          "raw_value": "Top",
+          "code": "Top",
+          "long_name": "Top importance",
+          "short_name": "Top",
+          "aliases": [],
+          "rank": 5,
+          "order": 0
+        },
+        {
+          "raw_value": "High",
+          "code": "High",
+          "long_name": "High importance",
+          "short_name": "High",
+          "aliases": [],
+          "rank": 4,
+          "order": 1
+        },
+        {
+          "raw_value": "Mid",
+          "code": "Mid",
+          "long_name": "Mid importance",
+          "short_name": "Mid",
+          "aliases": [],
+          "rank": 3,
+          "order": 2
+        },
+        {
+          "raw_value": "Low",
+          "code": "Low",
+          "long_name": "Low importance",
+          "short_name": "Low",
+          "aliases": [],
+          "rank": 2,
+          "order": 3
+        },
+        {
+          "raw_value": "NA",
+          "code": "NA",
+          "long_name": "Not applicable",
+          "short_name": "NA",
+          "aliases": [],
+          "rank": null,
+          "order": 4
+        },
+        {
+          "raw_value": "Unknown",
+          "code": "Unknown",
+          "long_name": "Unknown importance",
+          "short_name": "Unknown",
+          "aliases": [],
+          "rank": null,
+          "order": 5
+        }
+      ],
+      "sources": [
+        {
+          "title": "Wikipedia:Content assessment",
+          "url": "https://en.wikipedia.org/wiki/Wikipedia:Content_assessment#Grades",
+          "revision": 1383080529,
+          "observed_at": "2026-11-02T16:05:00+00:00"
+        },
+        {
+          "title": "Module:WikiProject banner/config",
+          "url": "https://en.wikipedia.org/wiki/Module:WikiProject_banner/config",
+          "revision": 1341378891,
+          "note": "Standard and non-article classes, including Help, User and FM."
+        },
+        {
+          "title": "enwiki PageAssessments project Video games",
+          "observed_at": "2026-11-02T16:05:00+00:00",
+          "note": "Raw values verified against project 457. Empty class means unassessed. Unrecognized project-specific values such as YStart remain lossless unknown observations."
+        }
+      ]
+    }
+  ]
+}

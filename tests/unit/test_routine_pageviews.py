@@ -9,17 +9,17 @@ import urllib.error
 from contextlib import chdir, nullcontext
 from dataclasses import replace
 from tempfile import TemporaryDirectory
-from unittest import TestCase
+from unittest import TestCase, addModuleCleanup
 from unittest.mock import MagicMock, call, patch
 
 import mwparserfromhell
 import polars as pl
 from dateutil.relativedelta import relativedelta
 
-from backend.services.zhwiki import pageviews
-from shared.reports import ReportResult
-from updater.edit_summary import MAX_EDIT_SUMMARY_BYTES
-from updater.jobs import JobContext, pageviews as job
+from data.reports import ReportResult
+from runtime.jobs import JobContext, pageviews as job
+from tasks.zhwiki import pageviews
+from updater.edit_summary import MAX_EDIT_SUMMARY_BYTES, EditSummary
 from updater.services.zhwiki import pageviews as rendering
 
 _DAY = dt.date(2026, 1, 10)
@@ -155,7 +155,7 @@ def _build_report(
     settings: rendering.ReportSettings,
     **options: int,
 ) -> rendering.PageviewReport:
-    """Render the complete backend collection for offline checks.
+    """Render the complete runtime collection for offline checks.
 
     Args:
         site: Offline wiki identity.
@@ -166,12 +166,17 @@ def _build_report(
     Returns:
         Rendered report backed by complete prepared rankings.
     """
-    prepared = pageviews.prepare_report(
-        site,
-        stop,
-        settings=settings.source_settings(),
-        **options,
-    )
+    with patch.object(
+        pageviews.pageview_data,
+        "read_snapshot",
+        return_value=None,
+    ):
+        prepared = pageviews.prepare_report(
+            site,
+            stop,
+            settings=settings.source_settings(),
+            **options,
+        )
     return rendering.build_report(prepared, settings=settings)
 
 
@@ -182,7 +187,7 @@ def _section(
     config: rendering.ReportPeriod,
     tag: str,
 ) -> tuple[str, str | None, int | None]:
-    """Render a backend ranking while exposing its leader metadata.
+    """Render a runtime ranking while exposing its leader metadata.
 
     Args:
         articles: Offline project members.
@@ -192,7 +197,7 @@ def _section(
         tag: Project identity.
 
     Returns:
-        Rendered section, backend leader, and nullable rank gain.
+        Rendered section, runtime leader, and nullable rank gain.
     """
     ranked = pageviews._ranked_data(articles, views, stop, config.delta)
     retained = pageviews._retained_rankings(ranked, config, stop, tag, tag)
@@ -212,6 +217,13 @@ def _section(
         ),
     )
     return report.text, population.top, population.gain
+
+
+def setUpModule() -> None:
+    """Keep summary year fixtures independent of the actual UTC year."""
+    clock = patch("updater.edit_summary._current_year", return_value=2026)
+    clock.start()
+    addModuleCleanup(clock.stop)
 
 
 class TestPreparedRendering(TestCase):
@@ -1371,8 +1383,9 @@ class TestReportState(TestCase):
             report.monthly_top_gain,
         ) == (3, 0, None)
         assert job._edit_summary(report) == (
-            "Updated for 10 Jan 2026. Top: «[[A]]» for daily (▲3); "
-            "«[[B]]» for weekly; «[[C]]» for monthly."
+            "4 articles, 100 daily views for Jan 10. «[[A]]» leads the "
+            "daily (▲3) ranking; «[[B]]» leads the weekly ranking; «[[C]]» "
+            "leads the monthly ranking."
         )
 
     def test_only_report_date_comments_supply_the_checkpoint(self) -> None:
@@ -1632,6 +1645,7 @@ class TestPageviewJob(TestCase):
         """Chain daily previews without changing the live page."""
         context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
         page = MagicMock(text=_TEXT)
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with (
             TemporaryDirectory() as directory,
             chdir(directory),
@@ -1653,6 +1667,7 @@ class TestPageviewJob(TestCase):
                 history_days=800,
                 missing_percent=1,
                 prefetch_stop=dt.date(2026, 1, 13),
+                dry=context.dry,
             )
             for stop in stops
         ]
@@ -1660,8 +1675,9 @@ class TestPageviewJob(TestCase):
         assert context.edits[0].original_text == _TEXT
         assert context.edits[0].title == job.REPORT_TITLE
         assert context.edits[0].summary == (
-            "Updated for 10 Jan 2026. Top: «[[A]]» for daily; "
-            "«[[B]]» for weekly; «[[C]]» for monthly. "
+            "Update pageviews for Jan 10. «[[A]]» leads the daily ranking; "
+            "«[[B]]» leads the weekly ranking; "
+            "«[[C]]» leads the monthly ranking. "
             f"{job.EditSummary.with_attribution('')}"
         )
         assert "2026-01-10" in context.edits[0].text
@@ -1680,9 +1696,10 @@ class TestPageviewJob(TestCase):
                     _site(),
                     dt.date(2026, 10, 19),
                     dry=False,
-                    started_at=dt.datetime(2026, 10, 19, 18, tzinfo=dt.UTC),
+                    started_at=dt.datetime(2026, 10, 19, 19, tzinfo=dt.UTC),
                 )
                 page = MagicMock(text=text)
+                page.get.side_effect = lambda _page=page, **_kwargs: _page.text
                 self.downloads.reset_mock()
                 self.downloads.side_effect = None
                 self.downloads.return_value = dt.date(2026, 10, accepted_day)
@@ -1696,22 +1713,27 @@ class TestPageviewJob(TestCase):
                         side_effect=lambda _site, stop, **_: _report(stop),
                     ) as build,
                     patch(
-                        "updater.jobs._execution.pywikibot.Page",
+                        "updater.publisher.pywikibot.Page",
                         return_value=page,
                     ),
                 ):
                     job.run(context=context)
-                self.downloads.assert_called_once_with(
-                    context.site,
-                    dt.date(2026, 10, 16),
-                    dt.date(2026, 10, 18),
-                    settings=job.REPORT_SETTINGS.source_settings(),
-                    history_days=800,
-                    missing_percent=1,
-                )
                 dates = [
                     dt.date(2026, 10, day)
                     for day in range(16, accepted_day + 1)
+                ]
+                assert self.downloads.call_args_list == [
+                    call(
+                        context.site,
+                        day,
+                        dt.date(2026, 10, 18)
+                        if day == dates[0]
+                        else dt.date(2026, 10, accepted_day),
+                        settings=job.REPORT_SETTINGS.source_settings(),
+                        history_days=800,
+                        missing_percent=1,
+                    )
+                    for day in dates
                 ]
                 assert [edit.tags[-1] for edit in context.edits] == [
                     day.isoformat() for day in dates
@@ -1741,10 +1763,11 @@ class TestPageviewJob(TestCase):
             _site(),
             dt.date(2026, 10, 19),
             dry=False,
-            started_at=dt.datetime(2026, 10, 19, 18, tzinfo=dt.UTC),
+            started_at=dt.datetime(2026, 10, 19, 19, tzinfo=dt.UTC),
         )
         text = _TEXT.replace("2026-01-09", "2026-10-15")
         page = MagicMock(text=text)
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         self.downloads.side_effect = pageviews.PageviewsUnavailableError(
             "no available unpublished day",
         )
@@ -1769,6 +1792,7 @@ class TestPageviewJob(TestCase):
         """Defer source outages before constructing a daily report."""
         context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
         page = MagicMock(text=_TEXT)
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         self.downloads.side_effect = pageviews.PageviewsDeferredError(
             "HTTP 503",
         )
@@ -1784,6 +1808,9 @@ class TestPageviewJob(TestCase):
         complete.assert_not_called()
         assert context.tasks[0].status == "deferred"
         assert context.notes == ["HTTP 503"]
+        assert context.tasks[0].failure_reason == "PageviewsDeferredError"
+        assert context.tasks[0].failure_date == dt.date(2026, 1, 10)
+        assert context.tasks[0].report_date is None
         assert not context.edits
         assert page.text == _TEXT
         page.save.assert_not_called()
@@ -1793,10 +1820,11 @@ class TestPageviewJob(TestCase):
         context = MagicMock(
             site=_site(),
             today=dt.date(2026, 1, 14),
-            started_at=dt.datetime(2026, 1, 14, 18, tzinfo=dt.UTC),
+            started_at=dt.datetime(2026, 1, 14, 19, tzinfo=dt.UTC),
         )
         context.publish.side_effect = RuntimeError("save failed")
         page = MagicMock(text=_TEXT)
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(job, "read_pages", return_value=[page]),
@@ -1815,6 +1843,7 @@ class TestPageviewJob(TestCase):
             history_days=800,
             missing_percent=1,
             prefetch_stop=dt.date(2026, 1, 14),
+            dry=context.dry,
         )
         context.publish.assert_called_once()
         assert page.text == _TEXT
@@ -1825,9 +1854,10 @@ class TestPageviewJob(TestCase):
             _site(),
             dt.date(2026, 1, 13),
             dry=False,
-            started_at=dt.datetime(2026, 1, 13, 18, tzinfo=dt.UTC),
+            started_at=dt.datetime(2026, 1, 13, 19, tzinfo=dt.UTC),
         )
         page = MagicMock(text=_TEXT)
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with (
             TemporaryDirectory() as directory,
             chdir(directory),
@@ -1841,7 +1871,7 @@ class TestPageviewJob(TestCase):
                 ],
             ) as build,
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
                 return_value=page,
             ),
             patch.object(job, "record_completion") as complete,
@@ -1865,7 +1895,7 @@ class TestPageviewJob(TestCase):
         context = MagicMock(
             site=_site(),
             today=dt.date(2026, 1, 13),
-            started_at=dt.datetime(2026, 1, 13, 18, tzinfo=dt.UTC),
+            started_at=dt.datetime(2026, 1, 13, 19, tzinfo=dt.UTC),
             dry=False,
         )
         context.publish.return_value = False
@@ -1893,7 +1923,7 @@ class TestPageviewJob(TestCase):
         context = MagicMock(
             site=_site(),
             today=dt.date(2026, 1, 11),
-            started_at=dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC),
+            started_at=dt.datetime(2026, 1, 11, 19, tzinfo=dt.UTC),
         )
         text = _TEXT.replace("2026-01-09", "2026-01-10")
         with (
@@ -1940,6 +1970,7 @@ class TestPageviewJob(TestCase):
             history_days=900,
             missing_percent=1,
             prefetch_stop=_STOP,
+            dry=context.dry,
         )
         assert 'history-days="900"' in context.edits[0].text
         assert 'missing-percent="90"' in context.edits[0].text
@@ -1950,9 +1981,10 @@ class TestPageviewJob(TestCase):
             _site(),
             dt.date(2026, 1, 11),
             dry=True,
-            started_at=dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC),
+            started_at=dt.datetime(2026, 1, 11, 19, tzinfo=dt.UTC),
         )
         page = MagicMock(text=_TEXT)
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with (
             TemporaryDirectory() as directory,
             chdir(directory),
@@ -1977,6 +2009,7 @@ class TestPageviewJob(TestCase):
             history_days=800,
             missing_percent=1,
             prefetch_stop=_STOP,
+            dry=context.dry,
         )
 
     @staticmethod
@@ -1984,6 +2017,7 @@ class TestPageviewJob(TestCase):
         """Defer transient requests while other routines continue."""
         context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
         page = MagicMock(text=_TEXT)
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with (
             TemporaryDirectory() as directory,
             chdir(directory),
@@ -2075,14 +2109,15 @@ class TestPageviewReadiness(TestCase):
                 history_days=800,
                 missing_percent=1,
                 prefetch_stop=expected_stop,
+                dry=context.dry,
             )
             context.publish.assert_called_once()
 
     def test_yesterday_becomes_eligible_at_exact_utc_boundary(self) -> None:
-        """Make yesterday eligible at exactly UTC 18:00."""
+        """Make yesterday eligible at exactly UTC 19:00."""
         for timestamp, expected in (
-            (dt.datetime(2026, 1, 11, 17, 59, 59, tzinfo=dt.UTC), None),
-            (dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC), _STOP),
+            (dt.datetime(2026, 1, 11, 18, 59, 59, tzinfo=dt.UTC), None),
+            (dt.datetime(2026, 1, 11, 19, tzinfo=dt.UTC), _STOP),
         ):
             with self.subTest(started_at=timestamp):
                 self._check_run(dt.date(2026, 1, 11), timestamp, expected)
@@ -2092,10 +2127,10 @@ class TestPageviewReadiness(TestCase):
         local_zone = dt.timezone(dt.timedelta(hours=8))
         for timestamp, expected in (
             (
-                dt.datetime(2026, 1, 12, 1, 59, 59, tzinfo=local_zone),
+                dt.datetime(2026, 1, 12, 2, 59, 59, tzinfo=local_zone),
                 None,
             ),
-            (dt.datetime(2026, 1, 12, 2, tzinfo=local_zone), _STOP),
+            (dt.datetime(2026, 1, 12, 3, tzinfo=local_zone), _STOP),
         ):
             with self.subTest(started_at=timestamp):
                 self._check_run(dt.date(2026, 1, 11), timestamp, expected)
@@ -2118,7 +2153,7 @@ class TestPageviewReadiness(TestCase):
             started_at=dt.datetime(2026, 1, 14, 17, tzinfo=dt.UTC),
         )
         with (
-            self.subTest(cutoff="before 18:00 UTC"),
+            self.subTest(cutoff="before 19:00 UTC"),
             TemporaryDirectory() as directory,
             chdir(directory),
             patch.object(
@@ -2160,14 +2195,14 @@ class TestPageviewReadiness(TestCase):
         )
 
     def test_unknown_attribute_does_not_change_utc_readiness(self) -> None:
-        """Ignore unrelated settings on both sides of UTC 18:00."""
+        """Ignore unrelated settings on both sides of UTC 19:00."""
         text = _TEXT.replace(
             'aranami begin="page_views"',
             'aranami begin="page_views" unrelated="3"',
         )
         for timestamp, expected in (
-            (dt.datetime(2026, 1, 11, 17, 59, 59, tzinfo=dt.UTC), None),
-            (dt.datetime(2026, 1, 11, 18, tzinfo=dt.UTC), _STOP),
+            (dt.datetime(2026, 1, 11, 18, 59, 59, tzinfo=dt.UTC), None),
+            (dt.datetime(2026, 1, 11, 19, tzinfo=dt.UTC), _STOP),
         ):
             with self.subTest(started_at=timestamp):
                 self._check_run(
@@ -2181,6 +2216,46 @@ class TestPageviewReadiness(TestCase):
 class TestPageviewSummaries(TestCase):
     """Verify leader details and whole-link summary shortening."""
 
+    def test_observed_numeric_counts_precede_optional_leaders(self) -> None:
+        """Keep counts and omit partial or unknown daily views."""
+        for observed, views, expected in (
+            (2, 900, "2 articles, 900 daily views"),
+            (
+                2,
+                1000000,
+                "2 articles, 1\u202f000\u202f000 daily views",
+            ),
+            (1, 900, "2 articles"),
+            (0, None, "2 articles"),
+        ):
+            with self.subTest(observed=observed, views=views):
+                report = replace(
+                    _report(_STOP),
+                    daily_top="遊" * 200,
+                    weekly_top=None,
+                    monthly_top=None,
+                    result=ReportResult(
+                        family="pageviews",
+                        tables={
+                            "totals": pl.DataFrame({
+                                "project": ["Games"],
+                                "period": ["daily"],
+                                "article_count": [2],
+                                "observed_articles": [observed],
+                                "total_views": [views],
+                            }),
+                        },
+                        metadata={"project": "Games"},
+                    ),
+                )
+                summary = EditSummary.with_attribution(
+                    job._edit_summary(report),
+                )
+                assert summary == (
+                    f"{expected} for Jan 10. ([[toolforge:aranami|Aranami]])"
+                )
+                assert len(summary.encode()) <= MAX_EDIT_SUMMARY_BYTES
+
     @staticmethod
     def test_leader_gains_omit_unchanged_and_unknown_annotations() -> None:
         """Show places gained and omit unavailable or zero movement."""
@@ -2189,13 +2264,14 @@ class TestPageviewSummaries(TestCase):
             daily_top="遊戲甲",
             weekly_top="遊戲乙",
             monthly_top="遊戲丙",
-            daily_top_gain=3,
+            daily_top_gain=1234,
             weekly_top_gain=0,
             monthly_top_gain=None,
         )
         assert job._edit_summary(report) == (
-            "Updated for 10 Jan 2026. Top: «[[遊戲甲]]» for daily (▲3); "
-            "«[[遊戲乙]]» for weekly; «[[遊戲丙]]» for monthly."
+            "Update pageviews for Jan 10. «[[遊戲甲]]» leads the daily "
+            "(▲1\u202f234) ranking; «[[遊戲乙]]» leads the weekly ranking; "
+            "«[[遊戲丙]]» leads the monthly ranking."
         )
 
     def test_repeated_leaders_link_each_distinct_title_once(self) -> None:
@@ -2204,17 +2280,20 @@ class TestPageviewSummaries(TestCase):
             (
                 ("惡靈古堡\uff1a爆發夜",) * 3,
                 (
-                    "«[[惡靈古堡\uff1a爆發夜]]» for "
-                    "daily, weekly, and monthly (▲42)"
+                    "«[[惡靈古堡\uff1a爆發夜]]» leads the "
+                    "daily, weekly, and monthly (▲42) rankings"
                 ),
             ),
             (
                 ("A", "B", "A"),
-                "«[[A]]» for daily and monthly (▲42); «[[B]]» for weekly",
+                (
+                    "«[[A]]» leads the daily and monthly (▲42) rankings; "
+                    "«[[B]]» leads the weekly ranking"
+                ),
             ),
             (
                 (None, "B", "B"),
-                "«[[B]]» for weekly and monthly (▲42)",
+                "«[[B]]» leads the weekly and monthly (▲42) rankings",
             ),
         ):
             with self.subTest(titles=titles):
@@ -2226,9 +2305,7 @@ class TestPageviewSummaries(TestCase):
                     monthly_top_gain=42,
                 )
                 summary = job._edit_summary(report)
-                assert summary == (
-                    f"Updated for 10 Jan 2026. Top: {expected}."
-                )
+                assert summary == (f"Update pageviews for Jan 10. {expected}.")
                 assert len(
                     mwparserfromhell.parse(summary).filter_wikilinks(),
                 ) == (len(set(titles) - {None}))
@@ -2246,8 +2323,8 @@ class TestPageviewSummaries(TestCase):
             monthly_top_gain=42,
         )
         assert job._edit_summary(report) == (
-            "Updated for 10 Jan 2026. Top: «[[A]]» for "
-            "daily (▲3), weekly (▲2), and monthly (▲42)."
+            "Update pageviews for Jan 10. «[[A]]» leads the daily (▲3), "
+            "weekly (▲2), and monthly (▲42) rankings."
         )
 
     @staticmethod
@@ -2255,7 +2332,7 @@ class TestPageviewSummaries(TestCase):
         """Include only configured rankings with an observed leader."""
         report = replace(_report(_STOP), daily_top=None, monthly_top=None)
         assert job._edit_summary(report) == (
-            "Updated for 10 Jan 2026. Top: «[[B]]» for weekly."
+            "Update pageviews for Jan 10. «[[B]]» leads the weekly ranking."
         )
 
     @staticmethod
@@ -2267,7 +2344,7 @@ class TestPageviewSummaries(TestCase):
             weekly_top=None,
             monthly_top=None,
         )
-        assert job._edit_summary(report) == "Updated for 10 Jan 2026."
+        assert job._edit_summary(report) == "Update pageviews for Jan 10."
 
     @staticmethod
     def test_multibyte_titles_are_omitted_as_complete_links() -> None:
@@ -2276,7 +2353,7 @@ class TestPageviewSummaries(TestCase):
         report = replace(_report(_STOP), daily_top=long_title)
         summary = job._edit_summary(report)
         assert len(summary.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
-        assert summary.startswith("Updated for 10 Jan 2026.")
+        assert summary.startswith("Update pageviews for Jan 10.")
         assert long_title not in summary
         assert "for daily" not in summary
         assert summary.count("[[") == summary.count("]]")
@@ -2300,14 +2377,15 @@ class TestPageviewSummaries(TestCase):
         )
         summary = job._edit_summary(report)
         assert summary == (
-            "Updated for 10 Jan 2026. Top: «[[A]]» for daily; "
-            "«[[B]]» for weekly and seasonal (▲4); «[[C]]» for monthly; "
-            "«[[D]]» for yearly (▲7)."
+            "Update pageviews for Jan 10. «[[A]]» leads the daily ranking; "
+            "«[[B]]» leads the weekly and seasonal (▲4) rankings; «[[C]]» "
+            "leads the monthly ranking; «[[D]]» leads the yearly (▲7) "
+            "ranking."
         )
         attributed = job.EditSummary.with_attribution(summary)
         assert len(attributed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES
         assert "weekly and seasonal (▲4)" in attributed
-        assert "«[[D]]» for yearly (▲7)." in attributed
+        assert "«[[D]]» leads the yearly (▲7) ranking." in attributed
         assert attributed.count("[[B]]") == 1
         assert attributed.endswith(job.EditSummary.with_attribution(""))
 
@@ -2325,8 +2403,8 @@ class TestPageviewSummaries(TestCase):
         )
         summary = job._edit_summary(report)
         assert summary == (
-            f"Updated for 10 Jan 2026. Top: «[[{title}]]» for "
-            "daily, weekly, monthly, seasonal, and yearly."
+            f"Update pageviews for Jan 10. «[[{title}]]» leads the "
+            "daily, weekly, monthly, seasonal, and yearly rankings."
         )
         attributed = job.EditSummary.with_attribution(summary)
         assert attributed.startswith(summary)
@@ -2347,7 +2425,8 @@ class TestPageviewSummaries(TestCase):
             "daily, weekly, and monthly",
         ):
             fixed_body = (
-                f"Updated for 10 Jan 2026. Top: «[[]]» for {expected_periods}."
+                "Update pageviews for Jan 10. "
+                f"«[[]]» leads the {expected_periods} rankings."
             )
             title_length = (
                 body_budget - len(fixed_body.encode("utf-8"))
@@ -2366,8 +2445,8 @@ class TestPageviewSummaries(TestCase):
                 assert "seasonal, and yearly" in summary
                 attributed = job.EditSummary.with_attribution(summary)
                 assert attributed == (
-                    f"Updated for 10 Jan 2026. Top: «[[{title}]]» for "
-                    f"{expected_periods}. {suffix}"
+                    f"Update pageviews for Jan 10. «[[{title}]]» leads the "
+                    f"{expected_periods} rankings. {suffix}"
                 )
                 assert (
                     len(attributed.encode("utf-8")) <= MAX_EDIT_SUMMARY_BYTES

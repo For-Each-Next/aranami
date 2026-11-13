@@ -1,7 +1,7 @@
 [project]
 name = "aranami"
-version = "0.8.8"
-description = "Toolforge automation for Wikipedia reports and a read-only dashboard."
+version = "0.9.2"
+description = "Wikipedia reports and a read-only dashboard with Django."
 readme = "README.md"
 authors = [
     { name = "For Each ... Next", email = "for_each_next@outlook.com" },
@@ -9,15 +9,16 @@ authors = [
 license = "CC0-1.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.15"
-keywords = ["dashboard", "mediawiki", "pywikibot", "toolforge", "wikipedia"]
+keywords = ["dashboard", "mediawiki", "pywikibot", "toolforge", "django", "wikipedia"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 7 - Inactive",
     "Environment :: Console",
     "Environment :: Web Environment",
-    "Framework :: FastAPI",
+    "Framework :: Django",
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
     "Operating System :: OS Independent",
+    "Programming Language :: JavaScript",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
@@ -29,7 +30,7 @@ classifiers = [
 dependencies = [
     "apscheduler",
     "dateparser",
-    "fastapi",
+    "django",
     "jieba",
     "jinja2",
     "markupsafe",
@@ -51,7 +52,7 @@ Homepage = "https://aranami.toolforge.org/"
 [dependency-groups]
 dev = [
     "httpx2",
-    "ruff",
+    "starlette",
 ]
 
 [tool.uv]

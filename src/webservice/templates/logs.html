@@ -1,12 +1,17 @@
 {% extends "base.html" %}
-{% block contents_links %}
-<ul><li><a href="#log-archive">{{ t.logs.archive }}</a></li></ul>
-{% endblock %}
+{% block assets %}<script type="module" src="{{ asset_url('components.js') }}"></script>{% endblock %}
+{% block contents_links %}<ul><li><a href="#log-activity">{{ t.logs.activity }}</a></li><li><a href="#log-archive">{{ t.logs.archive }}</a></li></ul>{% endblock %}
 {% block content %}
-<section class="section-flat" aria-labelledby="log-archive">
-<h2 id="log-archive">{{ t.logs.archive }}</h2>
-{% if selected_download %}<p class="log-toolbar"><a class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--action-default cdx-button--weight-normal" href="{{ selected_download }}" download>{{ t.logs.download }} · {{ selected_date }}</a></p>{% endif %}
-{% if files %}<div class="cdx-table"><div class="cdx-table__table-wrapper table-scroll" tabindex="0" role="region" aria-label="{{ t.logs.archive }}"><table class="cdx-table__table logs-table"><caption class="visually-hidden">{{ t.logs.archive }}</caption><thead><tr><th scope="col">{{ t.logs.column_date }}</th><th scope="col">{{ t.logs.column_file }}</th><th scope="col" class="cdx-table__table__cell--align-number">{{ t.logs.column_size }}</th></tr></thead><tbody>{% for file in files %}<tr><th scope="row"><a href="{{ file.url }}">{{ file.date }}</a></th><td class="log-download"><a class="filename" href="{{ file.download_url }}" download>{{ file.name }}</a></td><td class="cdx-table__table__cell--align-number">{{ file.size_label }}</td></tr>{% endfor %}</tbody></table></div></div>
-{% else %}<div class="cdx-message cdx-message--notice"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ t.logs.empty }}</div></div>{% endif %}
-</section>
+<section class="section-flat" aria-labelledby="log-activity"><h2 id="log-activity">{{ t.logs.activity }}</h2><p class="page-description">{{ t.logs.activity_note }}</p>
+<form class="log-filters" method="get" action="/logs/">
+<input type="hidden" name="lang" value="{{ language_tag }}">
+<label>{{ t.logs.column_date }} <input class="ui-text-input__input" type="date" name="date" required value="{{ selected_date }}"></label>
+<label>{{ t.logs.run_id }} <input class="ui-text-input__input" name="run_id" value="{{ run_id }}" pattern="[0-9a-f]{32}" maxlength="32"></label>
+<label>{{ t.logs.query }} <input class="ui-text-input__input" type="search" name="q" value="{{ query }}" maxlength="256"></label>
+<button class="ui-button ui-button--action-progressive ui-button--weight-primary" type="submit">{{ t.logs.apply }}</button></form>
+{% if log_availability == 'unreadable' %}<p class="ui-message ui-message--warning" role="status">{{ t.logs.partial }}</p>{% elif log_availability == 'missing' %}<p class="context">{{ t.logs.missing }}</p>{% endif %}
+{% if activity %}<div class="ui-table"><div class="ui-table__table-wrapper table-scroll" tabindex="0" role="region" aria-label="{{ t.logs.activity }}"><table class="ui-table__table logs-table"><thead><tr><th scope="col">{{ t.logs.column_date }}</th><th scope="col">{{ t.logs.level }}</th><th scope="col">{{ t.logs.event }}</th><th scope="col">{{ t.logs.details }}</th></tr></thead><tbody>{% for event in activity %}<tr><td>{% with time=event.time %}{% include "includes/time.html" %}{% endwith %}</td><td>{{ event.level }}</td><th scope="row">{{ event.kind }}</th><td><details><summary>{{ t.logs.details }}</summary><dl class="log-fields">{% for key,value in event.fields %}<dt>{{ key }}</dt><dd>{{ value }}</dd>{% endfor %}</dl></details></td></tr>{% endfor %}</tbody></table></div></div>{% elif log_availability == 'available' %}<p class="context">{{ t.logs.no_events }}</p>{% endif %}
+{% if log_truncated %}<p class="context">{{ t.logs.truncated }}</p>{% endif %}</section>
+<section class="section-flat" aria-labelledby="log-archive"><h2 id="log-archive">{{ t.logs.archive }}</h2>
+{% if files %}<div class="ui-table"><div class="ui-table__table-wrapper table-scroll" tabindex="0" role="region" aria-label="{{ t.logs.archive }}"><table class="ui-table__table logs-table"><caption class="visually-hidden">{{ t.logs.archive }}</caption><thead><tr><th scope="col">{{ t.logs.column_date }}</th><th scope="col">{{ t.logs.stream }}</th><th scope="col">{{ t.logs.column_file }}</th><th scope="col" class="ui-table__table__cell--align-number">{{ t.logs.column_size }}</th></tr></thead><tbody>{% for file in files %}<tr><th scope="row">{{ file.date }}</th><td>{{ file.stream_label }}</td><td class="log-download"><a class="filename" href="{{ file.view_url }}">{{ file.name }}</a></td><td class="ui-table__table__cell--align-number">{{ file.size_label }}</td></tr>{% endfor %}</tbody></table></div></div>{% else %}<p class="context">{{ t.logs.empty }}</p>{% endif %}</section>
 {% endblock %}

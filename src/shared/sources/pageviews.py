@@ -50,6 +50,7 @@ from tqdm import tqdm
 from shared.identity import USER_AGENT
 from shared.sources import pageviews_rate
 from shared.sources.cycle import read_top_pageviews
+from shared.support.activity import report_activity
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -235,6 +236,12 @@ def fetch_project_total(site: BaseSite, day: dt.date) -> int:
     """  # ruff: ignore[docstring-extraneous-exception]
     project = site.hostname().strip().lower()
     stamp = day.strftime("%Y%m%d")
+    report_activity(
+        "pageviews",
+        "site_traffic",
+        wiki=project,
+        date=day,
+    )
     base = "https://wikimedia.org/api/rest_v1/metrics/pageviews/aggregate/"
     # ruff: ignore[suspicious-url-open-usage]
     request = urllib.request.Request(
@@ -355,6 +362,12 @@ def _request_top_payload(
     Raises:
         urllib.error.HTTPError: The requested top list is unavailable.
     """
+    report_activity(
+        "pageviews",
+        "top_pages",
+        wiki=project,
+        target="/".join(period),
+    )
     base = "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/"
     segments = (project, "all-access", *period)
     # ruff: ignore[suspicious-url-open-usage]
@@ -655,6 +668,14 @@ def _request_daily_pageviews(
         Decoded daily observations in API order, or an empty list for
         HTTP 404.
     """
+    report_activity(
+        "pageviews",
+        "article_traffic",
+        wiki=project,
+        target=page,
+        references=(("page", page),),
+        date=start,
+    )
     request = _build_request(project, page, start, stop)
     return _open_request(request)
 

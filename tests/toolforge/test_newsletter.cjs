@@ -6,7 +6,7 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-const script = fs.readFileSync(path.resolve(__dirname, "../../dist/webservice/public_html/newsletter.js"), "utf8");
+const script = fs.readFileSync(path.resolve(__dirname, "../../src/webservice/public_html/newsletter.js"), "utf8");
 
 function fixture(clipboard) {
     const status = {textContent: ""};

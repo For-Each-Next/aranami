@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import polars as pl
 
-from backend.support import dyk_cache
+from data.caching import dyk as dyk_cache
 from shared.support.cache import write_parquet_cache
 
 
@@ -55,7 +55,7 @@ class TestParquetReplacement(TestCase):
             dyk_cache.save(original)
             with (
                 patch.object(Path, "replace", side_effect=OSError),
-                self.assertLogs("backend.support.dyk_cache", level="WARNING"),
+                self.assertLogs("data.caching.dyk", level="WARNING"),
             ):
                 dyk_cache.save(replacement)
             assert dyk_cache.load().equals(original)

@@ -45,9 +45,9 @@
     "zh-hant": "條目維護"
   },
   "nav.project": {
-    "en": "Video games WikiProject",
-    "zh-hans": "电子游戏专题",
-    "zh-hant": "電子遊戲專題"
+    "en": "Visit the Video games WikiProject",
+    "zh-hans": "前往电子游戏专题",
+    "zh-hant": "前往電子遊戲專題"
   },
   "nav.about": {
     "en": "About Aranami",
@@ -89,15 +89,25 @@
     "zh-hans": "启动时间",
     "zh-hant": "啟動時間"
   },
+  "server.stopping": {
+    "en": "stop requested at ",
+    "zh-hans": "停止时间",
+    "zh-hant": "停止時間"
+  },
+  "server.stopped": {
+    "en": "Stopped",
+    "zh-hans": "已停止",
+    "zh-hant": "已停止"
+  },
   "nav.contents": {
     "en": "Contents",
     "zh-hans": "目录",
     "zh-hant": "目錄"
   },
   "about.intro": {
-    "en": "Aranami ({name}, “raging waves”) supports the {project} on {wikipedia}. It updates on-wiki reports and brings together content reviews, article highlights, maintenance tasks, and newsletter drafts.",
-    "zh-hans": "Aranami（{name}，意为「狂澜」）服务于{wikipedia}之{project}，自动更新站内报告，并汇集内容评审、条目佳作、维护任务与简讯草稿。",
-    "zh-hant": "Aranami（{name}，意為「狂瀾」）服務於{wikipedia}之{project}，自動更新站內報告，並彙整內容評審、條目佳作、維護任務與簡訊草稿。"
+    "en": "Aranami ({name}, “raging waves”) supports the {project} on {wikipedia} with semi-automatic on-wiki reports and online tools.",
+    "zh-hans": "Aranami（{name}，意为「狂澜」）为{wikipedia}之{project}提供半自动更新的站内报告与在线工具。",
+    "zh-hant": "Aranami（{name}，意為「狂瀾」）為{wikipedia}之{project}提供半自動更新的站內報告與線上工具。"
   },
   "about.contact": {
     "en": "Source code is available on {source}. If you have questions, contact {user}.",
@@ -324,6 +334,51 @@
     "zh-hans": "评审区",
     "zh-hant": "評審區"
   },
+  "reviews.ongoing": {
+    "en": "Under review",
+    "zh-hans": "评审中",
+    "zh-hant": "評審中"
+  },
+  "reviews.ended": {
+    "en": "Ended",
+    "zh-hans": "已结束",
+    "zh-hant": "已結束"
+  },
+  "reviews.passed": {
+    "en": "Selected",
+    "zh-hans": "已入选",
+    "zh-hant": "已入選"
+  },
+  "reviews.failed": {
+    "en": "Not selected",
+    "zh-hans": "已落选",
+    "zh-hant": "已落選"
+  },
+  "reviews.age_months": {
+    "en": "{count}mo ago",
+    "zh-hans": "{count}月前",
+    "zh-hant": "{count}月前"
+  },
+  "reviews.age_days": {
+    "en": "{count}d ago",
+    "zh-hans": "{count}日前",
+    "zh-hant": "{count}日前"
+  },
+  "reviews.age_hours": {
+    "en": "{count}h ago",
+    "zh-hans": "{count}小时前",
+    "zh-hant": "{count}小時前"
+  },
+  "reviews.age_minutes": {
+    "en": "{count}m ago",
+    "zh-hans": "{count}分钟前",
+    "zh-hant": "{count}分鐘前"
+  },
+  "reviews.time_details": {
+    "en": "{event} ({time})",
+    "zh-hans": "{event}（{time}）",
+    "zh-hant": "{event}（{time}）"
+  },
   "reviews.started_days": {
     "en": "Started {count}d ago",
     "zh-hans": "{count}日前发起",
@@ -446,13 +501,13 @@
   },
   "homepage.recognized": {
     "en": "Main-page highlights",
-    "zh-hans": "佳作展示",
-    "zh-hant": "佳作展示"
+    "zh-hans": "首页展示",
+    "zh-hant": "首頁展示"
   },
   "homepage.dyk": {
     "en": "New article highlights",
-    "zh-hans": "新篇推荐",
-    "zh-hant": "新篇推薦"
+    "zh-hans": "新条目推荐",
+    "zh-hant": "新條目推薦"
   },
   "homepage.news": {
     "en": "In the news",
@@ -594,6 +649,11 @@
     "zh-hans": "准备中",
     "zh-hant": "準備中"
   },
+  "progress.source_read": {
+    "en": "Reading source data",
+    "zh-hans": "正在读取来源数据",
+    "zh-hant": "正在讀取來源資料"
+  },
   "progress.publishing": {
     "en": "Publishing",
     "zh-hans": "发布中",
@@ -615,9 +675,14 @@
     "zh-hant": "計算排名"
   },
   "progress.count": {
-    "en": "{phase} ({current}/{total})",
-    "zh-hans": "{phase}（{current}/{total}）",
-    "zh-hant": "{phase}（{current}/{total}）"
+    "en": "{phase}, progress {current}/{total}",
+    "zh-hans": "{phase}，进度{current}/{total}",
+    "zh-hant": "{phase}，進度{current}/{total}"
+  },
+  "progress.pageviews_date_sentence": {
+    "en": "Updating pageviews for {date}.",
+    "zh-hans": "正在更新{date}的浏览量记录。",
+    "zh-hant": "正在更新{date}的瀏覽量紀錄。"
   },
   "progress.pageviews_date": {
     "en": "Updating pageviews for {date}",
@@ -738,11 +803,6 @@
     "en": "Running; scheduled work is paused",
     "zh-hans": "运行中，定时任务已暂停",
     "zh-hant": "運行中，排程任務已暫停"
-  },
-  "server.stopped": {
-    "en": "Stopped",
-    "zh-hans": "已停止",
-    "zh-hant": "已停止"
   },
   "server.missing": {
     "en": "Unavailable; no current server observation",
@@ -1170,9 +1230,9 @@
     "zh-hant": "每日日誌封存"
   },
   "logs.task_label": {
-    "en": "Task or service",
-    "zh-hans": "任务或服务",
-    "zh-hant": "任務或服務"
+    "en": "Content",
+    "zh-hans": "内容",
+    "zh-hant": "內容"
   },
   "assessment.description.class.FA": {
     "en": "FA-Class",
@@ -1524,10 +1584,10 @@
     "zh-hans": "许可与鸣谢",
     "zh-hant": "許可與鳴謝"
   },
-  "about.codex": {
-    "en": "Interface components:",
-    "zh-hans": "界面组件：",
-    "zh-hant": "介面元件："
+  "about.django": {
+    "en": "Web framework:",
+    "zh-hans": "网页框架：",
+    "zh-hant": "網頁框架："
   },
   "backlog.regex": {
     "en": "Regular expression",
@@ -1550,14 +1610,179 @@
     "zh-hant": "{count}小時前發起"
   },
   "reports.intro": {
-    "en": "Check on-wiki report update status.",
-    "zh-hans": "检查站内报告页更新状态",
-    "zh-hant": "檢查站內報告頁更新狀態"
+    "en": "Follow Aranami’s on-wiki reports, their latest checks and confirmed updates. Select a status for page results and recorded actions. All times are UTC.",
+    "zh-hans": "查看Aranami的站内报告、最近检查与已确认的更新。点击状态可查看各页面的发布结果与操作记录。所有时间均为UTC。",
+    "zh-hant": "查看Aranami的站內報告、最近檢查與已確認的更新。點選狀態可查看各頁面的發佈結果與操作紀錄。所有時間均為UTC。"
+  },
+  "reports.latest_run": {
+    "en": "Latest check:",
+    "zh-hans": "最近检查：",
+    "zh-hant": "最近檢查："
+  },
+  "reports.updated_daily": {
+    "en": "Updated the {date} report",
+    "zh-hans": "已更新{date}报告",
+    "zh-hant": "已更新{date}報告"
+  },
+  "reports.updated_hourly": {
+    "en": "Updated through {date}, {hour}",
+    "zh-hans": "更新至{date}{hour}时",
+    "zh-hant": "更新至{date}{hour}時"
+  },
+  "reports.last_execution": {
+    "en": "Last execution",
+    "zh-hans": "最后执行",
+    "zh-hant": "最後執行"
+  },
+  "reports.next_execution": {
+    "en": "Next execution",
+    "zh-hans": "下次执行",
+    "zh-hant": "下次執行"
+  },
+  "reports.execution_started": {
+    "en": "Execution started",
+    "zh-hans": "执行开始",
+    "zh-hant": "執行開始"
+  },
+  "reports.running.started": {
+    "en": "Starting the report…",
+    "zh-hans": "正在启动报告任务……",
+    "zh-hant": "正在啟動報告工作……"
+  },
+  "reports.running.fetching": {
+    "en": "Reading source data…",
+    "zh-hans": "正在读取来源数据……",
+    "zh-hant": "正在讀取來源資料……"
+  },
+  "reports.running.preparing": {
+    "en": "Processing data…",
+    "zh-hans": "正在处理资料……",
+    "zh-hant": "正在處理資料……"
+  },
+  "reports.running.database_updated": {
+    "en": "Report data retained; preparing publication…",
+    "zh-hans": "报告数据已保存，正在准备发布……",
+    "zh-hant": "報告資料已儲存，正在準備發佈……"
+  },
+  "reports.running.checking": {
+    "en": "Checking the destination page{scope}…",
+    "zh-hans": "正在检查目标页面{scope}……",
+    "zh-hant": "正在檢查目標頁面{scope}……"
+  },
+  "reports.running.saving": {
+    "en": "Submitting the destination page{scope}…",
+    "zh-hans": "正在提交目标页面{scope}……",
+    "zh-hant": "正在提交目標頁面{scope}……"
+  },
+  "reports.running.publishing": {
+    "en": "Publishing the report…",
+    "zh-hans": "正在发布报告……",
+    "zh-hant": "正在發佈報告……"
+  },
+  "reports.running.pageviews_readiness": {
+    "en": "Checking daily pageview availability…",
+    "zh-hans": "正在检查当日浏览量数据……",
+    "zh-hant": "正在檢查當日瀏覽量資料……"
+  },
+  "reports.running.pageviews_download": {
+    "en": "Fetching pageviews…",
+    "zh-hans": "正在抓取浏览量……",
+    "zh-hant": "正在擷取瀏覽量……"
+  },
+  "reports.running.pageviews_aggregate": {
+    "en": "Calculating rankings…",
+    "zh-hans": "正在计算排名……",
+    "zh-hant": "正在計算排名……"
+  },
+  "reports.running.source_read": {
+    "en": "Reading {dataset} from {provider}{scope}…",
+    "zh-hans": "正在从{provider}读取{dataset}{scope}……",
+    "zh-hant": "正在從{provider}讀取{dataset}{scope}……"
+  },
+  "reports.source.provider.saved": {
+    "en": "saved data",
+    "zh-hans": "已保存数据",
+    "zh-hant": "已儲存資料"
+  },
+  "reports.source.provider.replica": {
+    "en": "Wiki Replicas",
+    "zh-hans": "Wiki Replicas",
+    "zh-hant": "Wiki Replicas"
+  },
+  "reports.source.provider.mediawiki": {
+    "en": "the MediaWiki API",
+    "zh-hans": "MediaWiki API",
+    "zh-hant": "MediaWiki API"
+  },
+  "reports.source.provider.pageviews": {
+    "en": "the Wikimedia Pageviews API",
+    "zh-hans": "维基媒体浏览量API",
+    "zh-hant": "維基媒體瀏覽量API"
+  },
+  "reports.source.dataset.project_membership": {
+    "en": "project membership",
+    "zh-hans": "专题成员数据",
+    "zh-hant": "專題成員資料"
+  },
+  "reports.source.dataset.page_text": {
+    "en": "page source code",
+    "zh-hans": "源代码",
+    "zh-hant": "原始碼"
+  },
+  "reports.source.dataset.page_history": {
+    "en": "revision history",
+    "zh-hans": "修订记录",
+    "zh-hant": "修訂紀錄"
+  },
+  "reports.source.dataset.page_metadata": {
+    "en": "page metadata",
+    "zh-hans": "信息",
+    "zh-hant": "資訊"
+  },
+  "reports.source.dataset.pageviews": {
+    "en": "pageview observations",
+    "zh-hans": "浏览量数据",
+    "zh-hant": "瀏覽量資料"
+  },
+  "reports.source.dataset.query": {
+    "en": "query results",
+    "zh-hans": "查询结果",
+    "zh-hant": "查詢結果"
+  },
+  "reports.source.dataset.database_query": {
+    "en": "database query results",
+    "zh-hans": "数据库查询结果",
+    "zh-hant": "資料庫查詢結果"
+  },
+  "reports.source.dataset.site_traffic": {
+    "en": "site traffic",
+    "zh-hans": "全站流量",
+    "zh-hant": "全站流量"
+  },
+  "reports.source.dataset.top_pages": {
+    "en": "top-page rankings",
+    "zh-hans": "热门页面排名",
+    "zh-hant": "熱門頁面排名"
+  },
+  "reports.source.dataset.article_traffic": {
+    "en": "article traffic",
+    "zh-hans": "条目流量",
+    "zh-hant": "條目流量"
+  },
+  "reports.actions": {
+    "en": "Recorded actions",
+    "zh-hans": "操作记录",
+    "zh-hant": "操作紀錄"
+  },
+  "reports.finished_at": {
+    "en": "Finished at",
+    "zh-hans": "结束时间",
+    "zh-hant": "結束時間"
   },
   "reports.history_note": {
-    "en": "The latest 20 job invocations. Select a task to read its recorded stages.",
-    "zh-hans": "最近20次任务执行。点击任务可查看各阶段记录。",
-    "zh-hant": "最近20次任務執行。點選任務可查看各階段紀錄。"
+    "en": "Executions from the last 168 hours, ten per page. Select a result to inspect its recorded actions.",
+    "zh-hans": "列出最近168小时的执行记录，每页10项。点击结果可查看本次操作记录。",
+    "zh-hant": "列出最近168小時的執行紀錄，每頁10項。點選結果可查看本次操作紀錄。"
   },
   "reports.empty": {
     "en": "No saved job invocations are available yet.",
@@ -1565,19 +1790,24 @@
     "zh-hant": "尚無任務執行紀錄。"
   },
   "reports.stage.started": {
-    "en": "Started",
-    "zh-hans": "开始",
-    "zh-hant": "開始"
+    "en": "Job started",
+    "zh-hans": "作业开始",
+    "zh-hant": "作業開始"
   },
   "reports.stage.fetching": {
     "en": "Reading source data",
     "zh-hans": "读取来源数据",
     "zh-hant": "讀取來源資料"
   },
+  "reports.stage.source_read": {
+    "en": "Reading source data",
+    "zh-hans": "读取来源数据",
+    "zh-hant": "讀取來源資料"
+  },
   "reports.stage.preparing": {
-    "en": "Preparing report",
-    "zh-hans": "整理报告",
-    "zh-hant": "整理報告"
+    "en": "Processing data",
+    "zh-hans": "处理资料",
+    "zh-hant": "處理資料"
   },
   "reports.stage.database_updated": {
     "en": "Report data saved",
@@ -1588,6 +1818,11 @@
     "en": "Checking and submitting page",
     "zh-hans": "检查并提交页面",
     "zh-hant": "檢查並提交頁面"
+  },
+  "reports.stage.checking": {
+    "en": "Checking destination page",
+    "zh-hans": "检查目标页面",
+    "zh-hant": "檢查目標頁面"
   },
   "reports.stage.saved": {
     "en": "Page saved",
@@ -1600,9 +1835,9 @@
     "zh-hant": "頁面儲存失敗"
   },
   "reports.stage.no_update": {
-    "en": "No page changes needed",
-    "zh-hans": "无需提交页面",
-    "zh-hant": "無需提交頁面"
+    "en": "No edit needed",
+    "zh-hans": "无需编辑",
+    "zh-hant": "無需編輯"
   },
   "reports.stage.deferred": {
     "en": "Waiting to retry",
@@ -1615,9 +1850,44 @@
     "zh-hant": "儲存結果未確認"
   },
   "reports.stage.finished": {
-    "en": "Finished",
-    "zh-hans": "结束",
-    "zh-hant": "結束"
+    "en": "Job completed",
+    "zh-hans": "作业完成",
+    "zh-hant": "作業完成"
+  },
+  "reports.stage.failed": {
+    "en": "Job failed",
+    "zh-hans": "作业失败",
+    "zh-hant": "作業失敗"
+  },
+  "reports.stage.finished_duration": {
+    "en": "Job completed in {elapsed}.",
+    "zh-hans": "作业完成，用时{elapsed}。",
+    "zh-hant": "作業完成，用時{elapsed}。"
+  },
+  "reports.stage.failed_duration": {
+    "en": "Job failed after {elapsed}.",
+    "zh-hans": "作业失败，用时{elapsed}。",
+    "zh-hant": "作業失敗，用時{elapsed}。"
+  },
+  "reports.stage.deferred_duration": {
+    "en": "Job deferred after {elapsed}; waiting to retry.",
+    "zh-hans": "作业延后，用时{elapsed}，等待重试。",
+    "zh-hant": "作業延後，用時{elapsed}，等待重試。"
+  },
+  "reports.elapsed.hours": {
+    "en": "{count} hr",
+    "zh-hans": "{count}小时",
+    "zh-hant": "{count}小時"
+  },
+  "reports.elapsed.minutes": {
+    "en": "{count} min",
+    "zh-hans": "{count}分",
+    "zh-hant": "{count}分"
+  },
+  "reports.elapsed.seconds": {
+    "en": "{count} sec",
+    "zh-hans": "{count}秒",
+    "zh-hant": "{count}秒"
   },
   "reports.stage_truncated": {
     "en": "Some intermediate stages were omitted from this bounded history.",
@@ -1859,19 +2129,2389 @@
     "zh-hans": "专题重要度评级：{grade}",
     "zh-hant": "專題重要度評級：{grade}"
   },
-  "server.web_version": {
-    "en": "Website version",
-    "zh-hans": "网站版本",
-    "zh-hant": "網站版本"
-  },
-  "server.hub_version": {
-    "en": "Hub version",
-    "zh-hans": "后台版本",
-    "zh-hant": "後台版本"
+  "server.version": {
+    "en": "Version",
+    "zh-hans": "版本",
+    "zh-hant": "版本"
   },
   "newsletter.generated_source": {
     "en": " (automatically generated wikitext)",
     "zh-hans": "（自动生成的维基代码）",
     "zh-hant": "（自動產生的維基代碼）"
+  },
+  "consistency.heading": {
+    "en": "Maintenance information consistency checks",
+    "zh-hans": "维护信息一致性检查",
+    "zh-hant": "維護資訊一致性檢查"
+  },
+  "consistency.unavailable": {
+    "en": "Consistency observations are not available yet.",
+    "zh-hans": "暂时没有一致性检查记录。",
+    "zh-hant": "暫時沒有一致性檢查紀錄。"
+  },
+  "consistency.coverage": {
+    "en": "Checks: {complete} complete · {unavailable} unavailable · {unsupported} unsupported.",
+    "zh-hans": "检查覆盖：{complete}项完成 · {unavailable}项暂不可用 · {unsupported}项尚不支持。",
+    "zh-hant": "檢查涵蓋：{complete}項完成 · {unavailable}項暫不可用 · {unsupported}項尚不支援。"
+  },
+  "consistency.empty": {
+    "en": "No discrepancies were found in completed checks.",
+    "zh-hans": "已完成的检查未发现不一致。",
+    "zh-hant": "已完成的檢查未發現不一致。"
+  },
+  "consistency.task.nomination": {
+    "en": "Missing nomination banners",
+    "zh-hans": "缺少提名横幅",
+    "zh-hant": "缺少提名橫幅"
+  },
+  "consistency.task.award": {
+    "en": "Missing article recognition markers",
+    "zh-hans": "缺少条目荣誉标记",
+    "zh-hant": "缺少條目榮譽標記"
+  },
+  "consistency.task.history": {
+    "en": "Missing main-page history",
+    "zh-hans": "缺少首页展示历史",
+    "zh-hant": "缺少首頁展示歷史"
+  },
+  "consistency.task.quality_history": {
+    "en": "Missing project review history",
+    "zh-hans": "缺少专题评审历史",
+    "zh-hant": "缺少專題評審歷史"
+  },
+  "consistency.view_all": {
+    "en": "View all {count} articles",
+    "zh-hans": "查看全部{count}篇",
+    "zh-hant": "查看全部{count}篇"
+  },
+  "consistency.task.project_list_missing": {
+    "en": "Articles missing from project lists",
+    "zh-hans": "专题列表遗漏条目",
+    "zh-hant": "專題列表遺漏條目"
+  },
+  "consistency.task.project_list_extra": {
+    "en": "Extra articles in project lists",
+    "zh-hans": "专题列表多余条目",
+    "zh-hant": "專題列表多餘條目"
+  },
+  "consistency.finding.nomination": {
+    "en": "A nomination is documented, but the talk page is missing {template}.",
+    "zh-hans": "已有提名记录，但讨论页缺少{template}。",
+    "zh-hant": "已有提名紀錄，但討論頁缺少{template}。"
+  },
+  "consistency.finding.award": {
+    "en": "The article is missing the expected {template} recognition marker.",
+    "zh-hans": "条目缺少对应的{template}荣誉标记。",
+    "zh-hant": "條目缺少對應的{template}榮譽標記。"
+  },
+  "consistency.finding.quality_history": {
+    "en": "The current project assessment lacks a successful {field} action in {template}.",
+    "zh-hans": "当前专题评级缺少{template}中对应的{field}通过记录。",
+    "zh-hant": "目前專題評級缺少{template}中對應的{field}通過紀錄。"
+  },
+  "consistency.finding.history": {
+    "en": "The documented main-page appearance is missing {field} in {template}.",
+    "zh-hans": "已有首页展示记录，但{template}缺少{field}。",
+    "zh-hant": "已有首頁展示紀錄，但{template}缺少{field}。"
+  },
+  "consistency.finding.history_template": {
+    "en": "The documented main-page appearance is missing its {template} history entry.",
+    "zh-hans": "已有首页展示记录，但缺少相应的{template}历史记录。",
+    "zh-hant": "已有首頁展示紀錄，但缺少相應的{template}歷史紀錄。"
+  },
+  "consistency.finding.project_list_missing": {
+    "en": "The saved project assessment includes this article, but the corresponding project list does not.",
+    "zh-hans": "已保存的专题评级包含此条目，但对应的专题列表未列出。",
+    "zh-hant": "已儲存的專題評級包含此條目，但對應的專題列表未列出。"
+  },
+  "consistency.finding.project_list_extra": {
+    "en": "The project list includes this article, but the saved assessment does not place it in that list.",
+    "zh-hans": "专题列表列出了此条目，但已保存的评级不符合该列表。",
+    "zh-hant": "專題列表列出了此條目，但已儲存的評級不符合該列表。"
+  },
+  "consistency.talk": {
+    "en": "Talk page",
+    "zh-hans": "讨论页",
+    "zh-hant": "討論頁"
+  },
+  "consistency.evidence": {
+    "en": "Finding and evidence",
+    "zh-hans": "问题与依据",
+    "zh-hant": "問題與依據"
+  },
+  "consistency.source": {
+    "en": "Evidence",
+    "zh-hans": "依据",
+    "zh-hant": "依據"
+  },
+  "consistency.checked_revision": {
+    "en": "Checked revision",
+    "zh-hans": "已检查版本",
+    "zh-hant": "已檢查版本"
+  },
+  "consistency.checked_page": {
+    "en": "Checked page",
+    "zh-hans": "已检查页面",
+    "zh-hant": "已檢查頁面"
+  },
+  "consistency.observed": {
+    "en": "Observed (UTC)",
+    "zh-hans": "观察时间（UTC）",
+    "zh-hant": "觀察時間（UTC）"
+  },
+  "consistency.event_date": {
+    "en": "Appearance date",
+    "zh-hans": "展示日期",
+    "zh-hant": "展示日期"
+  },
+  "consistency.review": {
+    "en": "Review the linked evidence and observation times before editing.",
+    "zh-hans": "编辑前请核对链接中的依据与观察时间。",
+    "zh-hant": "編輯前請核對連結中的依據與觀察時間。"
+  },
+  "consistency.project": {
+    "en": "Project",
+    "zh-hans": "专题",
+    "zh-hant": "專題"
+  },
+  "consistency.task.quarterly": {
+    "en": "Missing quarterly challenge statistics",
+    "zh-hans": "缺少季度扩充挑战统计",
+    "zh-hant": "缺少季度擴充挑戰統計"
+  },
+  "consistency.finding.quarterly": {
+    "en": "The completed quarter is missing its statistics row in the project milestone table.",
+    "zh-hans": "专题里程碑表格缺少已结束季度的统计行。",
+    "zh-hant": "專題里程碑表格缺少已結束季度的統計列。"
+  },
+  "consistency.quarter_end": {
+    "en": "Quarter end",
+    "zh-hans": "季度末",
+    "zh-hant": "季度末"
+  },
+  "consistency.unknown": {
+    "en": "Unknown",
+    "zh-hans": "未知",
+    "zh-hant": "未知"
+  },
+  "consistency.page_title": {
+    "en": "Page",
+    "zh-hans": "页面",
+    "zh-hant": "頁面"
+  },
+  "consistency.page_range": {
+    "en": "{start}–{end} of {count} pages",
+    "zh-hans": "第{start}–{end}个，共{count}个页面",
+    "zh-hant": "第{start}–{end}個，共{count}個頁面"
+  },
+  "consistency.snapshot_note": {
+    "en": "Suggestions use the exact quarter-end project snapshot; category counts may differ. Unknown values have no matching observation.",
+    "zh-hans": "建议数值来自对应季度末的专题快照，可能与分类计数不同。未知表示没有对应的观察数据。",
+    "zh-hant": "建議數值來自對應季度末的專題快照，可能與分類計數不同。未知表示沒有對應的觀察資料。"
+  },
+  "consistency.quality_note": {
+    "en": "Quality index: weighted mean on a 1–10 scale, using 10, 8, 7, 5, 3 and 1 for the six quality groups listed above.",
+    "zh-hans": "质量指数为1–10分的加权平均值，六个质量组依次使用权重10、8、7、5、3、1。",
+    "zh-hant": "品質指數為1–10分的加權平均值，六個品質組依次使用權重10、8、7、5、3、1。"
+  },
+  "consistency.metrics.fa": {
+    "en": "FA / FL / A / AL",
+    "zh-hans": "典范／特色列表／甲／甲级列表",
+    "zh-hant": "典範／特色列表／甲／甲級列表"
+  },
+  "consistency.metrics.ga": {
+    "en": "GA / B+",
+    "zh-hans": "优良／乙上",
+    "zh-hant": "優良／乙上"
+  },
+  "consistency.metrics.b": {
+    "en": "B / BL",
+    "zh-hans": "乙／乙级列表",
+    "zh-hant": "乙／乙級列表"
+  },
+  "consistency.metrics.c": {
+    "en": "C / CL",
+    "zh-hans": "丙／丙级列表",
+    "zh-hant": "丙／丙級列表"
+  },
+  "consistency.metrics.start": {
+    "en": "Start / List",
+    "zh-hans": "初／列表",
+    "zh-hant": "初／列表"
+  },
+  "consistency.metrics.stub": {
+    "en": "Stub / SL / Unassessed",
+    "zh-hans": "小作品／小作品列表／未评级",
+    "zh-hant": "小作品／小作品列表／未評級"
+  },
+  "consistency.metrics.top": {
+    "en": "Top importance",
+    "zh-hans": "极高重要度",
+    "zh-hant": "極高重要度"
+  },
+  "consistency.metrics.high": {
+    "en": "High importance",
+    "zh-hans": "高重要度",
+    "zh-hant": "高重要度"
+  },
+  "consistency.metrics.total": {
+    "en": "Project total",
+    "zh-hans": "专题总数",
+    "zh-hant": "專題總數"
+  },
+  "consistency.metrics.start_percentage": {
+    "en": "Start and above",
+    "zh-hans": "初级及以上比例",
+    "zh-hant": "初級及以上比例"
+  },
+  "consistency.metrics.quality_index": {
+    "en": "Quality index (1–10)",
+    "zh-hans": "质量指数（1–10）",
+    "zh-hant": "品質指數（1–10）"
+  },
+  "consistency.metrics.en_total": {
+    "en": "English project total",
+    "zh-hans": "英文专题总数",
+    "zh-hant": "英文專題總數"
+  },
+  "credits.title.content": {
+    "en": "Content icon credits",
+    "zh-hans": "内容图标署名",
+    "zh-hant": "內容圖示署名"
+  },
+  "credits.title.maintenance": {
+    "en": "Maintenance image credits",
+    "zh-hans": "维护图片署名",
+    "zh-hant": "維護圖片署名"
+  },
+  "credits.title.codex": {
+    "en": "Codex and Vue licenses",
+    "zh-hans": "Codex与Vue许可协议",
+    "zh-hant": "Codex與Vue授權條款"
+  },
+  "credits.title.gpl": {
+    "en": "GNU General Public License, version 2",
+    "zh-hans": "GNU通用公共许可证第2版",
+    "zh-hant": "GNU通用公眾授權條款第2版"
+  },
+  "credits.title.lgpl": {
+    "en": "GNU Lesser General Public License, version 2.1",
+    "zh-hans": "GNU宽通用公共许可证第2.1版",
+    "zh-hant": "GNU較寬鬆通用公眾授權條款第2.1版"
+  },
+  "credits.images": {
+    "en": "Images and attribution",
+    "zh-hans": "图片与署名",
+    "zh-hant": "圖片與署名"
+  },
+  "credits.correspondence": {
+    "en": "Template correspondence",
+    "zh-hans": "模板对应关系",
+    "zh-hant": "模板對應關係"
+  },
+  "credits.main_category": {
+    "en": "Main categories",
+    "zh-hans": "主要分类",
+    "zh-hant": "主要分類"
+  },
+  "credits.author": {
+    "en": "Author",
+    "zh-hans": "作者",
+    "zh-hant": "作者"
+  },
+  "credits.source": {
+    "en": "Source",
+    "zh-hans": "来源",
+    "zh-hant": "來源"
+  },
+  "credits.license": {
+    "en": "License",
+    "zh-hans": "许可协议",
+    "zh-hant": "授權條款"
+  },
+  "credits.original_language": {
+    "en": "Attribution and license wording is preserved in its original English.",
+    "zh-hans": "署名及许可条款保留英文原文。",
+    "zh-hant": "署名及授權條款保留英文原文。"
+  },
+  "credits.interface_icons": {
+    "en": "Interface icons",
+    "zh-hans": "界面图标",
+    "zh-hant": "介面圖示"
+  },
+  "logs.started_at": {
+    "en": "Job start time",
+    "zh-hans": "作业开始时间",
+    "zh-hant": "作業開始時間"
+  },
+  "observability.services": {
+    "en": "Service health",
+    "zh-hans": "服务状况",
+    "zh-hant": "服務狀況"
+  },
+  "observability.services_note": {
+    "en": "Freshness describes the latest heartbeat; the saved lifecycle describes what the service last reported.",
+    "zh-hans": "新鲜度反映最近一次心跳；运行状态是服务最后报告的状态。",
+    "zh-hant": "新鮮度反映最近一次心跳；執行狀態是服務最後回報的狀態。"
+  },
+  "observability.schedule": {
+    "en": "Scheduled work",
+    "zh-hans": "作业计划",
+    "zh-hant": "作業排程"
+  },
+  "observability.no_services": {
+    "en": "No service heartbeat has been saved.",
+    "zh-hans": "尚未保存服务心跳。",
+    "zh-hant": "尚未儲存服務心跳。"
+  },
+  "observability.datasets": {
+    "en": "Dataset freshness",
+    "zh-hans": "数据新鲜度",
+    "zh-hant": "資料新鮮度"
+  },
+  "observability.datasets_note": {
+    "en": "These are accepted datasets. Source observation, durable storage, and covered dates remain distinct.",
+    "zh-hans": "此处列出已接受的数据，分别显示来源观测时间、保存时间与覆盖日期。",
+    "zh-hant": "此處列出已接受的資料，分別顯示來源觀測時間、儲存時間與涵蓋日期。"
+  },
+  "observability.dataset": {
+    "en": "Dataset",
+    "zh-hans": "数据集",
+    "zh-hant": "資料集"
+  },
+  "observability.freshness_label": {
+    "en": "Freshness",
+    "zh-hans": "新鲜度",
+    "zh-hant": "新鮮度"
+  },
+  "observability.observed": {
+    "en": "Source observed",
+    "zh-hans": "来源观测",
+    "zh-hant": "來源觀測"
+  },
+  "observability.committed": {
+    "en": "Saved",
+    "zh-hans": "保存时间",
+    "zh-hant": "儲存時間"
+  },
+  "observability.coverage": {
+    "en": "Covered dates",
+    "zh-hans": "覆盖日期",
+    "zh-hant": "涵蓋日期"
+  },
+  "observability.no_datasets": {
+    "en": "No accepted dataset has been recorded.",
+    "zh-hans": "尚无已接受的数据记录。",
+    "zh-hant": "尚無已接受的資料記錄。"
+  },
+  "observability.publications": {
+    "en": "Publication results",
+    "zh-hans": "发布结果",
+    "zh-hant": "發佈結果"
+  },
+  "observability.target": {
+    "en": "Destination",
+    "zh-hans": "目标页面",
+    "zh-hant": "目標頁面"
+  },
+  "observability.confirmed_save": {
+    "en": "Last confirmed save",
+    "zh-hans": "最后确认保存",
+    "zh-hant": "最後確認儲存"
+  },
+  "observability.no_publications": {
+    "en": "No publication attempt has been recorded.",
+    "zh-hans": "尚无发布尝试记录。",
+    "zh-hant": "尚無發佈嘗試記錄。"
+  },
+  "logs.activity": {
+    "en": "Activity",
+    "zh-hans": "活动记录",
+    "zh-hant": "活動記錄"
+  },
+  "logs.activity_note": {
+    "en": "Search saved structured events by UTC date, run ID, or text. Diagnostic segments remain available as downloads.",
+    "zh-hans": "按UTC日期、作业ID或文字查找已保存的结构化事件。诊断日志可单独下载。",
+    "zh-hant": "依UTC日期、作業ID或文字尋找已儲存的結構化事件。診斷日誌可另行下載。"
+  },
+  "logs.query": {
+    "en": "Search events",
+    "zh-hans": "搜索事件",
+    "zh-hant": "搜尋事件"
+  },
+  "logs.run_id": {
+    "en": "Run ID",
+    "zh-hans": "作业ID",
+    "zh-hant": "作業ID"
+  },
+  "logs.apply": {
+    "en": "Apply filters",
+    "zh-hans": "筛选",
+    "zh-hant": "篩選"
+  },
+  "logs.level": {
+    "en": "Level",
+    "zh-hans": "级别",
+    "zh-hant": "級別"
+  },
+  "logs.event": {
+    "en": "Event",
+    "zh-hans": "事件",
+    "zh-hant": "事件"
+  },
+  "logs.details": {
+    "en": "Details",
+    "zh-hans": "详情",
+    "zh-hant": "詳細資料"
+  },
+  "logs.stream": {
+    "en": "Stream",
+    "zh-hans": "日志类型",
+    "zh-hant": "日誌類型"
+  },
+  "logs.stream_activity": {
+    "en": "Activity",
+    "zh-hans": "活动记录",
+    "zh-hant": "活動記錄"
+  },
+  "logs.stream_diagnostics": {
+    "en": "Diagnostics",
+    "zh-hans": "诊断记录",
+    "zh-hant": "診斷記錄"
+  },
+  "logs.no_events": {
+    "en": "No matching activity was found.",
+    "zh-hans": "没有匹配的活动记录。",
+    "zh-hant": "沒有符合條件的活動記錄。"
+  },
+  "logs.partial": {
+    "en": "Some selected activity segments could not be read. Available events are shown below.",
+    "zh-hans": "部分活动日志无法读取，下方显示可用记录。",
+    "zh-hant": "部分活動日誌無法讀取，下方顯示可用記錄。"
+  },
+  "logs.truncated": {
+    "en": "Only the newest matching events are shown. Download a segment for more detail.",
+    "zh-hans": "仅显示最近的匹配事件。下载日志分段可查看详情。",
+    "zh-hant": "僅顯示最近的符合事件。下載日誌分段可查看詳情。"
+  },
+  "logs.missing": {
+    "en": "No activity segments exist for this selection.",
+    "zh-hans": "所选日期没有活动日志。",
+    "zh-hant": "所選日期沒有活動日誌。"
+  },
+  "observability.availability.available": {
+    "en": "Available",
+    "zh-hans": "可用",
+    "zh-hant": "可用"
+  },
+  "observability.availability.missing": {
+    "en": "No status observations have been saved.",
+    "zh-hans": "尚未保存状态观测。",
+    "zh-hant": "尚未儲存狀態觀測。"
+  },
+  "observability.availability.corrupt": {
+    "en": "Saved status is invalid; no outcome is inferred.",
+    "zh-hans": "已保存的状态无效，无法判断结果。",
+    "zh-hant": "已儲存的狀態無效，無法判斷結果。"
+  },
+  "observability.availability.unreadable": {
+    "en": "Saved status cannot be read.",
+    "zh-hans": "无法读取已保存的状态。",
+    "zh-hant": "無法讀取已儲存的狀態。"
+  },
+  "observability.freshness.current": {
+    "en": "Current",
+    "zh-hans": "最新",
+    "zh-hant": "最新"
+  },
+  "observability.freshness.stale": {
+    "en": "Heartbeat stale",
+    "zh-hans": "心跳已过期",
+    "zh-hant": "心跳已過期"
+  },
+  "observability.freshness.unknown": {
+    "en": "Unknown",
+    "zh-hans": "未知",
+    "zh-hant": "未知"
+  },
+  "observability.freshness.behind": {
+    "en": "Behind schedule",
+    "zh-hans": "未按期更新",
+    "zh-hant": "未按期更新"
+  },
+  "observability.freshness.waiting": {
+    "en": "Waiting for source",
+    "zh-hans": "等待来源",
+    "zh-hant": "等待來源"
+  },
+  "observability.service.starting": {
+    "en": "Starting",
+    "zh-hans": "启动中",
+    "zh-hant": "啟動中"
+  },
+  "observability.service.running": {
+    "en": "Running",
+    "zh-hans": "运行中",
+    "zh-hant": "執行中"
+  },
+  "observability.service.paused": {
+    "en": "Paused",
+    "zh-hans": "已暂停",
+    "zh-hant": "已暫停"
+  },
+  "observability.service.draining": {
+    "en": "Stopping",
+    "zh-hans": "停止中",
+    "zh-hant": "停止中"
+  },
+  "observability.service.stopped": {
+    "en": "Stopped",
+    "zh-hans": "已停止",
+    "zh-hant": "已停止"
+  },
+  "observability.execution.running": {
+    "en": "Running",
+    "zh-hans": "执行中",
+    "zh-hant": "執行中"
+  },
+  "observability.execution.succeeded": {
+    "en": "Completed",
+    "zh-hans": "已完成",
+    "zh-hant": "已完成"
+  },
+  "observability.execution.failed": {
+    "en": "Failed",
+    "zh-hans": "失败",
+    "zh-hant": "失敗"
+  },
+  "observability.execution.deferred": {
+    "en": "Deferred",
+    "zh-hans": "延后",
+    "zh-hant": "延後"
+  },
+  "reports.deferred_date": {
+    "en": "Deferred the {date} report",
+    "zh-hans": "{date}报表延后",
+    "zh-hant": "{date}報表延後"
+  },
+  "reports.deferred_reason": {
+    "en": "{result}: {reason}",
+    "zh-hans": "{result}：{reason}",
+    "zh-hant": "{result}：{reason}"
+  },
+  "observability.execution.interrupted": {
+    "en": "Interrupted",
+    "zh-hans": "中断",
+    "zh-hant": "中斷"
+  },
+  "observability.publication.queued": {
+    "en": "Queued",
+    "zh-hans": "排队中",
+    "zh-hant": "排隊中"
+  },
+  "observability.publication.running": {
+    "en": "Publishing",
+    "zh-hans": "发布中",
+    "zh-hant": "發佈中"
+  },
+  "observability.publication.saved": {
+    "en": "Saved",
+    "zh-hans": "已保存",
+    "zh-hant": "已儲存"
+  },
+  "observability.publication.unchanged": {
+    "en": "Unchanged",
+    "zh-hans": "无需更改",
+    "zh-hant": "無需更改"
+  },
+  "observability.publication.failed": {
+    "en": "Failed",
+    "zh-hans": "失败",
+    "zh-hant": "失敗"
+  },
+  "observability.publication.deferred": {
+    "en": "Deferred",
+    "zh-hans": "延后",
+    "zh-hant": "延後"
+  },
+  "observability.publication.unconfirmed": {
+    "en": "Unconfirmed",
+    "zh-hans": "未确认",
+    "zh-hant": "未確認"
+  },
+  "ops.live_stale": {
+    "en": "The displayed status has not been refreshed recently. Last saved observations remain visible.",
+    "zh-hans": "显示的状态近期未刷新，仍保留最后一次有效观测。",
+    "zh-hant": "顯示的狀態近期未重新整理，仍保留最後一次有效觀測。"
+  },
+  "observability.service_name.scheduler": {
+    "en": "Scheduler",
+    "zh-hans": "调度服务",
+    "zh-hant": "排程服務"
+  },
+  "logs.kind.service_started": {
+    "en": "Service started",
+    "zh-hans": "服务启动",
+    "zh-hant": "服務啟動"
+  },
+  "logs.kind.service_stopping": {
+    "en": "Service stopping",
+    "zh-hans": "服务正在停止",
+    "zh-hant": "服務正在停止"
+  },
+  "logs.kind.service_stopped": {
+    "en": "Service stopped",
+    "zh-hans": "服务已停止",
+    "zh-hant": "服務已停止"
+  },
+  "logs.kind.routine_started": {
+    "en": "Report task started",
+    "zh-hans": "报告作业开始",
+    "zh-hant": "報告作業開始"
+  },
+  "logs.kind.routine_stage": {
+    "en": "Execution stage",
+    "zh-hans": "执行阶段",
+    "zh-hant": "執行階段"
+  },
+  "logs.kind.routine_finished": {
+    "en": "Report task finished",
+    "zh-hans": "报告作业结束",
+    "zh-hant": "報告作業結束"
+  },
+  "logs.kind.collection_started": {
+    "en": "Collection started",
+    "zh-hans": "数据采集开始",
+    "zh-hant": "資料擷取開始"
+  },
+  "logs.kind.collection_finished": {
+    "en": "Collection finished",
+    "zh-hans": "数据采集结束",
+    "zh-hant": "資料擷取結束"
+  },
+  "logs.kind.logging_recovered": {
+    "en": "Logging recovered",
+    "zh-hans": "日志记录恢复",
+    "zh-hant": "日誌記錄恢復"
+  },
+  "logs.kind.website_started": {
+    "en": "Website data refresh started",
+    "zh-hans": "网页数据更新开始",
+    "zh-hant": "網頁資料更新開始"
+  },
+  "logs.kind.website_finished": {
+    "en": "Website data refresh finished",
+    "zh-hans": "网页数据更新结束",
+    "zh-hant": "網頁資料更新結束"
+  },
+  "logs.kind.run_started": {
+    "en": "Batch started",
+    "zh-hans": "批量作业开始",
+    "zh-hant": "批次作業開始"
+  },
+  "logs.kind.run_finished": {
+    "en": "Batch finished",
+    "zh-hans": "批量作业结束",
+    "zh-hant": "批次作業結束"
+  },
+  "logs.kind.publication_started": {
+    "en": "Publication started",
+    "zh-hans": "发布开始",
+    "zh-hant": "發佈開始"
+  },
+  "logs.kind.publication_finished": {
+    "en": "Publication attempt finished",
+    "zh-hans": "发布尝试结束",
+    "zh-hant": "發佈嘗試結束"
+  },
+  "logs.kind.dataset_accepted": {
+    "en": "Dataset accepted",
+    "zh-hans": "数据已接受",
+    "zh-hant": "資料已接受"
+  },
+  "observability.service_name.web": {
+    "en": "Web service",
+    "zh-hans": "网页服务",
+    "zh-hant": "網頁服務"
+  },
+  "routine.website": {
+    "en": "Website data refresh",
+    "zh-hans": "网页数据更新",
+    "zh-hant": "網頁資料更新"
+  },
+  "routine.project-data": {
+    "en": "Daily project snapshots",
+    "zh-hans": "每日专题快照",
+    "zh-hant": "每日專題快照"
+  },
+  "routine.newsletter-history": {
+    "en": "Newsletter history collection",
+    "zh-hans": "简讯历史资料采集",
+    "zh-hant": "簡訊歷史資料擷取"
+  },
+  "routine.newsletter-daily": {
+    "en": "Daily newsletter facts",
+    "zh-hans": "每日简讯数据",
+    "zh-hant": "每日簡訊資料"
+  },
+  "reports.report_date": {
+    "en": "Report date: {date}",
+    "zh-hans": "报告日期：{date}",
+    "zh-hant": "報告日期：{date}"
+  },
+  "nav.checks": {
+    "en": "Maintenance tag checks",
+    "zh-hans": "维护标记检查",
+    "zh-hant": "維護標記檢查"
+  },
+  "consistency.copy_code": {
+    "en": "Copy wikicode",
+    "zh-hans": "复制维基代码",
+    "zh-hant": "複製維基代碼"
+  },
+  "consistency.code_copied": {
+    "en": "Copied",
+    "zh-hans": "已复制",
+    "zh-hant": "已複製"
+  },
+  "reports.source.action.source_read": {
+    "en": "{verb} {dataset} from {provider}{wiki}{date}{targets}.",
+    "zh-hans": "调用{provider}{verb}{wiki}{dataset}{date}{targets}。",
+    "zh-hant": "呼叫{provider}{verb}{wiki}{dataset}{date}{targets}。"
+  },
+  "reports.source.purpose.query": {
+    "en": "Querying Wiki Replicas for {purpose}{details}.",
+    "zh-hans": "从Wiki Replicas查询{purpose}{details}。",
+    "zh-hant": "從Wiki Replicas查詢{purpose}{details}。"
+  },
+  "reports.source.purpose.tables": {
+    "en": " using {wiki}.{tables}",
+    "zh-hans": "，使用{wiki}.{tables}",
+    "zh-hant": "，使用{wiki}.{tables}"
+  },
+  "reports.source.purpose.saved": {
+    "en": "Loading {purpose} from local cache.",
+    "zh-hans": "从本地缓存调取{purpose}。",
+    "zh-hant": "從本地快取調取{purpose}。"
+  },
+  "reports.source.purpose.project_membership": {
+    "en": "member pages of project \"{project}\"",
+    "zh-hans": "专题「{project}」的成员页面",
+    "zh-hant": "專題「{project}」的成員頁面"
+  },
+  "reports.source.purpose.category_members": {
+    "en": "{page_kind} in categories {categories}",
+    "zh-hans": "分类{categories}中的{page_kind}",
+    "zh-hant": "分類{categories}中的{page_kind}"
+  },
+  "reports.source.purpose.page_tags": {
+    "en": "selected {page_kind} matching {selections}",
+    "zh-hans": "{selections}中已选的{page_kind}",
+    "zh-hant": "{selections}中已選的{page_kind}"
+  },
+  "reports.source.purpose.latest_revisions": {
+    "en": "revision IDs (page_latest) of selected {page_kind}",
+    "zh-hans": "已选{page_kind}的版本号（page_latest）",
+    "zh-hant": "已選{page_kind}的版本號（page_latest）"
+  },
+  "reports.source.purpose.template_aliases": {
+    "en": "aliases of {template}",
+    "zh-hans": "{template}的别名",
+    "zh-hant": "{template}的別名"
+  },
+  "reports.source.selection.pages": {
+    "en": "pages",
+    "zh-hans": "页面",
+    "zh-hant": "頁面"
+  },
+  "reports.source.selection.talk_pages": {
+    "en": "talk pages",
+    "zh-hans": "讨论页",
+    "zh-hant": "討論頁"
+  },
+  "reports.source.selection.categories": {
+    "en": "categories {names}",
+    "zh-hans": "分类{names}",
+    "zh-hant": "分類{names}"
+  },
+  "reports.source.selection.templates": {
+    "en": "templates {names}",
+    "zh-hans": "模板{names}",
+    "zh-hant": "模板{names}"
+  },
+  "reports.source.membership.file": {
+    "en": "Loaded project member pages from \"{file}\".",
+    "zh-hans": "从「{file}」调取专题成员页面。",
+    "zh-hant": "從「{file}」調取專題成員頁面。"
+  },
+  "reports.source.membership.file_project": {
+    "en": "Loaded member pages for \"{project}\" from \"{file}\".",
+    "zh-hans": "从「{file}」调取专题「{project}」的成员页面。",
+    "zh-hant": "從「{file}」調取專題「{project}」的成員頁面。"
+  },
+  "reports.source.membership.legacy": {
+    "en": "Loaded project member pages from {source}.",
+    "zh-hans": "从{source}调取专题成员页面。",
+    "zh-hant": "從{source}調取專題成員頁面。"
+  },
+  "reports.source.action.query": {
+    "en": "Querying database {wiki}{targets} through {provider}{date}.",
+    "zh-hans": "从{provider}查询{wiki}{targets}{date}。",
+    "zh-hant": "從{provider}查詢{wiki}{targets}{date}。"
+  },
+  "reports.source.action.loaded": {
+    "en": "Loaded {dataset}{wiki}{date}{targets}.",
+    "zh-hans": "已读取{wiki}{dataset}{date}{targets}。",
+    "zh-hant": "已讀取{wiki}{dataset}{date}{targets}。"
+  },
+  "reports.source.action.checking": {
+    "en": "Checking the destination page{targets}.",
+    "zh-hans": "正在检查{targets}。",
+    "zh-hant": "正在檢查{targets}。"
+  },
+  "reports.source.action.saving": {
+    "en": "Submitting the destination page{targets}.",
+    "zh-hans": "正在提交{targets}。",
+    "zh-hant": "正在提交{targets}。"
+  },
+  "reports.source.wiki": {
+    "en": " on {wiki}",
+    "zh-hans": "{wiki}上的",
+    "zh-hant": "{wiki}上的"
+  },
+  "reports.source.targets": {
+    "en": ": {targets}",
+    "zh-hans": "：{targets}",
+    "zh-hant": "：{targets}"
+  },
+  "reports.source.tables": {
+    "en": ".{targets}",
+    "zh-hans": ".{targets}",
+    "zh-hant": ".{targets}"
+  },
+  "reports.source.date": {
+    "en": " for {date}",
+    "zh-hans": "（数据日期：{date}）",
+    "zh-hant": "（資料日期：{date}）"
+  },
+  "reports.source.metadata": {
+    "en": "File {file}; observation started at {observed} UTC and capture finished at {finished} UTC.",
+    "zh-hans": "文件为{file}，观测开始于{observed} UTC，采集完成于{finished} UTC。",
+    "zh-hant": "檔案為{file}，觀測開始於{observed} UTC，擷取完成於{finished} UTC。"
+  },
+  "reports.source.page_id": {
+    "en": "page ID {value}",
+    "zh-hans": "页面ID {value}",
+    "zh-hant": "頁面ID {value}"
+  },
+  "reports.source.more": {
+    "en": "{count} more",
+    "zh-hans": "另有{count}项",
+    "zh-hant": "另有{count}項"
+  },
+  "reports.target.database_updated": {
+    "en": "Generated report data for \"{target}\".",
+    "zh-hans": "已生成「{target}」的报告数据。",
+    "zh-hant": "已生成「{target}」的報告資料。"
+  },
+  "reports.target.checking": {
+    "en": "Checking destination page \"{target}\".",
+    "zh-hans": "正在检查「{target}」。",
+    "zh-hant": "正在檢查「{target}」。"
+  },
+  "reports.target.saving": {
+    "en": "Submitting destination page \"{target}\".",
+    "zh-hans": "正在提交「{target}」。",
+    "zh-hant": "正在提交「{target}」。"
+  },
+  "reports.target.saved": {
+    "en": "Saved wiki page \"{target}\".",
+    "zh-hans": "已向维基保存「{target}」。",
+    "zh-hant": "已向維基儲存「{target}」。"
+  },
+  "reports.target.no_update": {
+    "en": "No edit needed for \"{target}\".",
+    "zh-hans": "无需编辑「{target}」。",
+    "zh-hant": "無需編輯「{target}」。"
+  },
+  "reports.target.save_failed": {
+    "en": "The save of \"{target}\" failed.",
+    "zh-hans": "「{target}」保存失败。",
+    "zh-hant": "「{target}」儲存失敗。"
+  },
+  "reports.target.unconfirmed": {
+    "en": "The save outcome for \"{target}\" is unconfirmed.",
+    "zh-hans": "「{target}」的保存结果未确认。",
+    "zh-hant": "「{target}」的儲存結果未確認。"
+  },
+  "reports.stage.source_loaded": {
+    "en": "Saved data loaded",
+    "zh-hans": "已读取已保存数据",
+    "zh-hant": "已讀取已儲存資料"
+  },
+  "reports.running.source_loaded": {
+    "en": "Saved data loaded; processing data…",
+    "zh-hans": "已读取已保存数据，正在处理资料……",
+    "zh-hant": "已讀取已儲存資料，正在處理資料……"
+  },
+  "reports.source.action.mediawiki": {
+    "en": "{verb} {dataset} from {provider}{targets}{date}.",
+    "zh-hans": "调用{provider}{verb}{targets}的{dataset}{date}。",
+    "zh-hant": "呼叫{provider}{verb}{targets}的{dataset}{date}。"
+  },
+  "reports.source.new_pages.read": {
+    "en": "{verb} source text for {new_pages} new pages and {redirects} redirect conversions through the MediaWiki API.",
+    "zh-hans": "调用MediaWiki API{verb}{new_pages}个新页面和{redirects}个重定向改写页面的源代码。",
+    "zh-hant": "呼叫MediaWiki API{verb}{new_pages}個新頁面和{redirects}個重新導向改寫頁面的原始碼。"
+  },
+  "reports.source.new_pages.loaded": {
+    "en": "Loaded source text for {new_pages} new pages and {redirects} redirect conversions.",
+    "zh-hans": "已读取{new_pages}个新页面和{redirects}个重定向改写页面的源代码。",
+    "zh-hant": "已讀取{new_pages}個新頁面和{redirects}個重新導向改寫頁面的原始碼。"
+  },
+  "reports.source.action.mediawiki_unscoped": {
+    "en": "{verb} {dataset} from {provider}{wiki}{date}.",
+    "zh-hans": "调用{provider}{verb}{wiki}{dataset}{date}。",
+    "zh-hant": "呼叫{provider}{verb}{wiki}{dataset}{date}。"
+  },
+  "reports.source.verb": {
+    "en": "Read",
+    "zh-hans": "获取",
+    "zh-hant": "獲取"
+  },
+  "reports.source.membership.file_dated": {
+    "en": "the {date} project membership file \"{file}\"",
+    "zh-hans": "{date}的专题成员数据文件「{file}」",
+    "zh-hant": "{date}的專題成員資料檔案「{file}」"
+  },
+  "reports.source.membership.file_undated": {
+    "en": "the saved project membership file \"{file}\"",
+    "zh-hans": "已保存的专题成员数据文件「{file}」",
+    "zh-hant": "已儲存的專題成員資料檔案「{file}」"
+  },
+  "reports.source.membership.data_dated": {
+    "en": "the {date} project membership data",
+    "zh-hans": "{date}的专题成员数据",
+    "zh-hant": "{date}的專題成員資料"
+  },
+  "reports.source.membership.data_undated": {
+    "en": "the saved project membership data",
+    "zh-hans": "已保存的专题成员数据",
+    "zh-hant": "已儲存的專題成員資料"
+  },
+  "reports.source.membership.scope": {
+    "en": "{wiki}, {project}",
+    "zh-hans": "{wiki}，{project}",
+    "zh-hant": "{wiki}，{project}"
+  },
+  "reports.source.membership.capture": {
+    "en": "acquisition started at {observed} UTC, finished at {finished} UTC",
+    "zh-hans": "实际采集开始：{observed} UTC，完成：{finished} UTC",
+    "zh-hant": "實際擷取開始：{observed} UTC，完成：{finished} UTC"
+  },
+  "reports.source.membership.written": {
+    "en": "file serialization started at {written} UTC",
+    "zh-hans": "文件写入始于{written} UTC",
+    "zh-hant": "檔案寫入始於{written} UTC"
+  },
+  "reports.source.membership.details": {
+    "en": " ({details})",
+    "zh-hans": "（{details}）",
+    "zh-hant": "（{details}）"
+  },
+  "reports.source.membership.reading": {
+    "en": "Reading pages to check from {source}{details}.",
+    "zh-hans": "正在从{source}取得待查页面{details}。",
+    "zh-hant": "正在從{source}取得待查頁面{details}。"
+  },
+  "reports.source.membership.loaded": {
+    "en": "Loaded pages to check from {source}{details}.",
+    "zh-hans": "从{source}取得待查页面{details}。",
+    "zh-hant": "從{source}取得待查頁面{details}。"
+  },
+  "reports.source.pages": {
+    "en": " {targets}",
+    "zh-hans": "{targets}",
+    "zh-hant": "{targets}"
+  },
+  "reports.source.quoted_page": {
+    "en": "\"{page}\"",
+    "zh-hans": "「{page}」",
+    "zh-hant": "「{page}」"
+  },
+  "reports.source.revision": {
+    "en": "revision {value}",
+    "zh-hans": "历史版本 {value}",
+    "zh-hant": "歷史版本 {value}"
+  },
+  "reports.source.dataset.revision_text": {
+    "en": "revision text",
+    "zh-hans": "正文",
+    "zh-hant": "正文"
+  },
+  "consistency.missing": {
+    "en": "Missing ",
+    "zh-hans": "缺失",
+    "zh-hant": "缺失"
+  },
+  "consistency.ambiguous_history": {
+    "en": "Multiple Article history templates require manual review.",
+    "zh-hans": "存在多个Article history模板，需人工核对。",
+    "zh-hant": "存在多個Article history模板，需人工核對。"
+  },
+  "consistency.parameter_code": {
+    "en": "Article history parameters",
+    "zh-hans": "Article history参数",
+    "zh-hant": "Article history參數"
+  },
+  "consistency.evidence_details": {
+    "en": "Display history and evidence ({count})",
+    "zh-hans": "展示记录与核对依据（{count}）",
+    "zh-hant": "展示紀錄與核對依據（{count}）"
+  },
+  "consistency.remove_parameters": {
+    "en": "Remove the previous parameters: ",
+    "zh-hans": "移除旧参数：",
+    "zh-hant": "移除舊參數："
+  },
+  "consistency.remove_dyk": {
+    "en": "Remove {count} DYK templates.",
+    "zh-hans": "移除{count}个DYK模板。",
+    "zh-hant": "移除{count}個DYK模板。"
+  },
+  "data.heading": {
+    "en": "Saved Parquet data",
+    "zh-hans": "保存的Parquet数据",
+    "zh-hant": "儲存的Parquet資料"
+  },
+  "data.description": {
+    "en": "Saved metadata and records from the selected file. Each page contains up to 50 records in stored order.",
+    "zh-hans": "所选文件的保存信息和数据，每页最多显示50条记录，顺序与文件一致。",
+    "zh-hant": "所選檔案的儲存資訊及資料，每頁最多顯示50筆記錄，順序與檔案一致。"
+  },
+  "data.choose": {
+    "en": "Follow a Parquet filename in a report's activity details to view its saved data and capture metadata.",
+    "zh-hans": "点击报告操作记录中的Parquet文件名，可查看保存的数据和采集信息。",
+    "zh-hant": "點擊報告操作記錄中的Parquet檔案名稱，可檢視儲存資料及擷取資訊。"
+  },
+  "data.invalid": {
+    "en": "Choose one valid saved Parquet file.",
+    "zh-hans": "请选择一个有效的Parquet文件。",
+    "zh-hant": "請選擇一個有效的Parquet檔案。"
+  },
+  "data.missing": {
+    "en": "This saved file is no longer available. Disposable caches can expire or be replaced.",
+    "zh-hans": "此保存文件已不可用，临时缓存可能已过期或被替换。",
+    "zh-hant": "此儲存檔案已無法使用，暫存檔案可能已過期或被取代。"
+  },
+  "data.unavailable": {
+    "en": "This saved Parquet file cannot be read or verified.",
+    "zh-hans": "无法读取或验证此Parquet文件。",
+    "zh-hant": "無法讀取或驗證此Parquet檔案。"
+  },
+  "data.metadata": {
+    "en": "File details",
+    "zh-hans": "文件信息",
+    "zh-hant": "檔案資訊"
+  },
+  "data.schema": {
+    "en": "Stored columns",
+    "zh-hans": "保存字段",
+    "zh-hant": "儲存欄位"
+  },
+  "data.preview": {
+    "en": "Data preview",
+    "zh-hans": "数据预览",
+    "zh-hant": "資料預覽"
+  },
+  "data.preview_note": {
+    "en": "Showing records {start}–{end} of {total}.",
+    "zh-hans": "显示第{start}–{end}条，共{total}条记录。",
+    "zh-hant": "顯示第{start}–{end}筆，共{total}筆記錄。"
+  },
+  "data.column": {
+    "en": "Column",
+    "zh-hans": "字段",
+    "zh-hant": "欄位"
+  },
+  "data.type": {
+    "en": "Stored type",
+    "zh-hans": "保存类型",
+    "zh-hant": "儲存型別"
+  },
+  "data.unknown": {
+    "en": "Not recorded",
+    "zh-hans": "未记录",
+    "zh-hant": "未記錄"
+  },
+  "data.null": {
+    "en": "null",
+    "zh-hans": "空值",
+    "zh-hant": "空值"
+  },
+  "data.field.file": {
+    "en": "File",
+    "zh-hans": "文件",
+    "zh-hant": "檔案"
+  },
+  "data.field.wiki": {
+    "en": "Wiki",
+    "zh-hans": "维基",
+    "zh-hant": "維基"
+  },
+  "data.field.project": {
+    "en": "Project",
+    "zh-hans": "专题",
+    "zh-hant": "專題"
+  },
+  "data.field.snapshot_date": {
+    "en": "Data day",
+    "zh-hans": "数据日期",
+    "zh-hant": "資料日期"
+  },
+  "data.field.boundary_date": {
+    "en": "Capture boundary day",
+    "zh-hans": "采集边界日期",
+    "zh-hant": "擷取邊界日期"
+  },
+  "data.field.started_at": {
+    "en": "Acquisition started (UTC)",
+    "zh-hans": "采集开始（UTC）",
+    "zh-hant": "擷取開始（UTC）"
+  },
+  "data.field.finished_at": {
+    "en": "Acquisition completed (UTC)",
+    "zh-hans": "采集完成（UTC）",
+    "zh-hant": "擷取完成（UTC）"
+  },
+  "data.field.written_at": {
+    "en": "File write started (UTC)",
+    "zh-hans": "文件写入开始（UTC）",
+    "zh-hant": "檔案寫入開始（UTC）"
+  },
+  "data.field.schema": {
+    "en": "Dataset schema",
+    "zh-hans": "数据模式",
+    "zh-hant": "資料結構版本"
+  },
+  "data.field.generation": {
+    "en": "Capture generation",
+    "zh-hans": "采集批次",
+    "zh-hant": "擷取批次"
+  },
+  "data.field.application_version": {
+    "en": "Capture application version",
+    "zh-hans": "采集程序版本",
+    "zh-hant": "擷取程式版本"
+  },
+  "data.field.row_count": {
+    "en": "Total records",
+    "zh-hans": "记录总数",
+    "zh-hant": "記錄總數"
+  },
+  "data.field.sha256": {
+    "en": "Content SHA-256",
+    "zh-hans": "内容SHA-256",
+    "zh-hant": "內容SHA-256"
+  },
+  "reports.source.written": {
+    "en": "File serialization started at {written} UTC.",
+    "zh-hans": "文件写入始于{written} UTC。",
+    "zh-hant": "檔案寫入始於{written} UTC。"
+  },
+  "redirects.heading": {
+    "en": "Redirect recovery",
+    "zh-hans": "重定向专题恢复",
+    "zh-hant": "重新導向專題恢復"
+  },
+  "redirects.description": {
+    "en": "Find redirected pages whose talk pages retain deletion discussions and once carried a Video games WikiProject banner. Follow the saved revision links before restoring a banner.",
+    "zh-hans": "查找讨论页保留存废讨论、历史上曾有电子游戏专题横幅的重定向页面。恢复横幅前，请查看已保存的修订版本。",
+    "zh-hant": "尋找討論頁保留存廢討論、歷史上曾有電子遊戲專題橫幅的重新導向頁面。恢復橫幅前，請查看已儲存的修訂版本。"
+  },
+  "redirects.scope": {
+    "en": "Each talk page is sampled at its 10 most recent and 5 earliest revisions. Unmatched pages may still have older banner evidence outside that sample. Results appear as the slow background scan progresses.",
+    "zh-hans": "每个讨论页检查最近10次及最早5次修订；未匹配页面仍可能在取样范围外存在横幅证据。后台缓慢扫描期间会逐步显示结果。",
+    "zh-hant": "每個討論頁檢查最近10次及最早5次修訂；未配對頁面仍可能在取樣範圍外存在橫幅證據。背景緩慢掃描期間會逐步顯示結果。"
+  },
+  "redirects.hide": {
+    "en": "Hide",
+    "zh-hans": "隐藏",
+    "zh-hant": "隱藏"
+  },
+  "redirects.restore": {
+    "en": "Restore",
+    "zh-hans": "恢复显示",
+    "zh-hant": "恢復顯示"
+  },
+  "redirects.show_hidden": {
+    "en": "Show hidden results",
+    "zh-hans": "显示已隐藏结果",
+    "zh-hant": "顯示已隱藏結果"
+  },
+  "redirects.restore_all": {
+    "en": "Restore all hidden results",
+    "zh-hans": "恢复全部隐藏结果",
+    "zh-hant": "恢復全部隱藏結果"
+  },
+  "redirects.local_hiding": {
+    "en": "Hidden only in this browser. Page counts include hidden results.",
+    "zh-hans": "仅在此浏览器隐藏；分页总数包含已隐藏结果。",
+    "zh-hant": "僅在此瀏覽器隱藏；分頁總數包含已隱藏結果。"
+  },
+  "redirects.refresh_error": {
+    "en": "Could not refresh saved results. The last displayed results remain available.",
+    "zh-hans": "无法刷新已保存结果，仍保留上次显示的结果。",
+    "zh-hant": "無法重新整理已儲存結果，仍保留上次顯示的結果。"
+  },
+  "redirects.check_banners": {
+    "en": "Check displayed pages for restored banners",
+    "zh-hans": "检查当前页面的横幅是否已恢复",
+    "zh-hant": "檢查目前頁面的橫幅是否已恢復"
+  },
+  "redirects.check_error": {
+    "en": "Could not check all displayed pages. Unconfirmed results remain visible.",
+    "zh-hans": "无法检查全部当前页面，未确认的结果仍会显示。",
+    "zh-hant": "無法檢查全部目前頁面，未確認的結果仍會顯示。"
+  },
+  "redirects.check_done": {
+    "en": "Current banners checked on displayed pages. Confirmed matches are hidden for this visit; counts include them.",
+    "zh-hans": "已检查当前显示页面的横幅。本次访问中隐藏已确认的结果，计数仍包含这些结果。",
+    "zh-hant": "已檢查目前顯示頁面的橫幅。本次瀏覽中隱藏已確認的結果，計數仍包含這些結果。"
+  },
+  "redirects.scan": {
+    "en": "Background scan",
+    "zh-hans": "后台扫描",
+    "zh-hant": "背景掃描"
+  },
+  "redirects.scan_error": {
+    "en": "The scan will retry from its saved checkpoint.",
+    "zh-hans": "扫描将从已保存的检查点重试。",
+    "zh-hant": "掃描將從已儲存的檢查點重試。"
+  },
+  "redirects.no_preview": {
+    "en": "No article text was found in the bounded revision sample.",
+    "zh-hans": "在有限修订取样中未找到条目正文。",
+    "zh-hant": "在有限修訂取樣中未找到條目正文。"
+  },
+  "redirects.sampled_preview": {
+    "en": "Former article text from a sampled revision",
+    "zh-hans": "取样修订中的原条目正文",
+    "zh-hant": "取樣修訂中的原條目正文"
+  },
+  "redirects.current": {
+    "en": "Current redirect",
+    "zh-hans": "当前重定向",
+    "zh-hant": "目前重新導向"
+  },
+  "redirects.revision": {
+    "en": "Revision",
+    "zh-hans": "修订版本",
+    "zh-hant": "修訂版本"
+  },
+  "redirects.content": {
+    "en": "Former article text",
+    "zh-hans": "原条目正文",
+    "zh-hant": "原條目正文"
+  },
+  "redirects.banner": {
+    "en": "Former project banner",
+    "zh-hans": "历史专题横幅",
+    "zh-hant": "歷史專題橫幅"
+  },
+  "redirects.empty": {
+    "en": "No matching redirects have been saved yet. This does not establish that none exist.",
+    "zh-hans": "尚未保存匹配的重定向页面，这不代表没有此类页面。",
+    "zh-hant": "尚未儲存配對的重新導向頁面，這不代表沒有此類頁面。"
+  },
+  "redirects.no_script": {
+    "en": "Pagination and revision links work without JavaScript. Enable JavaScript for automatic updates and browser-local hiding.",
+    "zh-hans": "无需JavaScript即可使用分页与修订版本链接；自动更新及浏览器本地隐藏需要JavaScript。",
+    "zh-hant": "無需JavaScript即可使用分頁與修訂版本連結；自動更新及瀏覽器本機隱藏需要JavaScript。"
+  },
+  "redirects.range": {
+    "en": "{first}–{last} of {total} results",
+    "zh-hans": "第{first}–{last}项，共{total}项结果",
+    "zh-hant": "第{first}–{last}項，共{total}項結果"
+  },
+  "redirects.progress": {
+    "en": "{checked} of {discovered} discovered talk pages checked",
+    "zh-hans": "已检查{discovered}个已发现讨论页中的{checked}个",
+    "zh-hant": "已檢查{discovered}個已發現討論頁中的{checked}個"
+  },
+  "redirects.status.missing": {
+    "en": "No saved scan yet",
+    "zh-hans": "尚无已保存的扫描",
+    "zh-hant": "尚無已儲存的掃描"
+  },
+  "redirects.status.unavailable": {
+    "en": "Saved scan is unavailable",
+    "zh-hans": "已保存的扫描暂不可用",
+    "zh-hant": "已儲存的掃描暫不可用"
+  },
+  "redirects.status.discovering": {
+    "en": "Discovering candidate talk pages",
+    "zh-hans": "正在发现候选讨论页",
+    "zh-hant": "正在尋找候選討論頁"
+  },
+  "redirects.status.scanning": {
+    "en": "Checking candidate histories",
+    "zh-hans": "正在检查候选页面历史",
+    "zh-hant": "正在檢查候選頁面歷史"
+  },
+  "redirects.status.complete": {
+    "en": "Sampled scan complete",
+    "zh-hans": "取样扫描已完成",
+    "zh-hant": "取樣掃描已完成"
+  },
+  "redirects.status.interrupted": {
+    "en": "Scan paused; saved progress will resume",
+    "zh-hans": "扫描已暂停，将从已保存进度继续",
+    "zh-hant": "掃描已暫停，將從已儲存進度繼續"
+  },
+  "redirects.status.error": {
+    "en": "Scan delayed by a source error",
+    "zh-hans": "扫描因来源错误而延后",
+    "zh-hant": "掃描因來源錯誤而延後"
+  },
+  "routine.redirects": {
+    "en": "Redirect recovery scan",
+    "zh-hans": "重定向专题恢复扫描",
+    "zh-hant": "重新導向專題恢復掃描"
+  },
+  "redirects.incomplete": {
+    "en": "History could not be fully sampled for {count} talk pages. Their project membership remains unresolved.",
+    "zh-hans": "有{count}个讨论页的历史修订取样不完整，专题归属仍未确定。",
+    "zh-hant": "有{count}個討論頁的歷史修訂取樣不完整，專題歸屬仍未確定。"
+  },
+  "reviews.discussions": {
+    "en": "Active discussions",
+    "zh-hans": "活跃讨论",
+    "zh-hant": "活躍討論"
+  },
+  "reviews.discussion": {
+    "en": "Discussion",
+    "zh-hans": "讨论",
+    "zh-hant": "討論"
+  },
+  "reviews.activity_ordinary": {
+    "en": "Discussion",
+    "zh-hans": "讨论",
+    "zh-hant": "討論"
+  },
+  "reviews.activity_recent": {
+    "en": "Discussion with a new reply",
+    "zh-hans": "有新回复的讨论",
+    "zh-hant": "有新回覆的討論"
+  },
+  "reviews.activity_hot": {
+    "en": "Hot discussion",
+    "zh-hans": "热门讨论",
+    "zh-hant": "熱門討論"
+  },
+  "reviews.activity_recent_hot": {
+    "en": "Hot discussion with a new reply",
+    "zh-hans": "有新回复的热门讨论",
+    "zh-hant": "有新回覆的熱門討論"
+  },
+  "reviews.activity_details": {
+    "en": "{activity}. New reply: more than one recorded comment and the latest comment within 24 hours. Hot: at least 3 participants and 10 comments in the section, with a comment in the last 7 days.",
+    "zh-hans": "{activity}。新回复：已记录的留言超过1条，且最新留言在24小时内。热门：章节累计至少3人参与、10条留言，且最近7天内有留言。",
+    "zh-hant": "{activity}。新回覆：已記錄的留言超過1條，且最新留言在24小時內。熱門：章節累計至少3人參與、10條留言，且最近7天內有留言。"
+  },
+  "reviews.author_details": {
+    "en": "{user} {action} at {time} {event}",
+    "zh-hans": "由{user}{action}于{time}{event}",
+    "zh-hant": "由{user}{action}於{time}{event}"
+  },
+  "reviews.started_action": {
+    "en": "started",
+    "zh-hans": "发起",
+    "zh-hant": "發起"
+  },
+  "reviews.replied_action": {
+    "en": "last commented",
+    "zh-hans": "最后留言",
+    "zh-hant": "最後留言"
+  },
+  "reviews.participants_comments": {
+    "en": "{count} participants, {comments} comments",
+    "zh-hans": "{count}人参与讨论，{comments}条留言",
+    "zh-hant": "{count}人參與討論，{comments}條留言"
+  },
+  "reviews.comments": {
+    "en": "{count} comments",
+    "zh-hans": "{count}条留言",
+    "zh-hant": "{count}條留言"
+  },
+  "reports.failed_task": {
+    "en": "Failed to update the {task} report",
+    "zh-hans": "更新{task}报告失败",
+    "zh-hant": "更新{task}報告失敗"
+  },
+  "reports.started_task": {
+    "en": "Preparing the {task} task.",
+    "zh-hans": "开始准备{task}作业。",
+    "zh-hant": "開始準備{task}作業。"
+  },
+  "reports.source.traffic.action": {
+    "en": "Calling the Wikimedia Pageviews API to retrieve {traffic} for {wiki}.",
+    "zh-hans": "调用维基媒体浏览量API获取{wiki}之{traffic}。",
+    "zh-hant": "呼叫維基媒體瀏覽量API獲取{wiki}之{traffic}。"
+  },
+  "reports.source.traffic.site": {
+    "en": "site-wide traffic for {date}",
+    "zh-hans": "{date}全站流量",
+    "zh-hant": "{date}全站流量"
+  },
+  "reports.source.traffic.top": {
+    "en": "top-page traffic for {date}",
+    "zh-hans": "{date}热门页面流量",
+    "zh-hant": "{date}熱門頁面流量"
+  },
+  "server.updated": {
+    "en": "updated ",
+    "zh-hans": "更新于",
+    "zh-hant": "更新於"
+  },
+  "credits.content_intro": {
+    "en": "These icons identify main-page highlights, popularity ranks, and content reviews. Highlight icons represent saved featured, good, or did-you-know appearances independently of current assessments. The highlight, candidate, and community peer-review SVGs are unchanged Commons files; the project peer-review SVG is a vector redraw of its Commons PNG source. Each image retains its own license.",
+    "zh-hans": "这些图标表示首页展示、浏览量排名与内容评审。首页图标依据已保存的典范、优良或新条目推荐展示记录，独立于当前评级。首页展示、候选与社群同行评审SVG沿用维基共享资源原文件；专题同行评审SVG根据其PNG来源重绘。各图像保留自己的许可协议。",
+    "zh-hant": "這些圖示表示首頁展示、瀏覽量排名與內容評審。首頁圖示依據已儲存的典範、優良或新條目推薦展示紀錄，獨立於目前評級。首頁展示、候選與社群同行評審SVG沿用維基共享資源原檔案；專題同行評審SVG根據其PNG來源重繪。各圖像保留自己的授權條款。"
+  },
+  "reports.first": {
+    "en": "First page",
+    "zh-hans": "第一页",
+    "zh-hant": "第一頁"
+  },
+  "reports.last": {
+    "en": "Last page",
+    "zh-hans": "最后一页",
+    "zh-hant": "最後一頁"
+  },
+  "reports.rows": {
+    "en": "{count} rows",
+    "zh-hans": "{count}项",
+    "zh-hant": "{count}項"
+  },
+  "reports.page_size": {
+    "en": "Results per page",
+    "zh-hans": "每页项目数",
+    "zh-hant": "每頁項目數"
+  },
+  "reports.page_status": {
+    "en": "Showing results {start}–{end} of {total}",
+    "zh-hans": "第{start}–{end}项，共{total}项",
+    "zh-hant": "第{start}–{end}項，共{total}項"
+  },
+  "server.current_work": {
+    "en": "Current work",
+    "zh-hans": "当前工作",
+    "zh-hant": "目前工作"
+  },
+  "server.work_active": {
+    "en": "Background work in progress",
+    "zh-hans": "后台作业进行中",
+    "zh-hant": "背景作業進行中"
+  },
+  "server.work_idle": {
+    "en": "No background work is running.",
+    "zh-hans": "暂无进行中的后台作业。",
+    "zh-hant": "暫無進行中的背景作業。"
+  },
+  "server.work_unknown": {
+    "en": "Background work is unavailable.",
+    "zh-hans": "未获取后台作业状态。",
+    "zh-hant": "未取得背景作業狀態。"
+  },
+  "server.work_stale": {
+    "en": "Current work cannot be confirmed: scheduler heartbeat expired.",
+    "zh-hans": "排程器心跳已过期，无法确认当前工作。",
+    "zh-hant": "排程器心跳已過期，無法確認目前工作。"
+  },
+  "server.work_started": {
+    "en": "Preparing collection work…",
+    "zh-hans": "正在准备数据采集……",
+    "zh-hant": "正在準備資料擷取……"
+  },
+  "server.work.website-membership": {
+    "en": "Reading project membership",
+    "zh-hans": "读取专题成员",
+    "zh-hant": "讀取專題成員"
+  },
+  "server.work.website-reviews": {
+    "en": "Refreshing reviews and active discussions",
+    "zh-hans": "更新内容评审与活跃讨论",
+    "zh-hant": "更新內容評審與活躍討論"
+  },
+  "server.work.website-consistency": {
+    "en": "Checking maintenance tags",
+    "zh-hans": "检查维护标记",
+    "zh-hant": "檢查維護標記"
+  },
+  "server.work.website-recognized": {
+    "en": "Refreshing featured and good content",
+    "zh-hans": "更新典范及优良内容",
+    "zh-hant": "更新典範及優良內容"
+  },
+  "server.work.website-dyk": {
+    "en": "Refreshing did-you-know appearances",
+    "zh-hans": "更新新条目推荐展示",
+    "zh-hant": "更新新條目推薦展示"
+  },
+  "server.work.website-pageviews": {
+    "en": "Refreshing website pageview rankings",
+    "zh-hans": "更新网站浏览量排行",
+    "zh-hant": "更新網站瀏覽量排行"
+  },
+  "server.work.website-news-history": {
+    "en": "Refreshing main-page news and anniversaries",
+    "zh-hans": "更新首页新闻及历史上的今天",
+    "zh-hant": "更新首頁新聞及歷史上的今天"
+  },
+  "server.work.website-backlog": {
+    "en": "Refreshing maintenance worklists",
+    "zh-hans": "更新维护清单",
+    "zh-hant": "更新維護清單"
+  },
+  "server.work.website-newsletter": {
+    "en": "Refreshing saved newsletter data",
+    "zh-hans": "更新已保存的简讯数据",
+    "zh-hant": "更新已儲存的簡訊資料"
+  },
+  "server.work.homepage-archives": {
+    "en": "Maintaining the homepage-history database",
+    "zh-hans": "维护首页展示历史数据库",
+    "zh-hant": "維護首頁展示歷史資料庫"
+  },
+  "reviews.section_size": {
+    "en": "Section source length: {bytes} bytes",
+    "zh-hans": "话题源代码长度：{bytes}字节",
+    "zh-hant": "話題原始碼長度：{bytes}位元組"
+  },
+  "nav.copy_section_link": {
+    "en": "Copy link to {heading}",
+    "zh-hans": "复制「{heading}」的链接",
+    "zh-hant": "複製「{heading}」的連結"
+  },
+  "nav.section_link_copied": {
+    "en": "Wikilink copied.",
+    "zh-hans": "已复制维基链接。",
+    "zh-hant": "已複製維基連結。"
+  },
+  "nav.section_link_fallback": {
+    "en": "Select and copy this wikilink.",
+    "zh-hans": "请选择并复制此维基链接。",
+    "zh-hant": "請選取並複製此維基連結。"
+  },
+  "nav.section_permalink": {
+    "en": "Open this section",
+    "zh-hans": "打开本章节",
+    "zh-hant": "開啟本章節"
+  },
+  "nav.page_permalink": {
+    "en": "Open this page",
+    "zh-hans": "打开本页面",
+    "zh-hant": "開啟本頁面"
+  },
+  "homepage.type.tfa": {
+    "en": "Today's featured article",
+    "zh-hans": "今日典范条目",
+    "zh-hant": "今日典範條目"
+  },
+  "homepage.type.tfl": {
+    "en": "Today's featured list",
+    "zh-hans": "今日特色列表",
+    "zh-hant": "今日特色列表"
+  },
+  "homepage.type.tga": {
+    "en": "Today's good article",
+    "zh-hans": "今日优良条目",
+    "zh-hant": "今日優良條目"
+  },
+  "homepage.type.dyk": {
+    "en": "Did you know",
+    "zh-hans": "新条目推荐",
+    "zh-hant": "新條目推薦"
+  },
+  "homepage.scheduled_type.tfa": {
+    "en": "Featured article",
+    "zh-hans": "典范条目",
+    "zh-hant": "典範條目"
+  },
+  "homepage.scheduled_type.tfl": {
+    "en": "Featured list",
+    "zh-hans": "特色列表",
+    "zh-hant": "特色列表"
+  },
+  "homepage.scheduled_type.tga": {
+    "en": "Good article",
+    "zh-hans": "优良条目",
+    "zh-hant": "優良條目"
+  },
+  "homepage.type.itn": {
+    "en": "In the news",
+    "zh-hans": "新闻动态",
+    "zh-hant": "新聞動態"
+  },
+  "homepage.type.otd": {
+    "en": "On this day",
+    "zh-hans": "历史上的今天",
+    "zh-hant": "歷史上的今天"
+  },
+  "reports.source.dataset.discussion_comments": {
+    "en": "rendered discussion comments",
+    "zh-hans": "已渲染讨论留言",
+    "zh-hant": "已渲染討論留言"
+  },
+  "reviews.age_weeks": {
+    "en": "{count}w ago",
+    "zh-hans": "{count}周前",
+    "zh-hant": "{count}週前"
+  },
+  "reviews.started_weeks": {
+    "en": "Started {count}w ago",
+    "zh-hans": "{count}周前发起",
+    "zh-hant": "{count}週前發起"
+  },
+  "reviews.replied_weeks": {
+    "en": "Last comment {count}w ago",
+    "zh-hans": "{count}周前最后留言",
+    "zh-hant": "{count}週前最後留言"
+  },
+  "time.weeks_ago": {
+    "en": "({count}w ago)",
+    "zh-hans": "（{count}周前）",
+    "zh-hant": "（{count}週前）"
+  },
+  "time.weeks_ago_one": {
+    "en": "({count}w ago)",
+    "zh-hans": "（{count}周前）",
+    "zh-hant": "（{count}週前）"
+  },
+  "time.weeks_ahead": {
+    "en": "({count}w from now)",
+    "zh-hans": "（{count}周后）",
+    "zh-hant": "（{count}週後）"
+  },
+  "time.weeks_ahead_one": {
+    "en": "({count}w from now)",
+    "zh-hans": "（{count}周后）",
+    "zh-hant": "（{count}週後）"
+  },
+  "reviews.age_years": {
+    "en": "{count}yr ago",
+    "zh-hans": "{count}年前",
+    "zh-hant": "{count}年前"
+  },
+  "reviews.started_years": {
+    "en": "Started {count}yr ago",
+    "zh-hans": "{count}年前发起",
+    "zh-hant": "{count}年前發起"
+  },
+  "reviews.replied_years": {
+    "en": "Last comment {count}yr ago",
+    "zh-hans": "{count}年前最后留言",
+    "zh-hant": "{count}年前最後留言"
+  },
+  "time.years_ago": {
+    "en": "({count}yr ago)",
+    "zh-hans": "（{count}年前）",
+    "zh-hant": "（{count}年前）"
+  },
+  "time.years_ago_one": {
+    "en": "({count}yr ago)",
+    "zh-hans": "（{count}年前）",
+    "zh-hant": "（{count}年前）"
+  },
+  "time.years_ahead": {
+    "en": "({count}yr from now)",
+    "zh-hans": "（{count}年后）",
+    "zh-hant": "（{count}年後）"
+  },
+  "time.years_ahead_one": {
+    "en": "({count}yr from now)",
+    "zh-hans": "（{count}年后）",
+    "zh-hant": "（{count}年後）"
+  },
+  "reviews.age_just_now": {
+    "en": "just now",
+    "zh-hans": "刚刚",
+    "zh-hant": "剛剛"
+  },
+  "reviews.started_just_now": {
+    "en": "Started just now",
+    "zh-hans": "刚刚发起",
+    "zh-hant": "剛剛發起"
+  },
+  "reviews.replied_just_now": {
+    "en": "Last comment just now",
+    "zh-hans": "刚刚留言",
+    "zh-hant": "剛剛留言"
+  },
+  "discussions.heading": {
+    "en": "Recent discussions",
+    "zh-hans": "近期讨论",
+    "zh-hant": "近期討論"
+  },
+  "discussions.intro": {
+    "en": "General discussions with comments in the last 28 days, grouped by the latest comment and page type. Article groups do not overlap; each covers one of the four weeks. Each group shows newest comments first. Recognized content reviews appear only in Content reviews.",
+    "zh-hans": "最近28天有新评论的一般讨论，按最新评论时间和页面类型分组。条目按1—7、8—14、15—21、22—28天分组，每组由新到旧排列。已识别的评审仅列于内容评审。",
+    "zh-hant": "最近28天有新評論的一般討論，按最新評論時間和頁面類型分組。條目按1—7、8—14、15—21、22—28天分組，每組由新到舊排列。已識別的評審僅列於內容評審。"
+  },
+  "discussions.recent_intro": {
+    "en": "General discussions with new comments in the last 7 days.",
+    "zh-hans": "最近7天有新评论的一般讨论。",
+    "zh-hant": "最近7天有新評論的一般討論。"
+  },
+  "discussions.all": {
+    "en": "View all discussions from the last 28 days",
+    "zh-hans": "查看最近28天的全部讨论",
+    "zh-hant": "檢視最近28天的全部討論"
+  },
+  "discussions.week_1": {
+    "en": "Article discussions (comments within 1 week)",
+    "zh-hans": "条目讨论（一周内有留言）",
+    "zh-hant": "條目討論（一週內有留言）"
+  },
+  "discussions.week_2": {
+    "en": "Article discussions (comments within 2 weeks)",
+    "zh-hans": "条目讨论（二周内有留言）",
+    "zh-hant": "條目討論（二週內有留言）"
+  },
+  "discussions.week_3": {
+    "en": "Article discussions (comments within 3 weeks)",
+    "zh-hans": "条目讨论（三周内有留言）",
+    "zh-hant": "條目討論（三週內有留言）"
+  },
+  "discussions.week_4": {
+    "en": "Article discussions (comments within 4 weeks)",
+    "zh-hans": "条目讨论（四周内有留言）",
+    "zh-hant": "條目討論（四週內有留言）"
+  },
+  "discussions.drafts": {
+    "en": "Draft discussions",
+    "zh-hans": "草稿讨论",
+    "zh-hant": "草稿討論"
+  },
+  "discussions.projects": {
+    "en": "Project and portal discussions",
+    "zh-hans": "专题与主题讨论",
+    "zh-hant": "專題與主題討論"
+  },
+  "discussions.categories_templates": {
+    "en": "Category and template discussions",
+    "zh-hans": "分类与模板讨论",
+    "zh-hant": "分類與模板討論"
+  },
+  "discussions.other": {
+    "en": "Other discussions",
+    "zh-hans": "其他讨论",
+    "zh-hant": "其他討論"
+  },
+  "quality_authorship.heading": {
+    "en": "FA/GA editor statistics",
+    "zh-hans": "典优条目编辑统计",
+    "zh-hant": "典優條目編者統計"
+  },
+  "quality_authorship.authors": {
+    "en": "Authors",
+    "zh-hans": "作者",
+    "zh-hant": "作者"
+  },
+  "quality_authorship.intro": {
+    "en": "This page lists substantial contributors to high-quality articles in the Video games WikiProject. Editors looking to improve an article can ask users who are still active for editing advice.",
+    "zh-hans": "本页列出电子游戏专题高品质条目的重大贡献者。有志打磨条目的编者，可向仍然活跃的用户征求编辑建议。",
+    "zh-hant": "本頁列出電子遊戲專題高品質條目的重大貢獻者。有志打磨條目的編者，可向仍然活躍的使用者徵求編輯建議。"
+  },
+  "quality_authorship.accuracy_prefix": {
+    "en": "This table is not an honour roll. It uses ",
+    "zh-hans": "本表并非荣誉榜，使用",
+    "zh-hant": "本表並非榮譽榜，使用"
+  },
+  "quality_authorship.accuracy_sources": {
+    "en": " to infer substantial contributors automatically, so attribution may be inaccurate. For manually checked author lists, see the ",
+    "zh-hans": "自动推定重大贡献者，判定未必准确。人工核查的作者名单，可参考",
+    "zh-hant": "自動推定重大貢獻者，判定未必準確。人工核查的作者名單，可參考"
+  },
+  "quality_authorship.accuracy_sources_separator": {
+    "en": " and their ",
+    "zh-hans": "及其前身",
+    "zh-hant": "及其前身"
+  },
+  "quality_authorship.accuracy_end": {
+    "en": ".",
+    "zh-hans": "。",
+    "zh-hant": "。"
+  },
+  "quality_authorship.year_reviews": {
+    "en": "Video games year-end reviews",
+    "zh-hans": "电子游戏专题年终回顾",
+    "zh-hant": "電子遊戲專題年終回顧"
+  },
+  "quality_authorship.earlier_intro": {
+    "en": "earlier featured and good content introductions",
+    "zh-hans": "典优内容介绍",
+    "zh-hant": "典優內容介紹"
+  },
+  "quality_authorship.user": {
+    "en": "Editor",
+    "zh-hans": "编辑",
+    "zh-hant": "編輯"
+  },
+  "quality_authorship.count_b": {
+    "en": "Count B-Class",
+    "zh-hans": "计入乙级",
+    "zh-hant": "計入乙級"
+  },
+  "quality_authorship.count_b_description": {
+    "en": "For B-Class articles and lists, authors are inferred from the article revision at or before the start of the latest continuous B-Class range on the talk page. That article revision supplies the listing date.",
+    "zh-hans": "乙级条目及列表按讨论页最近一段连续乙级评级开始时或之前的最近条目版本推定作者，并以该条目版本的时间为入选日期。",
+    "zh-hant": "乙級條目及列表按討論頁最近一段連續乙級評級開始時或之前的最近條目版本推定作者，並以該條目版本的時間為入選日期。"
+  },
+  "quality_authorship.b_coverage": {
+    "en": "B-Class listing-time attribution collected: {collected}/{total} articles and lists. Pending history or revisions have unknown authorship.",
+    "zh-hans": "乙级入选时作者资料已收集：{collected}/{total}条目及列表。待收集历史或版本的作者尚未确定。",
+    "zh-hant": "乙級入選時作者資料已收集：{collected}/{total}條目及列表。待收集歷史或版本的作者尚未確定。"
+  },
+  "quality_authorship.b_unavailable": {
+    "en": "B-Class attribution is unavailable; retained high-quality article totals are shown.",
+    "zh-hans": "乙级作者资料暂不可用；当前显示已保存的高品质条目统计。",
+    "zh-hant": "乙級作者資料暫不可用；目前顯示已儲存的高品質條目統計。"
+  },
+  "quality_authorship.author_developed": {
+    "en": "Developed articles by {name}",
+    "zh-hans": "{name}的成型条目",
+    "zh-hant": "{name}的成型條目"
+  },
+  "quality_authorship.developed": {
+    "en": "Developed articles",
+    "zh-hans": "成型条目",
+    "zh-hant": "成型條目"
+  },
+  "quality_authorship.high_quality": {
+    "en": "{count} high-quality",
+    "zh-hans": "{count}高品质",
+    "zh-hant": "{count}高品質"
+  },
+  "quality_authorship.listed_or_revision": {
+    "en": "Listed date / attributed revision",
+    "zh-hans": "入选日期／署名版本",
+    "zh-hant": "入選日期／署名版本"
+  },
+  "quality_authorship.current_revision": {
+    "en": "Current-revision attribution",
+    "zh-hans": "当前版本署名",
+    "zh-hant": "目前版本署名"
+  },
+  "quality_authorship.contributions": {
+    "en": "Contributed articles",
+    "zh-hans": "贡献条目",
+    "zh-hant": "貢獻條目"
+  },
+  "quality_authorship.latest_active": {
+    "en": "Latest active date",
+    "zh-hans": "最后活跃日期",
+    "zh-hant": "最後活躍日期"
+  },
+  "quality_authorship.talk": {
+    "en": "talk",
+    "zh-hans": "讨论",
+    "zh-hant": "討論"
+  },
+  "quality_authorship.article": {
+    "en": "Article",
+    "zh-hans": "条目",
+    "zh-hant": "條目"
+  },
+  "quality_authorship.grade": {
+    "en": "Grade",
+    "zh-hans": "等级",
+    "zh-hant": "等級"
+  },
+  "quality_authorship.listed": {
+    "en": "Listed date",
+    "zh-hans": "入选日期",
+    "zh-hant": "入選日期"
+  },
+  "quality_authorship.articles": {
+    "en": "{count} articles",
+    "zh-hans": "{count}条目",
+    "zh-hant": "{count}條目"
+  },
+  "quality_authorship.articles_one": {
+    "en": "{count} article",
+    "zh-hans": "{count}条目",
+    "zh-hant": "{count}條目"
+  },
+  "quality_authorship.author_articles": {
+    "en": "High-quality articles by {name}",
+    "zh-hans": "{name}的高品质条目",
+    "zh-hant": "{name}的高品質條目"
+  },
+  "quality_authorship.unavailable": {
+    "en": "Saved authorship evidence is not available yet.",
+    "zh-hans": "尚无可用的作者资料。",
+    "zh-hant": "尚無可用的作者資料。"
+  },
+  "quality_authorship.empty": {
+    "en": "No authors were identified in the saved evidence.",
+    "zh-hans": "已保存的资料中未识别出作者。",
+    "zh-hant": "已儲存的資料中未識別出作者。"
+  },
+  "quality_authorship.days_ago": {
+    "en": "{count} days ago",
+    "zh-hans": "{count}日前",
+    "zh-hant": "{count}日前"
+  },
+  "quality_authorship.days_ahead": {
+    "en": "in {count} days",
+    "zh-hans": "{count}日后",
+    "zh-hant": "{count}日後"
+  },
+  "quality_authorship.days_ago_one": {
+    "en": "{count} day ago",
+    "zh-hans": "{count}日前",
+    "zh-hant": "{count}日前"
+  },
+  "quality_authorship.days_ahead_one": {
+    "en": "in {count} day",
+    "zh-hans": "{count}日后",
+    "zh-hant": "{count}日後"
+  },
+  "quality_authorship.today": {
+    "en": "today",
+    "zh-hans": "今日",
+    "zh-hant": "今日"
+  },
+  "quality_authorship.weeks_ago": {
+    "en": "{count} weeks ago",
+    "zh-hans": "{count}周前",
+    "zh-hant": "{count}週前"
+  },
+  "quality_authorship.weeks_ahead": {
+    "en": "in {count} weeks",
+    "zh-hans": "{count}周后",
+    "zh-hant": "{count}週後"
+  },
+  "quality_authorship.weeks_ago_one": {
+    "en": "{count} week ago",
+    "zh-hans": "{count}周前",
+    "zh-hant": "{count}週前"
+  },
+  "quality_authorship.weeks_ahead_one": {
+    "en": "in {count} week",
+    "zh-hans": "{count}周后",
+    "zh-hant": "{count}週後"
+  },
+  "quality_authorship.months_ago": {
+    "en": "{count} months ago",
+    "zh-hans": "{count}个月前",
+    "zh-hant": "{count}個月前"
+  },
+  "quality_authorship.months_ahead": {
+    "en": "in {count} months",
+    "zh-hans": "{count}个月后",
+    "zh-hant": "{count}個月後"
+  },
+  "quality_authorship.months_ago_one": {
+    "en": "{count} month ago",
+    "zh-hans": "{count}个月前",
+    "zh-hant": "{count}個月前"
+  },
+  "quality_authorship.months_ahead_one": {
+    "en": "in {count} month",
+    "zh-hans": "{count}个月后",
+    "zh-hant": "{count}個月後"
+  },
+  "quality_authorship.years_ago": {
+    "en": "{count} years ago",
+    "zh-hans": "{count}年前",
+    "zh-hant": "{count}年前"
+  },
+  "quality_authorship.years_ahead": {
+    "en": "in {count} years",
+    "zh-hans": "{count}年后",
+    "zh-hant": "{count}年後"
+  },
+  "quality_authorship.years_ago_one": {
+    "en": "{count} year ago",
+    "zh-hans": "{count}年前",
+    "zh-hant": "{count}年前"
+  },
+  "quality_authorship.years_ahead_one": {
+    "en": "in {count} year",
+    "zh-hans": "{count}年后",
+    "zh-hant": "{count}年後"
+  },
+  "quality_authorship.evidence_observed": {
+    "en": "Evidence observed:",
+    "zh-hans": "资料观测时间：",
+    "zh-hant": "資料觀測時間："
+  },
+  "quality_authorship.featured": {
+    "en": "{count} featured",
+    "zh-hans": "{count}典范",
+    "zh-hant": "{count}典範"
+  },
+  "quality_authorship.parenthesis_open": {
+    "en": " (",
+    "zh-hans": "（",
+    "zh-hant": "（"
+  },
+  "quality_authorship.parenthesis_close": {
+    "en": ")",
+    "zh-hans": "）",
+    "zh-hant": "）"
+  },
+  "quality_authorship.author_featured": {
+    "en": "Featured articles by {name}",
+    "zh-hans": "{name}的典范内容",
+    "zh-hant": "{name}的典範內容"
+  },
+  "quality_authorship.sort_caption": {
+    "en": "{caption} (column headers with buttons are sortable).",
+    "zh-hans": "{caption}（带按钮的列标题可排序）。",
+    "zh-hant": "{caption}（附按鈕的欄標題可排序）。"
+  },
+  "quality_authorship.coauthors": {
+    "en": "Co-authors: {names}",
+    "zh-hans": "共同作者：{names}",
+    "zh-hant": "共同作者：{names}"
+  },
+  "reports.source.parquet.read": {
+    "en": "Read local Parquet file {file}.",
+    "zh-hans": "读取本地Parquet文件{file}。",
+    "zh-hant": "讀取本地Parquet檔案{file}。"
+  },
+  "reports.source.parquet.written": {
+    "en": "Committed local Parquet file {file}.",
+    "zh-hans": "已写入本地Parquet文件{file}。",
+    "zh-hant": "已寫入本地Parquet檔案{file}。"
+  },
+  "reports.source.parquet.unchanged": {
+    "en": "Local Parquet file {file} is unchanged; no write.",
+    "zh-hans": "本地Parquet文件{file}内容未变，无需写入。",
+    "zh-hant": "本地Parquet檔案{file}內容未變，無需寫入。"
+  },
+  "reports.source.parse_templates": {
+    "en": "Parse pages ({templates}).",
+    "zh-hans": "解析页面（{templates}）。",
+    "zh-hant": "解析頁面（{templates}）。"
+  },
+  "reports.source.purpose.latest_revisions_batch": {
+    "en": "revision IDs (page_latest) of {count} {page_kind}, batch {batch}/{batches}",
+    "zh-hans": "{count}个{page_kind}的版本号（page_latest），第{batch}/{batches}批",
+    "zh-hant": "{count}個{page_kind}的版本號（page_latest），第{batch}/{batches}批"
+  },
+  "reports.source.purpose.latest_revisions_count": {
+    "en": "revision IDs (page_latest) of {count} selected {page_kind}",
+    "zh-hans": "已选{count}个{page_kind}的版本号（page_latest）",
+    "zh-hant": "已選{count}個{page_kind}的版本號（page_latest）"
+  },
+  "data.page": {
+    "en": "Page {page} of {total}",
+    "zh-hans": "第{page}页，共{total}页",
+    "zh-hant": "第{page}頁，共{total}頁"
+  },
+  "data.field.contract": {
+    "en": "Data contract",
+    "zh-hans": "数据契约",
+    "zh-hant": "資料契約"
+  },
+  "data.field.size_bytes": {
+    "en": "File size (bytes)",
+    "zh-hans": "文件大小（字节）",
+    "zh-hant": "檔案大小（位元組）"
+  },
+  "quality_authorship.updating": {
+    "en": "Loading saved statistics…",
+    "zh-hans": "正在加载已保存的统计…",
+    "zh-hant": "正在載入已儲存的統計…"
+  },
+  "quality_authorship.update_failed": {
+    "en": "Could not update the authors. Please try again.",
+    "zh-hans": "作者统计更新失败，请重试。",
+    "zh-hant": "作者統計更新失敗，請重試。"
+  },
+  "quality_authorship.only_quality": {
+    "en": "High-quality only",
+    "zh-hans": "仅高品质条目",
+    "zh-hant": "僅高品質條目"
+  },
+  "quality_analysis.heading": {
+    "en": "Quality article analysis",
+    "zh-hans": "高品质条目分析",
+    "zh-hant": "高品質條目分析"
+  },
+  "quality_analysis.intro": {
+    "en": "Explore the current quality content of Chinese Wikipedia’s Video games project, including Bplus articles.",
+    "zh-hans": "分析中文维基百科电子游戏专题当前的高品质内容，包含乙上级条目。",
+    "zh-hant": "分析中文維基百科電子遊戲專題目前的高品質內容，包含乙上級條目。"
+  },
+  "quality_analysis.background": {
+    "en": "Collected hourly in the background. This page reads saved results.",
+    "zh-hans": "数据每小时在后台收集，本页读取已保存的分析结果。",
+    "zh-hant": "資料每小時在背景收集，本頁讀取已儲存的分析結果。"
+  },
+  "quality_analysis.listing_evidence": {
+    "en": "Talk-page listing evidence",
+    "zh-hans": "讨论页入选依据",
+    "zh-hant": "討論頁入選依據"
+  },
+  "quality_analysis.observed": {
+    "en": "Analysis updated:",
+    "zh-hans": "分析更新：",
+    "zh-hant": "分析更新："
+  },
+  "quality_analysis.unavailable": {
+    "en": "The first saved analysis is not available yet. Background collection will populate this report.",
+    "zh-hans": "首份分析数据尚未保存，后台收集完成后将显示报告。",
+    "zh-hant": "首份分析資料尚未儲存，背景收集完成後將顯示報告。"
+  },
+  "quality_analysis.overview": {
+    "en": "Overview",
+    "zh-hans": "概览",
+    "zh-hant": "概覽"
+  },
+  "quality_analysis.grades": {
+    "en": "Content distribution",
+    "zh-hans": "品质分布",
+    "zh-hant": "品質分布"
+  },
+  "quality_analysis.years": {
+    "en": "Listings by year",
+    "zh-hans": "入选年份",
+    "zh-hant": "入選年份"
+  },
+  "quality_analysis.year": {
+    "en": "Year",
+    "zh-hans": "年份",
+    "zh-hant": "年份"
+  },
+  "quality_analysis.years_note": {
+    "en": "Listing years of the current cohort, not historical annual project totals. Undated articles are excluded.",
+    "zh-hans": "统计当前条目的入选年份，并非专题历年的条目总数。日期未知的条目不计入。",
+    "zh-hant": "統計目前條目的入選年份，並非專題歷年的條目總數。日期未知的條目不計入。"
+  },
+  "quality_analysis.lengths": {
+    "en": "Prose length comparison",
+    "zh-hans": "正文长度比较",
+    "zh-hant": "正文長度比較"
+  },
+  "quality_analysis.lengths_note": {
+    "en": "Compare FA, GA and Bplus prose lengths. Importance groups pool these three grades; FL, A and AL are excluded from this section. The central 68% range covers the 16th–84th percentiles and describes the saved cohort, not a minimum quality requirement.",
+    "zh-hans": "比较典范、优良及乙上条目的正文长度。重要度分组汇总这三个品质，不计入特色列表、甲及甲级列表。中央68%区间为第16至84百分位，描述已保存条目的分布，不代表品质要求。",
+    "zh-hant": "比較典範、優良及乙上條目的正文長度。重要度分組彙總這三個品質，不計入特色列表、甲及甲級列表。中央68%區間為第16至84百分位，描述已儲存條目的分布，不代表品質要求。"
+  },
+  "quality_analysis.articles": {
+    "en": "All articles and lists",
+    "zh-hans": "全部条目及列表",
+    "zh-hant": "全部條目及列表"
+  },
+  "quality_analysis.coverage_note": {
+    "en": "Summary cards and annual counts cover every selected grade. Unknown values are not treated as zero.",
+    "zh-hans": "概览及年度统计包含全部选定品质；汇总时不会将未知数据视为零。",
+    "zh-hant": "概覽及年度統計包含全部選定品質；彙總時不會將未知資料視為零。"
+  },
+  "quality_analysis.total": {
+    "en": "Articles and lists",
+    "zh-hans": "条目及列表",
+    "zh-hant": "條目及列表"
+  },
+  "quality_analysis.measured": {
+    "en": "Prose measured",
+    "zh-hans": "已测量正文",
+    "zh-hant": "已測量正文"
+  },
+  "quality_analysis.dated": {
+    "en": "Known listing dates",
+    "zh-hans": "入选日期已知",
+    "zh-hant": "入選日期已知"
+  },
+  "quality_analysis.median": {
+    "en": "Median prose length",
+    "zh-hans": "正文长度中位数",
+    "zh-hant": "正文長度中位數"
+  },
+  "quality_analysis.words": {
+    "en": "words",
+    "zh-hans": "词",
+    "zh-hant": "詞"
+  },
+  "quality_analysis.importance": {
+    "en": "Importance",
+    "zh-hans": "重要度",
+    "zh-hant": "重要度"
+  },
+  "quality_analysis.sample": {
+    "en": "Measured / total",
+    "zh-hans": "测量数／总数",
+    "zh-hant": "測量數／總數"
+  },
+  "quality_analysis.range_68": {
+    "en": "Central 68%",
+    "zh-hans": "中央68%区间",
+    "zh-hant": "中央68%區間"
+  },
+  "quality_analysis.range_95": {
+    "en": "Central 95%",
+    "zh-hans": "中央95%区间",
+    "zh-hant": "中央95%區間"
+  },
+  "quality_analysis.range_scale": {
+    "en": "All range marks share a scale from 0 to",
+    "zh-hans": "区间图标记使用同一刻度：0至",
+    "zh-hant": "區間圖標記使用同一刻度：0至"
+  },
+  "quality_analysis.no_dates": {
+    "en": "No supported listing dates are saved yet.",
+    "zh-hans": "尚无已保存且有证据支持的入选日期。",
+    "zh-hant": "尚無已儲存且有證據支持的入選日期。"
+  },
+  "quality_analysis.no_measurements": {
+    "en": "No prose measurements are saved yet.",
+    "zh-hans": "尚无已保存的正文测量结果。",
+    "zh-hant": "尚無已儲存的正文測量結果。"
+  },
+  "quality_analysis.search": {
+    "en": "Find an article",
+    "zh-hans": "查找条目",
+    "zh-hant": "尋找條目"
+  },
+  "quality_analysis.all_grades": {
+    "en": "All grades",
+    "zh-hans": "全部品质",
+    "zh-hant": "全部品質"
+  },
+  "quality_analysis.all_importance": {
+    "en": "All importance levels",
+    "zh-hans": "全部重要度",
+    "zh-hant": "全部重要度"
+  },
+  "quality_analysis.all_rows": {
+    "en": "All rows",
+    "zh-hans": "全部行",
+    "zh-hant": "全部列"
+  },
+  "quality_analysis.reset": {
+    "en": "Reset filters",
+    "zh-hans": "重置筛选",
+    "zh-hant": "重設篩選"
+  },
+  "quality_analysis.filter_note": {
+    "en": "Filters apply to this table. The summary charts always describe the complete cohort.",
+    "zh-hans": "筛选仅作用于此表；汇总图表始终描述全部选定内容。",
+    "zh-hant": "篩選僅作用於此表；彙總圖表始終描述全部選定內容。"
+  },
+  "quality_analysis.result_count": {
+    "en": "{count} of {total} articles and lists",
+    "zh-hans": "共{total}条目及列表，符合条件{count}项",
+    "zh-hant": "共{total}條目及列表，符合條件{count}項"
+  },
+  "quality_analysis.no_matches": {
+    "en": "No articles match these filters.",
+    "zh-hans": "没有符合筛选条件的条目。",
+    "zh-hant": "沒有符合篩選條件的條目。"
+  },
+  "quality_analysis.prose": {
+    "en": "Prose length",
+    "zh-hans": "正文长度",
+    "zh-hant": "正文長度"
+  },
+  "quality_analysis.source_size": {
+    "en": "Source size",
+    "zh-hans": "源码大小",
+    "zh-hant": "原始碼大小"
+  },
+  "routine.quality-authorship": {
+    "en": "Quality author statistics",
+    "zh-hans": "典优条目作者统计",
+    "zh-hant": "典優條目作者統計"
+  },
+  "routine.quality-analysis": {
+    "en": "Quality article analysis",
+    "zh-hans": "高品质条目分析",
+    "zh-hant": "高品質條目分析"
+  },
+  "quality_analysis.grade_comparison": {
+    "en": "By grade: FA, GA and Bplus",
+    "zh-hans": "按品质：典范、优良及乙上",
+    "zh-hant": "按品質：典範、優良及乙上"
+  },
+  "quality_analysis.importance_comparison": {
+    "en": "By importance",
+    "zh-hans": "按重要度",
+    "zh-hant": "按重要度"
+  },
+  "quality_analysis.importance_pool": {
+    "en": "Top, High, Mid and Low groups combine FA, GA and Bplus articles. Unknown importance is excluded.",
+    "zh-hans": "极高、高、中、低重要度均汇总典范、优良及乙上条目；不计入重要度未知的条目。",
+    "zh-hant": "極高、高、中、低重要度均彙總典範、優良及乙上條目；不計入重要度未知的條目。"
+  },
+  "quality_analysis.group": {
+    "en": "Group",
+    "zh-hans": "分组",
+    "zh-hant": "分組"
+  },
+  "quality_analysis.lengths_pending": {
+    "en": "The simplified prose comparison is awaiting the next background analysis. Saved article rows and annual totals remain available.",
+    "zh-hans": "简化后的正文比较正等待下一次后台分析；已保存的条目列表及年度统计仍可查看。",
+    "zh-hant": "簡化後的正文比較正等待下一次背景分析；已儲存的條目列表及年度統計仍可查看。"
+  },
+  "quality_analysis.columns_description": {
+    "en": "Each vertical column represents a listing year; colored segments show the saved count for each grade. The number above each column is its total. The data table provides exact values.",
+    "zh-hans": "每根竖直柱表示一个入选年份，彩色堆叠部分表示各品质的条目数，柱顶数字为总数。数据表提供精确值。",
+    "zh-hant": "每根垂直柱表示一個入選年份，彩色堆疊部分表示各品質的條目數，柱頂數字為總數。資料表提供精確值。"
+  },
+  "quality_analysis.chart_data": {
+    "en": "View chart data",
+    "zh-hans": "查看图表数据",
+    "zh-hant": "檢視圖表資料"
+  },
+  "quality_analysis.chart_scroll": {
+    "en": "Scroll horizontally to inspect more years. Exact values are available in the chart data table.",
+    "zh-hans": "可横向滚动查看更多年份，也可在图表数据表中查看精确值。",
+    "zh-hant": "可橫向捲動檢視更多年份，也可在圖表資料表中檢視精確值。"
+  },
+  "quality_analysis.grade_pie": {
+    "en": "By grade",
+    "zh-hans": "按品质",
+    "zh-hant": "按品質"
+  },
+  "quality_analysis.importance_pie": {
+    "en": "By importance",
+    "zh-hans": "按重要度",
+    "zh-hant": "按重要度"
+  },
+  "quality_analysis.share": {
+    "en": "Share",
+    "zh-hans": "占比",
+    "zh-hant": "占比"
+  },
+  "quality_analysis.pie_description": {
+    "en": "Pie slices show the saved article count in each category. The table gives exact counts and percentages.",
+    "zh-hans": "饼图展示各分类的已保存条目数，下方表格列出精确数量及占比。",
+    "zh-hant": "圓餅圖顯示各分類的已儲存條目數，下方表格列出精確數量及占比。"
+  },
+  "quality_analysis.importance_pending": {
+    "en": "The importance distribution will appear after the next background update.",
+    "zh-hans": "重要度分布将在下一次后台更新后显示。",
+    "zh-hant": "重要度分布將在下一次背景更新後顯示。"
+  },
+  "consistency.review_diff": {
+    "en": "Edit and view changes",
+    "zh-hans": "编辑并查看差异",
+    "zh-hant": "編輯並檢視差異"
+  },
+  "consistency.userscript_note": {
+    "en": "With this Tampermonkey script installed, Edit and view changes fills the talk-page lead and edit summary, then opens the diff for review.",
+    "zh-hans": "安装此Tampermonkey脚本后，点击“编辑并查看差异”会填写讨论页首段及编辑摘要，再打开差异供检查。",
+    "zh-hant": "安裝此Tampermonkey指令碼後，點選「編輯並檢視差異」會填入討論頁首段及編輯摘要，再開啟差異供檢查。"
+  },
+  "consistency.userscript_install": {
+    "en": "Install / download script",
+    "zh-hans": "安装／下载脚本",
+    "zh-hant": "安裝／下載指令碼"
   }
 }

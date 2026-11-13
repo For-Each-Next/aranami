@@ -10,9 +10,12 @@ rebuild; domain validation and expiry remain with that owner.
 
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
 import json
 import logging
 import os
+import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,12 +26,91 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from shared.support.parquet import (
+    parquet_metadata,
+    report_parquet_activity,
+    validate_parquet_metadata,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 _LOGGER = logging.getLogger(__name__)
 _METADATA_KEY = "aranami.cache"
 _MAX_CONTRACT_BYTES = 200
+_TIMESTAMP = re.compile(r"\d{8}T\d{6}\.parquet")
+
+
+def cache_key(family: str, *identities: str) -> str:
+    """Build a bounded ASCII path for one disposable cache identity.
+
+    Args:
+        family: Lowercase ASCII cache category. Digits and hyphens may
+            follow its first letter.
+        identities: Exact nonempty logical identities, such as wiki and
+            project or destination title. Order remains meaningful.
+
+    Returns:
+        The family followed by a full SHA-256 digest of the identities.
+        Source names remain unchanged in cache contents and metadata.
+        Durable report keys must use their own storage contract.
+
+    Raises:
+        ValueError: The family or logical identities are invalid.
+    """
+    if (
+        not isinstance(family, str)
+        or re.fullmatch(r"[a-z][a-z0-9-]{0,63}", family) is None
+        or not identities
+        or any(
+            not isinstance(value, str) or not value.strip()
+            for value in identities
+        )
+    ):
+        message = "Cache keys require an ASCII family and nonempty identities."
+        raise ValueError(message)
+    encoded = json.dumps(
+        identities,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"{family}/{hashlib.sha256(encoded).hexdigest()}"
+
+
+def latest_cache_path(directory: Path) -> Path | None:
+    """Select the newest timestamped cache without reading its table.
+
+    Args:
+        directory: One cache identity's private generation directory.
+
+    Returns:
+        Latest committed filename, or none for a missing directory.
+
+    Raises:
+        OSError: The directory is unsafe or cannot be inspected.
+    """
+    ancestors = [directory, directory.parent]
+    absolute = directory.absolute()
+    runtime = Path.cwd()
+    if absolute.is_relative_to(runtime):
+        ancestors = []
+        current = absolute
+        while current != runtime:
+            ancestors.append(current)
+            current = current.parent
+    if any(path.is_symlink() for path in ancestors):
+        message = "Cache directories cannot be symbolic links."
+        raise OSError(message)
+    if not directory.exists():
+        return None
+    return max(
+        (
+            path
+            for path in directory.iterdir()
+            if _TIMESTAMP.fullmatch(path.name)
+        ),
+        default=None,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,12 +122,14 @@ class ParquetCache:
         contract: Owner-selected identity for compatible parsing rules.
         max_rows: Maximum accepted row count.
         max_bytes: Maximum compressed and decoded table size.
+        observe: Emit local file activity during an active collection.
     """
 
     schema: Mapping[str, pl.DataType | type[pl.DataType]]
     contract: str
     max_rows: int
     max_bytes: int
+    observe: bool = True
 
     def __post_init__(self) -> None:
         """Freeze the schema and reject unusable cache definitions.
@@ -81,7 +165,8 @@ class ParquetCache:
         cannot combine one generation's contract with another's data.
 
         Args:
-            path: Disposable cache destination, or none for memory only.
+            path: Generation directory, exact Parquet file, or none for
+                memory only. Directories select the latest timestamp.
 
         Returns:
             Exact-schema observations, or a typed empty cache miss.
@@ -90,12 +175,20 @@ class ParquetCache:
         if path is None:
             return empty
         try:
-            return self._read(path)
+            if path.suffix != ".parquet":
+                path = latest_cache_path(path)
+                if path is None:
+                    return empty
+            frame = self._read(path)
         except FileNotFoundError:
             return empty
         except OSError, ValueError, pl.exceptions.PolarsError:
             _LOGGER.warning("Ignoring unreadable disposable cache: %s", path)
             return empty
+        else:
+            if self.observe:
+                report_parquet_activity(path, "source_loaded")
+            return frame
 
     def _read(self, path: Path) -> pl.DataFrame:
         """Read one open cache generation and validate its contract.
@@ -137,6 +230,7 @@ class ParquetCache:
             stream.seek(0)
             frame = pl.read_parquet(stream, n_rows=self.max_rows + 1)
         self._validate(frame)
+        validate_parquet_metadata(metadata, frame)
         return frame
 
     def _validate(self, frame: pl.DataFrame) -> None:
@@ -161,7 +255,9 @@ class ParquetCache:
         """Atomically replace a cache after checking schema and bounds.
 
         Args:
-            path: Disposable destination outside the source tree.
+            path: Generation directory or exact Parquet destination
+                outside the source tree. Directory writes use UTC
+                YYYYMMDDTHHMMSS names and retire older generations.
             frame: Complete observations validated by their owner.
 
         Raises:
@@ -169,10 +265,21 @@ class ParquetCache:
             ValueError: The schema or table size violates this contract.
         """
         self._validate(frame)
+        directory = path if path.suffix != ".parquet" else None
+        if directory is not None:
+            # Validate the namespace before creating or selecting files.
+            latest = latest_cache_path(directory)
+            stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%S.parquet")
+            path = directory / stamp
+            if latest is not None and latest > path:
+                message = "Cannot replace a newer cache generation."
+                raise ValueError(message)
         write_parquet_cache(
             path,
             frame,
             max_bytes=self.max_bytes,
+            contract=self.contract,
+            observe=self.observe,
             metadata={
                 _METADATA_KEY: json.dumps({
                     "schema": 1,
@@ -180,15 +287,27 @@ class ParquetCache:
                 }),
             },
         )
+        if directory is not None:
+            for previous in directory.iterdir():
+                if _TIMESTAMP.fullmatch(previous.name) and previous < path:
+                    try:
+                        previous.unlink(missing_ok=True)
+                    except OSError:
+                        _LOGGER.warning(
+                            "Could not remove old cache: %s",
+                            previous,
+                        )
 
 
-def write_parquet_cache(
+def write_parquet_cache(  # ruff: ignore[too-many-arguments]
     path: Path,
     frame: pl.DataFrame,
     *,
     max_bytes: int | None = None,
     mode: int = 0o600,
     metadata: Mapping[str, str] | None = None,
+    contract: str = "disposable-cache",
+    observe: bool = True,
 ) -> None:
     """Replace a cache only after its complete Parquet write succeeds.
 
@@ -197,7 +316,9 @@ def write_parquet_cache(
         frame: Complete observations already validated by their owner.
         max_bytes: Optional maximum compressed file length.
         mode: Permissions for the completed cache file.
-        metadata: Optional embedded Parquet key/value metadata.
+        metadata: Optional embedded owner metadata, preserved intact.
+        contract: Semantic identity embedded with file-write metadata.
+        observe: Emit completed local file activity after replacement.
 
     Raises:
         OSError: The destination is unsafe or cannot be replaced.
@@ -216,17 +337,26 @@ def write_parquet_cache(
     with NamedTemporaryFile(
         dir=path.parent,
         prefix=f".{path.stem}-",
-        suffix=".parquet",
+        suffix=".tmp",
         delete=False,
     ) as stream:
         temporary = Path(stream.name)
     try:
-        frame.write_parquet(temporary, metadata=metadata)
+        frame.write_parquet(
+            temporary,
+            metadata=parquet_metadata(
+                frame,
+                contract=contract,
+                metadata=metadata,
+            ),
+        )
         if max_bytes is not None and temporary.stat().st_size > max_bytes:
             message = "The compressed cache exceeds its size limit."
             raise ValueError(message)
         temporary.chmod(mode)
         temporary.replace(path)
+        if observe:
+            report_parquet_activity(path, "source_written")
     finally:
         try:
             temporary.unlink(missing_ok=True)

@@ -1,6 +1,6 @@
 """Share safe HTML, localization, and observation display mechanics.
 
-Use these helpers to render backend-prepared facts. They read no runtime
+Use these helpers to render runtime-prepared facts. They read no runtime
 files, initiate no requests, and never change source observations.
 """
 
@@ -13,6 +13,8 @@ import json
 import math
 import operator
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import lru_cache
 from http import HTTPStatus
@@ -24,16 +26,31 @@ import polars as pl
 from markupsafe import Markup, escape
 from opencc import OpenCC
 
+from shared.assessment_profiles import assessment_profile
+
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
 
 type Record = dict[str, object]
+_GAME_TITLE_LABELS: ContextVar[Mapping[str, str] | None] = ContextVar(
+    "game_title_labels",
+    default=None,
+)
 _MINUTE = 60
 _HOUR_MINUTES = 60
 _DAY_MINUTES = 1440
 _MONTH_MINUTES = 43830
-_SCHEDULE_MAX_AGE = 120
+_WEEK_MINUTES = 7 * _DAY_MINUTES
+_YEAR_MINUTES = 12 * _MONTH_MINUTES
+_RELATIVE_UNITS = (
+    ("years", _YEAR_MINUTES),
+    ("months", _MONTH_MINUTES),
+    ("weeks", _WEEK_MINUTES),
+    ("days", _DAY_MINUTES),
+    ("hours", _HOUR_MINUTES),
+    ("minutes", 1),
+)
 _PAGE_SIZE = 10
 _MAX_URL_LENGTH = 4096
 _DISPLAY_LIMIT = 6
@@ -62,67 +79,32 @@ _FAILURE_REASONS = {
     "ValueError": "invalid_data",
     "TypeError": "invalid_data",
 }
-_QUALITY = (
-    ("FA", "fa", "典范", "典範"),
-    ("FL", "fl", "特色列表", "典表"),
-    ("A", "a", "甲"),
-    ("AL", "al", "甲表", "甲级列表", "甲級列表"),
-    ("GA", "ga", "优良", "優良"),
-    ("Bplus", "bplus", "乙上"),
-    ("B", "b", "乙"),
-    ("BL", "bl", "乙表", "乙级列表", "乙級列表"),
-    ("C", "c", "丙"),
-    ("CL", "cl", "丙表", "丙级列表", "丙級列表"),
-    ("D", "d", "丁"),
-    ("Start", "start", "初"),
-    ("Stub", "stub", "小作品"),
-    ("List", "list", "列表"),
-    ("SL", "sl", "stublist", "小列表"),
-    ("Substub", "substub", "小小作品"),
-    ("Disambig", "disambig", "消歧义", "消歧義"),
-    ("Unassessed", "unassessed", "未评", "未評", "未评级", "未評級"),
-    ("Unknown", "unknown", "未知"),
-)
-_IMPORTANCE = (
-    ("Top", "top", "极高", "極高"),
-    ("High", "high", "高"),
-    ("Mid", "mid", "中"),
-    ("Low", "low", "低"),
-    ("Bottom", "bottom", "极低", "極低"),
-    ("NA", "na", "不适用", "不適用"),
-    ("Unknown", "unknown", "未知", "未评", "未評", "未评级", "未評級"),
-)
-_ALIASES = {
-    dimension: {name: code for code, *names in groups for name in names}
-    for dimension, groups in (("class", _QUALITY), ("importance", _IMPORTANCE))
+# This application serves the configured project. The shared registry
+# defines grades; locale messages remain presentation content.
+_ASSESSMENTS = assessment_profile("zhwiki", "电子游戏")
+_CODES = {
+    dimension: tuple(
+        label.code
+        for label in sorted(
+            _ASSESSMENTS.labels(dimension),
+            key=lambda label: (label.order is None, label.order or 0),
+        )
+        if label.order is not None or label.code == "Unknown"
+    )
+    for dimension in ("class", "importance")
 }
 _RANKS = {
-    "class": {
-        "FA": 10,
-        "FL": 10,
-        "A": 9,
-        "AL": 9,
-        "GA": 8,
-        "Bplus": 7,
-        "B": 6,
-        "BL": 6,
-        "C": 5,
-        "CL": 5,
-        "D": 4,
-        "Start": 3,
-        "List": 3,
-        "Stub": 2,
-        "SL": 2,
-        "Substub": 1,
-    },
-    "importance": {"Top": 5, "High": 4, "Mid": 3, "Low": 2, "Bottom": 1},
+    dimension: _ASSESSMENTS.ranks(dimension)
+    for dimension in ("class", "importance")
 }
-# Table sorting distinguishes grades that share filter boundaries.
 _SORT_RANKS = {
-    dimension: {
-        code: rank for rank, (code, *_) in enumerate(reversed(groups[:-1]))
-    }
-    for dimension, groups in (("class", _QUALITY), ("importance", _IMPORTANCE))
+    dimension: _ASSESSMENTS.sort_ranks(dimension)
+    for dimension in ("class", "importance")
+}
+_LIST_GROUPS = {
+    label.code: label.article_group
+    for label in _ASSESSMENTS.classes
+    if label.article_group is not None and label.article_group != label.code
 }
 
 
@@ -461,6 +443,29 @@ def utc_time(
     )
 
 
+def relative_units(seconds: float) -> tuple[str, int]:
+    """Select a whole relative age without changing source timestamps.
+
+    Args:
+        seconds: Elapsed or remaining interval from an observed time.
+
+    Returns:
+        The largest whole unit and count, using seven-day weeks and
+        365.25-day years split into twelve equal months. Intervals under
+        one minute return zero minutes for an explicit just-now label.
+    """
+    minutes = int(abs(seconds) // _MINUTE)
+    unit, divisor = next(
+        (
+            (unit, divisor)
+            for unit, divisor in _RELATIVE_UNITS
+            if minutes >= divisor
+        ),
+        ("minutes", 1),
+    )
+    return unit, minutes // divisor
+
+
 def relative_time(
     value: object,
     interface: Interface,
@@ -474,7 +479,8 @@ def relative_time(
         now: Aware rendering time shared with the absolute timestamp.
 
     Returns:
-        Whole months, days, hours, or minutes, rounded down.
+        Whole years, months, weeks, days, hours or minutes, rounded
+        down.
         Sub-minute intervals have short explicit labels. Invalid or
         missing timestamps produce no annotation.
     """
@@ -482,17 +488,9 @@ def relative_time(
     if instant is None:
         return ""
     seconds = (instant - now).total_seconds()
-    minutes = int(abs(seconds) // _MINUTE)
-    if minutes == 0:
+    unit, count = relative_units(seconds)
+    if count == 0:
         return interface.text("time.soon" if seconds > 0 else "time.just_now")
-    if minutes >= _MONTH_MINUTES:
-        unit, count = "months", minutes // _MONTH_MINUTES
-    elif minutes >= _DAY_MINUTES:
-        unit, count = "days", minutes // _DAY_MINUTES
-    elif minutes >= _HOUR_MINUTES:
-        unit, count = "hours", minutes // _HOUR_MINUTES
-    else:
-        unit, count = "minutes", minutes
     direction = "ahead" if seconds > 0 else "ago"
     return interface.text(f"time.{unit}_{direction}", count=count)
 
@@ -503,9 +501,12 @@ def assessment_code(value: object, dimension: str) -> str | None:
     Returns:
         The recognized canonical code, or None.
     """
+    if dimension not in _CODES:
+        return None
+    label = _ASSESSMENTS.resolve(value, dimension)
     return (
-        _ALIASES.get(dimension, {}).get(value.strip().lower())
-        if isinstance(value, str)
+        label.code
+        if label is not None and label.code in _CODES[dimension]
         else None
     )
 
@@ -583,13 +584,13 @@ def maintenance_selection(
         "order": r"asc|desc",
         "seed": r"[0-9a-f]{16}",
         "q": r"[^\x00-\x1f\x7f]{1,200}",
-        "quality": "|".join(code for code, *_ in _QUALITY) + "|Unknown",
-        "importance": "|".join(code for code, *_ in _IMPORTANCE),
+        "quality": "|".join(_CODES["class"]),
+        "importance": "|".join(_CODES["importance"]),
         "regex": "1",
         "quality_op": "eq|gte|lte|range",
         "importance_op": "eq|gte|lte|range",
-        "quality_to": "|".join(code for code, *_ in _QUALITY),
-        "importance_to": "|".join(code for code, *_ in _IMPORTANCE),
+        "quality_to": "|".join(_CODES["class"]),
+        "importance_to": "|".join(_CODES["importance"]),
         "genre": "all|article|list",
         "limit": "10|20|50",
     }
@@ -723,23 +724,17 @@ def maintenance_filter(
                 if dimension == "class"
                 else pl.lit("Unknown")
             )
-            code = value.str.to_lowercase().replace_strict(
-                _ALIASES[dimension],
-                default=fallback,
-            )
+            code = _ASSESSMENTS.expression(
+                value,
+                dimension,
+                preserve_unknown=False,
+            ).fill_null(fallback)
             if dimension == "class":
-                is_list = code.is_in(["FL", "AL", "BL", "CL", "List", "SL"])
+                is_list = code.is_in(_LIST_GROUPS)
                 genre = selection.get("genre")
                 if genre in {"article", "list"}:
                     conditions.append(is_list if genre == "list" else ~is_list)
-                code = code.replace({
-                    "FL": "FA",
-                    "AL": "A",
-                    "BL": "B",
-                    "CL": "C",
-                    "List": "Start",
-                    "SL": "Stub",
-                })
+                code = code.replace(_LIST_GROUPS)
             if selected:
                 conditions.append(
                     assessment_condition(
@@ -797,17 +792,14 @@ def maintenance_items(
         },
     ).with_row_index("position")
     if sort in _SORT_RANKS:
-        field = (
-            pl
-            .col(f"assessment_{sort}")
-            .str.strip_chars()
-            .str.to_lowercase()
-            .replace_strict(_ALIASES[sort], default=None)
-            .replace_strict(
-                _SORT_RANKS[sort],
-                default=None,
-                return_dtype=pl.Int64,
-            )
+        field = _ASSESSMENTS.expression(
+            f"assessment_{sort}",
+            sort,
+            preserve_unknown=False,
+        ).replace_strict(
+            _SORT_RANKS[sort],
+            default=None,
+            return_dtype=pl.Int64,
         )
     else:
         field = pl.col(
@@ -869,7 +861,9 @@ def merged_items(homepage: Record, sections: tuple[str, ...]) -> Record:
             merged = []
         for item in rows:
             kind = "ga" if section == "good" else section
-            if section == "featured":
+            if section == "upcoming":
+                kind = item.get("kind")
+            elif section == "featured":
                 kind = (
                     item.get("kind")
                     if item.get("kind") in {"fa", "fl"}
@@ -882,30 +876,89 @@ def merged_items(homepage: Record, sections: tuple[str, ...]) -> Record:
     return {"items": merged, "missing": missing}
 
 
-def homepage_sections(snapshot: Record | None) -> list[Record]:
-    """Omit empty sections and put scheduled quality content first.
+def homepage_sections(  # ruff: ignore[too-many-locals]
+    snapshot: Record | None,
+    now: dt.datetime | None = None,
+) -> list[Record]:
+    """Show six homepage highlights in descending display-date order.
+
+    Args:
+        snapshot: Saved homepage facts, possibly unavailable.
+        now: Actual page clock for expiring old highlights.
 
     Returns:
         Visible sections and their bounded article lists.
     """
     snapshot = snapshot or {}
     homepage = snapshot.get("homepage") or {}
-    recognized = merged_items(homepage, ("featured", "good"))
-    news = merged_items(homepage, ("news", "history"))
-    upcoming = homepage.get("upcoming")
-    if upcoming is not None:
-        upcoming = sorted(
-            upcoming,
-            key=operator.itemgetter("date", "title", "kind"),
-        )
-    quality = (
-        None
-        if recognized["items"] is None and upcoming is None
-        else [*(upcoming or []), *(recognized["items"] or [])]
+    observed = now or timestamp(snapshot.get("updated_at"))
+    today = observed.date() if observed else dt.datetime.now(dt.UTC).date()
+    previous_month = today.replace(day=1) - dt.timedelta(days=1)
+    month_start = previous_month.replace(
+        day=min(
+            today.day,
+            calendar.monthrange(previous_month.year, previous_month.month)[1],
+        ),
     )
-    views = (snapshot.get("pageviews") or {}).get("items")
+    quality = merged_items(homepage, ("featured", "good", "upcoming"))
+    current = merged_items(homepage, ("news", "history"))
+    candidates = []
+    for item in quality["items"] or []:
+        day = item.get("date")
+        minimum = (
+            today - dt.timedelta(days=6)
+            if item.get("kind") == "ga"
+            else month_start + dt.timedelta(days=1)
+        )
+        if day and (
+            minimum.isoformat() <= day <= today.isoformat()
+            or (
+                item.get("date_kind") == "scheduled"
+                and today.isoformat()
+                < day
+                <= (today + dt.timedelta(days=2)).isoformat()
+            )
+        ):
+            candidates.append(item)
+    candidates.extend(
+        item
+        for item in current["items"] or []
+        if item.get("date") == today.isoformat()
+        or (
+            item.get("kind") == "history"
+            and item.get("date_kind") == "scheduled"
+            and today.isoformat()
+            < (item.get("date") or "")
+            <= (today + dt.timedelta(days=2)).isoformat()
+        )
+    )
     dyk = homepage.get("dyk")
-    sections = (
+    candidates.extend(
+        {**item, "kind": "dyk"}
+        for item in dyk or []
+        if (item.get("date") or "") <= today.isoformat()
+        or (
+            item.get("date_kind") == "estimated"
+            and today.isoformat()
+            < (item.get("date") or "")
+            <= (today + dt.timedelta(days=2)).isoformat()
+        )
+    )
+    candidates.sort(key=lambda item: item.get("date") or "", reverse=True)
+    combined = []
+    seen = set()
+    for item in candidates:
+        if item["title"] not in seen:
+            seen.add(item["title"])
+            combined.append(item)
+    known = (
+        quality["items"] is not None
+        or current["items"] is not None
+        or dyk is not None
+    )
+    highlights = combined[:_DISPLAY_LIMIT] if known else None
+    views = (snapshot.get("pageviews") or {}).get("items")
+    sections = [
         (
             "pageviews",
             views[:_DISPLAY_LIMIT] if views is not None else None,
@@ -913,18 +966,13 @@ def homepage_sections(snapshot: Record | None) -> list[Record]:
         ),
         (
             "recognized",
-            quality,
-            quality == []
-            and not recognized["missing"]
-            and upcoming is not None,
+            highlights,
+            highlights == []
+            and not quality["missing"]
+            and not current["missing"]
+            and dyk is not None,
         ),
-        ("dyk", dyk[:_DISPLAY_LIMIT] if dyk is not None else None, dyk == []),
-        (
-            "news_history",
-            news["items"],
-            news["items"] == [] and not news["missing"],
-        ),
-    )
+    ]
     return [
         {"key": key, "items": items}
         for key, items, empty in sections
@@ -953,6 +1001,61 @@ def article_extract(item: Record, locale: str) -> tuple[str, str | None]:
     if text and language in {"zh-tw", "zh-hk"}:
         text = _regional_converter(language).convert(text)
     return language, text
+
+
+@contextmanager
+def title_display_scope(labels: Mapping[str, str]) -> Iterator[None]:
+    """Bind saved regional labels for the current rendering request.
+
+    Args:
+        labels: Validated canonical-title to Taiwan-label mapping.
+
+    Yields:
+        A rendering scope that restores prior labels on exit.
+    """
+    token = _GAME_TITLE_LABELS.set(labels)
+    try:
+        yield
+    finally:
+        _GAME_TITLE_LABELS.reset(token)
+
+
+def display_title(title: str, locale: str) -> str:
+    """Convert a visible Chinese title without changing its identity.
+
+    Args:
+        title: Original saved article or discussion heading.
+        locale: Negotiated script or regional Chinese preference.
+
+    Returns:
+        A saved conversion-group label for Taiwan when available,
+        otherwise a local dictionary conversion for Chinese preferences.
+        Generic Chinese and English retain the source spelling.
+    """
+    if locale not in {"zh-hans", "zh-hant", "zh-tw", "zh-hk"}:
+        return title
+    if locale == "zh-tw" and (
+        label := (_GAME_TITLE_LABELS.get() or {}).get(title)
+    ):
+        return label
+    return _title_converter(locale).convert(title)
+
+
+@lru_cache(maxsize=4)
+def _title_converter(locale: str) -> OpenCC:
+    """Reuse the local dictionary for a Chinese title preference.
+
+    Returns:
+        An OpenCC converter for the selected script or region.
+    """
+    return OpenCC(
+        {
+            "zh-hans": "t2s",
+            "zh-hant": "s2t",
+            "zh-tw": "s2tw",
+            "zh-hk": "s2hk",
+        }[locale],
+    )
 
 
 @lru_cache(maxsize=2)
@@ -1027,165 +1130,6 @@ def duration(
         seconds=str(int(remainder)) if running else f"{remainder:.2f}",
     )
     return label + ("…" if running else "")
-
-
-def event_duration(
-    event: Record | None,
-    interface: Interface,
-    now: dt.datetime,
-) -> str:
-    """Display waiting, measured completion, or active elapsed time.
-
-    Returns:
-        Localized waiting label or duration, possibly unknown.
-    """
-    if event is None:
-        return "—"
-    if event.get("status") == "queued":
-        return interface.text("state.Queued")
-    started = timestamp(event.get("started_at"))
-    if event.get("status") == "running":
-        seconds = max(0, (now - started).total_seconds()) if started else None
-        return duration(seconds, interface, running=True)
-    return duration(event.get("duration_seconds"), interface)
-
-
-def schedule_state(
-    snapshot: Record | None,
-    definitions: Record,
-    now: dt.datetime,
-) -> Record:
-    """Suppress stale or mismatched scheduler predictions.
-
-    Returns:
-        Displayable actual schedule state with unsafe times hidden.
-    """
-    unknown = {
-        "state": "missing",
-        "routines": {},
-        "updated_at": None,
-        "started_at": None,
-    }
-    if snapshot is None:
-        return unknown
-    updated = timestamp(snapshot.get("updated_at"))
-    if updated is None or snapshot.get("state") not in {
-        "running",
-        "paused",
-        "stopped",
-    }:
-        return unknown
-    age = (now - updated).total_seconds()
-    if age < 0 or (age > _SCHEDULE_MAX_AGE and snapshot["state"] != "stopped"):
-        return {
-            **unknown,
-            "state": "stale",
-            "updated_at": snapshot["updated_at"],
-        }
-    routines = {}
-    for key, definition in definitions.items():
-        row = snapshot.get("routines", {}).get(key)
-        if row is None or any(
-            row.get(field) != definition.get(field)
-            for field in ("pages", "hour", "minute")
-        ):
-            continue
-        if list(row.get("prefixes", ())) != list(
-            definition.get("prefixes", ()),
-        ):
-            continue
-        routines[key] = {
-            "state": row["state"],
-            "next_run_at": row.get("next_run_at")
-            if snapshot["state"] == "running" and row["state"] == "scheduled"
-            else None,
-        }
-        queued = timestamp(row.get("queued_since"))
-        if (
-            definition.get("idle") is True
-            and queued is not None
-            and queued <= updated
-            and snapshot["state"] == "running"
-            and row["state"] == "scheduled"
-        ):
-            routines[key]["queued_since"] = row["queued_since"]
-    started = timestamp(snapshot.get("started_at"))
-    return {
-        "state": snapshot["state"],
-        "routines": routines,
-        "updated_at": snapshot["updated_at"],
-        "expires_at": (
-            updated + dt.timedelta(seconds=_SCHEDULE_MAX_AGE)
-        ).isoformat()
-        if snapshot["state"] != "stopped"
-        else None,
-        "started_at": snapshot["started_at"]
-        if started is not None
-        and started <= updated
-        and snapshot["state"] in {"running", "paused"}
-        else None,
-    }
-
-
-def next_run(schedule: Record, routine: str, interface: Interface) -> str:
-    """Show actual next execution or unavailable schedule state.
-
-    Returns:
-        The actual next UTC time or a localized state explanation.
-    """
-    row = schedule["routines"].get(routine, {})
-    if row.get("queued_since") is not None:
-        return interface.text("ops.schedule_idle")
-    if (
-        schedule["state"] == "running"
-        and row.get("state") == "scheduled"
-        and row.get("next_run_at") is not None
-    ):
-        return utc_time(row["next_run_at"])
-    labels = {
-        "stale": "ops.schedule_stale",
-        "stopped": "ops.schedule_stopped",
-        "paused": "ops.schedule_paused",
-    }
-    key = labels.get(
-        schedule["state"],
-        "ops.schedule_paused"
-        if row.get("state") == "paused"
-        else "ops.schedule_missing",
-    )
-    return interface.text(key)
-
-
-def uptime(
-    schedule: Record,
-    version: str,
-    interface: Interface,
-    now: dt.datetime,
-) -> str:
-    """Show runtime only when fresh observations confirm it.
-
-    Returns:
-        Localized observed runtime, omitting leading zero units.
-        Unavailable observations retain their explanation.
-    """
-    started = timestamp(schedule.get("started_at"))
-    updated = timestamp(schedule.get("updated_at"))
-    if started is None or updated is None:
-        return interface.text("footer.uptime_unknown", version=version)
-    if (
-        schedule.get("state") not in {"running", "paused"}
-        or started > updated
-        or updated > now
-        or (now - updated).total_seconds() > _SCHEDULE_MAX_AGE
-    ):
-        return interface.text("footer.uptime_unknown", version=version)
-    seconds = int((now - started).total_seconds())
-    return interface.text(
-        "footer.uptime",
-        version=version,
-        duration=duration(seconds, interface, running=True).removesuffix("…"),
-        since=utc_time(schedule["started_at"]),
-    )
 
 
 def readable_size(size: int) -> str:

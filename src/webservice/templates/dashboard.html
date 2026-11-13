@@ -2,11 +2,13 @@
 {% block contents_links %}
 <ul>
   {% if reviews %}<li><a href="#reviews">{{ t.reviews.heading }}</a></li>{% endif %}
+  <li><a href="#discussions">{{ t.reviews.discussions }}</a></li>
   {% for section in sections %}<li><a href="#homepage-{{ section.key }}">{{ section.title }}</a></li>{% endfor %}
 </ul>
 {% endblock %}
 {% block content %}
-{% if notice %}<div class="cdx-message cdx-message--notice" role="status"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ notice }}</div></div>{% endif %}
+{% if notice %}<div class="ui-message ui-message--notice" role="status"><svg class="ui-icon ui-message__icon" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="ui-message__content">{{ notice }}</div></div>{% endif %}
 {% include "includes/reviews.html" %}
+<section class="section-flat" id="discussions" aria-labelledby="discussions-heading"><h2 id="discussions-heading">{{ t.reviews.discussions }}</h2><p class="page-description">{{ t.discussions.recent_intro }} <a href="{{ discussions_url }}">{{ t.discussions.all }}</a></p>{% if discussions %}{% with section=discussions %}{% include "includes/article_cards.html" %}{% endwith %}{% with updated=discussions.updated %}{% include "includes/source_updated.html" %}{% endwith %}{% endif %}</section>
 {% include "includes/highlights.html" %}
 {% endblock %}

@@ -15,15 +15,16 @@ from unittest.mock import Mock, patch
 import polars as pl
 from wiki_fixtures import OfflineSite
 
-from backend.services.zhwiki import assessment_log as source
-from shared.reports import ReportStore, report_key
+from data.assessment_log import AssessmentLogData
+from data.reports import ReportResult, ReportStore, report_key
+from tasks.zhwiki import assessment_log as source
 from updater.services.zhwiki.assessment_log import update_text
 
 _NOW = dt.datetime(2026, 11, 2, 0, 5, tzinfo=dt.UTC)
 _DAY = dt.date(2026, 11, 1)
 _TITLE = "WikiProject:电子游戏/评级/日志"
 _TOTALS = "丙3 低重要度3 条目3 非条目0 重定向0 专题页面3"
-_MARKER = "<!-- aranami-assessment-totals:v2 "
+_MARKER = "<!-- aranami-assessment-totals schema=2 "
 
 
 def _text(summary: str, *, changes: bool = False) -> str:
@@ -48,7 +49,7 @@ class TestAssessmentSummaryHistory(TestCase):
     """Read compact summaries and preserve original comparison facts."""
 
     @staticmethod
-    def test_v2_accepts_optional_categories_and_comment_only() -> None:
+    def test_schema_accepts_optional_categories_and_comment_only() -> None:
         """Accept summaries without a project delta."""
         for visible in (
             "专题页面+3：条目+3（丙+3 ｜ 低重要度+3）",
@@ -60,7 +61,9 @@ class TestAssessmentSummaryHistory(TestCase):
             text = _text(visible + _MARKER + _TOTALS + " -->")
             assert source.latest_report_date(text, through=_DAY) == _DAY
 
-    def test_v2_rejects_unrecognized_or_unclosed_summary_content(self) -> None:
+    def test_schema_rejects_unrecognized_or_unclosed_summary_content(
+        self,
+    ) -> None:
         """Reject arbitrary markup and incomplete summaries."""
         for summary in (
             "Unexpected text" + _MARKER + _TOTALS + " -->",
@@ -69,6 +72,29 @@ class TestAssessmentSummaryHistory(TestCase):
         ):
             with self.subTest(summary=summary), self.assertRaises(ValueError):
                 source.latest_report_date(_text(summary), through=_DAY)
+
+    @staticmethod
+    def test_previous_marker_stays_readable_without_rewriting_history() -> (
+        None
+    ):
+        """Keep accepted paragraphs during identity cleanup."""
+        summary = "条目+3<!-- aranami-assessment-totals:v2 " + _TOTALS + " -->"
+        original = _text(summary)
+        assert source.latest_report_date(original, through=_DAY) == _DAY
+        empty = pl.DataFrame()
+        prepared = AssessmentLogData(
+            members=empty,
+            baseline=empty,
+            changes=empty,
+            prefix="",
+            days={_DAY: {}},
+            pruned=False,
+            calculated_at=_NOW,
+            result=ReportResult("assessment-log", {}),
+            unchanged=True,
+            summaries={_DAY: summary},
+        )
+        assert update_text(original, prepared) == original
 
     def test_legacy_changes_survive_missing_prior_and_repeated_retry(
         self,

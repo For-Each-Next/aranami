@@ -1,4 +1,4 @@
-"""Verify the confirmed 365-day project scope retention policy."""
+"""Verify migration evidence retention and legacy scope tombstones."""
 
 # Exact day boundaries and unittest exceptions express the policy.
 # ruff: file-ignore[magic-value-comparison, pytest-unittest-raises-assertion]
@@ -11,15 +11,13 @@ from unittest.mock import patch
 
 import polars as pl
 
-from backend.articles import (
-    history_store as history,
-    milestone_store as store,
-)
-from backend.articles.scope import load, reconcile_scope
+from data.articles import history_store as history, milestone_store as store
+from data.articles.scope import load, reconcile_scope
+from shared.support.parquet import parquet_metadata
 
 
 class ArticleScopeTests(TestCase):
-    """Keep absent pages through the grace period."""
+    """Retain absent pages and honor saved removal decisions."""
 
     def setUp(self) -> None:
         """Create isolated data with two active pages."""
@@ -45,20 +43,20 @@ class ArticleScopeTests(TestCase):
             observed_at=self.stamp + dt.timedelta(days=days),
         )
 
-    def test_grace_boundary_and_delayed_writer(self) -> None:
-        """Prune at day 365 and reject stale later collector writes."""
-        self.observe([1], 0)
-        self.observe([1], 364)
-        assert store.load(self.root / "milestones.parquet").height == 2
-        self.observe([1], 365)
-        assert store.load(self.root / "milestones.parquet")[
-            "page_id"
-        ].to_list() == [1]
-        store.sync_events(self.events, self.root / "milestones.parquet")
-        assert store.load(self.root / "milestones.parquet").height == 1
-        self.observe([1, 2], 366)
-        store.sync_events(self.events, self.root / "milestones.parquet")
-        assert store.load(self.root / "milestones.parquet").height == 2
+    def _retain_tombstone(self) -> None:
+        """Supply a retained tombstone without enabling pruning."""
+        frame = load(self.root).with_columns(
+            pl
+            .when(pl.col("page_id") == 2)
+            .then(pl.lit(self.stamp + dt.timedelta(days=365)))
+            .otherwise(pl.col("purged_at"))
+            .alias("purged_at"),
+            pl.lit(self.stamp + dt.timedelta(days=365)).alias("observed_at"),
+        )
+        frame.write_parquet(
+            self.root / "scope.parquet",
+            metadata=parquet_metadata(frame, contract="article-scope"),
+        )
 
     def test_return_resets_absence_clock(self) -> None:
         """Require a fresh continuous absence after a page returns."""
@@ -70,6 +68,44 @@ class ArticleScopeTests(TestCase):
         assert load(self.root).filter(pl.col("page_id") == 2)[
             "first_out_of_scope"
         ].item() == self.stamp + dt.timedelta(days=365)
+
+    def test_alpha_retains_evidence_after_grace_period(self) -> None:
+        """Keep historical rows until dependent drafts are retired."""
+        self.observe([1], 0)
+        self.observe([1], 800)
+        assert store.load(self.root / "milestones.parquet").height == 2
+        assert (
+            load(self.root).filter(pl.col("page_id") == 2)["purged_at"].item()
+            is None
+        )
+
+    def test_alpha_preserves_legacy_tombstones_without_cleanup(self) -> None:
+        """Retain old removal decisions without resuming pruning."""
+        self.observe([1], 0)
+        self._retain_tombstone()
+        previous = (
+            load(self.root).filter(pl.col("page_id") == 2)["purged_at"].item()
+        )
+        with patch.object(store, "merge_save") as cleanup:
+            self.observe([1], 800)
+        cleanup.assert_not_called()
+        assert (
+            load(self.root).filter(pl.col("page_id") == 2)["purged_at"].item()
+            == previous
+        )
+        store.sync_events(self.events, self.root / "milestones.parquet")
+        assert store.load(self.root / "milestones.parquet").height == 1
+
+    def test_return_clears_retained_tombstone(self) -> None:
+        """Accept a returning page after its saved removal decision."""
+        self.observe([1], 0)
+        self._retain_tombstone()
+        self.observe([1, 2], 366)
+        restored = load(self.root).filter(pl.col("page_id") == 2)
+        assert restored["first_out_of_scope"].item() is None
+        assert restored["purged_at"].item() is None
+        store.sync_events(self.events, self.root / "milestones.parquet")
+        assert store.load(self.root / "milestones.parquet").height == 2
 
     def test_empty_or_failed_observation_never_changes_scope(self) -> None:
         """Reject incomplete membership before touching durable data."""
@@ -87,7 +123,7 @@ class ArticleScopeTests(TestCase):
         assert (self.root / "scope.parquet").read_bytes() == original
         assert store.load(self.root / "milestones.parquet").height == 2
 
-    def test_history_prunes_and_cannot_be_restored_by_delayed_snapshot(
+    def test_history_cannot_be_restored_behind_retained_tombstone(
         self,
     ) -> None:
         """Apply the same tombstone rule to retained talk revisions."""
@@ -108,22 +144,8 @@ class ArticleScopeTests(TestCase):
         path = self.root / "history.parquet"
         history.merge_save(path, snapshot)
         self.observe([1], 0)
-        self.observe([1], 365)
+        self._retain_tombstone()
+        history.merge_save(path, snapshot)
         assert history.read_versions(path).is_empty()
         history.merge_save(path, snapshot)
         assert history.read_versions(path).is_empty()
-
-    def test_failed_cleanup_retries_after_tombstone_is_published(self) -> None:
-        """Retry cleanup while retaining the removal decision."""
-        self.observe([1], 0)
-        with (
-            patch.object(store, "merge_save", side_effect=OSError("retry")),
-            self.assertRaises(OSError),
-        ):
-            self.observe([1], 365)
-        assert (
-            load(self.root).filter(pl.col("page_id") == 2)["purged_at"].item()
-            is not None
-        )
-        self.observe([1], 366)
-        assert store.load(self.root / "milestones.parquet").height == 1

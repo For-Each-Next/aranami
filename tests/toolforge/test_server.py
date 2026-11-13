@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
-from backend.server import (
+from data.runtime.status import read_status
+from runtime.dashboard import (
     DashboardHTTPServer,
     DashboardUpdater,
     collect_dashboard_pass,
@@ -337,12 +338,13 @@ class DashboardUpdaterTests(unittest.TestCase):
         assert updater.health()["healthy"]
         updater.stop()
         assert json.loads(self.output.read_text()) == {"attempt": 3}
-        log = next((self.directory / "logs").glob("aranami.*.log")).read_text()
+        log = next(
+            (self.directory / "logs/diagnostics").glob("*.log"),
+        ).read_text()
         assert "secret fixture" not in log
         assert "Website refresh failed after" in log
         assert "(RuntimeError). Previous data was retained." in log
-        assert "Z ERROR [backend.server." in log
-        assert not list((self.directory / "logs").glob("project.*.log"))
+        assert " UTC ERROR [runtime.dashboard." in log
 
     def test_partial_refresh_logs_a_natural_retry_explanation(self) -> None:
         """Describe source failures without copying private details."""
@@ -356,18 +358,42 @@ class DashboardUpdaterTests(unittest.TestCase):
         updater.start()
         assert updater.refresh()
         updater.stop()
-        log = next((self.directory / "logs").glob("aranami.*.log")).read_text()
+        log = next(
+            (self.directory / "logs/diagnostics").glob("*.log"),
+        ).read_text()
         assert "with 1 source failure." in log
         assert "Previous data was retained for failed reports." in log
         assert "sensitive source detail" not in log
         assert json.loads(self.output.read_text()) == snapshot
 
+    def test_retained_failure_does_not_fail_a_cached_check(self) -> None:
+        """Separate this pass from unavailable data retained earlier."""
+        snapshot = {
+            "collection": {"attempted": 0, "failed": 0},
+            "errors": [{"section": "recognized", "message": "unavailable"}],
+        }
+        updater = self.updater(lambda: snapshot)
+        updater.start()
+        assert updater.refresh()
+        updater.stop()
+        execution = next(
+            iter(read_status(self.directory)["executions"].values()),
+        )
+        assert execution["outcome"] == "succeeded"
+        assert execution["failure"] is None
+        assert (
+            json.loads(self.output.read_text())["errors"] == snapshot["errors"]
+        )
+
     def test_log_failure_does_not_discard_a_saved_snapshot(self) -> None:
         """Keep success independent of diagnostic persistence."""
         updater = self.updater(lambda: {"ready": True, "errors": []})
         with (
-            patch("logging.FileHandler._open", side_effect=OSError("fixture")),
-            patch("logging.Handler.handleError") as errors,
+            patch(
+                "data.runtime.logs.append_log",
+                side_effect=OSError("fixture"),
+            ),
+            patch("data.runtime.logs.write_failure") as errors,
         ):
             updater.start()
             assert updater.refresh()

@@ -1,38 +1,34 @@
-# Aranami branding
+# Brand and attribution
 
-Use the horizontal logo in the site header and the standalone wave for browser
-and touch icons. Keep the transparent background and the accessible name
-“Aranami”. The artwork belongs to this CC0-1.0 project.
+Use the horizontal Aranami wordmark in the header and the standalone wave for
+browser/touch icons. Preserve transparency, readable proportions and the
+accessible name “Aranami.” Artwork is under
+`src/webservice/public_html/assets/images/`: `aranami-wordmark.png`,
+`aranami-icon.png` and the 32-pixel `favicon.png`.
 
-The built-in ImageGen tool generated the artwork in
-`src/webservice/public_html/assets/images/`. Use `aranami-wordmark.png` for
-the header, `aranami-icon.png` for the standalone wave, and `favicon.png`
-for its 32-pixel browser variant. The images were cropped and reduced for web use.
+The project artwork was generated with ImageGen and prepared for web use. Its
+visual specification is a compact curling wave suggesting an A in negative
+space, blue `#3366cc` and navy `#202122`, simple geometry and clear humanist
+lettering. It has no badge, decorative texture or shadow. New variants should
+remain recognizably consistent with that artwork and the project's CC0 license.
 
-The design prompt requested a compact abstract curling ocean wave with an A
-suggested by its negative space, a blue `#3366cc` and navy `#202122` palette,
-and the exact word “Aranami” in clear humanist sans-serif lettering. It called
-for a transparent, tightly framed horizontal logo with simple geometry,
-without a badge, extra words, shadows, texture, or fine details. A second
-ImageGen prompt extracted the matching standalone wave, retaining its shape
-and transparency and removing the lettering.
+The interface uses native HTML and local CSS: neutral surfaces, accessible contrast,
+visible focus and native fallback controls. Header links use near-black text,
+current-page markers and visible focus. Tools supports hover, click-toggle and
+native keyboard/touch disclosure. Keep responsive navigation usable without
+scripts. [Frontend](frontend.md) defines rendering and interaction ownership.
 
-The interface follows the [Wikimedia Codex style guide][codex], with locally
-bundled CSS and Vue components, neutral surfaces, accessible contrast, native
-controls, and a collapsible contents button on small screens. See
-[Frontend components](frontend.md) for build and component contracts.
+Review icons follow the verified `Module:PJ:VG/RVW` contract at revision
+92100885. Preserve Commons file-page links and
+`assets/icons/credits.html`. Maintenance icons retain their template mapping,
+author/source/license notices in `assets/icons/maintenance/credits.html`.
+About links to both tables. Popularity medals distinguish ranks 1–3 and later
+ranks without changing observed order. DYK icons remain consistent; recognition
+icons reflect saved appearance evidence rather than guessing from grade.
+Discussion icons retain the Codex speech-bubble geometry with original Aranami
+plus and flame modifiers. The derived vectors use CC BY 4.0, with their source,
+authors and changes recorded in the SVG metadata and content icon credits.
 
-Content-review icons follow Chinese Wikipedia's `Module:PJ:VG/RVW`
-(revision 92100885). Preserve each icon's Commons file-page link and the source
-and license notices in `src/webservice/public_html/assets/icons/credits.html`.
-Maintenance icons retain their template correspondence, authors, source links,
-and licenses in `assets/icons/maintenance/credits.html`. About links directly
-to both credit tables. Keep these pages focused on attribution rather than
-file hashes or upload history.
-
-Header navigation uses near-black text without underlines, with visible focus
-outlines and current-page markers. The Tools menu opens on mouse hover; clicking
-keeps it open, and clicking again closes it. Keyboard and touch users can use
-the native disclosure, which also works without JavaScript.
-
-[codex]: https://doc.wikimedia.org/codex/latest/style-guide/overview.html
+Upstream article extracts retain CC BY-SA attribution independently of the
+source-code license. Historical Codex/Vue notices remain visible. Credit pages
+explain authorship and licensing, not implementation hashes or deployment history.

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -16,14 +17,11 @@ import polars as pl
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
 from wiki_fixtures import OfflineSite
 
-from backend import hub
-from backend.articles import scope as article_scope
-from backend.articles.history import (
-    collect_article_history,
-    history_membership,
-)
-from shared.sources.dyk import TalkPage
+from data.articles import scope as article_scope
+from runtime import hub
 from shared.sources.quarry import Replica, projects
+from shared.sources.revisions import RevisionContent
+from tasks.articles.history import collect_article_history, history_membership
 
 
 def _members() -> pl.DataFrame:
@@ -234,11 +232,6 @@ class RedirectHistoryTests(TestCase):
             ) as history,
             patch.object(
                 hub,
-                "collect_quality_register",
-                return_value=empty,
-            ) as register,
-            patch.object(
-                hub,
                 "enrich_authorship",
                 side_effect=lambda events, _site, **_options: events,
             ),
@@ -252,26 +245,31 @@ class RedirectHistoryTests(TestCase):
             hub.refresh_article_history()
         assert scope.call_args.args[0].equals(expanded)
         assert history.call_args.args[1].equals(expanded)
-        assert register.call_args.args[1].equals(expanded)
         assert badges.call_args.args[0].equals(current)
 
     @staticmethod
     def test_redirect_talk_is_read_without_current_history_tags() -> None:
         """Keep recognition under the original article identity."""
         site = OfflineSite("zh", "wikipedia")
+        text = (
+            "{{Article history|action1=GAN|"
+            "action1date=2017-04-01|action1result=listed|"
+            "action2=GAR|action2date=2020-05-01|"
+            "action2result=delisted}}"
+        )
         with TemporaryDirectory() as temporary:
             path = Path(temporary) / "history.parquet"
             with (
                 patch(
-                    "backend.articles.history.query_history_redirects",
+                    "tasks.articles.history.query_history_redirects",
                     return_value=_redirects(),
                 ),
                 patch(
-                    "backend.articles.history.template_aliases",
+                    "tasks.articles.history.template_aliases",
                     side_effect=lambda _site, title: (title,),
                 ),
                 patch(
-                    "backend.articles.history.query_tags",
+                    "tasks.articles.history.query_tags",
                     side_effect=lambda _site, members, _tags: (
                         members.with_columns(
                             pl.lit([], dtype=pl.List(pl.String)).alias("tags"),
@@ -279,24 +277,27 @@ class RedirectHistoryTests(TestCase):
                     ),
                 ),
                 patch(
-                    "backend.articles.history.latest_revisions",
+                    "tasks.articles.history.latest_revisions",
                     return_value=pl.DataFrame({
                         "page_id": [12],
                         "page_latest": [120],
                     }),
                 ),
                 patch(
-                    "backend.articles.history.read_talk_pages",
-                    return_value=[
-                        TalkPage(
+                    "tasks.articles.history.read_revision_contents",
+                    return_value={
+                        120: RevisionContent(
                             12,
+                            "Talk:Old article",
                             120,
-                            "{{Article history|action1=GAN|"
-                            "action1date=2017-04-01|action1result=listed|"
-                            "action2=GAR|action2date=2020-05-01|"
-                            "action2result=delisted}}",
+                            dt.datetime(2026, 10, 30, tzinfo=dt.UTC),
+                            hashlib.sha1(
+                                text.encode(),
+                                usedforsecurity=False,
+                            ).hexdigest(),
+                            text,
                         ),
-                    ],
+                    },
                 ) as preload,
             ):
                 members = history_membership(site, _members())
@@ -313,7 +314,7 @@ class RedirectHistoryTests(TestCase):
             assert quality["title"].to_list() == ["Old article"] * 2
             assert quality["talk_page_id"].to_list() == [12] * 2
             assert quality["revision_id"].to_list() == [120] * 2
-            preload.assert_called_once_with(site, [12])
+            preload.assert_called_once_with(site, [120])
 
     @staticmethod
     def test_verified_redirect_association_resets_scope_absence() -> None:
@@ -322,7 +323,7 @@ class RedirectHistoryTests(TestCase):
             root = Path(temporary)
             observed = dt.datetime(2025, 1, 1, tzinfo=dt.UTC)
             with patch(
-                "backend.articles.history.query_history_redirects",
+                "tasks.articles.history.query_history_redirects",
                 return_value=_redirects(),
             ):
                 expanded = history_membership(

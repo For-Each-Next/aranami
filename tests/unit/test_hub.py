@@ -1,4 +1,4 @@
-"""Verify shared update cycles and coordinated backend shutdown."""
+"""Verify shared update cycles and coordinated runtime shutdown."""
 
 # Match the repository's unittest assertions and test internal dispatch.
 # ruff: file-ignore[pytest-unittest-raises-assertion, private-member-access]
@@ -16,8 +16,8 @@ from unittest.mock import Mock, call, patch
 
 import polars as pl
 
-from backend import hub
-from backend.support.logs import open_run_log
+from data.runtime.logs import open_run_log
+from runtime import hub
 from shared.sources.cycle import read_membership, read_top_pageviews
 from shared.sources.pageviews import TopPageviews
 
@@ -37,6 +37,63 @@ class TestHubConfiguration(TestCase):
 
 class TestHubDispatch(TestCase):
     """Share one disposable source cycle between both outputs."""
+
+    @staticmethod
+    def test_b_collection_yields_to_ordinary_work_and_hour_boundaries() -> (
+        None
+    ):
+        """Give foreground collection priority over B attempts."""
+        clock = Mock(UTC=dt.UTC)
+        clock.datetime.now.return_value = dt.datetime(
+            2026,
+            11,
+            10,
+            12,
+            59,
+            tzinfo=dt.UTC,
+        )
+        with (
+            patch.object(hub, "dt", clock),
+            patch.object(hub, "read_status") as status,
+            patch.object(hub, "get_boot_id", return_value="current"),
+        ):
+            assert hub._yield_b_authorship()
+            status.assert_not_called()
+            clock.datetime.now.return_value = dt.datetime(
+                2026,
+                11,
+                10,
+                13,
+                0,
+                tzinfo=dt.UTC,
+            )
+            assert hub._yield_b_authorship()
+            clock.datetime.now.return_value = dt.datetime(
+                2026,
+                11,
+                10,
+                13,
+                1,
+                tzinfo=dt.UTC,
+            )
+            for task, boot, expected in (
+                ("website", "current", True),
+                ("newsletter-history", "current", False),
+                ("redirects", "current", False),
+                ("project-data", "current", True),
+                ("website", "previous", False),
+            ):
+                for outcome in ("queued", "running"):
+                    status.return_value = {
+                        "executions": {
+                            "run": {
+                                "task_id": task,
+                                "boot_id": boot,
+                                "outcome": outcome,
+                            },
+                        },
+                    }
+                    assert hub._yield_b_authorship() is expected
 
     @staticmethod
     def test_hourly_recognition_uses_a_fresh_source_cycle() -> None:
@@ -99,17 +156,15 @@ class TestHubDispatch(TestCase):
                 side_effect=lambda events, _site, **_options: events,
             ) as authorship,
             patch.object(hub, "enrich_milestones") as recognition,
-            patch.object(
-                hub,
-                "collect_quality_register",
-                return_value=pl.DataFrame(schema={"kind": pl.String}),
-            ) as register,
+            patch.object(hub, "refresh_current_corrections"),
+            patch.object(hub, "refresh_quality_author_activity") as activity,
             patch.object(hub, "sync_current_assessments") as assessments,
             patch.object(hub, "reconcile_scope") as scope,
             patch.object(hub, "refresh_newsletter") as newsletter,
             patch.object(hub, "refresh_website") as website,
             patch.object(hub._LOGGER, "info") as logged,
         ):
+            site.return_value.dbName.return_value = "zhwiki"
             hub.refresh_article_history()
             hub.refresh_article_history()
         assert fetch.call_count == 2  # ruff: ignore[magic-value-comparison]
@@ -121,17 +176,18 @@ class TestHubDispatch(TestCase):
         assert history_scope.call_count == 2  # ruff: ignore[magic-value-comparison]
         assert authorship.call_count == recognition.call_count == 2  # ruff: ignore[magic-value-comparison]
         assert assessments.call_count == 2  # ruff: ignore[magic-value-comparison]
-        assert register.call_count == 2  # ruff: ignore[magic-value-comparison]
-        assert register.call_args.args == (site.return_value, members)
-        assert register.call_args.kwargs == {
-            "path": hub.MILESTONES_PATH,
-            "observed_at": stamp,
+        assert activity.call_args_list == [call(site.return_value)] * 2
+        assert authorship.call_args.kwargs == {
+            "max_requests": 10,
+            "attempt_path": Path("cache/article-authorship-attempts"),
         }
-        assert authorship.call_args.kwargs == {"max_requests": 10}
         assert recognition.call_args.kwargs == {"max_requests": 10}
         assert assessments.call_args.args[0].equals(members)
         assert assessments.call_args.args[1] == hub.MILESTONES_PATH
-        assert assessments.call_args.kwargs == {"observed_at": stamp}
+        assert assessments.call_args.kwargs == {
+            "observed_at": stamp,
+            "profile": hub.assessment_profile("zhwiki", "电子游戏"),
+        }
         assert scope.call_args.args[0].equals(members)
         assert scope.call_args.args[1] == hub.MILESTONES_PATH.parent
         assert scope.call_args.kwargs == {"observed_at": stamp}
@@ -228,9 +284,11 @@ class TestHubDispatch(TestCase):
             ),
         )
 
-        def collect(*, wait: bool) -> None:
+        def collect(*, wait: bool, task_id: str, trigger: str) -> None:
             """Reuse reads within one required boundary collection."""
             assert wait
+            assert task_id == "newsletter-daily"
+            assert trigger == "scheduled"
             for _ in range(2):
                 read_top_pageviews(
                     "zh.wikipedia.org",
@@ -241,17 +299,33 @@ class TestHubDispatch(TestCase):
         updater = Mock(refresh=Mock(side_effect=collect))
         hub.refresh_newsletter(updater)
         hub.refresh_newsletter(updater)
-        assert updater.refresh.call_args_list == [call(wait=True)] * 2
+        assert (
+            updater.refresh.call_args_list
+            == [
+                call(
+                    wait=True,
+                    task_id="newsletter-daily",
+                    trigger="scheduled",
+                ),
+            ]
+            * 2
+        )
         assert fetch.call_count == 2  # ruff: ignore[magic-value-comparison]
 
 
 class TestHubLifecycle(TestCase):
     """Coordinate one scheduler, collection, HTTP, and signals."""
 
+    def setUp(self) -> None:
+        """Isolate the scanner from lifecycle fixtures."""
+        scanner = patch.object(hub, "RedirectScanner")
+        scanner.start()
+        self.addCleanup(scanner.stop)
+
     @staticmethod
     def test_website_diagnostics_survive_until_outputs_close() -> None:
         """Keep website failures and cleanup in the hub's daily log."""
-        logger = logging.getLogger("backend.website.collect")
+        logger = logging.getLogger("tasks.website.collect")
         scheduler = Mock()
         collect = Mock(
             side_effect=RuntimeError("website-only fixture failure"),
@@ -299,28 +373,28 @@ class TestHubLifecycle(TestCase):
                     logger.info("HTTP fixture closed.")
                 )
                 hub.run(hub.HubConfig(log_dir=log_dir))
-            path = next(log_dir.glob("aranami.*.log"))
+            path = next((log_dir / "diagnostics").glob("*.log"))
             content = path.read_text()
             assert "Website fixture started." in content
             assert "Monitor fixture started." in content
             assert "Website fixture refresh failed." in content
             assert "RuntimeError: website-only fixture failure" in content
-            assert "backend hub stopping (KeyboardInterrupt)" in content
-            assert content.index("backend hub stopping") < content.index(
+            assert "runtime hub stopping (KeyboardInterrupt)" in content
+            assert content.index("runtime hub stopping") < content.index(
                 "Website fixture stopped.",
             )
             assert content.index("Website fixture stopped.") < content.index(
                 "HTTP fixture closed.",
             )
             assert content.index("HTTP fixture closed.") < content.index(
-                "backend hub stopped.",
+                "runtime hub stopped.",
             )
             logger.info("After the hub fixture stopped.")
             assert path.read_text() == content
         scheduler.shutdown.assert_called_once_with(wait=True)
 
     @staticmethod
-    def test_signal_waits_for_scheduler_before_releasing_outputs() -> None:
+    def test_signal_waits_for_scheduler_before_releasing_outputs() -> None:  # ruff: ignore[too-many-statements]
         """Finish active work before closing outputs."""
         order = []
         handlers = {}
@@ -358,22 +432,23 @@ class TestHubLifecycle(TestCase):
             hub.run(hub.HubConfig())
 
         assert order == ["scheduler", "updater", "http"]
-        assert (
-            call(
-                "Aranami backend hub stopping (%s); waiting for active work.",
+        stopping = next(
+            entry
+            for entry in logged.call_args_list
+            if entry.args
+            == (
+                "Aranami runtime hub stopping (%s); waiting for active work.",
                 "SIGTERM",
-                extra={
-                    "major_event": {
-                        "kind": "service_stopping",
-                        "service": "hub",
-                        "dry": False,
-                    },
-                },
             )
-            in logged.call_args_list
         )
+        event = stopping.kwargs["extra"]["major_event"]
+        assert {key: event[key] for key in ("kind", "service", "dry")} == {
+            "kind": "service_stopping",
+            "service": "hub",
+            "dry": False,
+        }
         assert (
-            logged.call_args_list[-1].args[0].endswith("backend hub stopped.")
+            logged.call_args_list[-1].args[0].endswith("runtime hub stopped.")
         )
         updater.start.assert_called_once_with()
         scheduler.shutdown.assert_called_once_with(wait=True)
@@ -384,11 +459,37 @@ class TestHubLifecycle(TestCase):
         scheduler.resume.assert_called_once_with()
         options = scheduler.add_job.call_args.kwargs
         assert options["id"] == "website"
-        assert options["seconds"] == 3600  # ruff: ignore[magic-value-comparison]
+        assert options["trigger"] == "cron"
+        assert options["minute"] == options["second"] == 0
         assert options["args"] == (updater,)
         assert options["max_instances"] == 1
         assert options["coalesce"]
         assert options["next_run_time"].tzinfo is dt.UTC
+        project_jobs = [
+            job
+            for job in scheduler.add_job.call_args_list
+            if job.kwargs.get("id") == "project-data"
+        ]
+        assert len(project_jobs) == 1
+        project = project_jobs[0]
+        assert project.args == (hub.refresh_project_data,)
+        assert {
+            key: project.kwargs[key]
+            for key in (
+                "hour",
+                "minute",
+                "second",
+                "max_instances",
+                "coalesce",
+            )
+        } == {
+            "hour": "*",
+            "minute": 0,
+            "second": 0,
+            "max_instances": 1,
+            "coalesce": True,
+        }
+        assert project.kwargs["next_run_time"].tzinfo is dt.UTC
         daily_jobs = [
             job
             for job in scheduler.add_job.call_args_list
@@ -446,13 +547,17 @@ class TestHubLifecycle(TestCase):
         ):
             server = server_type.return_value.__enter__.return_value
             server.handle_request.side_effect = failure
-            hub.run(hub.HubConfig(run_immediately=False))
+            hub.run(hub.HubConfig(run_immediately=False, interval=90))
         assert raised.exception is failure
         start.return_value.shutdown.assert_called_once_with(wait=True)
         updater_type.return_value.stop.assert_called_once_with()
         assert "next_run_time" not in (
             start.return_value.add_job.call_args.kwargs
         )
+        assert start.return_value.add_job.call_args.kwargs["trigger"] == (
+            "interval"
+        )
+        assert start.return_value.add_job.call_args.kwargs["seconds"] == 90  # ruff: ignore[magic-value-comparison]
         server_type.return_value.__exit__.assert_called_once()
 
     def test_monitor_start_failure_releases_output(self) -> None:
@@ -479,6 +584,7 @@ class TestHubLifecycle(TestCase):
             patch.object(hub.signal, "signal"),
             patch.object(hub, "DashboardUpdater") as updater_type,
             patch.object(hub, "DashboardHTTPServer") as server_type,
+            patch.object(hub, "RedirectScanner") as scanner_type,
             patch.object(hub, "Event") as stopped,
             patch.object(hub.monitor, "start") as start,
         ):
@@ -486,6 +592,7 @@ class TestHubLifecycle(TestCase):
             hub.run(hub.HubConfig(dry=True))
         updater_type.assert_not_called()
         server_type.assert_not_called()
+        scanner_type.assert_not_called()
         assert start.call_args.kwargs["dry"] is True
         start.return_value.add_job.assert_not_called()
         start.return_value.shutdown.assert_called_once_with(wait=True)

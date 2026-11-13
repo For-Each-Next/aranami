@@ -1,4 +1,7 @@
-"""Verify natural-language logging across backend components."""
+"""Verify correlated UTC diagnostics and logging contexts."""
+
+# Counts and forced exception traces are intentional fixtures.
+# ruff: file-ignore[magic-value-comparison]
 
 import datetime as dt
 import logging
@@ -10,206 +13,116 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from backend.support.logs import open_run_log
+from data.runtime.events import logging_context
+from data.runtime.log_store import DIAGNOSTIC_RECORD_BYTES
+from data.runtime.logs import open_run_log
+
+
+def _fail_fixture() -> None:
+    """Raise a controlled source failure to exercise real tracebacks.
+
+    Raises:
+        ValueError: Always, for this offline diagnostic fixture.
+    """
+    message = "fixture failure"
+    raise ValueError(message)
 
 
 class TestProjectLogs(TestCase):
-    """Keep readable diagnostics separate from persisted metadata."""
+    """Keep readable diagnostics independent of status snapshots."""
 
-    @staticmethod
-    def test_components_share_one_natural_language_daily_file() -> None:
-        """Capture standard loggers without configuring the root."""
-        root_state = logging.root.level, tuple(logging.root.handlers)
-        with TemporaryDirectory() as directory:
-            destination = Path(directory)
-            with open_run_log(destination):
-                logging.getLogger("backend.server").info(
-                    "Website refresh completed.",
-                )
-                logging.getLogger("updater.jobs.dyks").warning(
-                    "DYK publication was deferred.",
-                )
-                logging.getLogger("shared.sources.wiki").info(
-                    "Read current source pages.",
-                )
-            paths = list(destination.iterdir())
-            assert len(paths) == 1
-            assert paths[0].name.startswith("aranami.")
-            content = paths[0].read_text()
-            assert "Website refresh completed." in content
-            assert "DYK publication was deferred." in content
-            assert "Read current source pages." in content
-            assert "Z INFO [backend.server." in content
-            assert "Z WARNING [updater.jobs.dyks." in content
-            assert all(
-                not line.startswith("{") for line in content.splitlines()
-            )
-        assert root_state == (logging.root.level, tuple(logging.root.handlers))
+    def setUp(self) -> None:
+        """Isolate output and suppress ordinary fixture diagnostics."""
+        self.root = Path(self.enterContext(TemporaryDirectory()))
+        self.output = self.enterContext(redirect_stderr(StringIO()))
 
-    @staticmethod
-    def test_utc_midnight_routes_each_record_to_its_own_date() -> None:
-        """Rotate filenames by the record's actual UTC timestamp."""
+    def test_component_handlers_keep_root_logging_unchanged(self) -> None:
+        """Capture components without duplicate root output."""
+        original = logging.root.level, tuple(logging.root.handlers)
+        with open_run_log(self.root):
+            with open_run_log(), logging_context(run_id="a" * 32):
+                logging.getLogger("runtime.dashboard").info("Refresh done.")
+            logging.getLogger("shared.sources.wiki").warning("Retry later.")
+        (path,) = (self.root / "diagnostics").glob("*.log")
+        text = path.read_text()
+        assert text.count("Refresh done.") == 1
+        assert "UTC INFO [runtime.dashboard." in text
+        assert "run=" + "a" * 32 in text
+        assert "run=-" in text
+        assert not (self.root / "activity").exists()
+        assert original == (logging.root.level, tuple(logging.root.handlers))
+        assert self.output.getvalue().count("Refresh done.") == 1
+
+    def test_midnight_uses_record_utc_date(self) -> None:
+        """Rotate by UTC observation without changing old files."""
         before = dt.datetime(2026, 10, 18, 23, 59, 59, tzinfo=dt.UTC)
         after = before + dt.timedelta(seconds=1)
-        with TemporaryDirectory() as directory:
-            destination = Path(directory)
-            with open_run_log(destination) as logger:
+        with open_run_log(self.root) as logger:
+            for instant in (before, after):
                 with patch(
                     "logging.time.time_ns",
-                    return_value=int(before.timestamp() * 1e9),
-                ):
-                    logger.info("Work before midnight.")
-                with patch(
-                    "logging.time.time_ns",
-                    return_value=int(after.timestamp() * 1e9),
-                ):
-                    logger.info("Work after midnight.")
-            first = destination / "aranami.2026-10-18.log"
-            second = destination / "aranami.2026-10-19.log"
-            assert "2026-10-18 23:59:59Z" in first.read_text()
-            assert "Work before midnight." in first.read_text()
-            assert "2026-10-19 00:00:00Z" in second.read_text()
-            assert "Work after midnight." in second.read_text()
-            assert "Work after midnight." not in first.read_text()
-
-    @staticmethod
-    def test_retention_preserves_thirty_calendar_dates_and_metadata() -> None:
-        """Keep today and its preceding twenty-nine UTC dates."""
-        today = dt.date(2026, 10, 18)
-        instant = dt.datetime.combine(today, dt.time(), tzinfo=dt.UTC)
-        with TemporaryDirectory() as directory:
-            destination = Path(directory)
-            for age in range(1, 96):
-                (
-                    destination
-                    / f"aranami.{today - dt.timedelta(days=age)}.log"
-                ).write_text("Earlier diagnostic.\n")
-            preserved = {
-                "routine-status.json",
-                "schedule-status.json",
-                "aranami.invalid.log",
-                "project.2020-01-01.log",
-            }
-            for filename in preserved:
-                (destination / filename).write_text("preserved")
-            with (
-                open_run_log(destination) as logger,
-                patch(
-                    "logging.time.time_ns",
                     return_value=int(instant.timestamp() * 1e9),
-                ),
-            ):
-                logger.info("Current diagnostic.")
-            expected = {
-                f"aranami.{today - dt.timedelta(days=age)}.log"
-                for age in range(30)
-            }
-            assert {path.name for path in destination.iterdir()} == (
-                expected | preserved
-            )
-            assert all(
-                (destination / name).read_text() == "preserved"
-                for name in preserved
-            )
+                ):
+                    logger.info("Observed at %s.", instant.isoformat())
+        first = self.root / "diagnostics/20261018.000.log"
+        second = self.root / "diagnostics/20261019.000.log"
+        assert "2026-10-18 23:59:59.000 UTC" in first.read_text()
+        assert "2026-10-19 00:00:00.000 UTC" in second.read_text()
+        assert after.isoformat() not in first.read_text()
 
-    @staticmethod
-    def test_sparse_archives_expire_by_date_instead_of_file_count() -> None:
-        """Expire old dates even when fewer than thirty files exist."""
-        today = dt.date(2026, 10, 18)
-        instant = dt.datetime.combine(today, dt.time(), tzinfo=dt.UTC)
-        with TemporaryDirectory() as directory:
-            destination = Path(directory)
-            for age in (1, 29, 30, 60):
-                (
-                    destination
-                    / f"aranami.{today - dt.timedelta(days=age)}.log"
-                ).write_text("Earlier diagnostic.\n")
-            with (
-                open_run_log(destination) as logger,
-                patch(
-                    "logging.time.time_ns",
-                    return_value=int(instant.timestamp() * 1e9),
-                ),
-            ):
-                logger.info("Current diagnostic.")
-            assert {path.name for path in destination.iterdir()} == {
-                f"aranami.{today - dt.timedelta(days=age)}.log"
-                for age in (0, 1, 29)
-            }
+    def test_threads_keep_complete_independent_correlations(self) -> None:
+        """Keep concurrent identities on their own records."""
 
-    @staticmethod
-    def test_overlapping_thread_contexts_share_one_handler() -> None:
-        """Retain complete standard log records from concurrent work."""
-        components = ("backend.website.collect", "updater.jobs.dyks")
-        with TemporaryDirectory() as directory:
-            destination = Path(directory)
-
-            def append(component: str) -> None:
-                """Write one component's diagnostic sequence.
-
-                Args:
-                    component: Ordinary Python logger name.
-                """
-                with open_run_log():
-                    for sequence in range(20):
-                        logging.getLogger(component).info(
-                            "Completed fixture operation %d.",
-                            sequence,
-                        )
-
-            with open_run_log(destination), ThreadPoolExecutor(2) as pool:
-                list(pool.map(append, components))
-            (path,) = destination.glob("aranami.*.log")
-            lines = path.read_text().splitlines()
-            expected_count = 40
-            assert len(lines) == expected_count
-            for component in components:
+        def append(identifier: str) -> None:
+            """Write one worker's twenty correlated messages."""
+            with open_run_log(), logging_context(run_id=identifier):
                 for sequence in range(20):
-                    assert (
-                        sum(
-                            f"[{component}.append]" in line
-                            and line.endswith(
-                                f"Completed fixture operation {sequence}.",
-                            )
-                            for line in lines
-                        )
-                        == 1
+                    logging.getLogger("tasks.fixture").info(
+                        "%s %d",
+                        identifier,
+                        sequence,
                     )
 
-    @staticmethod
-    def test_retention_failure_preserves_work_and_message() -> None:
-        """Use standard handler error reporting and continue logging."""
-        with (
-            TemporaryDirectory() as directory,
-            patch(
-                "backend.support.logs._prune_daily_logs",
-                side_effect=OSError("fixture retention failure"),
-            ),
-            patch("logging.Handler.handleError") as error,
-        ):
-            destination = Path(directory)
-            with open_run_log(destination) as logger:
-                logger.info("Required work completed.")
-            (path,) = destination.glob("aranami.*.log")
-            assert "Required work completed." in path.read_text()
-        error.assert_called_once()
+        with open_run_log(self.root), ThreadPoolExecutor(2) as pool:
+            list(pool.map(append, ("a" * 32, "b" * 32)))
+        lines = (
+            next((self.root / "diagnostics").glob("*.log"))
+            .read_text()
+            .splitlines()
+        )
+        assert len(lines) == 40
+        for line in lines:
+            identifier = line.split(": ", 1)[1].split()[0]
+            assert "run=" + identifier in line
 
-    @staticmethod
-    def test_terminal_receives_one_copy_of_each_natural_message() -> None:
-        """Share standard stderr output across nested run contexts."""
-        output = StringIO()
-        logger = logging.getLogger("backend.server")
-        with (
-            TemporaryDirectory() as directory,
-            redirect_stderr(output),
-            open_run_log(Path(directory)),
-        ):
-            with open_run_log():
-                logger.info("Updated website highlights.")
-            logger.warning("A source will retry at the next check.")
-        content = output.getvalue()
-        assert content.count("Updated website highlights.") == 1
-        assert content.count("A source will retry at the next check.") == 1
-        assert "Z INFO [backend.server." in content
-        assert "Z WARNING [backend.server." in content
-        assert all(not line.startswith("{") for line in content.splitlines())
+    def test_tracebacks_remain_readable_and_large_records_are_bounded(
+        self,
+    ) -> None:
+        """Preserve tracebacks and explicitly truncate large text."""
+        with open_run_log(self.root) as logger:
+            try:
+                _fail_fixture()
+            except ValueError:
+                logger.exception("Failed to prepare fixture.")
+            logger.info("漢" * DIAGNOSTIC_RECORD_BYTES)
+        text = next((self.root / "diagnostics").glob("*.log")).read_text()
+        assert "Traceback (most recent call last)" in text
+        assert "ValueError: fixture failure" in text
+        assert text.endswith("[diagnostic truncated at 64 KiB]\n")
+        assert len(text.encode()) < DIAGNOSTIC_RECORD_BYTES * 2
+
+    def test_storage_failure_is_counted_and_recovery_is_visible(self) -> None:
+        """Keep work running with visible dropped-record counts."""
+        with open_run_log(self.root) as logger:
+            with patch(
+                "data.runtime.logs.append_log",
+                side_effect=OSError("disk"),
+            ):
+                logger.info("First lost record.")
+                logger.info("Second lost record.")
+            logger.info("Saved after recovery.")
+        text = next((self.root / "diagnostics").glob("*.log")).read_text()
+        assert "recovered; dropped=2" in text
+        assert "Saved after recovery." in text
+        assert "lost record" not in text
+        assert self.output.getvalue().count("logging unavailable") == 1

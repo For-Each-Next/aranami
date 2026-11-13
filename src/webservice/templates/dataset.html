@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block contents_links %}{% if dataset %}<ul><li><a href="#dataset-metadata">{{ t.data.metadata }}</a></li><li><a href="#dataset-schema">{{ t.data.schema }}</a></li><li><a href="#dataset-preview">{{ t.data.preview }}</a></li></ul>{% else %}{{ super() }}{% endif %}{% endblock %}
+{% block assets %}<script type="module" src="{{ asset_url('components.js') }}"></script>{% endblock %}
+{% block content %}
+{% if dataset %}
+<div id="dataset-viewer" data-file="{{ dataset.file }}" data-page="{{ dataset.page }}" data-close="{{ t.ops.close }}">
+<p class="page-description">{{ t.data.description }}</p>
+<section class="section-flat" aria-labelledby="dataset-metadata"><h2 id="dataset-metadata">{{ t.data.metadata }}</h2>
+<div class="ui-table"><div class="ui-table__table-wrapper table-scroll" tabindex="0" role="region" aria-label="{{ t.data.metadata }}"><table class="ui-table__table"><caption class="visually-hidden">{{ dataset.name }}</caption><tbody>{% for fact in dataset.facts %}<tr><th scope="row">{{ fact.label }}</th><td>{% if fact.value is none %}{{ t.data.unknown }}{% else %}{{ fact.value }}{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
+</section>
+<section class="section-flat" aria-labelledby="dataset-schema"><h2 id="dataset-schema">{{ t.data.schema }}</h2>
+<div class="ui-table"><div class="ui-table__table-wrapper table-scroll" tabindex="0" role="region" aria-label="{{ t.data.schema }}"><table class="ui-table__table"><caption class="visually-hidden">{{ t.data.schema }}</caption><thead><tr><th scope="col">{{ t.data.column }}</th><th scope="col">{{ t.data.type }}</th></tr></thead><tbody>{% for name, dtype in dataset.schema %}<tr><th scope="row"><code>{{ name }}</code></th><td><code>{{ dtype }}</code></td></tr>{% endfor %}</tbody></table></div></div>
+</section>
+<section class="section-flat" aria-labelledby="dataset-preview"><h2 id="dataset-preview">{{ t.data.preview }}</h2><p>{{ dataset.preview_note }}</p>
+<div class="ui-table dataset-preview-table"><div class="ui-table__table-wrapper table-scroll" tabindex="0" role="region" aria-label="{{ t.data.preview }}"><table class="ui-table__table"><caption class="visually-hidden">{{ dataset.name }}</caption><thead><tr>{% for name in dataset.columns %}<th scope="col"><code>{{ name }}</code></th>{% endfor %}</tr></thead><tbody>{% for row in dataset.cells %}<tr>{% for cell in row %}<td>{% if cell.value is none %}<span class="context">{{ t.data.null }}</span>{% else %}{{ cell.value }}{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div></div>
+</section>
+<nav class="dataset-pagination" aria-label="{{ t.data.preview }}">{% if dataset.previous %}<a class="ui-button ui-button--fake-button ui-button--fake-button--enabled" data-dataset-page href="{{ dataset.previous }}">{{ t.backlog.previous }}</a>{% endif %}<span>{{ t.data.page.format(page=dataset.page, total=dataset.page_count) }}</span>{% if dataset.next %}<a class="ui-button ui-button--fake-button ui-button--fake-button--enabled" data-dataset-page href="{{ dataset.next }}">{{ t.backlog.next }}</a>{% endif %}</nav>
+</div>
+<template id="dataset-dialog-template">{% from "includes/popup_dialog.html" import popup with context %}{% call popup("dataset-dialog", dataset.name, "#dataset-viewer") %}<div data-dataset-content></div>{% endcall %}</template>
+{% else %}<p class="page-description">{{ t.data.choose }}</p>{% endif %}
+{% endblock %}

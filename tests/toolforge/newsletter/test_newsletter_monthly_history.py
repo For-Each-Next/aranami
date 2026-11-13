@@ -8,16 +8,14 @@ from __future__ import annotations
 import datetime as dt
 from unittest import TestCase
 
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.statistics import (
-    POPULAR_PAGE,
-    collect_popularity,
-)
 from newsletter.test_newsletter_data import Reader
 from newsletter.test_newsletter_statistics import (
     _popular,
 )
 from shared.newsletter import Issue
+from tasks.zhwiki.legacy.newsletter_popularity import POPULAR_PAGE
+from tasks.zhwiki.newsletter.collection import collect_source_facts
+from tasks.zhwiki.newsletter.statistics import collect_popularity
 
 
 def _annual(_title: str, _boundary: dt.datetime) -> str:

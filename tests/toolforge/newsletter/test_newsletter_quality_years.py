@@ -9,14 +9,12 @@ from unittest import TestCase
 import mwparserfromhell
 import polars as pl
 
-from backend.newsletter.annual import (
-    QUALITY_HISTORY_GRADES,
-    prepare_quality_year_ends,
-)
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.schema import valid_newsletter
+from data.newsletter.grades import QUALITY_HISTORY_GRADES
+from data.newsletter.schema import valid_newsletter
 from newsletter.test_newsletter_data import Reader
 from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.annual import prepare_quality_year_ends
+from tasks.zhwiki.newsletter.collection import collect_source_facts
 from updater.services.newsletter_editorial import render_annual_feature
 
 

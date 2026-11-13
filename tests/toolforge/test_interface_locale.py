@@ -10,10 +10,10 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-from fastapi.testclient import TestClient
 from starlette.responses import Response
+from starlette.testclient import TestClient
+from status_fixtures import status_snapshot
 
-from backend.public import create_app
 from shared.config import routine_configuration
 from webservice.pages import (
     _Page,
@@ -26,6 +26,7 @@ from webservice.presentation import (
     assessment_code,
     title_url,
 )
+from webservice.server import create_app
 
 # Exact HTTP codes and authored labels define these contracts.
 # ruff: file-ignore[magic-value-comparison, import-private-name]
@@ -124,7 +125,9 @@ class InterfaceLocaleTests(unittest.TestCase):
         params = (
             "task=references&sort=title&order=desc&page=2&q=Game&quality=B"
         )
-        with patch("backend.public._PublicViews._maintenance_page") as render:
+        with patch(
+            "webservice.server._PublicViews._maintenance_page",
+        ) as render:
             # Obtain navigation without reading runtime data.
             render.return_value = Response("fixture")
             self.client.get("/maintenance/?" + params + "&lang=en")
@@ -170,81 +173,33 @@ class AssessmentFallbackTests(unittest.TestCase):
     """Translate grades while retaining Chinese source titles."""
 
     @staticmethod
-    def test_report_names_explain_destinations() -> None:
-        """Link each saved destination once beneath compact headings."""
-        config = {"routines": routine_configuration()}
-        definitions = config["routines"]["routines"]
-        routines = ("assessment_lists", "enwp_key_articles")
-        reports = {
-            title: {
-                "routine": routine,
-                "site": "zhwiki",
-                "title": title,
-                "status": "no_update",
-                "dry": False,
-                "started_at": "2026-10-18T11:59:55Z",
-                "finished_at": "2026-10-18T12:00:00Z",
-                "duration_seconds": 5,
-            }
-            for routine in routines
+    def test_publication_content_shows_only_its_destination() -> None:
+        """Keep page titles free of redundant task subtitles."""
+        definitions = routine_configuration()["routines"]
+        template = status_snapshot()["publications"]["target"]
+        records = {
+            title: {**template, "task_id": routine, "title": title}
+            for routine in ("assessment_lists", "enwp_key_articles")
             for title in definitions[routine]["pages"].values()
         }
-        for locale, removed_note in (
-            ("en", "excluding time waiting for earlier reports"),
-            ("zh-hans", "不包含等待前序报告的时间"),
-            ("zh-hant", "不包含等待前序報告的時間"),
-        ):
+        for locale in ("en", "zh-hans", "zh-hant"):
             interface = Interface(locale)
-            for saved in ({}, reports):
-                output = render_reports(
-                    {},
-                    locale,
-                    config=config,
-                    status={"reports": {"reports": saved}},
-                )
-                assert "report-targets" not in output
-                assert removed_note not in output
-                for routine in routines:
-                    targets = definitions[routine]["pages"].values()
-                    heading = re.search(
-                        rf'<h3\b[^>]*\bid="routine-{routine}-heading"[^>]*>'
-                        r"(.*?)</h3>",
-                        output,
-                        re.DOTALL,
-                    )
-                    assert heading is not None
-                    count = interface.text(
-                        "ops.page_count",
-                        count=len(targets),
-                    )
-                    assert f">{count}</a>" in heading[1]
+            empty = render_reports({}, locale)
+            assert interface.text("observability.no_publications") in empty
+            output = render_reports({"publications": records}, locale)
+            for routine in ("assessment_lists", "enwp_key_articles"):
+                publications = output.split(
+                    f'<dialog id="report-details-{routine}"',
+                )[1].split("</dialog>")[0]
+                for title in definitions[routine]["pages"].values():
                     assert (
-                        f'aria-controls="report-details-{routine}"'
-                        in heading[1]
+                        publications.count(
+                            f'href="{title_url(title)}"',
+                        )
+                        == 1
                     )
-                    assert all(title not in heading[1] for title in targets)
-                    dialog = re.search(
-                        rf'<dialog id="report-details-{routine}"[^>]*>'
-                        r"(.*?)</dialog>",
-                        output,
-                        re.DOTALL,
-                    )
-                    assert dialog is not None
-                    if not saved:
-                        assert "<table" not in dialog[1]
-                        assert interface.text("ops.no_record") in dialog[1]
-                        continue
-                    table = re.search(
-                        r"<tbody\b[^>]*>(.*?)</tbody>",
-                        dialog[1],
-                        re.DOTALL,
-                    )
-                    assert table is not None
-                    for title in targets:
-                        link = f'href="{title_url(title)}"'
-                        assert dialog[1].count(link) == 1
-                        assert table[1].count(link) == 1
-                        assert f">{title}</a>" in table[1]
+                    assert f">{title}</a>" in publications
+                assert "<small" not in publications.split("</table>")[0]
 
     @staticmethod
     def test_fallbacks_and_aliases_in_all_locales() -> None:
@@ -280,7 +235,8 @@ class AssessmentFallbackTests(unittest.TestCase):
                 assert card["assessments"][1]["label"] == interface.text(
                     "assessment.importance.Unknown",
                 )
-                assert "源条目" in str(card["link"])
+                expected_title = "源條目" if locale == "zh-hant" else "源条目"
+                assert expected_title in str(card["link"])
             assert assessment_code("未評", "class") == "Unassessed"
             assert assessment_code("未知", "importance") == "Unknown"
             output = render_dashboard(None, None, None, locale)

@@ -6,34 +6,34 @@
 {% endblock %}
 {% block assets %}
   <link rel="stylesheet" href="{{ asset_url('newsletter.css') }}">
-  <script src="{{ asset_url('components.js') }}" defer></script>
+  <script type="module" src="{{ asset_url('components.js') }}"></script>
   <script src="{{ asset_url('newsletter.js') }}" defer></script>
 {% endblock %}
 {% block content %}
 <div data-newsletter-content>
 <p class="page-description">{{ introduction }}</p>
 <form class="newsletter-controls" action="/newsletter/" method="get" data-newsletter-issue-form>
-  <div class="field cdx-field newsletter-issue-field">
-    <div class="cdx-label"><label class="cdx-label__label" for="newsletter-issue"><span class="cdx-label__label__text">{{ t.newsletter.issue }}</span></label></div>
-    <div class="cdx-field__control newsletter-issue-selection">
-      <select id="newsletter-issue" class="cdx-select" name="issue" required>
+  <div class="field ui-field newsletter-issue-field">
+    <div class="ui-label"><label class="ui-label__label" for="newsletter-issue"><span class="ui-label__label__text">{{ t.newsletter.issue }}</span></label></div>
+    <div class="ui-field__control newsletter-issue-selection">
+      <select id="newsletter-issue" class="ui-select" name="issue" required>
         {% if archived_issue %}<option value="{{ selected_issue }}" selected disabled hidden>{{ selected_issue }} ({{ t.newsletter.choice.archived }})</option>{% endif %}
         {% for choice in issue_choices %}<option value="{{ choice.value }}"{% if choice.checked %} selected{% endif %}>{{ choice.value }} ({{ choice.label }})</option>{% endfor %}
       </select>
-      <noscript><button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.issue_view }}</button></noscript>
+      <noscript><button type="submit" class="ui-button ui-button--action-default ui-button--weight-normal">{{ t.newsletter.issue_view }}</button></noscript>
     </div>
   </div>
   <input type="hidden" name="lang" value="{{ locale }}">
 </form>
-<div class="cdx-message cdx-message--warning cdx-message--inline" role="status" hidden data-newsletter-load-status data-failure="{{ t.newsletter.load_failed }}"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content"></div></div>
+<div class="ui-message ui-message--warning ui-message--inline" role="status" hidden data-newsletter-load-status data-failure="{{ t.newsletter.load_failed }}"><svg class="ui-icon ui-message__icon" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="ui-message__content"></div></div>
 <div data-newsletter-result>
 {% if draft_history.dates or draft_history.selected %}
 <form class="newsletter-date-controls" action="/newsletter/" method="get">
-  <div class="field cdx-field newsletter-date-field">
-    <div class="cdx-label"><label class="cdx-label__label" id="newsletter-date-label" for="newsletter-data-date"><span class="cdx-label__label__text">{{ t.newsletter.history.date }}</span></label></div>
-    <div class="cdx-field__control newsletter-date-selection">
-      <div class="cdx-text-input"><input class="cdx-text-input__input" id="newsletter-data-date" name="date" type="date" value="{{ draft_history.form_date }}"{% if draft_history.minimum %} min="{{ draft_history.minimum }}" max="{{ draft_history.maximum }}" list="newsletter-saved-dates"{% endif %} required></div>
-      <noscript><button type="submit" class="cdx-button cdx-button--action-default cdx-button--weight-normal">{{ t.newsletter.history.view }}</button></noscript>
+  <div class="field ui-field newsletter-date-field">
+    <div class="ui-label"><label class="ui-label__label" id="newsletter-date-label" for="newsletter-data-date"><span class="ui-label__label__text">{{ t.newsletter.history.date }}</span></label></div>
+    <div class="ui-field__control newsletter-date-selection">
+      <div class="ui-text-input"><input class="ui-text-input__input" id="newsletter-data-date" name="date" type="date" value="{{ draft_history.form_date }}"{% if draft_history.minimum %} min="{{ draft_history.minimum }}" max="{{ draft_history.maximum }}" list="newsletter-saved-dates"{% endif %} required></div>
+      <noscript><button type="submit" class="ui-button ui-button--action-default ui-button--weight-normal">{{ t.newsletter.history.view }}</button></noscript>
     </div>
   </div>
   <input type="hidden" name="issue" value="{{ selected_issue }}">
@@ -41,19 +41,19 @@
   {% if draft_history.dates %}<datalist id="newsletter-saved-dates">{% for day in draft_history.dates %}<option value="{{ day }}"></option>{% endfor %}</datalist>{% endif %}
 </form>
 {% else %}<p class="context">{{ t.newsletter.history.unavailable }}</p>{% endif %}
-{% if draft_history.missing %}<div class="cdx-message cdx-message--notice" role="status"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ t.newsletter.history.missing }}</div></div>
+{% if draft_history.missing %}<div class="ui-message ui-message--notice" role="status"><svg class="ui-icon ui-message__icon" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="ui-message__content">{{ t.newsletter.history.missing }}</div></div>
 {% elif draft_history.selected and available %}<p class="context newsletter-observation">{{ t.newsletter.history.through }} <time datetime="{{ draft_history.selected }}">{{ draft_history.selected }}</time> · {{ t.newsletter.history.generated }} {% with time=draft_history.generated %}{% include "includes/time.html" %}{% endwith %}</p>
 {% endif %}
-{% if not available and not draft_history.missing %}<div class="cdx-message cdx-message--notice" role="status"><svg class="cdx-icon cdx-message__icon--vue" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="cdx-message__content">{{ t.newsletter.unavailable }}</div></div>{% endif %}
+{% if not available and not draft_history.missing %}<div class="ui-message ui-message--notice" role="status"><svg class="ui-icon ui-message__icon" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="ui-message__content">{{ t.newsletter.unavailable }}</div></div>{% endif %}
 {% if available %}
 {% for draft in drafts %}
 <section class="newsletter-draft" id="newsletter-page-{{ loop.index }}" aria-labelledby="newsletter-heading-{{ loop.index }}">
   <h2 id="newsletter-heading-{{ loop.index }}">{{ draft.heading }}</h2>
-  {% with draft_index=loop.index %}{% include "includes/generated/newsletter_draft.html" %}{% endwith %}
+  {% with draft_index=loop.index %}{% include "includes/newsletter_draft.html" %}{% endwith %}
   <div class="newsletter-copy-controls">
-    <button type="button" class="cdx-button cdx-button--action-default cdx-button--weight-normal" data-newsletter-copy="newsletter-text-{{ loop.index }}" data-copy-success="{{ t.newsletter.copied }}" data-copy-failure="{{ t.newsletter.copy_fallback }}" aria-describedby="newsletter-copy-status-{{ loop.index }}">{{ t.newsletter['copy'] }}</button>
-    <a class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--action-default cdx-button--weight-normal" href="{{ draft.url }}">{{ t.newsletter.view_page }}</a>
-    <a class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--action-progressive cdx-button--weight-primary" href="{{ draft.edit_url }}">{{ t.newsletter.edit_page }}</a>
+    <button type="button" class="ui-button ui-button--action-default ui-button--weight-normal" data-newsletter-copy="newsletter-text-{{ loop.index }}" data-copy-success="{{ t.newsletter.copied }}" data-copy-failure="{{ t.newsletter.copy_fallback }}" aria-describedby="newsletter-copy-status-{{ loop.index }}">{{ t.newsletter['copy'] }}</button>
+    <a class="ui-button ui-button--fake-button ui-button--fake-button--enabled ui-button--action-default ui-button--weight-normal" href="{{ draft.url }}">{{ t.newsletter.view_page }}</a>
+    <a class="ui-button ui-button--fake-button ui-button--fake-button--enabled ui-button--action-progressive ui-button--weight-primary" href="{{ draft.edit_url }}">{{ t.newsletter.edit_page }}</a>
     <span id="newsletter-copy-status-{{ loop.index }}" role="status" aria-live="polite" data-newsletter-status></span>
   </div>
 </section>

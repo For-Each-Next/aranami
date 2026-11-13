@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from backend.website.backlog_config import (
+from tasks.website.backlog_config import (
     backlog_tasks,
     load_backlog_config,
     validate_backlog_config,
@@ -298,7 +298,7 @@ class TestBacklogConfig(TestCase):
             expected = validate_backlog_config(_config())
             assert load_backlog_config(path) == expected
             with patch(
-                "backend.website.backlog_config.DEFAULT_CONFIG_PATH",
+                "tasks.website.backlog_config.DEFAULT_CONFIG_PATH",
                 path,
             ):
                 assert load_backlog_config() == expected

@@ -6,6 +6,8 @@ Removals describe departures from the assessment set, not page deletion.
 
 from __future__ import annotations
 
+import re
+
 # Chinese report typography intentionally uses full-width punctuation.
 # ruff: file-ignore[ambiguous-unicode-character-string]
 from html import escape
@@ -14,17 +16,20 @@ from typing import TYPE_CHECKING
 import polars as pl
 from mwparserfromhell.nodes import Heading, Wikilink
 
-from backend.services.project_assessments import summary_totals
+from data.project_assessments import summary_totals
+from shared.assessment_profiles import assessment_profile
 from shared.support.regions import replace_by_tag
+from updater.edit_summary import EditSummary, format_summary_number
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import date
 
-    from backend.services.zhwiki.assessment_log import (
+    from data.assessment_log import (
         AssessmentLogData,
         AssessmentSummaryMigration,
     )
+    from shared.assessment_profiles import AssessmentProfile
 
 _SECTIONS = (
     ("renamed", "重命名"),
@@ -32,184 +37,80 @@ _SECTIONS = (
     ("added", "新增評級"),
     ("removed", "移除評級"),
 )
-_QUALITY_NAMES = {
-    "fa": "典范",
-    "fl": "特色列表",
-    "ga": "优良",
-    "a": "甲",
-    "al": "甲级列表",
-    "b": "乙",
-    "b+": "乙上",
-    "bplus": "乙上",
-    "c": "丙",
-    "start": "初",
-    "stub": "小作品",
-    "list": "列表",
-    "draft": "草稿",
-    "category": "分类",
-    "disambig": "消歧义",
-    "file": "文件",
-    "template": "模板",
-    "portal": "主题",
-    "project": "专题",
-    "na": "不适用",
-    "n/a": "不适用",
-    "unassessed": "未评",
-    "unknown": "未知",
-    "典範": "典范",
-    "優良": "优良",
-    "甲級列表": "甲级列表",
-    "分類": "分类",
-    "消歧義": "消歧义",
-    "主題": "主题",
-    "專題": "专题",
-    "不適用": "不适用",
-    "未評": "未评",
-}
-_IMPORTANCE_NAMES = {
-    "top": "极高",
-    "high": "高",
-    "mid": "中",
-    "low": "低",
-    "na": "不适用",
-    "n/a": "不适用",
-    "unknown": "未知",
-    "極高": "极高",
-    "不適用": "不适用",
-}
-_NONARTICLE_NAMES = {
-    "category": "分類",
-    "分类": "分類",
-    "分類": "分類",
-    "disambig": "消歧義",
-    "消歧义": "消歧義",
-    "消歧義": "消歧義",
-    "file": "檔案",
-    "文件": "檔案",
-    "template": "模板",
-    "portal": "主題",
-    "主题": "主題",
-    "project": "專題",
-    "专题": "專題",
-    "redirect": "重定向",
-    "draft": "草稿",
-    "na": "不適用",
-    "n/a": "不適用",
-    "unassessed": "未評",
-    "setindex": "同类索引",
-    "同类索引": "同类索引",
-    "同類索引": "同类索引",
-    "重定向": "重定向",
-}
 _COUNT_SCHEMA = {"value": pl.String, "count": pl.Int64}
-_SUMMARY_MARKER = "aranami-assessment-totals:v2"
-_SUMMARY_QUALITY = (
-    ("典范级", ("fa", "典范", "典範"), ("fl", "特色列表", "典表")),
-    ("优良级", ("ga", "优良", "優良"), ()),
-    ("甲级", ("a", "甲"), ("al", "甲表", "甲级列表", "甲級列表")),
-    ("乙上级", ("b+", "bplus", "乙上"), ()),
-    ("乙级", ("b", "乙"), ("bl", "乙表", "乙级列表", "乙級列表")),
-    ("丙级", ("c", "丙"), ("cl", "丙表", "丙级列表", "丙級列表")),
-    ("丁级", ("d", "丁"), ()),
-    ("初级", ("start", "初"), ("list", "列表")),
-    ("小作品级", ("stub", "小作品"), ("sl", "stublist", "小列表")),
-    ("小小作品级", ("substub", "小小作品"), ()),
-    ("未评级", ("unassessed", "unknown", "未评", "未評", "未知"), ()),
-)
-_SUMMARY_IMPORTANCE = (
-    ("极高", ("top", "极高", "極高")),
-    ("高", ("high", "高")),
-    ("中", ("mid", "中")),
-    ("低", ("low", "低")),
-    ("极低", ("bottom", "极低", "極低")),
-    ("不适用", ("na", "n/a", "不适用", "不適用")),
-    (
-        "未知",
-        ("unknown", "unassessed", "未知", "未评", "未評", "未评级", "未評級"),
-    ),
-)
-_QUALITY_ORDER = (
-    "典范",
-    "特色列表",
-    "甲",
-    "甲级列表",
-    "优良",
-    "乙上",
-    "乙",
-    "乙级列表",
-    "丙",
-    "丙级列表",
-    "丁",
-    "初",
-    "列表",
-    "小作品",
-    "小作品列表",
-    "小小作品",
-    "未评",
-)
-_QUALITY_ALIASES = {
-    alias: ("未评" if label == "未评级" else label.removesuffix("级"))
-    for label, article_aliases, _ in _SUMMARY_QUALITY
-    for alias in article_aliases
-} | {
-    alias: {
-        "典范级": "特色列表",
-        "初级": "列表",
-        "小作品级": "小作品列表",
-    }.get(
-        label,
-        f"{label}列表",
-    )
-    for label, _, list_aliases in _SUMMARY_QUALITY
-    for alias in list_aliases
-}
-_IMPORTANCE_ORDER = tuple(f"{name}重要度" for name, _ in _SUMMARY_IMPORTANCE)
-_IMPORTANCE_ALIASES = {
-    alias: f"{name}重要度"
-    for name, aliases in _SUMMARY_IMPORTANCE
-    for alias in aliases
-}
-_NONARTICLE_ALIASES = {
-    label: f"{name}级"
-    for alias, name in (_QUALITY_NAMES | _NONARTICLE_NAMES).items()
-    for label in (alias, name)
-} | {"未评": "未评级"}
+_SUMMARY_MARKER = "aranami-assessment-totals schema=2"
 
 
-def _summary_counts(
-    articles: pl.DataFrame,
-    field: str,
-    aliases: Mapping[str, str],
-    default: str,
-    suffix: str,
-) -> dict[str, int]:
-    """Count article assessments after translating known label aliases.
+def build_edit_summary(data: AssessmentLogData) -> str:
+    """Describe observed assessment actions with their completed date.
 
     Args:
-        articles: Complete namespace-zero members for one observation.
-        field: Assessment dimension to count.
-        aliases: Labels that share one report label.
-        default: Label for an absent assessment.
-        suffix: Dimension suffix already present in some source labels.
+        data: Prepared changes and any retained unpublished history.
 
     Returns:
-        Counts by normalized label, preserving custom grades.
+        An action-led summary distinguishing renames from assessments.
+        Pending history is described without claiming fresh counts.
     """
-    label = (
+    if data.pending:
+        action = "Publish pending assessment changes"
+    else:
+        counts = dict(data.changes.group_by("kind").len().iter_rows())
+        clauses = []
+        for kind, verb, noun in (
+            ("renamed", "rename", "page"),
+            ("reassessed", "change", "assessment"),
+            ("added", "add", "assessment"),
+            ("removed", "remove", "assessment"),
+        ):
+            if count := counts.get(kind, 0):
+                clauses.append(
+                    f"{verb} {format_summary_number(count)} "
+                    f"{noun}{'' if count == 1 else 's'}",
+                )
+        action = "; ".join(clauses).capitalize() or "Update assessment log"
+    return EditSummary.daily(data.report_date, action=action).render()
+
+
+def _profile(data: AssessmentLogData) -> AssessmentProfile:
+    """Select the source's declared metadata without global coercion.
+
+    Returns:
+        Exact project or site profile, preserving unknown observations.
+    """
+    return assessment_profile(
+        str(data.result.provenance.get("wiki") or "zhwiki"),
+        str(data.result.metadata.get("project") or ""),
+    )
+
+
+def _display_counts(
+    entries: list[dict] | None,
+    profile: AssessmentProfile,
+    dimension: str,
+    *,
+    field: str,
+) -> dict[str, int] | None:
+    """Combine equivalent observations using declared profile labels.
+
+    Returns:
+        Weighted display counts, or null for an unknown distribution.
+        Unknown custom labels retain their raw spelling.
+    """
+    if entries is None:
+        return None
+    raw = pl.col("value").str.strip_chars()
+    source = (
         pl
-        .col(field)
-        .fill_null(default)
-        .str.strip_chars()
-        .str.to_lowercase()
-        .str.replace(rf"[{suffix}]$" if suffix == "级級" else f"{suffix}$", "")
+        .when(raw.is_null() | (raw.str.len_chars() == 0))
+        .then(pl.lit("Unassessed" if dimension == "class" else "Unknown"))
+        .otherwise(raw)
     )
     counted = (
-        articles
+        pl
+        .DataFrame(entries, schema=_COUNT_SCHEMA)
         .select(
-            label.replace(aliases).alias("label"),
-            pl.col("count")
-            if "count" in articles.columns
-            else pl.lit(1).alias("count"),
+            profile.expression(source, dimension, field=field).alias("label"),
+            "count",
         )
         .group_by("label")
         .agg(pl.col("count").sum())
@@ -237,28 +138,6 @@ def _total_inputs(
     )
 
 
-def _display_counts(
-    entries: list[dict] | None,
-    aliases: Mapping[str, str],
-    default: str,
-    suffix: str,
-) -> dict[str, int] | None:
-    """Translate weighted labels while combining equivalent spellings.
-
-    Returns:
-        Display counts, or null for an unobserved distribution.
-    """
-    if entries is None:
-        return None
-    return _summary_counts(
-        pl.DataFrame(entries, schema=_COUNT_SCHEMA),
-        "value",
-        aliases,
-        default,
-        suffix,
-    )
-
-
 def _changed_counts(
     current: Mapping[str, int] | None,
     previous: Mapping[str, int] | None,
@@ -272,7 +151,7 @@ def _changed_counts(
     if current is None or previous is None:
         return ""
     labels = (*order, *sorted((current.keys() | previous.keys()) - set(order)))
-    return " · ".join(
+    return "、".join(
         f"{name}{change:+,}"
         for name in labels
         if (change := current.get(name, 0) - previous.get(name, 0))
@@ -348,65 +227,111 @@ def _migrated_totals(migration: AssessmentSummaryMigration) -> str:
 
 
 def _project_count(totals: Mapping) -> int | None:
-    """Count project pages excluding actual redirects when known.
+    """Count every project page, including actual redirects when known.
 
     Returns:
-        Project pages, or null for partial legacy totals.
+        Complete project population, or null for partial legacy totals.
     """
     nonarticles = totals.get("nonarticles")
+    redirects = totals.get("redirects")
     return (
-        totals["count"] + nonarticles["count"]
-        if nonarticles is not None
+        totals["count"] + nonarticles["count"] + redirects
+        if nonarticles is not None and redirects is not None
         else None
     )
 
 
-def _totals_comment(
+def _totals_comment(  # ruff: ignore[too-many-locals]
     totals: Mapping,
     quality: Mapping[str, int],
     importance: Mapping[str, int] | None,
     nonarticles: Mapping[str, int] | None,
+    profile: AssessmentProfile,
 ) -> str:
-    """Retain complete current counts in an inert readable HTML comment.
+    """Retain ordered article, nonarticle and importance distributions.
 
     Returns:
-        Escaped labels and totals, including zeroes and unknowns.
+        An escaped inert comment with explicit zeroes and unknowns.
+        Nonarticle/redirect pages contribute inapplicable importance.
     """
-    facts = [
-        f"{name}{quality.get(name, 0):,}"
-        for name in (
-            *_QUALITY_ORDER,
-            *sorted(quality.keys() - set(_QUALITY_ORDER)),
+    article_labels = tuple(
+        label for label in profile.classes if label.is_article
+    )
+    other_labels = tuple(
+        label
+        for label in profile.classes
+        if not label.is_article and label.code != "Redirect"
+    )
+    article_names = {label.long_name for label in article_labels}
+    other_names = {label.long_name for label in other_labels}
+    redirect_label = next(
+        (
+            label.long_name
+            for label in profile.classes
+            if label.code == "Redirect"
+        ),
+        "重定向级",
+    )
+    other_names.add(redirect_label)
+    articles = "、".join(
+        f"{label.raw_value}{quality.get(label.long_name, 0):,}"
+        for label in article_labels
+    )
+    unknown_articles = sorted(quality.keys() - article_names)
+    if unknown_articles:
+        articles += "、" + "、".join(
+            f"{name}{quality[name]:,}" for name in unknown_articles
         )
-    ]
-    if importance is None:
-        facts.append("重要度未知")
+    if nonarticles is None:
+        others = "非条目未知"
     else:
-        facts.extend(
-            f"{name}{importance.get(name, 0):,}"
-            for name in (
-                *_IMPORTANCE_ORDER,
-                *sorted(importance.keys() - set(_IMPORTANCE_ORDER)),
+        others = "、".join(
+            f"{label.long_name}{nonarticles.get(label.long_name, 0):,}"
+            for label in other_labels
+        )
+        custom = sorted(nonarticles.keys() - other_names)
+        if custom:
+            others += "、" + "、".join(
+                f"{name}{nonarticles[name]:,}" for name in custom
             )
+    redirects = totals.get("redirects")
+    redirect_text = (
+        f"重定向级{redirects + (nonarticles or {}).get(redirect_label, 0):,}"
+        if redirects is not None
+        else "重定向级未知"
+    )
+    if importance is None:
+        importance_text = "重要度未知"
+    else:
+        counts = dict(importance)
+        inapplicable = profile.resolve("NA", "importance")
+        if inapplicable is not None:
+            name = inapplicable.long_name
+            counts[name] = (
+                counts.get(name, 0)
+                + totals["nonarticles"]["count"]
+                + redirects
+                if totals.get("nonarticles") is not None
+                and redirects is not None
+                else None
+            )
+        order = tuple(label.long_name for label in profile.importance)
+        importance_text = "、".join(
+            f"{name}{counts.get(name, 0):,}"
+            if counts.get(name, 0) is not None
+            else f"{name}未知"
+            for name in (*order, *sorted(counts.keys() - set(order)))
         )
-    if nonarticles is not None:
-        facts.extend(
-            f"{name}{count:,}" for name, count in sorted(nonarticles.items())
-        )
-    for name, count in (
-        ("条目", totals["count"]),
-        ("非条目", (totals.get("nonarticles") or {}).get("count")),
-        ("重定向", totals.get("redirects")),
-        ("专题页面", _project_count(totals)),
-    ):
-        facts.append(
-            f"{name}{count:,}" if count is not None else f"{name}未知",
-        )
-    text = escape(" ".join(facts), quote=False).replace("--", "&#45;&#45;")
+    count = _project_count(totals)
+    total = f"合计{count:,}" if count is not None else "合计未知"
+    text = escape(
+        f"{total}：{articles}，{others}，{redirect_text}；{importance_text}",
+        quote=False,
+    ).replace("--", "&#45;&#45;")
     return f"<!-- {_SUMMARY_MARKER} {text} -->"
 
 
-def _totals(data: AssessmentLogData) -> str:
+def _totals(data: AssessmentLogData) -> str:  # ruff: ignore[too-many-locals]
     """Render one daily delta line with complete totals in a comment.
 
     Returns:
@@ -417,46 +342,51 @@ def _totals(data: AssessmentLogData) -> str:
     if current is None:
         return ""
     previous = _total_inputs(data, previous=True) or {}
+    profile = _profile(data)
+    quality_order = tuple(
+        label.long_name for label in profile.classes if label.is_article
+    )
+    importance_order = tuple(label.long_name for label in profile.importance)
     quality = _display_counts(
         current["class"],
-        _QUALITY_ALIASES,
-        "未评",
-        "级級",
+        profile,
+        "class",
+        field="long_name",
     )
     previous_quality = _display_counts(
         previous.get("class"),
-        _QUALITY_ALIASES,
-        "未评",
-        "级級",
+        profile,
+        "class",
+        field="long_name",
     )
     importance = _display_counts(
         current["importance"],
-        _IMPORTANCE_ALIASES,
-        "未知重要度",
-        "重要度",
+        profile,
+        "importance",
+        field="long_name",
     )
     previous_importance = _display_counts(
         previous.get("importance"),
-        _IMPORTANCE_ALIASES,
-        "未知重要度",
-        "重要度",
+        profile,
+        "importance",
+        field="long_name",
     )
-    details = " ｜ ".join(
+    details = "，".join(
         filter(
             None,
             (
-                _changed_counts(quality, previous_quality, _QUALITY_ORDER),
+                _changed_counts(quality, previous_quality, quality_order),
                 _changed_counts(
                     importance,
                     previous_importance,
-                    _IMPORTANCE_ORDER,
+                    importance_order,
                 ),
             ),
         ),
     )
     parts = [
         _count_change(
-            "条目",
+            "条目页",
             current["count"],
             previous.get("count"),
             details=details,
@@ -466,20 +396,28 @@ def _totals(data: AssessmentLogData) -> str:
     previous_nonarticles = previous.get("nonarticles") or {}
     classes = _display_counts(
         nonarticles["class"] if nonarticles is not None else None,
-        _NONARTICLE_ALIASES,
-        "未评级",
-        "级級",
+        profile,
+        "class",
+        field="long_name",
     )
     if nonarticles is not None:
         previous_classes = _display_counts(
             previous_nonarticles.get("class"),
-            _NONARTICLE_ALIASES,
-            "未评级",
-            "级級",
+            profile,
+            "class",
+            field="long_name",
         )
-        details = _changed_counts(classes, previous_classes, ())
+        details = _changed_counts(
+            classes,
+            previous_classes,
+            tuple(
+                label.long_name
+                for label in profile.classes
+                if not label.is_article
+            ),
+        )
         label = _count_change(
-            "非条目",
+            "非条目页",
             nonarticles["count"],
             previous_nonarticles.get("count"),
             details=details,
@@ -488,63 +426,77 @@ def _totals(data: AssessmentLogData) -> str:
     if current.get("redirects") is not None:
         parts.append(
             _count_change(
-                "重定向",
+                "重定向页",
                 current["redirects"],
                 previous.get("redirects"),
             ),
         )
     project = _count_change(
-        "专题页面",
+        "专题页面数",
         _project_count(current),
         _project_count(previous),
     )
-    groups = " · ".join(filter(None, parts))
+    groups = "；".join(filter(None, parts))
     return (
         project
         + ("：" if project and groups else "")
         + groups
-        + _totals_comment(current, quality or {}, importance, classes)
+        + ("。" if project or groups else "")
+        + _totals_comment(current, quality or {}, importance, classes, profile)
     )
 
 
-def _label(value: object, names: Mapping[str, str], suffix: str) -> str:
-    """Format a source assessment with its Chinese dimension suffix.
+def _label(
+    value: object,
+    dimension: str,
+    *,
+    profile: AssessmentProfile | None = None,
+) -> str:
+    """Format an assessment using the selected profile's long label.
 
     Args:
-        value: Source grade or importance, including unavailable values.
-        names: Known English and Traditional Chinese label translations.
-        suffix: Quality or importance suffix to include exactly once.
+        value: Source class or importance, including absent values.
+        dimension: Class or importance dimension.
+        profile: Source metadata, or the Chinese site standard.
 
     Returns:
-        A bold simplified label preserving unknown custom values.
+        Bold declared text, retaining custom labels and one suffix.
     """
+    profile = profile or assessment_profile("zhwiki", "")
     raw = str(value or "").strip()
-    raw = raw or ("未评" if suffix == "级" else "未知")
-    raw = raw.removesuffix(suffix).removesuffix("級")
-    return f"'''{names.get(raw.casefold(), raw)}{suffix}'''"
+    raw = raw or ("Unassessed" if dimension == "class" else "Unknown")
+    label = profile.resolve(raw, dimension)
+    if label is not None:
+        return f"'''{label.long_name}'''"
+    suffix = "级" if dimension == "class" else "重要度"
+    endings = ("级", "級") if dimension == "class" else (suffix,)
+    rendered = raw if raw.endswith(endings) else raw + suffix
+    return f"'''{rendered}'''"
 
 
-def _assessment_sentences(row: Mapping[str, object]) -> str:
+def _assessment_sentences(
+    row: Mapping[str, object],
+    *,
+    profile: AssessmentProfile | None = None,
+) -> str:
     """Describe new assessments or only the dimensions that changed.
 
     Args:
         row: Prepared assessment observations before and after a change.
+        profile: Exact source profile, when available.
 
     Returns:
         Natural quality and importance sentences with explicit unknowns.
     """
     reassessed = row["kind"] == "reassessed"
     sentences = []
-    for field, dimension, names, suffix in (
-        ("class", "品質", _QUALITY_NAMES, "级"),
-        ("importance", "重要度", _IMPORTANCE_NAMES, "重要度"),
-    ):
-        current = _label(row[field], names, suffix)
+    for field, dimension in (("class", "品質"), ("importance", "重要度")):
+        current = _label(row[field], field, profile=profile)
         previous = row[f"old_{field}"]
         if reassessed:
             if previous == row[field]:
                 continue
-            old = _label(previous, names, suffix)
+            old = _label(previous, field, profile=profile)
             sentences.append(f"{dimension}由{old}改為{current}。")
         else:
             sentences.append(f"{dimension}獲評{current}。")
@@ -575,12 +527,15 @@ def _revision_links(revisions: tuple[int | None, int | None]) -> str:
 def _change_line(
     row: Mapping[str, object],
     reference: tuple[str | None, int | None, int | None] | None,
+    *,
+    profile: AssessmentProfile | None = None,
 ) -> str:
     """Render a single prepared membership or assessment change.
 
     Args:
         row: Prepared change with stable identity and both observations.
         reference: Known talk destination and permanent revision IDs.
+        profile: Exact source profile defining display labels.
 
     Returns:
         One natural sentence record with safe page and discussion links.
@@ -600,7 +555,7 @@ def _change_line(
         return f"{beginning}已移除評級。"
     action = "重新評級" if row["kind"] == "reassessed" else "已評級"
     return (
-        f"{beginning}{action}。{_assessment_sentences(row)}"
+        f"{beginning}{action}。{_assessment_sentences(row, profile=profile)}"
         f"{_revision_links(reference[1:])}"
     )
 
@@ -646,7 +601,7 @@ def _repaired_days(data: AssessmentLogData) -> dict[date, dict[str, str]]:
     """Copy history and repair verified generated removal links.
 
     Args:
-        data: Retained bodies and exact lines identified by the backend.
+        data: Retained bodies and exact lines identified by the runtime.
 
     Returns:
         Dated groups with available subject and discussion links.
@@ -672,6 +627,52 @@ def _repaired_days(data: AssessmentLogData) -> dict[date, dict[str, str]]:
     return days
 
 
+def _compact_summary(summary: str) -> str:
+    """Remove zero-only groups from retained generated daily summaries.
+
+    Returns:
+        The same hidden totals and dated facts with compact display
+        groups. Unrecognized or custom history remains untouched.
+    """
+    visible, marker, hidden = summary.partition(
+        f"<!-- {_SUMMARY_MARKER} ",
+    )
+    if not marker or "±0" not in visible:
+        return summary
+    project = ""
+    if visible.startswith("专题页面数"):
+        project, separator, visible = visible.partition("：")
+        if not separator:
+            return summary
+        if project == "专题页面数±0":
+            project = ""
+    groups, group, depth = [], "", 0
+    for character in visible.removesuffix("。"):
+        if character == "；" and depth == 0:
+            groups.append(group)
+            group = ""
+            continue
+        group += character
+        depth += (character == "（") - (character == "）")
+    groups.append(group)
+    labels = {"条目页", "非条目页", "重定向页"}
+    compact = [
+        changed
+        for group in groups
+        if (changed := re.sub(r"^(条目页|非条目页|重定向页)±0", r"\1", group))
+        not in labels
+    ]
+    body = "；".join(compact)
+    return (
+        project
+        + ("：" if project and body else "")
+        + body
+        + ("。" if project or body else "")
+        + marker
+        + hidden
+    )
+
+
 def update_text(original_text: str, data: AssessmentLogData) -> str:
     """Append observed changes and retain selected daily records.
 
@@ -684,13 +685,18 @@ def update_text(original_text: str, data: AssessmentLogData) -> str:
         exact original text when no updates are pending.
     """
     observation_date = data.report_date
+    summaries = {
+        day: _compact_summary(summary)
+        for day, summary in data.summaries.items()
+    }
+    formatting_changed = summaries != data.summaries
     new_unchanged_day = data.unchanged and observation_date not in data.days
     existing_summary = data.summaries.get(observation_date, "")
     migration = data.summary_migrations.get(observation_date)
     summary = (
         (_migrated_totals(migration) if migration else _totals(data))
         if observation_date in data.days
-        and f"<!-- {_SUMMARY_MARKER} " not in existing_summary
+        and "<!-- aranami-assessment-totals" not in existing_summary
         and (
             migration is not None
             or not existing_summary.startswith("专题页面")
@@ -707,10 +713,10 @@ def update_text(original_text: str, data: AssessmentLogData) -> str:
         new_unchanged_day,
         data.removed_links,
         summary_changed,
+        formatting_changed,
     )):
         return original_text
     days = _repaired_days(data)
-    summaries = dict(data.summaries)
     if summary_changed:
         summaries[observation_date] = summary
     if new_unchanged_day:
@@ -727,7 +733,11 @@ def update_text(original_text: str, data: AssessmentLogData) -> str:
             if changes.is_empty():
                 continue
             lines = "\n".join(
-                _change_line(row, data.references.get(row["page_id"]))
+                _change_line(
+                    row,
+                    data.references.get(row["page_id"]),
+                    profile=_profile(data),
+                )
                 for row in changes.iter_rows(named=True)
             )
             previous = sections.get(label, "").rstrip()

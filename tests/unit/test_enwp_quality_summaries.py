@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from unittest import TestCase
+from unittest.mock import patch
 
 import polars as pl
 from wiki_fixtures import OfflineSite
 
-from backend.services.enwiki import key_articles as data_service
-from backend.services.enwiki.article_changes import compare_articles
+from data.article_changes import (
+    ArticleChanges,
+    QualityChange,
+    compare_articles,
+)
+from tasks.enwiki import key_articles as data_service
 from updater.services.zhwiki import enwp_key_articles as reports
 
 
@@ -37,6 +42,167 @@ class TestQualitySummaries(TestCase):
     """Name English quality actions for stable article identities."""
 
     @staticmethod
+    def test_retained_nominees_still_appear_in_summary_totals() -> None:
+        """Count current candidates regardless of report additions."""
+        members = _rows(("Existing quality", 1, 10, "GA")).with_columns(
+            pl.lit("FAC").alias("en_reviews"),
+        )
+        candidates = _rows(
+            ("Existing candidate", 2, 20, "B"),
+            ("Other candidate", 3, 30, "C"),
+        ).with_columns(pl.lit("GAN").alias("en_reviews"))
+        data = data_service.ReportData(
+            pl.concat([members, candidates]),
+            {
+                "quality": {
+                    "Existing quality": data_service.OldArticle(
+                        "Existing quality",
+                        1,
+                        10,
+                        "GA",
+                    ),
+                },
+            },
+            {},
+            reviews=candidates,
+        )
+        definition = data_service.ReportDefinition(
+            "quality",
+            "en_class",
+            ("FA", "FL", "GA"),
+        )
+        original = (
+            "{{PJ:VG/DBR/EN/item|en=Existing quality|wd=1|en_cls=GA/FAC}}"
+            "{{PJ:VG/DBR/EN/item|en=Existing candidate|wd=2|en_cls=B/GAN}}"
+            "{{PJ:VG/DBR/EN/item|en=Other candidate|wd=3|en_cls=C/GAN}}"
+        )
+        with (
+            patch.object(data_service, "load_membership", return_value={}),
+            patch.object(data_service, "_stored_articles", return_value=None),
+        ):
+            prepared = data_service.prepare_publication(
+                data,
+                definition,
+                OfflineSite("zh", "wikipedia"),
+                "Wikipedia:Quality",
+                original,
+            )
+        assert not prepared.changes.added
+        assert not prepared.changes.removed
+        assert prepared.new_nominees == candidates.height
+        assert (
+            reports.build_edit_summary(
+                prepared.changes,
+                {},
+                quality=True,
+                new_nominees=prepared.new_nominees,
+            )
+            == "1 article: FA 0, FL 0, GA 1; 2 new nominees."
+        )
+
+    @staticmethod
+    def test_empty_or_missing_nominees_omit_summary_suffix() -> None:
+        """Keep zero candidates quiet after previous nominees leave."""
+        members = _rows(("Existing quality", 1, 10, "GA"))
+        definition = data_service.ReportDefinition(
+            "quality",
+            "en_class",
+            ("FA", "FL", "GA"),
+        )
+        for candidates in (None, members.clear()):
+            data = data_service.ReportData(
+                members,
+                {
+                    "quality": {
+                        "Existing quality": data_service.OldArticle(
+                            "Existing quality",
+                            1,
+                            10,
+                            "GA",
+                        ),
+                    },
+                },
+                {},
+                reviews=candidates,
+            )
+            with (
+                patch.object(data_service, "load_membership", return_value={}),
+                patch.object(
+                    data_service,
+                    "_stored_articles",
+                    return_value=None,
+                ),
+            ):
+                prepared = data_service.prepare_publication(
+                    data,
+                    definition,
+                    OfflineSite("zh", "wikipedia"),
+                    "Wikipedia:Quality",
+                    "{{PJ:VG/DBR/EN/item|en=Old candidate|wd=2|en_cls=B/GAN}}",
+                )
+            assert prepared.new_nominees == 0
+            assert "nominee" not in reports.build_edit_summary(
+                prepared.changes,
+                {},
+                quality=True,
+                new_nominees=prepared.new_nominees,
+            )
+
+    @staticmethod
+    def test_label_led_totals_and_compact_class_code() -> None:
+        """Match the requested totals, adjacent delta and class code."""
+        article = data_service.OldArticle(
+            "Top Gear Hyper Bike",
+            1,
+            10,
+            "GA",
+        )
+        changes = ArticleChanges(
+            current_total=3042,
+            added=(article,),
+            removed=(),
+            quality_changes=(QualityChange(None, article),),
+            quality_counts=(("FA", 301), ("FL", 101), ("GA", 2640)),
+        )
+        assert reports.build_edit_summary(changes, {}, quality=True) == (
+            "3\u202f042 articles (+1): FA 301, FL 101, GA 2\u202f640 (+1). GA "
+            "«[[:en:Top Gear Hyper Bike]]»."
+        )
+
+    @staticmethod
+    def test_signed_class_deltas_use_the_same_count_format() -> None:
+        """Group large positive and negative class differences."""
+        changes = ArticleChanges(
+            current_total=1234,
+            added=(),
+            removed=(),
+            quality_changes=tuple(
+                QualityChange(
+                    data_service.OldArticle(
+                        f"Game {index}",
+                        index,
+                        index,
+                        "FA",
+                    ),
+                    data_service.OldArticle(
+                        f"Game {index}",
+                        index,
+                        index,
+                        "GA",
+                    ),
+                )
+                for index in range(1, 1235)
+            ),
+            quality_counts=(("FA", 0), ("FL", 0), ("GA", 1234)),
+        )
+        summary = reports.build_edit_summary(changes, {}, quality=True)
+        assert summary.startswith(
+            "1\u202f234 articles: FA 0 (-1\u202f234), FL 0, "
+            "GA 1\u202f234 (+1\u202f234).",
+        )
+        assert len(summary.encode()) <= reports.MAX_EDIT_SUMMARY_BYTES
+
+    @staticmethod
     def test_parse_stored_english_class() -> None:
         """Read template classes and ignore obsolete ID comments."""
         parsed = data_service.parse_old_articles(
@@ -51,8 +217,8 @@ class TestQualitySummaries(TestCase):
         }
 
     @staticmethod
-    def test_new_english_classes_use_requested_verbs() -> None:
-        """Name GA listings and FA and FL promotions independently."""
+    def test_new_english_classes_use_requested_codes() -> None:
+        """Name new classes and attach their measured signed deltas."""
         summary = reports.build_edit_summary(
             compare_articles(
                 {},
@@ -62,8 +228,8 @@ class TestQualitySummaries(TestCase):
             quality=True,
         )
         assert summary == (
-            "2 articles: 1 FA, 0 FL, 1 GA. GA listed «[[:en:Good]]»; "
-            "FA prompted «[[:en:Article]]»."
+            "2 articles (+2): FA 1 (+1), FL 0, GA 1 (+1). GA "
+            "«[[:en:Good]]»; FA «[[:en:Article]]»."
         )
         assert (
             reports.build_edit_summary(
@@ -71,12 +237,12 @@ class TestQualitySummaries(TestCase):
                 {},
                 quality=True,
             )
-            == "1 article: 0 FA, 1 FL, 0 GA. FL prompted «[[:en:List]]»."
+            == "1 article (+1): FA 0, FL 1 (+1), GA 0. FL «[[:en:List]]»."
         )
 
     @staticmethod
     def test_removed_english_classes_use_previous_class() -> None:
-        """Name GA delistings and FA and FL removals."""
+        """Use DGA for delisted GA and FFA/FFL for former FA/FL."""
         previous = {
             "Good": data_service.OldArticle("Good", 1, 10, "GA"),
             "Article": data_service.OldArticle("Article", 2, 20, "FA"),
@@ -87,8 +253,8 @@ class TestQualitySummaries(TestCase):
             {},
             quality=True,
         ) == (
-            "0 articles: 0 FA, 0 FL, 0 GA. GA delisted «[[:en:Good]]»; "
-            "FA removed «[[:en:Article]]»; FL removed «[[:en:List]]»."
+            "0 articles (-3): FA 0 (-1), FL 0 (-1), GA 0 (-1). DGA "
+            "«[[:en:Good]]»; FFA «[[:en:Article]]»; FFL «[[:en:List]]»."
         )
 
     @staticmethod
@@ -102,8 +268,8 @@ class TestQualitySummaries(TestCase):
             quality=True,
         )
         assert summary == (
-            "1 article: 1 FA, 0 FL, 0 GA. "
-            "FA prompted «[[:en:After]]» (from GA)."
+            "1 article: FA 1 (+1), FL 0, GA 0 (-1). FA «[[:en:After]]» from"
+            " GA."
         )
         assert reports.build_edit_summary(
             compare_articles(previous, current),
@@ -136,17 +302,16 @@ class TestQualitySummaries(TestCase):
             ),
         )
         for previous, item_id in cases:
-            assert (
-                reports.build_edit_summary(
-                    compare_articles(
-                        previous,
-                        _rows(("After", item_id, 10, "FA")),
-                    ),
-                    {},
-                    quality=True,
-                )
-                == "1 article: 1 FA, 0 FL, 0 GA. "
-                "FA prompted «[[:en:After]]» (from GA)."
+            assert reports.build_edit_summary(
+                compare_articles(
+                    previous,
+                    _rows(("After", item_id, 10, "FA")),
+                ),
+                {},
+                quality=True,
+            ) == (
+                "1 article: FA 1 (+1), FL 0, GA 0 (-1). "
+                "FA «[[:en:After]]» from GA."
             )
 
     @staticmethod
@@ -160,8 +325,8 @@ class TestQualitySummaries(TestCase):
             {1: "後"},
             quality=True,
         ) == (
-            "1 article: 1 FA, 0 FL, 0 GA. "
-            "FA prompted «[[:en:After]]» ([[後]]) (from GA)."
+            "1 article: FA 1 (+1), FL 0, GA 0 (-1). FA «[[:en:After]]» "
+            "&#91;[[後]]&#93; from GA."
         )
 
     @staticmethod
@@ -181,7 +346,7 @@ class TestQualitySummaries(TestCase):
                 {},
                 quality=True,
             )
-            == "1 article: 0 FA, 0 FL, 1 GA."
+            == "1 article: FA 0, FL 0, GA 1."
         )
 
     @staticmethod
@@ -195,8 +360,8 @@ class TestQualitySummaries(TestCase):
             {},
             quality=True,
         ) == (
-            "1 article: 0 FA, 0 FL, 1 GA. GA listed «[[:en:Same]]»; "
-            "GA delisted «[[:en:Same]]»."
+            "1 article (+1/-1): FA 0, FL 0, GA 1 (+1/-1). GA "
+            "«[[:en:Same]]»; DGA «[[:en:Same]]»."
         )
 
     @staticmethod
@@ -209,7 +374,7 @@ class TestQualitySummaries(TestCase):
                 {},
                 quality=True,
             )
-            == "1 article: 1 FA, 0 FL, 0 GA."
+            == "1 article: FA 1, FL 0, GA 0."
         )
         assert (
             reports.build_edit_summary(
@@ -217,7 +382,23 @@ class TestQualitySummaries(TestCase):
                 {},
                 quality=True,
             )
-            == "0 articles: 0 FA, 0 FL, 0 GA. Removed «[[:en:Before]]»."
+            == "0 articles (-1): FA 0, FL 0, GA 0. Remove «[[:en:Before]]»."
+        )
+        current = data_service.OldArticle("After", 1, 10, "FA")
+        unknown_transition = ArticleChanges(
+            current_total=1,
+            added=(),
+            removed=(),
+            quality_changes=(QualityChange(previous["Before"], current),),
+            quality_counts=(("FA", 1), ("FL", 0), ("GA", 0)),
+        )
+        assert (
+            reports.build_edit_summary(
+                unknown_transition,
+                {},
+                quality=True,
+            )
+            == "1 article: FA 1, FL 0, GA 0."
         )
 
     @staticmethod
@@ -234,4 +415,4 @@ class TestQualitySummaries(TestCase):
             quality=True,
         )
         assert len(summary.encode()) <= summary_budget
-        assert summary == "1 article: 1 FA, 0 FL, 0 GA. FA prompted 1 more."
+        assert summary == ("1 article: FA 1 (+1), FL 0, GA 0 (-1). FA 1 more.")

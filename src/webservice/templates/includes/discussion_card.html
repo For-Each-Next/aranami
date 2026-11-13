@@ -1,0 +1,21 @@
+<article class="ui-card article-card-body discussion-card" aria-labelledby="article-{{ section.key }}-{{ card_index }}">
+<span class="discussion-activity ui-card__icon" data-discussion-activity="{{ card.review_activity }}" role="img" title="{{ card.review_activity_label }}" aria-label="{{ card.review_activity_label }}"><svg class="review-icon" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#{{ card.review_icon_symbol }}"></use></svg></span>
+<div class="ui-card__text">
+<div class="ui-card__text__title">
+<h3 id="article-{{ section.key }}-{{ card_index }}"><span class="article-summary"><bdi lang="zh">{{ card.link }}</bdi></span></h3> {% include "includes/assessment_chips.html" %}
+</div>
+<div class="ui-card__text__description">
+<p class="article-extract discussion-extract"><span class="discussion-topic" id="discussion-topic-{{ section.key }}-{{ card_index }}"><bdi lang="zh">{{ card.discussion_link }}</bdi></span>{% if card.extract is not none %}<bdi class="discussion-opening" lang="{{ card.extract_language }}">{{ card.extract }}</bdi>{% endif %}</p>
+</div>
+<div class="ui-card__text__supporting-text">
+<ul class="card-meta metadata-items" role="list">
+{% for date in card.review_dates %}
+<li><span class="review-mark" aria-hidden="true">{{ date.marker }}</span> {% if date.url %}<a href="{{ date.url }}" title="{{ date.label }}">{% endif %}<time datetime="{{ date.value }}" title="{{ date.label }}" aria-label="{{ date.description }}">{{ date.elapsed }}</time>{% if date.url %}</a>{% endif %}</li>
+{% if date.participants %}<li><span class="review-participants" title="{{ date.participants }}"><span aria-hidden="true">☺︎ {{ date.participant_count }}</span><span class="visually-hidden">{{ date.participants }}</span></span></li>{% endif %}
+{% endfor %}
+{% if card.review_section_size %}<li><span class="discussion-size" title="{{ card.review_section_size.description }}">{{ card.review_section_size.label }}</span></li>{% endif %}
+</ul>
+</div>
+</div>
+
+</article>

@@ -1,4 +1,4 @@
-"""Render backend-prepared DYK facts into managed wiki ranges."""
+"""Render runtime-prepared DYK facts into managed wiki ranges."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from mwparserfromhell.nodes import Template
 from shared.support.regions import replace_by_tag
 
 if TYPE_CHECKING:
-    from backend.services.zhwiki.dyks import PreparedDyk
+    from data.dyk import PreparedDyk
 
 
 def _item(title: str, assessment: str) -> Template:
@@ -77,7 +77,7 @@ def update_text(
 
     Args:
         original_text: Destination content whose surroundings are kept.
-        prepared: Complete backend data with no further source reads.
+        prepared: Complete runtime data with no further source reads.
 
     Returns:
         Complete text preserving chart settings and unmanaged content.

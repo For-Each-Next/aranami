@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 
 # Protocol statuses and size limits are exact regression assertions.
 # ruff: file-ignore[magic-value-comparison]
-import datetime as dt
 import gzip
 import http.client
 import io
@@ -21,33 +21,61 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
-from starlette.exceptions import HTTPException
-from starlette.requests import ClientDisconnect
+from django.http import Http404
+from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
+from status_fixtures import executions, status_snapshot
 from uvicorn import Config, Server
 from websockets.sync.client import connect
 
-from backend.public import create_app, main
-from backend.support.http import accepts_gzip
-from backend.support.public_data import read_schedule_status
-from backend.support.routine_status import write_routine_status
-from shared.config import configuration_id, routine_configuration
+from data.runtime.events import event_extra
+from data.runtime.status import status_path, target_key, update_status
+from webservice.http import accepts_gzip
+from webservice.server import create_app, main
 
 if TYPE_CHECKING:
     import socket
     from collections.abc import Callable, Iterator
 
     import httpx2
-    from fastapi import FastAPI
     from starlette.types import Message
+
+    from webservice.asgi import DjangoWebsite
+
+
+def _store_status(runtime: Path, value: dict | None = None) -> dict:
+    """Retain canonical fixture facts through the real status writer.
+
+    Returns:
+        The input observations, independently copied by storage.
+    """
+    value = status_snapshot() if value is None else value
+    changes = {}
+    for domain in ("services", "executions", "datasets", "publications"):
+        rows = {}
+        for key, observed in value[domain].items():
+            row = {
+                name: item
+                for name, item in observed.items()
+                if name != "freshness"
+            }
+            stored_key = (
+                target_key(row["site"], row["title"])
+                if domain == "publications"
+                else key
+            )
+            rows[stored_key] = row
+        changes[domain] = rows
+    assert update_status(changes, runtime=runtime)
+    return value
 
 
 async def _exchange(
-    app: FastAPI,
+    app: DjangoWebsite,
     target: str,
     *,
     on_send: Callable[[Message], None] | None = None,
+    body: bytes = b"",
 ) -> list[Message]:
     """Observe messages that HTTP clients normalize or buffer.
 
@@ -56,6 +84,7 @@ async def _exchange(
     """
     raw_path, _, query = target.partition("?")
     messages = []
+    body_sent = False
 
     async def receive() -> Message:
         """Provide an empty read-only request body.
@@ -63,12 +92,22 @@ async def _exchange(
         Returns:
             One complete empty request message.
         """
-        await asyncio.sleep(0)
-        return {"type": "http.request", "body": b"", "more_body": False}
+        nonlocal body_sent
+        if body_sent:
+            await asyncio.Future()
+        body_sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
 
     async def send(message: Message) -> None:
         """Capture transport chunks and optional disconnect effects."""
         await asyncio.sleep(0)
+        if message["type"] == "http.response.start":
+            message = {
+                **message,
+                "headers": [
+                    (key.lower(), value) for key, value in message["headers"]
+                ],
+            }
         messages.append(message)
         if on_send is not None:
             on_send(message)
@@ -105,7 +144,7 @@ class RetiredInspectionRoutesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             app = create_app(Path(temporary))
             with TestClient(app) as client:
-                for path in ("/data/", "/api/data", "/tasks/", "/api/tasks"):
+                for path in ("/api/data", "/tasks/", "/api/tasks"):
                     with self.subTest(path=path):
                         response = client.get(path)
                         assert response.status_code == HTTPStatus.NOT_FOUND
@@ -114,11 +153,11 @@ class RetiredInspectionRoutesTests(unittest.TestCase):
                 assert 'href="/tasks/"' not in about
 
 
-class PublicWebsiteTests(unittest.TestCase):
+class PublicWebsiteTests(unittest.TestCase):  # ruff: ignore[too-many-public-methods] - Routes share one isolated HTTP fixture.
     """Verify routes, bounded logs, and unavailable-state behavior."""
 
     def setUp(self) -> None:
-        """Create a socket-free FastAPI client over synthetic data."""
+        """Create a socket-free Django client over synthetic data."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.runtime = Path(temporary.name).resolve()
@@ -146,7 +185,7 @@ class PublicWebsiteTests(unittest.TestCase):
         encoding: str = "identity",
         language: str = "en",
     ) -> tuple[int, httpx2.Headers, bytes]:
-        """Read a response through FastAPI's real request pipeline.
+        """Read a response through Django's real request pipeline.
 
         Returns:
             Status, headers, and bytes for assertions.
@@ -214,7 +253,7 @@ class PublicWebsiteTests(unittest.TestCase):
         etag = first.headers["ETag"]
         digest = etag.removeprefix('W/"').removesuffix('"')
         with patch(
-            "backend.support.asset_cache.read_regular",
+            "webservice.asset_cache.read_regular",
             side_effect=AssertionError("Unchanged assets must reuse bytes"),
         ):
             for validator in (
@@ -297,12 +336,19 @@ class PublicWebsiteTests(unittest.TestCase):
         with patch("pywikibot.Site", side_effect=AssertionError("No sources")):
             status, _, body = self.request("/api/status")
             assert status == 200
-            assert json.loads(body) == {
-                "routines": None,
-                "schedule": None,
-                "reports": None,
-                "history": None,
-            }
+            value = json.loads(body)
+            assert value["schema"] == 1
+            assert value["availability"] == "missing"
+            assert value["store_id"] is None
+            assert all(
+                value[key] == {}
+                for key in (
+                    "services",
+                    "executions",
+                    "datasets",
+                    "publications",
+                )
+            )
             assert self.request("/api/dashboard")[0] == 503
             config = json.loads(self.request("/api/config")[2])
             assert config["version"]
@@ -329,6 +375,7 @@ class PublicWebsiteTests(unittest.TestCase):
                 "/reports/",
                 "/logs/",
                 "/maintenance/",
+                "/checks/",
             ):
                 with self.subTest(target=target):
                     status, headers, body = self.request(target)
@@ -357,7 +404,8 @@ class PublicWebsiteTests(unittest.TestCase):
                     if target == "/reports/":
                         assert b'id="tool-status"' in body
                         assert b'id="recent-events"' in body
-                        assert b'id="routine-' in body
+                        assert b'id="routine-pageviews"' in body
+                        assert b'id="dataset-status"' not in body
                         assert b'id="live-server-status"' not in body
                     assert b"Enable JavaScript" not in body
             head = self.request("/", "HEAD")
@@ -369,6 +417,53 @@ class PublicWebsiteTests(unittest.TestCase):
             assert self.request("/maintenance/?task=../private")[0] == 400
             assert self.request("/logs/?q=one&q=two")[0] == 400
         assert not (self.runtime / "state").exists()
+
+    def test_checks_have_separate_route_and_preserve_old_links(self) -> None:
+        """Keep localized checks outside maintenance."""
+        assert self.request("/checks/?task=valid")[0] == 400
+        checks_head = self.request("/checks/", "HEAD")
+        assert checks_head[0] == 200
+        assert checks_head[2] == b""
+        status, headers, checks = self.request("/checks/?lang=zh-hant")
+        assert status == 200
+        assert headers["Content-Language"] == "zh-Hant"
+        assert b'href="/checks/" aria-current="page"' in checks
+        assert b'id="live-uptime"' in checks
+        old_checks = self.request("/maintenance/checks/?lang=zh-hant")
+        assert old_checks[0] == 307
+        assert old_checks[1]["Location"] == "/checks/?lang=zh-hant"
+        old_history = self.request(
+            "/maintenance/?task=consistency_history&lang=zh-hant&page=2",
+        )
+        assert old_history[0] == 307
+        assert old_history[1]["Location"] == (
+            "/checks/?task=consistency_history&lang=zh-hant&page=2"
+        )
+
+    def test_attribution_routes_share_locale_navigation_without_sources(
+        self,
+    ) -> None:
+        """Render credit URLs through the normal page shell."""
+        with patch("pywikibot.Site", side_effect=AssertionError("No sources")):
+            for target in (
+                "/assets/icons/credits.html",
+                "/assets/icons/maintenance/credits.html",
+                "/codex-license.html",
+                "/assets/icons/gpl-2.0.html",
+                "/assets/icons/lgpl-2.1.html",
+            ):
+                with self.subTest(target=target):
+                    status, headers, body = self.request(target + "?lang=en")
+                    assert status == 200
+                    assert headers["Content-Language"] == "en"
+                    assert "Cookie" in headers["Vary"]
+                    assert b'class="masthead"' in body
+                    assert b'class="footer-links"' in body
+                    assert (target + "?lang=zh-hans").encode() in body
+                    assert self.request(target, "HEAD")[2] == b""
+                    assert self.request(target, "POST")[0] == 405
+        assert not (self.runtime / "state").exists()
+        assert not (self.runtime / "cache").exists()
 
     def test_maintenance_overview_uses_saved_categories_and_task_links(
         self,
@@ -397,7 +492,7 @@ class PublicWebsiteTests(unittest.TestCase):
         with (
             patch("pywikibot.Site", side_effect=AssertionError("No sources")),
             patch(
-                "backend.public._PublicViews._dashboard",
+                "webservice.server._PublicViews._dashboard",
                 return_value=snapshot,
             ),
         ):
@@ -419,14 +514,14 @@ class PublicWebsiteTests(unittest.TestCase):
             assert head[1]["Content-Length"] == headers["Content-Length"]
             detail = self.request("/maintenance/?task=sources")[2].decode()
             assert '<form class="maintenance-search"' in detail
-            assert 'class="cdx-table__table__sort-button"' in detail
+            assert 'class="ui-table__table__sort-button"' in detail
             assert 'href="/maintenance/" class="back"' in detail
             assert self.request("/maintenance/?task=missing")[0] == 404
             assert self.request("/maintenance/?sort=title")[0] == 400
         assert not (self.runtime / "state").exists()
 
         with patch(
-            "backend.public._PublicViews._dashboard",
+            "webservice.server._PublicViews._dashboard",
             return_value={
                 "backlog": {
                     "observed_at": "2026-10-31T12:00:00Z",
@@ -442,164 +537,142 @@ class PublicWebsiteTests(unittest.TestCase):
             assert b"temporarily unavailable" not in body
 
     def test_live_status_bypasses_page_cache_and_never_collects(self) -> None:
-        """Refresh saved status without reading dashboard datasets."""
-        now = dt.datetime.now(dt.UTC)
-        record = {
-            "routine": "pageviews",
-            "status": "running",
-            "dry": False,
-            "updated": None,
-            "duration_seconds": None,
-            "started_at": (now - dt.timedelta(seconds=33)).isoformat(),
-            "finished_at": None,
-            "run_id": "a" * 32,
-        }
-        directory = self.runtime / "state"
-        assert write_routine_status(record, directory=directory)
+        """Share live snapshots without source or dataset reads."""
+        value = status_snapshot()
+        record = next(iter(value["executions"].values()))
+        record.update(
+            outcome="running",
+            finished_at=None,
+            duration_seconds=None,
+            updated_count=None,
+        )
+        record["started_at"] = (
+            dt.datetime.now(dt.UTC) - dt.timedelta(seconds=13)
+        ).isoformat()
+        record["updated_at"] = dt.datetime.now(dt.UTC).isoformat()
+        record["stages"] = record["stages"][:1]
+        _store_status(self.runtime, value)
         with (
             patch("pywikibot.Site", side_effect=AssertionError("No sources")),
             patch(
-                "backend.public._PublicViews._dashboard",
-                side_effect=AssertionError("No dataset reads"),
+                "webservice.server._PublicViews._dashboard",
+                side_effect=AssertionError("No datasets"),
             ),
         ):
             status, headers, body = self.request("/api/live")
+            first = json.loads(body)
             assert status == 200
+            assert first["schema"] == 1
+            assert first["type"] == "status"
+            assert len(first["instance"]) == 32
+            assert first["store_id"]
+            assert "Running" in first["html"]
+            assert 'id="live-uptime"' in first["html"]
             assert headers["Cache-Control"] == "no-store"
-            assert "Accept-Language" in headers["Vary"]
-            assert re.search(
-                rb'<a class="status-label status-link"[^>]*>Running</a>',
-                body,
-            )
-            assert b'id="live-uptime"' in body
             record.update(
-                status="updated",
-                updated=1,
-                finished_at=now.isoformat(),
-                duration_seconds=32.89,
+                outcome="succeeded",
+                updated_count=0,
+                finished_at=record["updated_at"],
+                duration_seconds=13,
+                sequence=3,
             )
-            assert write_routine_status(record, directory=directory)
-            body = self.request("/api/live")[2]
-            assert b">Updated</a>" in body
-            assert b"Checked at " in body
-            assert b"(33 sec)" not in body
-            assert b"32.89" not in body
-            translated = self.request("/api/live", language="zh-TW")
-            assert translated[1]["Content-Language"] == "zh-Hant-TW"
-            assert "檢查時間\uff1a" in translated[2].decode()
-            assert "執行時間33秒" not in translated[2].decode()
+            assert update_status(
+                {"executions": {record["run_id"]: record}},
+                runtime=self.runtime,
+            )
+            second = json.loads(self.request("/api/live")[2])
+            assert second["instance"] == first["instance"]
+            assert second["sequence"] > first["sequence"]
+            assert second["revision"] > first["revision"]
+            assert "Updated the October 17, 2026 report" in second["html"]
+            assert "13" in second["html"]
+            translated = json.loads(
+                self.request("/api/live", language="zh-TW")[2],
+            )
+            assert translated["html"] != second["html"]
             assert self.request("/api/live", "HEAD")[2] == b""
             assert self.request("/api/live", "POST")[0] == 405
-            (directory / "routine-status.json").write_text("invalid")
-            assert b">No record</a>" in self.request("/api/live")[2]
+            status_path(self.runtime).write_text("invalid")
+            assert (
+                json.loads(self.request("/api/status")[2])["availability"]
+                == "corrupt"
+            )
+            assert json.loads(self.request("/api/live")[2])["store_id"] is None
         assert not (self.runtime / "cache").exists()
 
     def test_log_selection_filter_limits_and_full_download(self) -> None:
-        """Keep structured events separate from diagnostic downloads."""
+        """Keep filtered activity separate from diagnostic downloads."""
         directory = self.runtime / "logs"
-        directory.mkdir()
-        filename = "aranami.2026-10-23.log"
-        content = "".join(
-            "2026-10-23 12:00:00Z INFO [updater.jobs._execution._save_edit]: "
-            f"Saved Line {index} <script> [x] on zhwiki.\n"
-            for index in range(150)
-        )
-        (directory / filename).write_text(content)
-        events = [
-            {
+        for stream in ("activity", "diagnostics"):
+            (directory / stream).mkdir(parents=True)
+        filename = "20261023.000.log"
+        content = "private diagnostic <script>\n" * 150
+        (directory / "diagnostics" / filename).write_text(content)
+        events = []
+        for index in range(150):
+            event = {
                 "schema": 1,
-                "time": (
-                    dt.datetime(2026, 10, 23, 12, tzinfo=dt.UTC)
-                    + dt.timedelta(seconds=index)
-                ).isoformat(),
-                "kind": "routine_started",
-                "routine": "pageviews",
-                "dry": False,
+                "time": "2026-10-23T12:00:00.000000Z",
+                "event_id": f"{index + 1:032x}",
+                "level": "INFO",
+                **event_extra(
+                    "routine_stage",
+                    routine="pageviews",
+                    stage="preparing",
+                    title="Matched [x] <script>" if index == 0 else "Other",
+                    run_id="a" * 32,
+                )["major_event"],
             }
-            for index in range(150)
-        ]
-        (directory / "events.2026-10-23.jsonl").write_text(
+            events.append(event)
+        (directory / "activity/20261023.000.jsonl").write_text(
             "\n".join(json.dumps(event) for event in events) + "\n",
         )
-        (directory / "aranami.2026-02-30.log").write_text("invalid date")
-        (directory / "credentials.log").write_text("private")
-        (directory / "aranami.2026-10-22.log").symlink_to(directory / filename)
         status, _, body = self.request("/api/logs?q=%5Bx%5D")
         value = json.loads(body)
         assert status == 200
-        assert value["files"] == [
-            {
-                "date": "2026-10-23",
-                "name": filename,
-                "size": len(content),
-            },
-        ]
-        assert value["events"] == events[-100:]
-        assert value["truncated"]
+        assert value["schema"] == 1
+        assert value["availability"] == "available"
+        assert value["events"] == events[:1]
         assert value["query"] == "[x]"
-        state = self.runtime / "state"
-        state.mkdir(exist_ok=True)
-        history_times = [event["time"] for event in events[-100:]]
-        history_times[0] = "2026-10-22T12:00:50+00:00"
-        (state / "job-history.json").write_text(
-            json.dumps({
-                "schema": 1,
-                "runs": [
-                    {
-                        "run_id": f"{index:032x}",
-                        "routine": "pageviews",
-                        "started_at": instant,
-                        "finished_at": None,
-                        "status": "running",
-                        "duration_seconds": None,
-                        "truncated": False,
-                        "stages": [
-                            {
-                                "kind": "started",
-                                "time": instant,
-                                "title": "",
-                            },
-                        ],
-                    }
-                    for index, instant in enumerate(history_times)
-                ],
-            }),
-        )
-        with (
-            patch("pywikibot.Site", side_effect=AssertionError("No sources")),
-            patch(
-                "backend.public._PublicViews._dashboard",
-                side_effect=AssertionError("No dataset reads"),
-            ),
-            patch(
-                "backend.public.log_excerpt",
-                side_effect=AssertionError("Reports do not read daily events"),
-            ),
-        ):
-            human = self.request("/reports/")[2].decode()
-        _, marker, remainder = human.partition("<tbody>")
-        assert marker
-        rows = remainder.partition("</tbody>")[0]
-        assert rows.count("<tr ") == 20
-        assert "Pageview rankings" in rows
-        assert "Running" in rows
-        assert "2026-10-23 12:02:29" in rows
-        assert "2026-10-22 12:00:50" not in rows
-        assert rows.index("2026-10-23 12:02:29") < rows.index(
-            "2026-10-23 12:02:10",
-        )
-        assert '<form action="/reports/"' not in human
-        assert 'class="log-pagination"' not in human
-        assert 'class="log-match-count"' not in human
-        assert "the Pageview rankings task started." not in human
-        assert "Line 149" not in human
-        assert "<script>" not in human
-        assert '<div class="major-events">' not in human
-        self._assert_report_navigation(content, filename)
-        downloaded = self.request("/api/logs?date=2026-10-23&download=1")
+        recent = json.loads(self.request("/api/logs")[2])
+        assert recent["events"] == events[-100:]
+        assert recent["truncated"]
+        human = self.request("/logs/?q=%5Bx%5D")[2].decode()
+        assert "Matched [x] &lt;script&gt;" in human
+        assert "private diagnostic" not in human
+        download = "/api/logs?stream=diagnostics&date=2026-10-23&download=1"
+        downloaded = self.request(download)
         assert downloaded[2] == content.encode()
-        assert filename in downloaded[1]["Content-Disposition"]
-        assert self.request("/api/logs?download=1", "HEAD")[2] == b""
+        assert downloaded[1]["Content-Disposition"] == (
+            f'attachment; filename="{filename}"'
+        )
+        assert self.request(download, "HEAD")[2] == b""
+        view = f"/logs/?stream=diagnostics&date=2026-10-23&file={filename}"
+        downloaded = self.request(view)
+        assert downloaded[0] == 200
+        assert downloaded[2] == content.encode()
+        assert downloaded[1]["Content-Type"] == "text/plain; charset=utf-8"
+        assert downloaded[1]["Content-Disposition"] == (
+            f'inline; filename="{filename}"'
+        )
+        assert downloaded[1]["X-Content-Type-Options"] == "nosniff"
+        assert self.request(view, "HEAD")[2] == b""
+        assert (
+            self.request(view.replace(filename, "20261023.001.log"))[0] == 404
+        )
+        assert self.request(view.replace("2026-10-23", "2026-10-22"))[0] == 400
+        assert self.request(view.replace(filename, "../outside.log"))[0] == 400
+        activity_view = self.request(
+            "/logs/?stream=activity&date=2026-10-23&file=20261023.000.jsonl",
+        )
+        assert activity_view[0] == 200
+        assert activity_view[1]["Content-Type"] == "text/plain; charset=utf-8"
+        assert (
+            activity_view[2]
+            == (
+                "\n".join(json.dumps(event) for event in events) + "\n"
+            ).encode()
+        )
         for query in (
             "date=../secret",
             "date=2026-02-30",
@@ -611,79 +684,42 @@ class PublicWebsiteTests(unittest.TestCase):
         ):
             with self.subTest(query=query):
                 assert self.request("/api/logs?" + query)[0] == 400
-        assert self.request("/api/logs?date=2026-01-01")[0] == 404
-        assert self.request("/api/logs?date=2026-10-22")[0] == 404
+        assert (
+            json.loads(self.request("/api/logs?date=2026-01-01")[2])[
+                "availability"
+            ]
+            == "missing"
+        )
 
-    def _assert_report_navigation(self, content: str, filename: str) -> None:
-        """Keep report history separate from diagnostic downloads."""
-        history = json.loads(self.request("/api/status")[2])["history"]
-        assert len(history["runs"]) == 100
-        live = self.request("/api/live")[2].decode()
-        assert live.count('<dialog id="job-history-') == 20
+    def test_report_history_uses_status_and_never_reads_activity(self) -> None:
+        """Keep execution details separate from log downloads."""
+        value = status_snapshot()
+        value["executions"] = executions(30)
+        for index, run in enumerate(value["executions"].values()):
+            run["started_at"] = (
+                dt.datetime.now(dt.UTC) - dt.timedelta(minutes=index + 1)
+            ).isoformat()
+            run["finished_at"] = run["started_at"]
+            run["duration_seconds"] = 0
+        _store_status(self.runtime, value)
+        with patch(
+            "webservice.server.read_activity",
+            side_effect=AssertionError("No log reads"),
+        ):
+            status, _, body = self.request("/reports/")
+        assert status == 200
+        text = body.decode()
+        assert text.count('<dialog id="job-history-') == 10
+        assert '<ul class="job-stages">' in text
+        assert "Pageview rankings" in text
+        assert "Completed" in text
         assert self.request("/reports/", "HEAD")[2] == b""
         assert self.request("/reports/", "POST")[0] == 405
-        for query in (
-            "date=2026-10-23&order=asc&page=2&status=running",
-            "status=failed",
-            "date=2026-01-01",
-            "q=missing",
-        ):
-            with self.subTest(query=query):
-                status, _, body = self.request("/reports/?" + query)
-                assert status == 200
-                output = body.decode()
-                rows = output.partition("<tbody>")[2].partition("</tbody>")[0]
-                assert rows.count("<tr ") == 20
-                assert "2026-10-22 12:00:50" not in rows
-                assert rows.index("2026-10-23 12:02:29") < rows.index(
-                    "2026-10-23 12:02:10",
-                )
-                assert "lang=zh-hant" in output
-        with patch(
-            "backend.public.log_excerpt",
-            side_effect=AssertionError("Archive must not read run events"),
-        ):
-            status, _, archive = self.request("/logs/")
-        assert status == 200
-        assert filename.encode() in archive
-        assert b'id="recent-events"' not in archive
-        assert b'class="log-query"' not in archive
-        assert (
-            self.request(
-                "/logs/?date=2026-10-23&download=1",
-            )[2]
-            == content.encode()
-        )
-        self._assert_unavailable_report_history()
-
-    def _assert_unavailable_report_history(self) -> None:
-        """Render missing or malformed history without rewriting it."""
-        history = self.runtime / "state" / "job-history.json"
-        history.unlink()
+        status_path(self.runtime).write_text("invalid")
         status, _, body = self.request("/reports/")
         assert status == 200
-        assert b'id="tool-status"' in body
-        assert b'id="recent-events"' in body
-        assert (
-            re.search(
-                rb'<table class="[^"]*\blogs-table\b[^"]*">',
-                body,
-            )
-            is None
-        )
-        history.write_text("invalid history")
-        status, _, body = self.request("/reports/")
-        assert status == 200
-        assert b'id="tool-status"' in body
-        assert (
-            re.search(
-                rb'<table class="[^"]*\blogs-table\b[^"]*">',
-                body,
-            )
-            is None
-        )
-        assert history.read_text() == "invalid history"
-        assert json.loads(self.request("/api/status")[2])["history"] is None
+        assert '<dialog id="job-history-' not in body.decode()
+        assert status_path(self.runtime).read_text() == "invalid"
 
     def test_raw_targets_and_query_bounds_remain_strict(self) -> None:
         """Reject encoded paths and oversized or invalid queries."""
@@ -742,7 +778,7 @@ class PublicWebsiteTests(unittest.TestCase):
                 )
                 assert "error" in json.loads(body)
         with patch(
-            "backend.public.saved_status",
+            "webservice.server.read_status",
             side_effect=OSError("/secret"),
         ):
             status, headers, body = self.request("/api/status")
@@ -765,9 +801,9 @@ class PublicWebsiteTests(unittest.TestCase):
 
     def test_downloads_close_and_do_not_include_appended_bytes(self) -> None:
         """Bound streams to opening size and close aborted reads."""
-        directory = self.runtime / "logs"
-        directory.mkdir()
-        path = directory / "aranami.2026-10-23.log"
+        directory = self.runtime / "logs/diagnostics"
+        directory.mkdir(parents=True)
+        path = directory / "20261023.000.log"
         content = b"a" * (128 * 1024)
         path.write_bytes(content)
 
@@ -778,7 +814,11 @@ class PublicWebsiteTests(unittest.TestCase):
                     stream.write(b"new data")
 
         messages = asyncio.run(
-            _exchange(self.app, "/api/logs?download=1", on_send=append),
+            _exchange(
+                self.app,
+                "/api/logs?stream=diagnostics&download=1",
+                on_send=append,
+            ),
         )
         assert (
             b"".join(message.get("body", b"") for message in messages)
@@ -787,6 +827,22 @@ class PublicWebsiteTests(unittest.TestCase):
         headers = dict(messages[0]["headers"])
         assert int(headers[b"content-length"]) == len(content)
         assert b"content-encoding" not in headers
+
+        inline_content = path.read_bytes()
+        inline_messages = asyncio.run(
+            _exchange(
+                self.app,
+                "/logs/?stream=diagnostics&file=20261023.000.log",
+                on_send=append,
+            ),
+        )
+        assert (
+            b"".join(message.get("body", b"") for message in inline_messages)
+            == inline_content
+        )
+        inline_headers = dict(inline_messages[0]["headers"])
+        assert int(inline_headers[b"content-length"]) == len(inline_content)
+        assert inline_headers[b"content-disposition"].startswith(b"inline;")
 
         opened = []
 
@@ -797,7 +853,7 @@ class PublicWebsiteTests(unittest.TestCase):
                 opened.append(tracked)
                 yield tracked
 
-        with patch("backend.public.open_regular", side_effect=tracked_open):
+        with patch("webservice.server.open_log", side_effect=tracked_open):
 
             def abort(message: Message) -> None:
                 """Simulate failure during the first chunk.
@@ -810,12 +866,17 @@ class PublicWebsiteTests(unittest.TestCase):
                     reason = "disconnected"
                     raise OSError(reason)
 
-            with self.assertRaises(ClientDisconnect):  # ruff: ignore[pytest-unittest-raises-assertion]
-                asyncio.run(
-                    _exchange(self.app, "/api/logs?download=1", on_send=abort),
-                )
+            asyncio.run(
+                _exchange(
+                    self.app,
+                    "/api/logs?stream=diagnostics&download=1",
+                    on_send=abort,
+                ),
+            )
             assert opened[-1].closed
-            response = self.client.head("/api/logs?download=1")
+            response = self.client.head(
+                "/api/logs?stream=diagnostics&download=1",
+            )
             try:
                 assert opened[-1].closed
                 assert response.content == b""
@@ -829,12 +890,12 @@ class PublicWebsiteTests(unittest.TestCase):
     def test_framework_errors_preserve_public_policy(self) -> None:
         """Keep native framework failures sanitized and private."""
         for error, expected in (
-            (HTTPException(404, "/secret"), 404),
+            (Http404("/secret"), 404),
             (RuntimeError("/secret"), 500),
         ):
             with (
                 self.subTest(error=type(error).__name__),
-                patch("backend.public.saved_status", side_effect=error),
+                patch("webservice.server.read_status", side_effect=error),
             ):
                 status, headers, body = self.request("/api/status")
                 assert status == expected
@@ -859,6 +920,31 @@ class PublicWebsiteTests(unittest.TestCase):
             content,
         )
 
+    def test_excessive_query_fields_retain_public_error_headers(self) -> None:
+        """Reject excessive fields before Django parses the query."""
+        query = "&".join("q=1" for _ in range(13))
+        response = self.client.get(f"/about/?{query}")
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.json() == {"error": "Bad Request"}
+        assert response.headers["Cache-Control"] == "no-store"
+        assert (
+            "default-src 'none'" in response.headers["Content-Security-Policy"]
+        )
+
+    def test_actual_request_body_is_bounded_without_content_length(
+        self,
+    ) -> None:
+        """Bound streamed GET input before saved-data readers run."""
+        for size, expected in ((4096, 200), (4097, 413)):
+            with self.subTest(size=size):
+                messages = asyncio.run(
+                    _exchange(self.app, "/styles.css", body=b"x" * size),
+                )
+                assert messages[0]["status"] == expected
+                assert b"content-security-policy" in dict(
+                    messages[0]["headers"],
+                )
+
     def test_factories_isolate_cache_and_runtime(self) -> None:
         """Keep saved observations and cached pages isolated per app."""
         other = self.runtime / "other"
@@ -866,9 +952,9 @@ class PublicWebsiteTests(unittest.TestCase):
         assets = other / "assets"
         assets.mkdir()
         (assets / "fixture.html").write_text("other assets")
-        logs = other / "logs"
-        logs.mkdir()
-        (logs / "aranami.2026-10-23.log").write_text("other runtime")
+        logs = other / "logs/diagnostics"
+        logs.mkdir(parents=True)
+        (logs / "20261023.000.log").write_text("other runtime")
         app = create_app(other, assets)
         client = TestClient(app, headers={"Accept-Encoding": "identity"})
         self.addCleanup(client.close)
@@ -905,8 +991,8 @@ class PublicWebsiteTests(unittest.TestCase):
         content = b"x" * (2 * 1024 * 1024)
         (self.assets / "large.css").write_bytes(content)
         directory = self.runtime / "logs"
-        directory.mkdir()
-        (directory / "aranami.2026-10-23.log").write_bytes(content)
+        (directory / "diagnostics").mkdir(parents=True)
+        (directory / "diagnostics/20261023.000.log").write_bytes(content)
 
         def serve_and_check(app: object, **options: object) -> None:
             """Exercise the actual server settings selected by main."""
@@ -932,12 +1018,17 @@ class PublicWebsiteTests(unittest.TestCase):
                 for path, method, status, expected in (
                     ("/large.css", "GET", 200, content),
                     (
-                        "/api/logs?date=2026-10-23&download=1",
+                        "/api/logs?stream=diagnostics&date=2026-10-23&download=1",
                         "GET",
                         200,
                         content,
                     ),
-                    ("/api/logs?date=2026-10-23&download=1", "HEAD", 200, b""),
+                    (
+                        "/api/logs?stream=diagnostics&date=2026-10-23&download=1",
+                        "HEAD",
+                        200,
+                        b"",
+                    ),
                     ("/%61pi/status", "GET", 404, None),
                     ("/api/status", "OPTIONS", 405, None),
                 ):
@@ -977,8 +1068,11 @@ class PublicWebsiteTests(unittest.TestCase):
                 assert not thread.is_alive()
 
         with (
-            patch("backend.public.create_app", return_value=self.app),
-            patch("backend.public.uvicorn.run", side_effect=serve_and_check),
+            patch("webservice.server.create_app", return_value=self.app),
+            patch(
+                "webservice.server.uvicorn.run",
+                side_effect=serve_and_check,
+            ),
             patch(
                 "threading.excepthook",
                 wraps=threading.excepthook,
@@ -995,7 +1089,7 @@ class PublicWebsiteTests(unittest.TestCase):
             thread_failure.assert_not_called()
         records = [
             json.loads(line)
-            for path in sorted(directory.glob("events.*.jsonl"))
+            for path in sorted((directory / "activity").glob("*.jsonl"))
             for line in path.read_text().splitlines()
         ]
         assert [(event["kind"], event["service"]) for event in records] == [
@@ -1012,60 +1106,49 @@ class PublicWebsiteTests(unittest.TestCase):
             assert self.request("/")[2] == b"cached"
             assert self.request("/")[2] == b"cached"
             assert render.call_count == 1
-            state = self.runtime / "state"
-            state.mkdir()
-            (state / "routine-status.json").write_text("invalid snapshot")
+            state = status_path(self.runtime)
+            state.parent.mkdir(parents=True)
+            state.write_text("invalid snapshot")
             assert self.request("/")[2] == b"cached"
             assert render.call_count == 2
             self.request("/", language="zh-TW")
             assert render.call_count == 3
 
     def test_log_directory_symlink_and_large_lines(self) -> None:
-        """Reject linked log directories and cap displayed lines."""
+        """Expose unsafe or corrupt activity independently."""
         directory = self.runtime / "logs"
         directory.symlink_to(self.assets, target_is_directory=True)
-        assert json.loads(self.request("/api/logs")[2])["files"] == []
+        result = json.loads(self.request("/api/logs")[2])
+        assert result["files"] == []
+        assert result["availability"] == "unreadable"
         directory.unlink()
-        directory.mkdir()
-        (directory / "aranami.2026-10-23.log").write_bytes(b"x" * 20000)
+        (directory / "activity").mkdir(parents=True)
+        (directory / "activity/20261023.000.jsonl").write_bytes(
+            b"x" * 20000 + b"\n",
+        )
         value = json.loads(self.request("/api/logs")[2])
         assert value["events"] == []
-        assert not value["truncated"]
-        (directory / "events.2026-10-23.jsonl").write_bytes(b"x" * 20000)
-        value = json.loads(self.request("/api/logs")[2])
-        assert value["events"] == []
-        assert value["truncated"]
+        assert value["availability"] == "unreadable"
 
-    def test_scheduler_validation_preserves_observed_configuration(
-        self,
-    ) -> None:
-        """Reject mismatched or malformed schedules."""
-        state = self.runtime / "state"
-        state.mkdir()
-        now = dt.datetime.now(dt.UTC).isoformat()
-        routines = json.loads(json.dumps(routine_configuration()["routines"]))
-        for row in routines.values():
-            row.update(state="scheduled", next_run_at=now)
-            del row["misfire_grace_time"]
-        value = {
-            "schema": 1,
-            "updated_at": now,
-            "started_at": now,
-            "state": "running",
-            "config_id": configuration_id(),
-            "routines": routines,
-        }
-        path = state / "schedule-status.json"
-        path.write_text(json.dumps(value))
-        assert read_schedule_status(path) == value
-        assert json.loads(self.request("/api/status")[2])["schedule"] == value
-        value["config_id"] = "0" * 64
-        path.write_text(json.dumps(value))
-        assert json.loads(self.request("/api/status")[2])["schedule"] is None
-        value["config_id"] = configuration_id()
-        routines["dyks"]["next_run_at"] = "invalid"
-        path.write_text(json.dumps(value))
-        assert json.loads(self.request("/api/status")[2])["schedule"] is None
+    def test_invalid_saved_status_remains_explicitly_unavailable(self) -> None:
+        """Reject malformed envelopes without editing saved evidence."""
+        _store_status(self.runtime)
+        path = status_path(self.runtime)
+        original = json.loads(path.read_text())
+        assert (
+            json.loads(self.request("/api/status")[2])["availability"]
+            == "available"
+        )
+        for replacement in (
+            {**original, "schema": 999},
+            {**original, "executions": []},
+        ):
+            path.write_text(json.dumps(replacement))
+            assert (
+                json.loads(self.request("/api/status")[2])["availability"]
+                == "corrupt"
+            )
+            assert json.loads(path.read_text()) == replacement
 
 
 class PublicSocketTests(unittest.TestCase):
@@ -1076,14 +1159,14 @@ class PublicSocketTests(unittest.TestCase):
     def test_pushes_changes_heartbeats_and_reconciliation(self) -> None:
         """Keep sockets alive and reconcile changed or expired views."""
         with (
+            patch.object(self.app.state.live_feed, "_check_seconds", 0.01),
+            patch.object(self.app.state.live_feed, "_refresh_seconds", 60),
             patch("pywikibot.Site", side_effect=AssertionError("No sources")),
             patch(
-                "backend.public._PublicViews._dashboard",
+                "webservice.server._PublicViews._dashboard",
                 side_effect=AssertionError("No datasets"),
             ),
-            patch("backend.public._SOCKET_CHECK_SECONDS", 0.01),
-            patch("backend.public._SOCKET_HEARTBEAT_SECONDS", 0.02),
-            patch("backend.public._SOCKET_REFRESH_SECONDS", 0.08),
+            patch("webservice.server._SOCKET_HEARTBEAT_SECONDS", 0.02),
             patch(
                 "webservice.pages.render_live_status",
                 return_value="initial",
@@ -1093,28 +1176,49 @@ class PublicSocketTests(unittest.TestCase):
                 headers={"Origin": "http://testserver"},
             ) as websocket,
         ):
-            assert websocket.receive_json() == {
-                "type": "status",
-                "html": "initial",
-            }
+            first = websocket.receive_json()
+            assert first["schema"] == 1
+            assert first["type"] == "status"
+            assert first["html"] == "initial"
+            assert first["store_id"] is None
+            assert len(first["instance"]) == 32
             assert render.call_args.args[2] == "zh-hant"
             websocket.send_json({"type": "ping"})
-            assert websocket.receive_json() == {"type": "heartbeat"}
+            assert websocket.receive_json() == {
+                "schema": 1,
+                "type": "heartbeat",
+                "instance": first["instance"],
+                "sequence": first["sequence"],
+            }
             assert render.call_count == 1
             render.return_value = "changed"
-            state = self.runtime / "state"
-            state.mkdir()
-            (state / "routine-status.json").write_text(
-                "invalid saved observation",
-            )
-            while (message := websocket.receive_json())["type"] == "heartbeat":
+            _store_status(self.runtime)
+            while (message := websocket.receive_json())[
+                "type"
+            ] == "heartbeat" or (
+                message.get("type") == "status"
+                and message.get("store_id") is None
+            ):
                 pass
-            assert message == {"type": "status", "html": "changed"}
-            assert render.call_count == 2
+            assert message["type"] == "status"
+            assert message["html"] == "changed"
+            assert message["instance"] == first["instance"]
+            assert message["sequence"] > first["sequence"]
+            assert message["store_id"] is not None
+            assert render.call_count >= 2
             render.return_value = "reconciled"
-            while (message := websocket.receive_json())["type"] == "heartbeat":
-                pass
-            assert message == {"type": "status", "html": "reconciled"}
+            # Reconcile periodically after observing the stored change.
+            with patch.object(
+                self.app.state.live_feed,
+                "_refresh_seconds",
+                0.01,
+            ):
+                while (message := websocket.receive_json())[
+                    "type"
+                ] == "heartbeat":
+                    pass
+            assert message["type"] == "status"
+            assert message["html"] == "reconciled"
         assert not (self.runtime / "cache").exists()
 
     def test_rejects_invalid_origin_path_query_and_commands(self) -> None:
@@ -1166,7 +1270,7 @@ class PublicSocketTests(unittest.TestCase):
             },
         ) as websocket:
             assert websocket.receive_json()["type"] == "status"
-        with patch("backend.public._SOCKET_CLIENTS", 1):
+        with patch("webservice.server._SOCKET_CLIENTS", 1):
             with self.client.websocket_connect("/api/live/ws") as first:
                 assert first.receive_json()["type"] == "status"
                 with (
@@ -1196,8 +1300,8 @@ class PublicStartupTests(unittest.TestCase):
         """Keep launcher flags while replacing bespoke workers."""
         with (
             tempfile.TemporaryDirectory() as directory,
-            patch("backend.public.create_app") as factory,
-            patch("backend.public.uvicorn.run") as serve,
+            patch("webservice.server.create_app") as factory,
+            patch("webservice.server.uvicorn.run") as serve,
         ):
             main([
                 "--runtime",
@@ -1229,8 +1333,8 @@ class PublicStartupTests(unittest.TestCase):
     def test_help_and_invalid_ports_do_not_create_apps(self) -> None:
         """Keep CLI help and validation free of clients and jobs."""
         with (
-            patch("backend.public.create_app") as factory,
-            patch("backend.public.uvicorn.run") as serve,
+            patch("webservice.server.create_app") as factory,
+            patch("webservice.server.uvicorn.run") as serve,
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
         ):

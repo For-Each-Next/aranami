@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mwparserfromhell.nodes import Tag
 from pywikibot import Page
 from pywikibot.exceptions import InvalidTitleError
 from pywikibot.site import Namespace
@@ -11,9 +12,42 @@ from pywikibot.site import Namespace
 from shared.support.wikitext import clean_value
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from mwparserfromhell.nodes import Template
     from mwparserfromhell.wikicode import Wikicode
     from pywikibot.site import BaseSite
+
+_QUOTED_TAGS = {
+    "blockquote",
+    "q",
+    "nowiki",
+    "pre",
+    "source",
+    "syntaxhighlight",
+    "ref",
+    "gallery",
+    "math",
+    "code",
+}
+
+
+def active_templates(code: Wikicode) -> Iterator[Template]:
+    """Inspect template calls outside quoted or literal source examples.
+
+    Args:
+        code: Parsed source whose original parameters remain unchanged.
+
+    Yields:
+        Recursive template calls with no quoted-tag ancestor.
+    """
+    for template in code.filter_templates():
+        if not any(
+            isinstance(ancestor, Tag)
+            and str(ancestor.tag).strip().casefold() in _QUOTED_TAGS
+            for ancestor in code.get_ancestors(template)
+        ):
+            yield template
 
 
 def template_page(name: object, site: BaseSite) -> Page | None:
@@ -30,7 +64,7 @@ def template_page(name: object, site: BaseSite) -> Page | None:
     try:
         page = Page(site, str(name).strip(), Namespace.TEMPLATE)
         page.title()
-    except InvalidTitleError:
+    except InvalidTitleError, ValueError:
         return None
     return page
 

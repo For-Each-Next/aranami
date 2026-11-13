@@ -18,13 +18,14 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from backend.services.zhwiki.new_pages import build_result
+from data.paths import storage_key
+from data.reports import ReportResult, ReportStore, report_key
+from runtime.jobs import JobContext, ProposedEdit, job_run
 from shared.deployment import project_version
-from shared.reports import ReportResult, ReportStore, report_key
-from updater.jobs import JobContext, ProposedEdit, job_run
+from tasks.zhwiki.new_pages import build_result
 
 if TYPE_CHECKING:
-    from shared.reports import ReportBundle
+    from data.reports import ReportBundle
 
 _START = dt.datetime(2026, 10, 20, tzinfo=dt.UTC)
 _ARTICLE_COUNT = 75
@@ -98,7 +99,7 @@ class TestReportStore(TestCase):
         clock.datetime.now.return_value = _START
         with (
             TemporaryDirectory() as directory,
-            patch("shared.reports.dt", clock),
+            patch("data.reports.dt", clock),
         ):
             store = ReportStore(Path(directory))
             key = report_key("english-comparisons", "zhwiki", "Report")
@@ -410,6 +411,9 @@ class TestReportStore(TestCase):
             )
             assert bundle.path.name == f"test-report-{generated:%Y%m%d%H%M%S}"
             assert (bundle.path / "members.parquet").exists()
+            assert bundle.path.relative_to(store.root).as_posix().isascii()
+            assert bundle.manifest["report_key"] == key
+            assert bundle.manifest["target"]["title"] == "專題:電子遊戲/列表"
             assert not list(store.root.rglob(".generation-*"))
             assert store.lock_root.is_relative_to(Path(directory) / "state")
 
@@ -440,7 +444,7 @@ class TestReportStore(TestCase):
                 started_at=_START + dt.timedelta(hours=1),
                 target={"site": "zhwiki", "title": "電子遊戲"},
             )
-            assert first.path == store.root / key
+            assert first.path == store.root / storage_key(key)
             assert first.path.name == "20261020"
             assert (first.path / "members.parquet").exists()
             assert again.wikitext == "first"
@@ -448,8 +452,89 @@ class TestReportStore(TestCase):
             assert store.read(key, previous=True) is None
 
 
+class TestUnicodeReportStorage(TestCase):
+    """Preserve retained report identities during path migration."""
+
+    def test_legacy_unicode_bundle_is_readable_without_shadow_writes(
+        self,
+    ) -> None:
+        """Keep old evidence until an explicit path migration."""
+        with TemporaryDirectory() as directory:
+            store = ReportStore(Path(directory))
+            title = "專題:電子遊戲/列表"
+            key = report_key("assessment-lists", "zhwiki", title)
+            bundle = store.write(
+                key,
+                _result(),
+                "retained report",
+                run_id="1" * 32,
+                started_at=_START,
+                target={"site": "zhwiki", "title": title},
+            )
+            current = bundle.path.parent
+            legacy = store.root / key
+            current.rename(legacy)
+            original = (legacy / "latest.json").read_bytes()
+            saved = store.read(key)
+            assert saved.wikitext == "retained report"
+            assert saved.path == legacy / bundle.path.name
+            assert saved.manifest["report_key"] == key
+            with self.assertRaisesRegex(ValueError, "[Mm]igrat"):
+                store.write(
+                    key,
+                    _result(1),
+                    "later report",
+                    run_id="2" * 32,
+                    started_at=_START + dt.timedelta(days=1),
+                    target={"site": "zhwiki", "title": title},
+                )
+            assert (legacy / "latest.json").read_bytes() == original
+            assert not current.exists()
+
+
 class TestStoredPublication(TestCase):
     """Keep calculated data independent of save and preview outcomes."""
+
+    @staticmethod
+    def test_daily_source_references_survive_durable_publication() -> None:
+        """Retain daily identities with original source metadata."""
+        site = Mock()
+        site.dbName.return_value = "zhwiki"
+        reference = {
+            "wiki": "zhwiki",
+            "project": "Games",
+            "snapshot_date": "2026-11-02",
+            "boundary_date": "2026-11-03",
+            "sha256": "a" * 64,
+            "generation": "20261103T000001Z",
+            "observed_at": "2026-11-03T00:00:01+00:00",
+            "scheduled_for": "2026-11-03T00:00:00+00:00",
+        }
+        with (
+            TemporaryDirectory() as directory,
+            patch("pathlib.Path.cwd", return_value=Path(directory)),
+            patch(
+                "runtime.execution.project_snapshot_references",
+                return_value=[reference],
+            ),
+        ):
+            context = JobContext(site, _START.date(), dry=True)
+            context.publish(
+                ProposedEdit(
+                    site,
+                    "Target",
+                    "body",
+                    "summary",
+                    report_key="test-zhwiki-main",
+                    result=_result(),
+                ),
+            )
+            saved = ReportStore(dry=True).read("test-zhwiki-main")
+        assert saved is not None
+        assert saved.manifest["provenance"]["project_snapshots"] == [reference]
+        assert saved.manifest["provenance"]["source_timestamp"] == (
+            "2026-10-19T18:00:00+00:00"
+        )
 
     @staticmethod
     def test_one_routine_publishes_successive_complete_results() -> None:
@@ -457,10 +542,11 @@ class TestStoredPublication(TestCase):
         site = Mock()
         site.dbName.return_value = "zhwiki"
         page = Mock(text="old")
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
-            patch("updater.jobs._execution.pywikibot.Page", return_value=page),
+            patch("updater.publisher.pywikibot.Page", return_value=page),
         ):
             context = JobContext(site, _START.date(), dry=False)
             with job_run("pageviews", context=context):
@@ -493,12 +579,13 @@ class TestStoredPublication(TestCase):
         site = Mock()
         site.dbName.return_value = "zhwiki"
         page = Mock(text="old")
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         page.save.side_effect = RuntimeError("connection lost")
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
                 return_value=page,
             ),
         ):
@@ -540,7 +627,7 @@ class TestStoredPublication(TestCase):
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
             ) as page,
         ):
             with (
@@ -576,7 +663,7 @@ class TestStoredPublication(TestCase):
             '<!-- aranami end="new-pages" -->'
         )
         with patch(
-            "backend.services.zhwiki.new_pages.Page",
+            "tasks.zhwiki.new_pages.Page",
             return_value=page,
         ):
             result = build_result(

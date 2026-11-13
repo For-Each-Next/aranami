@@ -9,13 +9,17 @@ import datetime as dt
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 from unittest import TestCase
 from unittest.mock import patch
 
 import polars as pl
-from pywikibot.site import BaseSite, Namespace
+from wiki_fixtures import OfflineSite as _OfflineSite
 
-from backend.website.backlog import collect_backlog
+from tasks.website.backlog import collect_backlog
+
+if TYPE_CHECKING:
+    from pywikibot.site import BaseSite
 
 _MEMBER_SCHEMA = {
     "page_id": pl.Int64,
@@ -23,28 +27,6 @@ _MEMBER_SCHEMA = {
     "full_title": pl.String,
 }
 _CATEGORY_SCHEMA = {"page_id": pl.Int64, "name": pl.String}
-
-
-class _OfflineSite(BaseSite):
-    """Resolve namespace identities without contacting Wikipedia."""
-
-    def namespace(
-        self,
-        number: int,
-        *,
-        all_ns: bool = False,
-    ) -> str | Namespace:
-        """Return the builtin namespace name or metadata.
-
-        Args:
-            number: Requested namespace identifier.
-            all_ns: Whether to return the complete namespace object.
-
-        Returns:
-            The namespace metadata or preferred title prefix.
-        """
-        namespace = self.namespaces[number]
-        return namespace if all_ns else namespace[0]
 
 
 class TestMaintenanceBacklog(TestCase):
@@ -92,7 +74,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "backend.website.backlog.page_categories",
+            "tasks.website.backlog.page_categories",
             return_value=categories,
         ) as read:
             result = collect_backlog(site, members)
@@ -177,7 +159,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "backend.website.backlog.page_categories",
+            "tasks.website.backlog.page_categories",
             return_value=categories,
         ) as read:
             result = collect_backlog(site, members)
@@ -246,7 +228,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "backend.website.backlog.page_categories",
+            "tasks.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(_OfflineSite("zh", "wikipedia"), members)
@@ -261,7 +243,7 @@ class TestMaintenanceBacklog(TestCase):
         assert all(len(group["items"]) == 1 for group in old_groups)
         assert all(
             group["source_url"].startswith(
-                "https://zh.wikipedia.org/wiki/Category:",
+                "https://zh.wikipedia.org/wiki/Category%3A",
             )
             for group in result["groups"]
         )
@@ -304,7 +286,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "backend.website.backlog.page_categories",
+            "tasks.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(
@@ -351,7 +333,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "backend.website.backlog.page_categories",
+            "tasks.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(
@@ -415,7 +397,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "backend.website.backlog.page_categories",
+            "tasks.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(_OfflineSite("zh", "wikipedia"), members)
@@ -453,7 +435,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "backend.website.backlog.page_categories",
+            "tasks.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(
@@ -486,7 +468,7 @@ class TestMaintenanceBacklog(TestCase):
     def test_successful_empty_membership_retains_zero_groups() -> None:
         """Keep successful absence separate from collection failures."""
         with patch(
-            "backend.website.backlog.page_categories",
+            "tasks.website.backlog.page_categories",
             return_value=pl.DataFrame(schema=_CATEGORY_SCHEMA),
         ) as read:
             site = _OfflineSite("zh", "wikipedia")
@@ -521,7 +503,7 @@ class TestMaintenanceBacklog(TestCase):
             orient="row",
         )
         with patch(
-            "backend.website.backlog.page_categories",
+            "tasks.website.backlog.page_categories",
             return_value=categories,
         ):
             result = collect_backlog(_OfflineSite("zh", "wikipedia"), members)
@@ -537,7 +519,7 @@ class TestMaintenanceBacklog(TestCase):
         """Propagate source failure so orchestration can mark null."""
         with (
             patch(
-                "backend.website.backlog.page_categories",
+                "tasks.website.backlog.page_categories",
                 side_effect=RuntimeError("Replica unavailable."),
             ),
             self.assertRaisesRegex(RuntimeError, "Replica unavailable"),
@@ -558,14 +540,14 @@ class TestMaintenanceBacklog(TestCase):
         )
         with (
             patch(
-                "backend.website.backlog.page_categories",
+                "tasks.website.backlog.page_categories",
                 return_value=pl.DataFrame(
                     [(1, "需要清理的条目"), (2, "需要清理的条目")],
                     schema=_CATEGORY_SCHEMA,
                     orient="row",
                 ),
             ),
-            patch("backend.website.backlog._MAX_GROUP_ITEMS", 1),
+            patch("tasks.website.backlog._MAX_GROUP_ITEMS", 1),
             self.assertRaisesRegex(ValueError, "snapshot record limit"),
         ):
             collect_backlog(_OfflineSite("zh", "wikipedia"), members)
@@ -603,7 +585,7 @@ class TestConfiguredMaintenance(TestCase):
             path = Path(directory) / "maintenance.json"
             path.write_text(json.dumps(config), encoding="utf-8")
             with patch(
-                "backend.website.backlog.page_categories",
+                "tasks.website.backlog.page_categories",
                 return_value=pl.DataFrame(
                     [
                         (1, name),
@@ -706,7 +688,7 @@ class TestConfiguredMaintenance(TestCase):
             path.write_text(json.dumps(config), encoding="utf-8")
             with (
                 patch(
-                    "backend.website.backlog.page_categories",
+                    "tasks.website.backlog.page_categories",
                     return_value=pl.DataFrame(
                         [
                             (1, "自2024年5月Needs_sources"),
@@ -717,7 +699,7 @@ class TestConfiguredMaintenance(TestCase):
                     ),
                 ) as categories,
                 patch(
-                    "backend.website.backlog.maintenance_tags",
+                    "tasks.website.backlog.maintenance_tags",
                     side_effect=tags,
                 ) as read,
             ):
@@ -746,7 +728,7 @@ class TestConfiguredMaintenance(TestCase):
         assert sources["items"][0]["oldest_issue_month"] == "2024-05"
         assert sources["items"][1]["oldest_issue_month"] is None
         assert groups["custom_template"]["source_url"] == (
-            "https://zh.wikipedia.org/wiki/Template:Article_warning"
+            "https://zh.wikipedia.org/wiki/Template%3AArticle_warning"
         )
         assert result["total"] == 2  # ruff: ignore[magic-value-comparison]
 
@@ -758,8 +740,8 @@ class TestConfiguredMaintenance(TestCase):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "maintenance.json"
             with (
-                patch("backend.website.backlog.page_categories") as categories,
-                patch("backend.website.backlog.maintenance_tags") as tags,
+                patch("tasks.website.backlog.page_categories") as categories,
+                patch("tasks.website.backlog.maintenance_tags") as tags,
                 self.assertRaises(OSError),
             ):
                 collect_backlog(

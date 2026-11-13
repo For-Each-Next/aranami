@@ -12,15 +12,16 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import polars as pl
+from wiki_fixtures import offline_site
 
-from backend.newsletter.homepage import (
-    collect_newsletter_homepage,
-)
 from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.homepage import collect_newsletter_homepage
 
 
 class HistoryReader:
     """Provide actual source shapes with historical versions."""
+
+    site = offline_site()
 
     def __init__(self) -> None:
         """Record historical requests and batch title resolution."""

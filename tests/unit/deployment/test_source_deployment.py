@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 _ROOT = Path(__file__).resolve().parents[3]
-_PACKAGES = {"backend", "updater", "webservice", "shared"}
+_PACKAGES = {"runtime", "tasks", "data", "updater", "webservice", "shared"}
 
 
 def _uploader() -> ModuleType:
@@ -113,35 +113,9 @@ def _fixture(root: Path, payload: dict[str, bytes]) -> None:
         payload: Validated source upload used to seed the fixture.
     """
     for name, content in payload.items():
-        if name == "deployment.json":
-            continue
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
-
-
-def _development_fixture(root: Path, payload: dict[str, bytes]) -> None:
-    """Copy authored build inputs and a verified disposable web tree."""
-    receipt = json.loads((_ROOT / "dist/webservice/build.json").read_bytes())
-    files = {
-        name: data
-        for name, data in payload.items()
-        if not name.startswith((
-            "src/webservice/public_html/",
-            "src/webservice/templates/",
-        ))
-    }
-    files.update({
-        name: (_ROOT / name).read_bytes() for name in receipt["inputs"]
-    })
-    files.update({
-        f"dist/webservice/{name}": (
-            _ROOT / "dist/webservice" / name
-        ).read_bytes()
-        for name in receipt["outputs"]
-    })
-    files["dist/webservice/build.json"] = json.dumps(receipt).encode()
-    _fixture(root, files)
 
 
 def _archive_contents(content: bytes) -> dict[str, bytes]:
@@ -283,13 +257,18 @@ class TestSourcePayload(TestCase):
         """Declare locked web dependencies and project metadata."""
         metadata = tomllib.loads(self.payload["pyproject.toml"].decode())
         project = metadata["project"]
-        assert {"fastapi", "jinja2", "uvicorn", "websockets"} <= set(
+        assert {
+            "django",
+            "jinja2",
+            "uvicorn",
+            "websockets",
+        } <= set(
             project["dependencies"],
         )
         assert {
-            "Development Status :: 4 - Beta",
+            "Development Status :: 7 - Inactive",
             "Environment :: Web Environment",
-            "Framework :: FastAPI",
+            "Framework :: Django",
         } <= set(project["classifiers"])
         assert (
             "Development Status :: 1 - Planning"
@@ -298,8 +277,8 @@ class TestSourcePayload(TestCase):
         assert metadata["tool"]["uv"]["package"] is False
         lock = tomllib.loads(self.payload["uv.lock"].decode())
         packages = {package["name"] for package in lock["package"]}
-        assert {"fastapi", "jinja2", "uvicorn", "websockets"} <= packages
-        assert not {"django", "flask", "werkzeug", "waitress"} & packages
+        assert {"django", "jinja2", "uvicorn", "websockets"} <= packages
+        assert not {"fastapi", "flask", "werkzeug", "waitress"} & packages
 
     def test_payload_matches_reviewed_manifest_and_recorded_hashes(
         self,
@@ -316,6 +295,9 @@ class TestSourcePayload(TestCase):
             *(f"scripts/toolforge/{name}" for name in self.uploader._SCRIPTS),
         }
         assert set(self.payload) == expected
+        assert "src/tasks/project_data.py" in self.payload
+        assert "src/data/project_data.py" in self.payload
+        assert "src/data/caching/pageviews.py" in self.payload
         assert "src/webservice/pages.py" in self.payload
         assert "src/webservice/templates/base.html" in self.payload
         png_files = {
@@ -340,7 +322,7 @@ class TestSourcePayload(TestCase):
             if name.startswith("src/")
         } == _PACKAGES
         assert (
-            'exec "$runtime_python" -m backend "$@"'
+            'exec "$runtime_python" -m runtime "$@"'
             in self.payload["scripts/toolforge/run-hub.sh"].decode()
         )
         assert (
@@ -358,12 +340,26 @@ class TestSourcePayload(TestCase):
             name for name in self.payload if Path(name).suffix == ".js"
         } == {
             "src/webservice/public_html/components.js",
+            "src/webservice/public_html/consistency-repair.user.js",
             "src/webservice/public_html/live.js",
             "src/webservice/public_html/navigation.js",
             "src/webservice/public_html/newsletter.js",
+            "src/webservice/public_html/redirects.js",
+            *(
+                f"src/webservice/public_html/{name}.js"
+                for name in (
+                    "copy",
+                    "datasets",
+                    "heading_links",
+                    "history",
+                    "maintenance",
+                    "quality_authorship",
+                    "quality_analysis",
+                )
+            ),
         }
         assert (
-            "-m backend.public --host 0.0.0.0 --port 8000 "
+            "-m webservice.server --host 0.0.0.0 --port 8000 "
             '--runtime "$tool_dir"'
             in self.payload["scripts/toolforge/run-web.sh"].decode()
         )
@@ -547,99 +543,80 @@ class TestSourcePayload(TestCase):
         remote.assert_called_once()
 
 
-class TestWebBuildPayload(TestCase):
-    """Require current builds and preserve the deployed source tree."""
+class TestWebSourcePayload(TestCase):
+    """Ship Django pages and native assets without a build step."""
 
     def setUp(self) -> None:
-        """Prepare one reviewed payload and an isolated checkout."""
+        """Prepare an isolated checkout from the reviewed payload."""
         self.uploader = _uploader()
         self.payload = self.uploader.source_payload()
         self.root = Path(self.enterContext(TemporaryDirectory())).resolve()
-        _development_fixture(self.root, self.payload)
+        _fixture(self.root, self.payload)
 
-    def test_build_maps_to_runtime_paths_without_build_dependencies(
+    def test_authored_files_ship_directly_without_compiler_dependencies(
         self,
     ) -> None:
-        """Upload checked outputs while keeping source paths stable."""
+        """Use identical local and deployed resources without Node."""
         assert self.uploader.source_payload(self.root) == self.payload
-        assert not any(name.startswith("dist/") for name in self.payload)
+        assert not any(name.startswith("build/") for name in self.payload)
         assert "package.json" not in self.payload
-        assert not any(name.startswith("frontend/") for name in self.payload)
-        assert not (self.root / "src/webservice/public_html/live.js").exists()
+        manifest = json.loads(self.payload["deployment.json"])
+        assert manifest["built_at"].endswith("+00:00")
+        assert "src/webservice/settings.py" in self.payload
+        assert "src/webservice/public_html/components.js" in self.payload
+        assert not any(
+            name.endswith((".ts", ".vue", "codex.css"))
+            or "/generated/" in name
+            for name in self.payload
+        )
 
-    def test_missing_receipt_and_stale_inputs_are_rejected(self) -> None:
-        """Require new build evidence after authored sources change."""
-        receipt = self.root / "dist/webservice/build.json"
-        original = receipt.read_bytes()
-        receipt.unlink()
-        with self.assertRaisesRegex(ValueError, "Missing regular"):
-            self.uploader.source_payload(self.root)
-        receipt.write_bytes(original)
-        source = self.root / "frontend/live.ts"
-        source.write_text(source.read_text() + "\n// Changed input.\n")
-        with self.assertRaisesRegex(ValueError, "Stale web build"):
-            self.uploader.source_payload(self.root)
+    def test_changed_source_updates_its_payload_digest(self) -> None:
+        """Hash the exact authored bytes for source payloads."""
+        name = "src/webservice/public_html/live.js"
+        source = self.root / name
+        source.write_bytes(source.read_bytes() + b"\n// Updated source.\n")
+        payload = self.uploader.source_payload(self.root)
+        assert payload[name] == source.read_bytes()
+        manifest = json.loads(payload["deployment.json"])
+        assert (
+            manifest["files"][name]
+            == hashlib.sha256(
+                source.read_bytes(),
+            ).hexdigest()
+        )
+        assert payload["deployment.json"] != self.payload["deployment.json"]
 
-    def test_changed_missing_and_unreviewed_outputs_are_rejected(self) -> None:
-        """Check content, completeness, and review independently."""
-        script = self.root / "dist/webservice/public_html/live.js"
-        original = script.read_bytes()
-        script.write_bytes(original + b"\n// Changed output.\n")
-        with self.assertRaisesRegex(ValueError, "Stale web build"):
-            self.uploader.source_payload(self.root)
-        script.unlink()
-        with self.assertRaisesRegex(ValueError, "inventory changed"):
-            self.uploader.source_payload(self.root)
-        script.write_bytes(original)
-        extra = self.root / "dist/webservice/public_html/unreviewed.js"
-        extra.write_bytes(b"'unreviewed';")
-        receipt_path = self.root / "dist/webservice/build.json"
-        receipt = json.loads(receipt_path.read_bytes())
-        receipt["outputs"]["public_html/unreviewed.js"] = hashlib.sha256(
-            extra.read_bytes(),
-        ).hexdigest()
-        receipt_path.write_text(json.dumps(receipt))
+    def test_missing_unreviewed_and_linked_sources_are_rejected(self) -> None:
+        """Retain the reviewed inventory and reject linked web files."""
+        source = self.root / "src/webservice/public_html/live.js"
+        original = source.read_bytes()
+        source.unlink()
         with self.assertRaisesRegex(ValueError, "reviewed payload"):
             self.uploader.source_payload(self.root)
-
-    def test_omitted_inputs_and_linked_build_ancestors_are_rejected(
-        self,
-    ) -> None:
-        """Reject incomplete receipts and linked output directories."""
-        receipt_path = self.root / "dist/webservice/build.json"
-        original = receipt_path.read_bytes()
-        receipt = json.loads(original)
-        del receipt["inputs"]["frontend/live.ts"]
-        receipt_path.write_text(json.dumps(receipt))
-        with self.assertRaisesRegex(ValueError, "inventory changed"):
+        source.write_bytes(original)
+        extra = source.with_name("unreviewed.js")
+        extra.write_text("// Unreviewed source.\n")
+        with self.assertRaisesRegex(ValueError, "reviewed payload"):
             self.uploader.source_payload(self.root)
-        receipt_path.write_bytes(original)
-        build = self.root / "dist"
-        build.rename(self.root / "linked-build")
-        build.symlink_to(self.root / "linked-build", target_is_directory=True)
+        extra.unlink()
+        source.rename(extra)
+        source.symlink_to(extra)
         with self.assertRaisesRegex(ValueError, "symlinks"):
             self.uploader.source_payload(self.root)
 
-    def test_resource_resolution_never_uses_partial_authored_tree(
-        self,
-    ) -> None:
-        """Select dist locally and package resources in deployments."""
+    def test_checkout_uses_the_same_authored_resource_paths(self) -> None:
+        """Ignore obsolete build directories when locating resources."""
         with patch.object(
             deployment,
             "__file__",
             str(self.root / "src/shared/deployment.py"),
         ):
-            assert deployment.resource_root("webservice") == (
-                self.root / "dist/webservice"
-            )
-            (self.root / "dist").rename(self.root / "missing-dist")
-            assert not deployment.resource_root("webservice").exists()
-            (self.root / "package.json").unlink()
-            assert deployment.resource_root("webservice") == (
-                self.root / "src/webservice"
-            )
+            expected = self.root / "src/webservice"
+            assert deployment.resource_root("webservice") == expected
+            (self.root / "build/webservice").mkdir(parents=True)
+            assert deployment.resource_root("webservice") == expected
 
-    def test_deployed_pages_render_without_node_or_dist(self) -> None:
+    def test_deployed_pages_render_without_node_or_build(self) -> None:
         """Load the archive using only its pinned Python runtime."""
         with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -668,7 +645,7 @@ class TestWebBuildPayload(TestCase):
                 check=False,
             )
             assert result.returncode == 0, result.stderr
-            assert not (root / "dist").exists()
+            assert not (root / "build").exists()
             assert not (root / "node_modules").exists()
 
 
@@ -676,16 +653,17 @@ class TestSourceImports(TestCase):
     """Check application boundaries and source imports."""
 
     @staticmethod
-    def test_backend_data_layers_do_not_depend_on_updater() -> None:
-        """Keep data and runtime storage independent of publication."""
-        for layer in ("services", "support"):
-            for path in (_ROOT / "src/backend" / layer).rglob("*.py"):
-                tree = ast.parse(path.read_text(), filename=str(path))
-                for node in ast.walk(tree):
-                    assert not any(
-                        name == "updater" or name.startswith("updater.")
-                        for name in _import_targets(node)
-                    ), path
+    def test_data_layers_do_not_acquire_sources() -> None:
+        """Keep durable contracts independent of source acquisition."""
+        paths = list((_ROOT / "src/data").rglob("*.py"))
+        assert paths
+        for path in paths:
+            tree = ast.parse(path.read_text(), filename=str(path))
+            for node in ast.walk(tree):
+                assert not any(
+                    name.startswith("shared.sources")
+                    for name in _import_targets(node)
+                ), path
 
     @staticmethod
     def test_updater_services_only_render_prepared_data() -> None:
@@ -736,7 +714,7 @@ class TestSourceImports(TestCase):
     @staticmethod
     def test_jobs_only_read_destinations_and_refresh_pexbot() -> None:
         """Allow destination reads and intentional PexBot refreshes."""
-        for path in (_ROOT / "src/updater/jobs").rglob("*.py"):
+        for path in (_ROOT / "src/runtime/jobs").rglob("*.py"):
             tree = ast.parse(path.read_text(), filename=str(path))
             for node in ast.walk(tree):
                 for target in _import_targets(node):
@@ -746,7 +724,7 @@ class TestSourceImports(TestCase):
                         assert target == "shared.sources.wiki.read_pages", path
                     if target.startswith("pywikibot"):
                         assert (
-                            path.name == "_execution.py"
+                            path.name == "context.py"
                             or target == "pywikibot.site.BaseSite"
                         ), path
                     if target.split(".")[0] in {
@@ -761,20 +739,25 @@ class TestSourceImports(TestCase):
     def test_python315_ast_enforces_source_application_boundaries() -> None:
         """Inspect lazy imports using Python 3.15's AST."""
         assert sys.version_info[:2] == (3, 15)
-        for package in _PACKAGES:
-            allowed = (
-                {"backend", "updater", "shared"}
-                if package in {"backend", "updater"}
-                else {package, "shared"}
-            )
+        dependencies = {
+            "shared": {"shared"},
+            "data": {"data", "shared"},
+            "tasks": {"tasks", "data", "shared"},
+            "updater": {"updater", "data", "shared"},
+            "webservice": {"webservice", "updater", "data", "shared"},
+            "runtime": _PACKAGES,
+        }
+        for package, allowed in dependencies.items():
             forbidden = _PACKAGES - allowed
-            forbidden |= {"aranami", "toolforge", "wiki_report_updater"}
-            for path in (_ROOT / "src" / package).rglob("*.py"):
-                path_forbidden = (
-                    forbidden - {"webservice"}
-                    if path == _ROOT / "src/backend/public.py"
-                    else forbidden
-                )
+            forbidden |= {
+                "backend",
+                "aranami",
+                "toolforge",
+                "wiki_report_updater",
+            }
+            paths = list((_ROOT / "src" / package).rglob("*.py"))
+            assert paths, package
+            for path in paths:
                 tree = ast.parse(path.read_text(), filename=str(path))
                 for node in ast.walk(tree):
                     names = (
@@ -785,18 +768,17 @@ class TestSourceImports(TestCase):
                         else []
                     )
                     assert (
-                        not {name.split(".")[0] for name in names}
-                        & path_forbidden
+                        not {name.split(".")[0] for name in names} & forbidden
                     ), path
         public = ast.parse(
-            (_ROOT / "src/backend/__init__.py").read_text(),
+            (_ROOT / "src/runtime/__init__.py").read_text(),
         )
         lazy = [
             node
             for node in ast.walk(public)
             if isinstance(node, ast.ImportFrom) and node.is_lazy
         ]
-        assert any(node.module == "backend.runner" for node in lazy)
+        assert any(node.module == "runtime.runner" for node in lazy)
 
     @staticmethod
     def test_imports_and_attribution_need_no_distribution_or_wiki_client() -> (
@@ -818,37 +800,40 @@ pywikibot.Site = forbidden
 pywikibot.Page.__init__ = forbidden
 from shared.config import TASK_DEFINITIONS
 from shared.deployment import project_version
-from backend.support.execution import RuntimeContext
-from backend.services.enwiki import key_articles
-from backend.support import report_membership
+from runtime.execution import RuntimeContext
+from tasks.enwiki import key_articles
+from data.runtime import report_membership
 from shared.support import regions
-from updater.jobs import JobContext
+from runtime.jobs import JobContext
 from updater.edit_summary import EditSummary
 assert issubclass(JobContext, RuntimeContext)
-assert key_articles.__name__ == "backend.services.enwiki.key_articles"
-assert report_membership.__name__ == "backend.support.report_membership"
+assert key_articles.__name__ == "tasks.enwiki.key_articles"
+assert report_membership.__name__ == "data.runtime.report_membership"
 assert regions.__name__ == "shared.support.regions"
 for name in TASK_DEFINITIONS:
-    importlib.import_module(f"updater.jobs.{name}")
-import backend.__main__
-import backend.monitor as monitor
-import backend.server
-import backend.public
-import backend.hub
+    importlib.import_module(f"runtime.jobs.{name}")
+import runtime.__main__
+import runtime.monitor as monitor
+import runtime.dashboard
+import webservice.server
+import runtime.hub
 import webservice.pages
-for name in ("logs", "routine_status", "schedule_status"):
-    importlib.import_module(f"backend.support.{name}")
-    assert importlib.util.find_spec(f"shared.support.{name}") is None
+for name in (
+    "data.runtime.logs",
+    "data.runtime.status",
+    "runtime.schedule_status",
+):
+    importlib.import_module(name)
 assert importlib.util.find_spec("wiki_report_updater") is None
-assert importlib.util.find_spec("backend.jobs") is None
+assert importlib.util.find_spec("updater.jobs") is None
 assert importlib.util.find_spec("updater.services.enwiki") is None
 assert importlib.util.find_spec("webservice.collect") is None
-assert importlib.util.find_spec("webservice.server") is None
+assert importlib.util.find_spec("backend") is None
 assert importlib.util.find_spec("webservice.__main__") is None
 assert monitor._scheduler is None
 assert project_version()
 assert EditSummary.with_attribution("Checked.") == (
-    "Checked. ([[toolforge:Aranami|Aranami]])"
+    "Checked. ([[toolforge:aranami|Aranami]])"
 )
 """
         with TemporaryDirectory() as directory:

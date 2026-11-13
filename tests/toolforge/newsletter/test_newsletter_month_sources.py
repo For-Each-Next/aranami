@@ -6,14 +6,12 @@ import datetime as dt
 from copy import deepcopy
 from unittest import TestCase
 
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.schema import valid_newsletter
-from backend.newsletter.statistics import (
-    POPULAR_PAGE,
-    collect_popularity,
-)
+from data.newsletter.schema import valid_newsletter
 from newsletter.test_newsletter_data import Reader
 from shared.newsletter import Issue
+from tasks.zhwiki.legacy.newsletter_popularity import POPULAR_PAGE
+from tasks.zhwiki.newsletter.collection import collect_source_facts
+from tasks.zhwiki.newsletter.statistics import collect_popularity
 
 
 class PopularReader(Reader):

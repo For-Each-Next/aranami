@@ -27,12 +27,18 @@ import polars as pl
 from polars import DataType
 from polars.datatypes import DataTypeClass
 from sqlalchemy import URL, Engine, create_engine
+from sqlalchemy.sql.schema import Table
 from sqlalchemy.sql.selectable import CompoundSelect, Select
+from sqlalchemy.sql.visitors import iterate
+
+from shared.support.activity import report_activity
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from pywikibot.site import BaseSite
+
+    from shared.support.activity import SourcePurpose, SourceScope
 
 type PolarsDataType = DataTypeClass | DataType
 type ReplicaStatement = Select[Any] | CompoundSelect[Any]
@@ -101,6 +107,8 @@ class Replica:
         *,
         parameters: Mapping[str, Any] | None = None,
         schema_overrides: Mapping[str, PolarsDataType] | None = None,
+        purpose: SourcePurpose | None = None,
+        scope: SourceScope | None = None,
     ) -> QueryFrame:
         """Create a deferred query frame.
 
@@ -109,6 +117,8 @@ class Replica:
             parameters: Optional values for named bind parameters.
             schema_overrides: Optional Polars dtypes keyed by result
                 column name.
+            purpose: Public intent for this source read.
+            scope: Public pages, project, categories or template.
 
         Returns:
             A frame that has not opened a database connection.
@@ -119,6 +129,8 @@ class Replica:
             statement,
             parameters=parameters or {},
             schema_overrides=schema_overrides or {},
+            purpose=purpose,
+            scope=scope,
         )
 
     @property
@@ -178,6 +190,8 @@ class QueryFrame:
         statement: SQLAlchemy select expression to execute.
         parameters: Values for named bind parameters.
         schema_overrides: Polars dtypes keyed by result column name.
+        purpose: Public reason for the read, when supplied by its owner.
+        scope: Public selection, without private bind values or SQL.
 
     """
 
@@ -187,6 +201,8 @@ class QueryFrame:
     schema_overrides: Mapping[str, PolarsDataType] = field(
         default_factory=dict,
     )
+    purpose: SourcePurpose | None = None
+    scope: SourceScope | None = None
 
     def collect(self) -> pl.DataFrame:
         """Execute the read-only query with the declared result schema.
@@ -195,6 +211,20 @@ class QueryFrame:
             Eager query result ready for native Polars expressions.
 
         """
+        tables = sorted({
+            node.name
+            for node in iterate(self.statement)
+            if isinstance(node, Table)
+        })
+        report_activity(
+            "replica",
+            "database_query",
+            wiki=self.replica.project,
+            target=", ".join(tables),
+            references=[("table", table) for table in tables],
+            purpose=self.purpose,
+            scope=self.scope,
+        )
         names, rows = _fetch(
             self.replica,
             self.statement,

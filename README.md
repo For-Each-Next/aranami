@@ -1,75 +1,88 @@
-# <img src="src/webservice/public_html/assets/images/aranami.svg" width="40" height="40" alt=""> Aranami
+# Aranami archive
 
-Aranami (荒波, “rough waves”) keeps Wikipedia project reports up to date
-and provides web tools to help readers and editors find articles to improve.
-Its main focus is
-[WikiProject Video games on Chinese Wikipedia](https://zh.wikipedia.org/wiki/WikiProject:电子游戏).
+This repository preserves the final Aranami v0.9.2 source. Development after
+v0.8.8 was consolidated into one commit. The deployed Toolforge service runs
+independently of this read-only GitHub archive.
 
-## Webservice
+Aranami (荒波, “rough waves”) maintains Wikipedia project reports and provides
+article-maintenance tools and newsletter drafts. It serves
+[WikiProject Video games on Chinese Wikipedia](https://zh.wikipedia.org/wiki/WikiProject:电子游戏)
+from Toolforge.
 
-Use Aranami's three public tools:
+Daily reports share a completed-day observation of project membership and
+assessments. Hourly reports can use newer observations. Saved article evidence
+and daily Pageviews support later reports and newsletter drafts.
 
-- [Dashboard](https://aranami.toolforge.org/): current content reviews,
-  main-page highlights, upcoming quality content, and popular articles.
-- [Maintenance lists](https://aranami.toolforge.org/maintenance/): articles
-  needing attention, with filters to find work that interests you.
-- [Newsletter generator](https://aranami.toolforge.org/newsletter/): quarterly
-  drafts with editable wikitext, blank editorial templates, and a January
-  annual feature.
+## Results
 
-The dashboard refreshes content reviews hourly and other sections daily.
-Review cards link to active discussions and show assessments, introductions,
-and known start dates and durations. If a refresh fails, saved results remain
-available while Aranami retries.
+- [Dashboard](https://aranami.toolforge.org/): reviews, main-page appearances,
+  upcoming recognized content and popular articles.
+- [Discussions](https://aranami.toolforge.org/discussions/): active project-talk
+  topics from the past 30 days, grouped by project, article and other pages.
+- [Maintenance](https://aranami.toolforge.org/maintenance/): searchable, sortable
+  saved article worklists from maintenance categories.
+- [Maintenance checks](https://aranami.toolforge.org/checks/):
+  metadata inconsistencies and quarterly update hints, grouped by issue type.
+  The linked Tampermonkey script fills prepared talk-header repairs for a
+  manual diff review.
+- [Redirect recovery](https://aranami.toolforge.org/redirects/): redirects whose
+  talk-page history contains a removed Video games project banner, with revision
+  evidence and historical article excerpts for manual review.
+- [FA/GA editor statistics](https://aranami.toolforge.org/quality-authorship/):
+  experienced editors with estimated article credits by grade, listing evidence
+  and latest observed public edit dates.
+- [Quality article analysis](https://aranami.toolforge.org/quality-analysis/):
+  current quality grades including Bplus, listing-year charts, prose-length
+  ranges and a complete sortable article table, prepared hourly in the background.
+- [Newsletter drafts](https://aranami.toolforge.org/newsletter/): copyable
+  quarterly wikitext and a separate January annual review for manual publication.
+- [Reports](https://aranami.toolforge.org/reports/): recorded attempts, confirmed
+  updates and recent execution details.
+- [Saved data](https://aranami.toolforge.org/data/): source-linked project
+  captures with their original metadata, field schema and a bounded preview.
 
-Newsletter drafts refresh at `00:00 UTC` daily until publication, including
-issues delayed past the end of a quarter. The generator opens the earliest
-unpublished issue and lets editors browse earlier drafts.
+Saved results remain available during source failures. Unknown observations
+are not converted to zeroes. Published and cancelled newsletter issues retain
+their saved facts; delayed drafts can continue improving.
 
-## On-wiki report updates
+## UTC schedule
 
-Aranami automatically updates the Wikipedia reports below. Use the
-[Reports monitor](https://aranami.toolforge.org/reports/) to check results,
-recent updates, and links to each on-wiki report.
-
-These are UTC trigger times, not promises that an edit will be necessary.
-A successful check can finish with **no update needed**.
-
-| Report | Frequency and UTC trigger | Result |
+| Work | Trigger | Result |
 |---|---|---|
-| [New-article recommendations (DYK)][dyk] | Hourly, `HH:00` | Completed DYK entries, current nominees, assessments, and cumulative statistics. |
-| [New pages][new-pages] | Daily, `00:07` | Keyword-selected new pages and pages rewritten from redirects, with assessments to help editors review them. |
-| [Article assessments][assessments] | Daily, when idle after `00:00` | Six assessment and review lists: Bplus, BPAN, A, AL, ACC, and PPR. |
-| [Assessment change log][assessment-log] | Daily, `00:00:00` | Removals, new assessments, reassessments, and renames grouped by observation date. |
-| [Pageview rankings][pageviews] | Daily cycle from `18:00`; normal first attempt `18:59`, retries at `HH:59` | Daily, weekly, monthly, seasonal, yearly, and monthly task-force rankings. |
-| [English Wikipedia comparisons][english] | Daily, when idle after `00:00`, after assessment capture | Important and high-quality English articles, their Chinese counterparts, and relevant changes. |
-| [Database reports][database] | Daily, when idle after `00:00` | Refreshed PexBot maintenance reports for the project. |
+| Project data | Every hour :00; daily at 00:00:00 | Shared page lists, replica revision IDs and categories; full daily snapshots for yesterday |
+| Assessment log | Idle after 00:00 | Adjacent-day membership/class/importance changes |
+| Newsletter facts | Idle after 00:00 and due retries | Eligible quarterly and annual draft data |
+| DYK checks | Deferred every hour :00 | Current nominees and completed dates, with unchanged source parses reused |
+| Article evidence | Every hour :00 | Retained recognition evidence and quality-author activity |
+| Quality analysis | Every hour :02, idle after ordinary work | Cached article metrics and precomputed chart summaries |
+| Quality authors | Every hour :02, idle after ordinary work | Resumable B/BL listing histories, article cutoffs and authorship |
+| New pages | Idle after 00:00; hourly retries while behind | Created pages and redirect conversions selected by project keywords |
+| Assessment lists / English comparisons | Idle after 00:00 | Quality, review and bilingual project reports |
+| Pageviews | 19:00 normally, :00 retries while behind | Daily and longer-period project/task-force rankings |
+| PexBot reports | Idle after 00:00 | Configured maintenance refreshes, with a 24-hour cooldown |
+| Website | Every hour :00 | Reviews hourly and daily datasets on a new UTC boundary |
+| Redirect recovery | Resumable background pass while scheduled work is idle | Replica discovery and preloaded current pages use batches of 50; saved matches appear incrementally |
 
-New pages and Pageviews fill missing daily reports. Pageviews uses an 18:00 UTC
-reporting boundary; incomplete data retries hourly. Tasks marked “when idle”
-wait for other scheduled work. PexBot reports updated within the preceding
-24 hours are not requested again.
-
-See the [change history](CHANGELOG.md) for completed improvements.
+The primary collection starts with page lists at every UTC hour, with the full
+daily capture at 00:00:00. Source collection finishes before dependent reports
+run. Reports reuse the committed daily or disposable hourly Parquet data.
+Startup recovery does not shift subsequent hourly boundaries.
+These are dispatch times, not guaranteed edit times. Pageviews waits for actual
+19:00 readiness and uses the frozen midnight titles and assessments. Continuous
+traffic histories receive only their missing tail; gapped histories are
+refetched. Project snapshots always come from new complete queries.
 
 ## Documentation
 
-- [Terminal usage](docs/usage.md): inspect results, preview reports, and run
-  selected routines on Toolforge.
-- [Administration](docs/administration.md): deploy, operate, and recover services.
-- [Development](docs/development.md): prepare changes and verify them offline.
-- [Architecture](docs/architecture.md): maintain component and data contracts,
-  together with [repository instructions](AGENTS.md) and the scoped
-  [backend](src/backend/AGENTS.md) and [updater](src/updater/AGENTS.md) rules.
+[Usage](docs/usage.md) covers terminal operations;
+[Administration](docs/administration.md) covers deployment and recovery;
+[Development](docs/development.md) covers the source layout and offline checks;
+[Architecture](docs/architecture.md) defines ownership, data and migration.
+The [documentation index](docs/README.md) links component references.
 
-## License
-
-[CC0 1.0 Universal](LICENSE).
-
-[dyk]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新条目推荐
-[new-pages]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/新进条目/关键词筛选
-[assessments]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/认证条目
-[assessment-log]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/评级/日志
-[pageviews]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/热门条目
-[english]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告/英文维基百科重要条目
-[database]: https://zh.wikipedia.org/wiki/WikiProject:电子游戏/数据库报告
+The final source is retained on `trunk` and tagged `v0.9.2` in
+[aranami-old](https://github.com/For-Each-Next/aranami-old).
+[CHANGELOG](CHANGELOG.md) records the consolidated release.
+Historical records remain available through normal data readers after old-format
+extractors retire. Source is licensed under [CC0 1.0 Universal](LICENSE);
+upstream content and bundled assets retain their attributed licenses.

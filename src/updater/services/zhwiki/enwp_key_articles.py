@@ -1,6 +1,6 @@
 """Construct English key-article reports without publishing wiki edits.
 
-Render backend-prepared rows and change metadata while preserving page
+Render runtime-prepared rows and change metadata while preserving page
 surroundings and the distinct importance and quality section layouts.
 """
 
@@ -15,20 +15,22 @@ import mwparserfromhell
 import polars as pl
 from mwparserfromhell.nodes import Heading
 
-from backend.services.enwiki.key_articles import ReportDefinition
-from shared.reports import ReportResult
+from data.key_articles import ReportDefinition
+from data.reports import ReportResult
 from shared.support.regions import replace_by_tag
 from updater.edit_summary import (
     MAX_EDIT_SUMMARY_BYTES,
     EditSummary,
     article_mention,
+    format_summary_number,
+    summary_change,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from backend.services.enwiki.article_changes import ArticleChanges
-    from backend.services.enwiki.key_articles import ReportData
+    from data.article_changes import ArticleChanges
+    from data.key_articles import ReportData
 
 
 REPORT_HEADER = "{{PJ:VG/DBR/EN/header}}"
@@ -284,7 +286,15 @@ def report_result(data: ReportData, spec: ReportSpec) -> ReportResult:
     members = filter_report_rows(data.rows, spec)
     return ReportResult(
         family="enwp_key_articles",
-        tables={"prepared_rows": data.rows, "members": members},
+        tables={
+            "prepared_rows": data.rows,
+            "members": members,
+            **(
+                {"reviews": data.reviews}
+                if spec.name == "quality" and data.reviews is not None
+                else {}
+            ),
+        },
         metadata={
             "selection": spec.name,
             "filter_column": spec.filter_column,
@@ -393,7 +403,52 @@ def render_item(row: Mapping[str, object]) -> str:
     Returns:
         One bulleted item in the established report format.
     """
+    if row.get("en_reviews"):
+        review = str(row["en_reviews"]).replace(",", "/")
+        row = {
+            **row,
+            "en_class": f"{row['en_class']}/{review}",
+        }
     return f"* {build_report_item_template(row)}"
+
+
+def render_review_body(rows: pl.DataFrame | None) -> str:
+    """Render current nominations before the quality-year groups.
+
+    Args:
+        rows: Candidates with optional nullable nomination dates.
+
+    Returns:
+        A candidate section ordered by newest nomination first, using
+        English titles for ties and putting unknown dates last. Proven
+        dates retain their comments. No candidates returns empty text.
+    """
+    if rows is None or rows.is_empty():
+        return ""
+    if "review_date" not in rows.columns:
+        rows = rows.with_columns(
+            pl.lit(None, dtype=pl.Date).alias("review_date"),
+        )
+    items = []
+    ordered = rows.sort(
+        ["review_date", "en_title"],
+        descending=[True, False],
+        nulls_last=True,
+    )
+    for row in ordered.iter_rows(named=True):
+        item = render_item(row)
+        if row.get("review_date") is not None:
+            item += (
+                f"<!-- Review started: {row['review_date'].isoformat()} -->"
+            )
+        items.append(item)
+    return "\n".join((
+        "== 参评条目 ==",
+        "",
+        REPORT_HEADER,
+        *items,
+        REPORT_FOOTER,
+    ))
 
 
 def render_body(rows_frame: pl.DataFrame) -> str:
@@ -530,7 +585,7 @@ def format_summary_article(
     english_title: str,
     chinese_title: str | None,
 ) -> str:
-    """Quote an English title and parenthesize its Chinese counterpart.
+    """Quote an English title and bracket its Chinese counterpart.
 
     Args:
         english_title: English Wikipedia article title.
@@ -539,7 +594,7 @@ def format_summary_article(
 
     Returns:
         Quoted English interwiki link followed by an optional Chinese
-        companion link in parentheses, without additional guillemets.
+        companion link in square brackets, without extra guillemets.
     """
     return article_mention(
         english_title,
@@ -554,31 +609,49 @@ def build_edit_summary(
     max_bytes: int = MAX_EDIT_SUMMARY_BYTES,
     *,
     quality: bool = False,
+    new_nominees: int = 0,
 ) -> str:
-    """Format backend change metadata as one bounded edit summary.
+    """Format runtime change metadata as one bounded edit summary.
 
     Args:
         changes: Backend-prepared identities and class differences.
         item_to_zh_title: Wikidata item IDs mapped to zhwiki titles.
         max_bytes: Requested UTF-8 summary budget, capped at 255 bytes.
         quality: Whether to describe English quality-class changes.
+        new_nominees: Current non-quality candidates, including retained
+            nominations and excluding existing GA/FA/FL members.
 
     Returns:
-        Article total and assessment counts, followed by changed links.
+        Label-led article and assessment totals, with observed quality
+        deltas beside their class counts, followed by changed links.
         Quality summaries list FA, FL, and GA; importance summaries list
         Top and High. Missing assessment observations are omitted.
         Renames with the same page ID keep only counts. Quality reports
-        describe GA listings and delistings, FA/FL promotions and
-        removals, and earlier classes for known transitions.
+        use GA, FA and FL for current classes, DGA for delisted GA,
+        FFA/FFL for former FA/FL, and prior classes after ``from``.
         Importance and Chinese assessment changes are ignored. Uncached
         entries use their Wikidata item or title. Chinese links require
-        a Chinese Wikipedia sitelink.
+        a Chinese Wikipedia sitelink. Separate candidate changes use
+        FAC/FLC/GAN mentions without repeating successful promotions.
     """
     count = changes.current_total
-    noun = "article" if count == 1 else "articles"
     counts = changes.quality_counts if quality else changes.importance_counts
-    breakdown = ", ".join(f"{total:,} {label}" for label, total in counts)
-    base = f"{count:,} {noun}" + (f": {breakdown}." if counts else ".")
+    movements = _quality_movements(changes) if quality else {}
+    breakdown = ", ".join(
+        f"{label} {format_summary_number(total)}"
+        + summary_change(*movements.get(label, (0, 0)))
+        for label, total in counts
+    )
+    noun = "article" if count == 1 else "articles"
+    base = (
+        f"{format_summary_number(count)} {noun}"
+        f"{summary_change(len(changes.added), len(changes.removed))}"
+    ) + (f": {breakdown}." if counts else ".")
+    if quality and new_nominees:
+        noun = "nominee" if new_nominees == 1 else "nominees"
+        base = base.removesuffix(".") + (
+            f"; {format_summary_number(new_nominees)} new {noun}."
+        )
     summary = EditSummary(base, max_bytes=max_bytes)
     if quality:
         return _build_quality_summary(
@@ -601,13 +674,39 @@ def build_edit_summary(
         for article in changes.removed
     ]
 
-    summary.add_group("Added ", added, group_separator=" ")
+    summary.add_group("Add ", added, group_separator=" ")
     summary.add_group(
-        "removed " if added else "Removed ",
+        "remove " if added else "Remove ",
         removed,
         group_separator="; " if added else " ",
     )
     return summary.render()
+
+
+def _quality_movements(changes: ArticleChanges) -> dict[str, tuple[int, int]]:
+    """Count both sides of known quality-class membership changes.
+
+    Args:
+        changes: Current members, known transitions and departures.
+
+    Returns:
+        Additions and removals per class. A matched member without a
+        known prior class cannot establish a class delta.
+    """
+    additions = dict.fromkeys(("FA", "FL", "GA"), 0)
+    removals = dict.fromkeys(additions, 0)
+    for change in changes.quality_changes:
+        previous = change.previous
+        if previous is not None and previous.en_class is None:
+            continue
+        if previous is not None and previous.en_class in removals:
+            removals[previous.en_class] += 1
+        if change.current.en_class in additions:
+            additions[change.current.en_class] += 1
+    for article in changes.removed:
+        if article.en_class in removals:
+            removals[article.en_class] += 1
+    return {label: (additions[label], removals[label]) for label in additions}
 
 
 def _build_quality_summary(
@@ -627,20 +726,22 @@ def _build_quality_summary(
         entries without a stored class do not imply a promotion.
     """
     actions = {
-        "GA": ("listed", "delisted"),
-        "FA": ("prompted", "removed"),
-        "FL": ("prompted", "removed"),
+        "GA": ("GA", "DGA"),
+        "FA": ("FA", "FFA"),
+        "FL": ("FL", "FFL"),
     }
     groups: dict[tuple[str | None, bool], list[str]] = {}
     for change in changes.quality_changes:
         old_article = change.previous
         new_article = change.current
+        if old_article is not None and old_article.en_class is None:
+            continue
         article = format_summary_article(
             new_article.english_title,
             item_to_zh_title.get(new_article.item_id),
         )
         if old_article is not None and old_article.en_class in actions:
-            article += f" (from {old_article.en_class})"
+            article += f" from {old_article.en_class}"
         en_class = (
             new_article.en_class if new_article.en_class in actions else None
         )
@@ -659,15 +760,29 @@ def _build_quality_summary(
     for added in (True, False):
         for en_class, verbs in actions.items():
             summary.add_group(
-                f"{en_class} {verbs[0 if added else 1]} ",
+                f"{verbs[0 if added else 1]} ",
                 groups.get((en_class, added), []),
                 group_separator="; ",
             )
         summary.add_group(
-            "Added " if added else "Removed ",
+            "Add " if added else "Remove ",
             groups.get((None, added), []),
             group_separator="; ",
         )
+    for added in (True, False):
+        for nomination in changes.nominations:
+            articles = nomination.added if added else nomination.removed
+            summary.add_group(
+                ("" if added else "Remove ") + nomination.kind + " ",
+                [
+                    format_summary_article(
+                        article.english_title,
+                        item_to_zh_title.get(article.item_id),
+                    )
+                    for article in articles
+                ],
+                group_separator="; ",
+            )
     return summary.render()
 
 
@@ -702,9 +817,14 @@ def build_reports(
     texts = {}
     for spec in specs:
         rows = filter_report_rows(data.rows, spec)
+        body = spec.render_body(rows)
+        if spec.name == "quality":
+            body = "\n\n".join(
+                filter(None, (render_review_body(data.reviews), body)),
+            )
         texts[spec.name] = update_page_text(
             existing[spec.name],
-            spec.render_body(rows),
+            body,
             count_report_rows(rows, spec),
             spec,
         )

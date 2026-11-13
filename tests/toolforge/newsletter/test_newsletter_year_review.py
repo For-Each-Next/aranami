@@ -12,17 +12,17 @@ from unittest.mock import Mock
 
 import polars as pl
 
-from backend.newsletter.annual import (
+from data.newsletter.schema import valid_newsletter
+from data.newsletter.validation import year_quarters
+from newsletter.test_newsletter_data import Reader
+from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.annual import (
     collect_year_new_pages,
     enrich_year_dyk,
     prepare_history,
     prepare_year_history,
-    year_quarters,
 )
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.schema import valid_newsletter
-from newsletter.test_newsletter_data import Reader
-from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.collection import collect_source_facts
 from updater.services.newsletter_editorial import render_editorial
 
 
@@ -279,7 +279,8 @@ class TestYearReview(TestCase):
         sources = {
             "Game": "{{Infobox video game|released='''Wii'''"
             "{{vgr|JP|2011年3月4日|NA|2012年4月5日}}"
-            "<ref>{{cite web|date=1999-01-01}}</ref>}}",
+            "<ref><del><s>1990</s></del>"
+            "{{cite web|date=1999-01-01}}</ref>}}",
             "Canceled": "{{Infobox VG|released=已取消（原定2010年）}}",
             "Unknown": "{{Infobox person|birth_date=1980年1月1日}}",
         }

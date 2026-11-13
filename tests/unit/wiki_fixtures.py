@@ -6,6 +6,8 @@ from pywikibot.site import BaseSite, Namespace
 class OfflineSite(BaseSite):
     """Use real title parsing with localized namespace fixtures."""
 
+    articlepath = "/wiki/{}"
+
     @staticmethod
     def _build_namespaces() -> dict[int, Namespace]:
         """Build namespace names without querying a wiki.
@@ -14,11 +16,32 @@ class OfflineSite(BaseSite):
             Localized template names and WikiProject aliases.
         """
         namespaces = Namespace.builtin_namespaces()
+        namespaces[4] = Namespace(
+            4,
+            canonical_name="Project",
+            custom_name="Wikipedia",
+            aliases=["WP", "维基百科"],
+            case="first-letter",
+        )
+        namespaces[5] = Namespace(
+            5,
+            canonical_name="Project talk",
+            custom_name="Wikipedia talk",
+            aliases=["WT"],
+            case="first-letter",
+        )
         namespaces[10] = Namespace(
             10,
             canonical_name="Template",
             custom_name="模板",
             aliases=["模版", "樣板", "样板"],
+            case="first-letter",
+        )
+        namespaces[14] = Namespace(
+            14,
+            canonical_name="Category",
+            custom_name="Category",
+            aliases=["分类", "分類"],
             case="first-letter",
         )
         namespaces[102] = Namespace(
@@ -28,7 +51,11 @@ class OfflineSite(BaseSite):
             aliases=["PJ", "维基专题"],
             case="first-letter",
         )
-        for number, name in ((118, "Draft"), (119, "Draft talk")):
+        for number, name in (
+            (103, "WikiProject talk"),
+            (118, "Draft"),
+            (119, "Draft talk"),
+        ):
             namespaces[number] = Namespace(
                 number,
                 canonical_name=name,

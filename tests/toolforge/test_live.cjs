@@ -6,7 +6,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(
-    path.join(__dirname, "../../dist/webservice/public_html/live.js"), "utf8",
+    path.join(__dirname, "../../src/webservice/public_html/live.js"), "utf8",
 );
 const messages = {
     "duration.seconds": "{seconds} sec",
@@ -16,11 +16,15 @@ const messages = {
     "time.minutes_ago": "({count}m ago)",
     "time.hours_ago": "({count}h ago)",
     "time.days_ago": "({count}d ago)",
+    "time.weeks_ago": "({count}w ago)",
     "time.months_ago": "({count}mo ago)",
+    "time.years_ago": "({count}yr ago)",
     "time.minutes_ahead": "({count}m from now)",
     "time.hours_ahead": "({count}h from now)",
     "time.days_ahead": "({count}d from now)",
+    "time.weeks_ahead": "({count}w from now)",
     "time.months_ahead": "({count}mo from now)",
+    "time.years_ahead": "({count}yr from now)",
     "time.soon": "(within 1m)",
     "time.just_now": "(just now)",
 };
@@ -130,10 +134,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
     }, "Details…");
     const statusLabel = new Element("SPAN", {
         id: "status-label",
-        ...(completed ? {} : {
-            "data-progress-label": subject,
-            "data-progress-fallback": "Running",
-        }),
+
     }, completed ? "No update" : subject);
     const statusLine = new Element("P", {
         id: "status-line", class: "routine-status", "data-status": completed ? "no_update" : "running",
@@ -154,7 +155,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
     const server = new Element("P", {
         id: "server-state", "data-schedule-time": "", "data-stale-text": "Server unavailable",
     }, "Running");
-    const progress = new Element("LI", { "data-progress-active": "" }, "Fetching pageviews (2,000/13,500)");
+    const progress = new Element("LI", {  }, "Fetching pageviews (2,000/13,500)");
     const notice = new Element("P", {
         id: logs ? "live-server-notice" : "live-notice", hidden: "",
     }, "Reconnecting");
@@ -195,6 +196,7 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
 
 function browser(logs = false, resources = false, options = {}) {
     const state = fixture(0, false, logs, resources, options.footerOnly);
+    if (options.fastResources) state.root.setAttribute("data-refresh-interval", "1000");
     const requests = [];
     const warnings = [];
     const sockets = [];
@@ -253,22 +255,27 @@ function browser(logs = false, resources = false, options = {}) {
     const settle = async () => {
         for (let i = 0; i < 8; i++) await Promise.resolve();
     };
+    const envelope = (next, overrides = {}) => ({
+        schema: 1, type: "status", instance: "a".repeat(32),
+        sequence: Number.isFinite(Date.parse(next.root.dataset.serverTime)) ? Date.parse(next.root.dataset.serverTime) - base + 1 : now + 1,
+        store_id: "b".repeat(32), revision: 1,
+        observed_at: stamp(now), html: html(next), ...overrides,
+    });
     return {
-        ...state, requests, warnings, sockets, settle,
+        ...state, requests, warnings, sockets, settle, envelope,
         async respond(next = fixture(now, false, logs, resources, options.footerOnly), response = {}) {
-            const content = html(next);
             requests.at(-1).resolve({
-                ok: true, headers: { get: () => "text/html; charset=utf-8" },
-                text: async () => content,
+                ok: true, status: 200, headers: { get: (key) => key === "Content-Type" ? "application/json; charset=utf-8" : null },
+                json: async () => envelope(next),
                 ...response,
             });
             await settle();
         },
         frame(frame, socket = sockets.at(-1)) {
-            socket.message(typeof frame === "string" ? frame : JSON.stringify(frame));
+            socket.message(typeof frame === "string" ? frame : JSON.stringify({schema: 1, instance: "a".repeat(32), sequence: 1, store_id: null, revision: null, observed_at: stamp(0), ...frame}));
         },
         push(next = fixture(now, false, logs, resources, options.footerOnly), socket = sockets.at(-1)) {
-            socket.message(JSON.stringify({ type: "status", html: html(next) }));
+            socket.message(JSON.stringify(envelope(next)));
         },
         fire(name, event) { events.get(name)(event); },
         elapse(milliseconds) { now += milliseconds; },
@@ -385,7 +392,7 @@ test("running clocks use whole seconds across day and hour boundaries", () => {
     }
 });
 
-test("relative clocks use days for boot times at twenty-four hours and beyond", () => {
+test("relative clocks use compact units at minute through year boundaries", () => {
     for (const [seconds, expected] of [
         [-59, "(just now)"],
         [-60, "(1m ago)"],
@@ -394,16 +401,28 @@ test("relative clocks use days for boot times at twenty-four hours and beyond", 
         [-86399, "(23h ago)"],
         [-86400, "(1d ago)"],
         [-259200, "(3d ago)"],
+        [-604799, "(6d ago)"],
+        [-604800, "(1w ago)"],
+        [-2629799, "(4w ago)"],
         [-2629800, "(1mo ago)"],
         [-5259600, "(2mo ago)"],
+        [-31557599, "(11mo ago)"],
+        [-31557600, "(1yr ago)"],
+        [-63115200, "(2yr ago)"],
         [59, "(within 1m)"],
         [60, "(1m from now)"],
         [3600, "(1h from now)"],
         [86399, "(23h from now)"],
         [86400, "(1d from now)"],
         [259200, "(3d from now)"],
+        [604799, "(6d from now)"],
+        [604800, "(1w from now)"],
+        [2629799, "(4w from now)"],
         [2629800, "(1mo from now)"],
         [5259600, "(2mo from now)"],
+        [31557599, "(11mo from now)"],
+        [31557600, "(1yr from now)"],
+        [63115200, "(2yr from now)"],
     ]) {
         const page = browser();
         page.relative.setAttribute("data-observed-at", stamp(1000 + seconds * 1000));
@@ -415,7 +434,7 @@ test("relative clocks use days for boot times at twenty-four hours and beyond", 
 test("inline relative notes omit localized parentheses", async () => {
     for (const [label, expected] of [
         ["({count}d ago)", "3d ago"],
-        ["（{count}天前）", "3天前"],
+        ["（{count}日前）", "3日前"],
     ]) {
         const page = browser();
         const next = fixture();
@@ -428,6 +447,54 @@ test("inline relative notes omit localized parentheses", async () => {
         assert.equal(page.relative.textContent, expected);
         page.jump(1000);
         assert.equal(page.relative.textContent, expected);
+    }
+});
+
+test("relative clocks use English abbreviations and localized Chinese units", async () => {
+    const catalog = JSON.parse(fs.readFileSync(
+        path.join(__dirname, "../../src/webservice/messages.json"), "utf8",
+    ));
+    const units = {
+        "en": {minutes: "m", hours: "h", days: "d", weeks: "w", months: "mo", years: "yr"},
+        "zh-hans": {minutes: "分钟", hours: "小时", days: "日", weeks: "周", months: "月", years: "年"},
+        "zh-hant": {minutes: "分鐘", hours: "小時", days: "日", weeks: "週", months: "月", years: "年"},
+    };
+    for (const language of ["en", "zh-hans", "zh-hant"]) {
+        const labels = Object.fromEntries(Object.entries(catalog)
+            .filter(([key]) => key.startsWith("time.") || key.startsWith("duration."))
+            .map(([key, translations]) => [key, translations[language]]));
+        for (const [unit, minutes] of [
+            ["minutes", 1], ["hours", 60], ["days", 1440],
+            ["weeks", 10080], ["months", 43830], ["years", 525960],
+        ]) {
+            const suffix = units[language][unit];
+            for (const direction of ["ago", "ahead"]) {
+                const page = browser(false, false, { language });
+                const next = fixture();
+                const value = stamp(minutes * 60000 * (direction === "ago" ? -1 : 1));
+                next.relative.setAttribute("data-observed-at", value);
+                const label = language === "en"
+                    ? `({count}${suffix} ${direction === "ago" ? "ago" : "from now"})`
+                    : `（{count}${suffix}${direction === "ago" ? "前" : language === "zh-hant" ? "後" : "后"}）`;
+                next.root.setAttribute("data-clock-messages", JSON.stringify(labels));
+                await page.respond(next);
+                assert.equal(page.relative.textContent, label.replace("{count}", "1"));
+                assert.equal(page.relative.dataset.observedAt, value);
+            }
+        }
+    }
+});
+
+test("clock snapshots require labels for every relative-age unit", async () => {
+    for (const key of ["time.weeks_ago", "time.months_ahead", "time.years_ago"]) {
+        const page = browser(false, false, { websocket: true });
+        const next = fixture();
+        const incomplete = {...messages};
+        delete incomplete[key];
+        next.root.setAttribute("data-clock-messages", JSON.stringify(incomplete));
+        page.push(next);
+        assert.equal(page.warnings[0][1].failure, "clock");
+        assert.equal(page.root.dataset.clockMessages, JSON.stringify(messages));
     }
 });
 
@@ -485,8 +552,6 @@ test("synchronization keeps existing modal dialogs and freezes completed timers"
     assert.equal(page.statusLabel.textContent, "No update");
     assert.equal(page.statusLine.getAttribute("data-status"), "no_update");
     assert.equal(page.button.textContent, "Details…");
-    assert.equal(page.statusLabel.hasAttribute("data-progress-label"), false);
-    assert.equal(page.statusLabel.hasAttribute("data-progress-fallback"), false);
     assert.equal(page.clock.hasAttribute("data-clock"), false);
     const completed = page.clock.textContent;
     assert.equal(completed, "(14.30 sec)");
@@ -533,7 +598,6 @@ test("subject labels and phase counts synchronize without replacing buttons", as
     assert.equal(page.requests.length, 2);
     const next = fixture(5000);
     const subject = "Updating records for October 21, 2026";
-    next.statusLabel.setAttribute("data-progress-label", subject);
     next.statusLabel.textContent = subject;
     next.progress.textContent = "Fetching pageviews (3,000/13,500)";
     await page.respond(next);
@@ -634,7 +698,7 @@ test("HTTP, response, and render failures have separate bounded diagnostics", as
     for (const [response, failure, status] of [
         [{ ok: false, status: 503 }, "http", 503],
         [{ headers: { get: () => "text/plain" } }, "response"],
-        [{ text: async () => { throw new Error("Body unavailable"); } }, "response"],
+        [{ json: async () => { throw new Error("Body unavailable"); } }, "response"],
     ]) {
         const page = browser();
         await page.respond(undefined, response);
@@ -675,9 +739,9 @@ test("failed syncs retain observations, expire schedules, and recover", async ()
     assert.equal(page.notice.hidden, false);
     assert.equal(page.notice.dataset.liveError, "network");
     assert.equal(page.uptime.textContent, "Uptime unavailable");
-    assert.equal(page.progress.hidden, true);
+    assert.equal(page.progress.hidden, false);
     assert.equal(page.progress.textContent, "Fetching pageviews (2,000/13,500)");
-    assert.equal(page.statusLabel.textContent, "Running");
+    assert.equal(page.statusLabel.textContent, "Updating records for October 20, 2026");
     assert.equal(page.button.textContent, "Details…");
     assert.equal(page.button.hidden, false);
     assert.equal(page.document.activeElement, page.button);
@@ -1026,4 +1090,120 @@ test("focus recovers overdue HTTP and socket deadlines before timers run", async
     assert.equal(page.requests.length, 2);
     await page.respond();
     assert.equal(page.notice.hidden, true);
+});
+
+
+test("process restart accepts a reset sequence but rejects retired responses", async () => {
+    const page = browser(false, false, { websocket: true });
+    page.frame(page.envelope(fixture(1000), {sequence: 10}));
+    page.frame(page.envelope(fixture(0, true), {instance: "c".repeat(32), sequence: 1}));
+    assert.equal(page.statusLabel.textContent, "No update");
+    page.frame(page.envelope(fixture(2000), {sequence: 99}));
+    assert.equal(page.statusLabel.textContent, "No update");
+    assert.equal(page.root.dataset.serverTime, stamp(0));
+});
+
+test("new protocol versions never replace the last valid view", async () => {
+    const page = browser(false, false, { websocket: true });
+    page.push(fixture(1000, true));
+    page.frame(page.envelope(fixture(2000), {schema: 2}));
+    assert.equal(page.statusLabel.textContent, "No update");
+    assert.equal(page.warnings.at(-1)[1].failure, "protocol");
+});
+
+test("unavailable push preserves observations and requests HTTP recovery", async () => {
+    const page = browser(false, false, { websocket: true });
+    page.push(fixture(1000, true));
+    await page.respond(fixture(1000, true));
+    page.frame({type: "unavailable", error: "status_unavailable"});
+    assert.equal(page.statusLabel.textContent, "No update");
+    assert.equal(page.notice.hidden, false);
+    page.jump(1000);
+    assert.equal(page.requests.length, 2);
+    await page.respond(fixture(2000, true));
+    assert.equal(page.notice.hidden, true);
+});
+
+test("conditional HTTP verification keeps the accepted view", async () => {
+    const page = browser();
+    await page.respond(fixture(0, true), {headers: {get: key => key === "Content-Type" ? "application/json" : '"generation-1"'}});
+    page.jump(5000);
+    assert.equal(page.requests.at(-1).options.headers["If-None-Match"], '"generation-1"');
+    await page.respond(undefined, {ok: false, status: 304});
+    assert.equal(page.statusLabel.textContent, "No update");
+    assert.equal(page.notice.hidden, true);
+});
+
+test("newer sequence accepts a backward clock adjustment", async () => {
+    const page = browser(false, false, {websocket: true});
+    page.frame(page.envelope(fixture(10000), {sequence: 3, revision: 5}));
+    page.frame(page.envelope(fixture(1000, true), {sequence: 4, revision: 6}));
+    assert.equal(page.statusLabel.textContent, "No update");
+    assert.equal(page.root.dataset.serverTime, stamp(1000));
+});
+
+test("an unseen process cannot roll back the same saved store", async () => {
+    const page = browser(false, false, {websocket: true});
+    page.frame(page.envelope(fixture(1000, true), {revision: 8}));
+    page.frame(page.envelope(fixture(2000), {instance: "c".repeat(32), revision: 7}));
+    assert.equal(page.statusLabel.textContent, "No update");
+    page.frame(page.envelope(fixture(3000), {instance: "d".repeat(32), store_id: "e".repeat(32), revision: 1}));
+    assert.equal(page.root.dataset.serverTime, stamp(3000));
+});
+
+test("service heartbeats expire independently", async () => {
+    const page = browser();
+    const fresh = fixture(0);
+    const first = new Element("SPAN", {id: "first-service", "data-observation-expires": stamp(1000), "data-stale-text": "Stale"}, "Current");
+    const second = new Element("SPAN", {id: "second-service", "data-observation-expires": stamp(3000), "data-stale-text": "Stale"}, "Current");
+    fresh.root.insertBefore(first, null);
+    fresh.root.insertBefore(second, null);
+    await page.respond(fresh);
+    page.jump(2000);
+    assert.equal(page.document.getElementById("first-service").textContent, "Stale");
+    assert.equal(page.document.getElementById("second-service").textContent, "Current");
+});
+
+test("active execution duration expires with its owning service", async () => {
+    const page = browser();
+    const next = fixture();
+    next.clock.setAttribute("data-clock-expires", stamp(1000));
+    next.clock.setAttribute("data-clock-unknown", "—");
+    await page.respond(next);
+    page.jump(2000);
+    assert.equal(page.clock.textContent, "—");
+    assert.equal(page.uptime.textContent, "1 min 42 sec");
+});
+
+
+test("live refresh preserves heading-copy focus and pending clipboard state", async () => {
+    const page = browser();
+    const control = new Element('BUTTON', {id: 'heading-copy-server-status-heading', class: 'heading-copy', disabled: '', 'aria-label': 'Copy section'} , '#');
+    const heading = new Element('H2', {id: 'server-status-heading', class: 'has-heading-link', 'aria-label': 'Server status'}, '', [control, new Text('Server status')]);
+    page.root.insertBefore(heading, page.root.firstChild);
+    page.document.activeElement = control;
+    const next = fixture(5000);
+    next.root.insertBefore(new Element('H2', {id: 'server-status-heading'}, 'Server status'), next.root.firstChild);
+    await page.respond(next);
+    assert.equal(page.document.getElementById('server-status-heading'), heading);
+    assert.equal(page.document.getElementById('heading-copy-server-status-heading'), control);
+    assert.equal(page.document.activeElement, control);
+    assert.equal(control.hasAttribute('disabled'), true);
+    assert.equal(heading.getAttribute('class'), 'has-heading-link');
+    assert.equal(heading.getAttribute('aria-label'), 'Server status');
+    assert.equal(heading.childNodes.filter(node => node.nodeName === 'BUTTON').length, 1);
+});
+
+
+test("Server status panels refresh resource values every second", async () => {
+    const page = browser(true, true, {fastResources: true});
+    await page.respond();
+    page.jump(1000);
+    assert.equal(page.requests.length, 2);
+    const next = fixture(1000, false, true, true);
+    next.memory.textContent = "125.0 MiB";
+    await page.respond(next);
+    assert.equal(page.memory.textContent, "125.0 MiB");
+    page.jump(1000);
+    assert.equal(page.requests.length, 3);
 });

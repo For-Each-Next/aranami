@@ -7,6 +7,7 @@ Application imports are validated separately by the Python 3.15 runtime.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import json
 import os
@@ -245,12 +246,24 @@ def verify(root: Path) -> dict[str, object]:
         raise ValueError(msg)
     manifest = _json(root, "deployment.json")
     if (
-        set(manifest) != {"schema", "version", "files"}
+        set(manifest) - {"built_at"} != {"schema", "version", "files"}
         or manifest["schema"] != 1
         or not isinstance(manifest["version"], str)
     ):
         msg = "Unsupported deployment manifest."
         raise ValueError(msg)
+    if "built_at" in manifest:
+        if not isinstance(manifest["built_at"], str):
+            msg = "Invalid UTC source build timestamp."
+            raise ValueError(msg)
+        try:
+            instant = dt.datetime.fromisoformat(manifest["built_at"])
+            valid = instant.utcoffset() == dt.timedelta(0)
+        except ValueError:
+            valid = False
+        if not valid:
+            msg = "Invalid UTC source build timestamp."
+            raise ValueError(msg)
     expected = _expected_sources(root)
     _verify_hashes(root, manifest["files"], expected)
     if _actual_sources(root) != expected | {"deployment.json"}:

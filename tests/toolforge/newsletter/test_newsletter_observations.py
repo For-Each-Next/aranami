@@ -13,10 +13,10 @@ from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.observations import save_observation
-from backend.newsletter.schema import read_newsletter_data, valid_newsletter
+from data.newsletter.observations import save_observation
+from data.newsletter.schema import read_newsletter_data, valid_newsletter
 from newsletter.test_newsletter_data import Reader
+from tasks.zhwiki.newsletter.collection import collect_source_facts
 
 
 class NewsletterObservationTests(TestCase):
@@ -37,7 +37,7 @@ class NewsletterObservationTests(TestCase):
         assert read_newsletter_data(self.directory) is None
         save_observation(self.directory, self.facts, valid_newsletter)
         with patch(
-            "backend.newsletter.collection.collect_source_facts",
+            "tasks.zhwiki.newsletter.collection.collect_source_facts",
             side_effect=AssertionError("Source access during saved read"),
         ):
             assert read_newsletter_data(self.directory) == self.facts

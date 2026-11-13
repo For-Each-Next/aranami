@@ -174,7 +174,7 @@ class NewsletterPresentationTests(unittest.TestCase):
                     assert "readonly" in attributes
                     classes = re.search(r'class="([^"]+)"', attributes)
                     assert classes is not None
-                    assert "cdx-text-area__textarea" in classes[1].split()
+                    assert "ui-text-area__textarea" in classes[1].split()
                     assert 'lang="zh"' in attributes
                     assert "data-newsletter-wikitext" in attributes
                     assert f'id="newsletter-text-{index}"' in attributes
@@ -249,7 +249,7 @@ class NewsletterPresentationTests(unittest.TestCase):
                     re.DOTALL,
                 )
                 links = re.findall(
-                    r'<a\b([^>]*class="cdx-button[^"]*"[^>]*)>'
+                    r'<a\b([^>]*class="ui-button[^"]*"[^>]*)>'
                     r"(.*?)</a>",
                     output,
                     re.DOTALL,
@@ -272,15 +272,15 @@ class NewsletterPresentationTests(unittest.TestCase):
                         classes = re.search(r'class="([^"]+)"', attributes)
                         assert classes is not None
                         assert {
-                            "cdx-button",
-                            f"cdx-button--action-{action}",
-                            f"cdx-button--weight-{weight}",
+                            "ui-button",
+                            f"ui-button--action-{action}",
+                            f"ui-button--weight-{weight}",
                         } <= set(classes[1].split())
                     assert "hidden" not in copy[0]
                     for link in (view, edit):
                         assert "hidden" not in link[0]
                         assert "data-newsletter-copy=" not in link[0]
-                        assert "cdx-button--fake-button--enabled" in link[0]
+                        assert "ui-button--fake-button--enabled" in link[0]
                         target = re.search(r'href="([^"]+)"', link[0])
                         assert target is not None
                         url = urlsplit(unescape(target[1]))
@@ -322,7 +322,7 @@ class NewsletterPresentationTests(unittest.TestCase):
                         }
                     output = render_newsletter(value, locale)
                     targets = re.findall(
-                        r'<a class="cdx-button[^"]*" href="([^"]+)"',
+                        r'<a class="ui-button[^"]*" href="([^"]+)"',
                         output,
                     )
                     assert [unescape(target) for target in targets[::2]] == [
@@ -364,7 +364,7 @@ class NewsletterPresentationTests(unittest.TestCase):
                 ):
                     assert removed not in output
                 assert (
-                    '<select id="newsletter-issue" class="cdx-select" '
+                    '<select id="newsletter-issue" class="ui-select" '
                     'name="issue" required>' in output
                 )
                 assert '<option value="2027-01" selected>' in output
@@ -381,11 +381,11 @@ class NewsletterPresentationTests(unittest.TestCase):
                 assert submit is not None
                 assert "hidden" not in submit[1]
                 assert (
-                    '<div class="cdx-message cdx-message--warning '
-                    'cdx-message--inline" role="status" hidden '
+                    '<div class="ui-message ui-message--warning '
+                    'ui-message--inline" role="status" hidden '
                     "data-newsletter-load-status" in output
                 )
-                assert '<div class="cdx-message__content"></div>' in output
+                assert '<div class="ui-message__content"></div>' in output
                 assert "newsletter-code-label" in output
                 identifiers = set(re.findall(r'\bid="([^"]+)"', output))
                 for reference in re.findall(

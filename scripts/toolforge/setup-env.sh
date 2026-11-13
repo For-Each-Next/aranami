@@ -69,11 +69,11 @@ from shared.deployment import project_version
 json.dumps(routine_configuration(), allow_nan=False)
 assert tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"] == project_version()
 for name in TASK_DEFINITIONS:
-    importlib.import_module(f"updater.jobs.{name}")
-import backend.hub
-import backend.public
-import backend.server
-import backend.website.collect
+    importlib.import_module(f"runtime.jobs.{name}")
+import runtime.hub
+import webservice.server
+import runtime.dashboard
+import tasks.website.collect
 import webservice.pages
 print(f"Validated Aranami {project_version()} on Python {sys.version.split()[0]}; publication was not started.")
 PY

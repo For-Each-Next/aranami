@@ -348,7 +348,8 @@ class EditorialDraftTests(unittest.TestCase):
         assert "共有篇條目" not in text
         assert "社群表彰：" in text
         assert "ACG專題獎年度得分名單如下：" in text
-        assert "{{Graph:Chart" in text
+        assert "{{Graph:Chart" not in text
+        assert "尚未取得累計新條目推薦數量的完整歷史資料。" in text
         expected_categories = 2
         assert text.count("[[Category:") == expected_categories
 

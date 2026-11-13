@@ -9,11 +9,11 @@ from unittest.mock import Mock
 import polars as pl
 from test_section_cache import DashboardFixture
 
-from backend.newsletter.annual import enrich_year_dyk
-from backend.newsletter.collection import collect_source_facts
-from backend.newsletter.schema import valid_newsletter
+from data.newsletter.schema import valid_newsletter
 from newsletter.test_newsletter_data import Reader
 from shared.newsletter import Issue
+from tasks.zhwiki.newsletter.annual import enrich_year_dyk
+from tasks.zhwiki.newsletter.collection import collect_source_facts
 from updater.services.newsletter_editorial import render_editorial
 
 _TITLE = "《最终幻想XI》的音乐"

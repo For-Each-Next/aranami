@@ -18,10 +18,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from backend.newsletter.statistics import (
-    HISTORICAL_DYK,
-    QUALITY_GRADES,
-)
+from data.newsletter.grades import QUALITY_GRADES, QUALITY_HISTORY_GRADES
 from shared.newsletter import DYK_PROJECTS, ROOT
 
 if TYPE_CHECKING:
@@ -39,7 +36,6 @@ _GRADES = {
     "FT": "典范话题",
     "GT": "优良话题",
 }
-_ANNUAL_QUALITY_GRADES = ("FA", "FL", "A", "AL", "GA", "Bplus")
 _ANNUAL_QUALITY_GROUPS = (
     (("FA", "FL"), "[[PJ:VG/FA|典範內容]]"),
     (("A", "AL"), "[[PJ:VG/A|甲級內容]]"),
@@ -51,15 +47,6 @@ _DYK_PROJECT_HEADINGS = {
     "传记": "公司與人物",
     "公司": "公司與人物",
     "音乐": "音樂",
-}
-_OVERVIEW = {
-    "total": "條目總數",
-    "fa": "典范条目",
-    "fl": "特色列表",
-    "ga": "优良条目",
-    "dyk": "新條目推薦",
-    "bplus": "乙上级条目",
-    "topics": "优良话题",
 }
 LITERAL_ESCAPES = str.maketrans({
     **{character: f"&#{ord(character)};" for character in "[]{}|\r\n"},
@@ -84,7 +71,6 @@ _CREDIT_GRADES = {
     "GT": "優良話題",
 }
 _AWARD_THRESHOLD = 10
-_DYK_BASELINE_YEAR = 2025
 _QUALITY_AXIS_STEP = 10
 _QUALITY_AXIS_MINIMUM_MAX = 50
 
@@ -1121,21 +1107,14 @@ def _milestone_charts(review: Mapping, year: int) -> tuple[str, str]:
         Annual quality additions and quarterly/current cumulative DYK.
     """
     quality = _quality_history_chart(review)
+    series = review.get("dyk_series")
+    if series is None:
+        return quality, "尚未取得累計新條目推薦數量的完整歷史資料。"
     dyk = [
-        (day, count) for day, count in HISTORICAL_DYK if day[:4] < str(year)
+        (row["date"], row["count"])
+        for row in series
+        if row["date"][:4] <= str(year)
     ]
-    if year == _DYK_BASELINE_YEAR + 1:
-        dyk.extend(
-            (row["date"], HISTORICAL_DYK[-1][1] + row["count"])
-            for row in review.get("dyk_new_quarters") or []
-        )
-        current = review.get("dyk_current")
-        if current is not None and (not dyk or current["date"] > dyk[-1][0]):
-            dyk.append((
-                current["date"],
-                HISTORICAL_DYK[-1][1] + current["count"],
-            ))
-    dyk = [(day, count) for day, count in dyk if day[:4] <= str(year)]
     chart = (
         "{{Graph:Chart | type = area | width = 400 | height = 250 "
         "| xType = date | x = "
@@ -1182,7 +1161,7 @@ def _quality_summary(review: Mapping, year: int) -> str:
         None,
     )
     if history == []:
-        counts = dict.fromkeys(_ANNUAL_QUALITY_GRADES, 0)
+        counts = dict.fromkeys(QUALITY_HISTORY_GRADES, 0)
         previous = 0
     total = sum(counts.values()) if counts is not None else None
     changes = review.get("quality_changes")
@@ -1199,7 +1178,7 @@ def _quality_summary(review: Mapping, year: int) -> str:
             )
             .filter(
                 (pl.col("action") == "added")
-                & pl.col("grade").is_in(_ANNUAL_QUALITY_GRADES),
+                & pl.col("grade").is_in(QUALITY_HISTORY_GRADES),
             )
             .select(
                 pl.col("title").n_unique().alias("total"),
@@ -1209,7 +1188,7 @@ def _quality_summary(review: Mapping, year: int) -> str:
                     .filter(pl.col("grade") == grade)
                     .n_unique()
                     .alias(grade)
-                    for grade in _ANNUAL_QUALITY_GRADES
+                    for grade in QUALITY_HISTORY_GRADES
                 ),
             )
             .row(0, named=True)
@@ -1363,7 +1342,7 @@ def render_annual_feature(issue: Issue, year_review: Mapping) -> str:
 
     Args:
         issue: January publication reviewing the preceding year.
-        year_review: Saved annual observations supplied by the backend.
+        year_review: Saved annual observations supplied by the runtime.
 
     Returns:
         Complete original feature wikitext ready for daily capture.

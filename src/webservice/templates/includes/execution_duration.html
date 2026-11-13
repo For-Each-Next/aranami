@@ -1,0 +1,1 @@
+<span{% if event.timer_start %} data-clock="elapsed" data-started-at="{{ event.timer_start }}" data-clock-expires="{{ event.timer_expires }}" data-clock-unknown="—" data-duration-template="{duration}"{% endif %}>{{ event.duration }}</span>

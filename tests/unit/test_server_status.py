@@ -8,7 +8,9 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
-from backend.support import server_status
+from data.runtime import resources
+from data.runtime.resources import validate_runtime
+from runtime import server_status
 
 
 class TestServerStatus(TestCase):
@@ -50,7 +52,7 @@ class TestServerStatus(TestCase):
         assert observation["python_implementation"] == "CPython"
         assert len(observation["python_compiler"]) == 80
         assert observation["aranami_version"] == "0.8.5"
-        assert server_status.validate_runtime(observation) == observation
+        assert validate_runtime(observation) == observation
 
     @staticmethod
     def test_optional_environment_can_be_unavailable() -> None:
@@ -76,13 +78,13 @@ class TestServerStatus(TestCase):
         assert observation["os_release"] is None
         assert observation["python_compiler"] is None
         assert observation["aranami_version"] is None
-        assert server_status.validate_runtime(observation) == observation
+        assert validate_runtime(observation) == observation
         legacy = {
             key: value
             for key, value in observation.items()
-            if key not in server_status._OPTIONAL_TEXT_FIELDS
+            if key not in resources._OPTIONAL_TEXT_FIELDS
         }
-        assert server_status.validate_runtime(legacy) == legacy
+        assert validate_runtime(legacy) == legacy
 
     @staticmethod
     def test_container_counters_measure_cpu_over_elapsed_time() -> None:
@@ -114,7 +116,7 @@ class TestServerStatus(TestCase):
         assert second["cpu_limit"] == 2
         assert second["memory_bytes"] == 104_857_600
         assert second["memory_limit_bytes"] == 4_294_967_296
-        assert server_status.validate_runtime(second) == second
+        assert validate_runtime(second) == second
 
     @staticmethod
     def test_missing_and_unlimited_resources_remain_unknown() -> None:
@@ -132,7 +134,7 @@ class TestServerStatus(TestCase):
                 "cpu_limit",
             )
         )
-        assert server_status.validate_runtime(None) is None
+        assert validate_runtime(None) is None
         assert not server_status._read(Path("/unavailable/aranami-cgroup"))
 
     @staticmethod
@@ -151,7 +153,7 @@ class TestServerStatus(TestCase):
             for key, value in observation.items()
             if not key.startswith("storage_")
         }
-        assert server_status.validate_runtime(legacy) == legacy
+        assert validate_runtime(legacy) == legacy
         with patch.object(
             server_status.shutil,
             "disk_usage",
@@ -183,4 +185,4 @@ class TestServerStatus(TestCase):
                 self.subTest(observation=observation),
                 self.assertRaises(ValueError),
             ):
-                server_status.validate_runtime(observation)
+                validate_runtime(observation)

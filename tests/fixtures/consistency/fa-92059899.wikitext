@@ -1,0 +1,110 @@
+{{NoteTA
+| G1 = Games
+}}
+
+{{WikiProject:电子游戏/Sidebar|PJ:VG/FA|专题条目=expanded}}
+
+[[File:Featured article star.svg|64px|left|alt=銅五角星，維基百科典範內容標誌]]
+
+'''[[Portal:特色內容|典範（特色）内容]]'''是维基人在[[中文维基百科|维基百科]]中认定的典范之作，亦是所有条目应达到的目标状态。此类内容须满足[[Wikipedia:典範條目標準|典範條目]]或[[Wikipedia:特色列表|特色列表]]標準，且经过准确性、中立性、完整性和格式的评审之后，方可列於下表。
+
+电子游戏专题共有'''{{ACbPaC|project=电子游戏|formatnum=yes|FA|A|Bplus|GA|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}'''篇条目，其中典范条目有'''{{ACbPaC|project=电子游戏|formatnum=yes|FA}}'''篇、特色列表有'''{{ACbPaC|project=电子游戏|formatnum=yes|FL}}'''篇，因此专题达到典范（特色）水准的条目有'''{{ACbPaC|project=电子游戏|formatnum=yes|FA|FL}}'''篇（约占1/{{#expr:{{ACbPaC|project=电子游戏|FA|A|Bplus|GA|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}/{{ACbPaC|project=电子游戏|FA|FL}} round 0}}或{{percentage|{{ACbPaC|project=电子游戏|FA|FL}}|{{ACbPaC|project=电子游戏|FA|A|Bplus|GA|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}|1}}）。从全站角度看，中文維基百科{{NUMBEROFARTICLES}}篇条目中共有{{FORMATNUM:{{#expr:{{FA number}}+{{FL number}}}}}}篇典范（特色）内容；占本站条目数{{percentage|{{ACbPaC|project=电子游戏|FA|A|Bplus|GA|B|C|Start|Stub|FL|AL|BL|CL|List|SL|Unassessed}}|{{NUMBEROFARTICLES}}|1}}的游戏类条目为本站贡献了{{percentage|{{ACbPaC|project=电子游戏|FA|FL}}|{{#expr:{{FA number}}+{{FL number}}}}|1}}的典范（特色）内容。
+
+下方列出专题中的典范（特色）内容。列表依照条目主题分节，再以入选时间逆序排列。本表係手动維護，未必能及時更新，完整名单请參見[[WikiProject:电子游戏/认证条目#当前典范条目|機械人自动更新名單]]。
+
+== 当前典范条目 ==
+
+=== 游戏作品 ===
+
+{{div col|colwidth=22em}}
+# {{icon|FA}} [[:黑相集：棉蘭號]]<small>（2026-03-12）</small>
+# {{icon|FA}} [[:泰拉瑞亚]]<small>（2025-12-21）</small>
+# {{icon|FA}} [[:BanG Dream! 少女樂團派對|-{zh-cn:BanG Dream! 少女乐团派对！; zh-tw:BanG Dream! 少女樂團派對}-]]<small>（2025-05-13）</small>
+# {{icon|FA}} [[:漫長等待]]<small>（2023-06-29）</small>
+# {{icon|FA}} [[:電腦太空戰]]<small>（2023-04-29）</small>
+# {{icon|FA}} [[:太空戰爭！]]<small>（2023-03-09）</small>
+# {{icon|FA}} [[:最後生還者]]<small>（2023-02-08）</small>
+# {{icon|FA}} [[:辐射 (游戏)]]<small>（2022-12-12）</small>
+# {{icon|FA}} [[:质量效应2]]<small>（2022-04-19）</small>
+# {{icon|FA}} [[:黑色洛城]]<small>（2022-04-07）</small>
+# {{icon|FA}} [[:魔盜王：被詛咒的艦隊]]<small>（2020-09-20）</small>
+# {{icon|FA}} [[:冤罪殺機]]<small>（2020-08-27）</small>
+# {{icon|FA}} [[:星系舰队]]<small>（2020-08-11）</small>
+# {{icon|FA}} [[:严肃的骨头]]<small>（2020-07-28）</small>
+# {{icon|FA}} [[:傳送門2]]<small>（2020-02-26）</small>
+# {{icon|FA}} [[:超级肉肉男孩]]<small>（2018-06-01）</small>
+# {{icon|FA}} [[:反重力赛车3]]<small>（2014-10-24）</small>
+# {{icon|FA}} [[:战神：背叛]]<small>（2014-04-03）</small>
+# {{icon|FA}} [[:洞窟物語]]<small>（2013-03-27）</small>
+{{div col end}}
+
+=== 硬體與服務 ===
+
+{{div col|colwidth=22em}}
+# {{icon|FA}} [[:Dreamcast]]<small>（2019-09-15）</small>
+# {{icon|FA}} [[:世嘉土星]]<small>（2019-05-13）</small>
+# {{icon|FA}} [[:Game Gear]]<small>（2019-05-13）</small>
+# {{icon|FA}} [[:任天堂DSi]]<small>（2018-10-28）</small>
+{{div col end}}
+
+=== 其他 ===
+
+{{div col|colwidth=22em}}
+# {{icon|FA}} [[:巴哈姆特電玩資訊站]]<small>（2026-02-25）</small>
+# {{icon|FA}} [[:惡靈古堡2：啟示錄]]<small>（2021-02-19）</small>
+{{div col end}}
+
+== 当前特色列表 ==
+
+{{div col|colwidth=22em}}
+# {{icon|FL}} [[:鋼鐵蟲師系列電子遊戲列表]]<small>（2023-08-06）</small>
+# {{icon|FL}} [[:游戏开发者选择奖年度游戏]]<small>（2023-01-01）</small>
+# {{icon|FL}} [[:畅销PlayStation 3游戏列表]]<small>（2022-11-12）</small>
+# {{icon|FL}} [[:沙加系列电子游戏列表]]<small>（2021-08-24）</small>
+# {{icon|FL}} [[:上古卷軸系列電子遊戲列表]]<small>（2021-04-11）</small>
+# {{icon|FL}} [[:最後生還者獲獎與提名列表]]<small>（2020-08-25）</small>
+# {{icon|FL}} [[:Valve电子游戏列表]]<small>（2020-08-10）</small>
+# {{icon|FL}} [[:史克威尔艾尼克斯欧洲游戏列表]]<small>（2020-08-01）</small>
+# {{icon|FL}} [[:畅销任天堂Switch游戏列表]]<small>（2019-09-01）</small>
+# {{icon|FL}} [[:現代藝術博物館電子遊戲館藏列表]]<small>（2019-04-10）</small>
+# {{icon|FL}} [[:俠盜獵車手V獲獎與提名列表]]<small>（2018-07-27）</small>
+{{div col end}}
+
+== 参评内容 ==
+
+=== 参评典范条目 ===
+
+{{div col|colwidth=22em}}
+{{#section:WikiProject:电子游戏/认证条目/FAC|list}}
+{{div col end}}
+
+=== 参评特色列表 ===
+
+{{div col|colwidth=22em}}
+{{#section:WikiProject:电子游戏/认证条目/FLC|list}}
+{{div col end}}
+
+== 撤销内容 ==
+
+=== 撤销典范条目 ===
+
+{{div col|colwidth=22em}}
+{{#section:WikiProject:电子游戏/认证条目/FFA|list}}
+{{div col end}}
+
+=== 撤销特色列表 ===
+
+{{div col|colwidth=22em}}
+{{#section:WikiProject:电子游戏/认证条目/FFL|list}}
+{{div col end}}
+
+== 参见 ==
+
+* [[WikiProject:电子游戏/认证条目/FA|機械人更新的完整典範条目名單]]、[[WikiProject:电子游戏/认证条目/FL|特色列表名單]]
+* {{psid|34581850|PetScan生成的典范（特色）内容名单}}（按最后编辑时间逆序排雷）
+* [[WikiProject:电子游戏/首页展示#首页特色内容展示报告|首頁展示報告]]
+
+<noinclude>
+[[Category:电子游戏专题遴选内容|C]]
+[[Category:维基百科特色内容|專題]]
+</noinclude>

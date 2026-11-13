@@ -4,17 +4,17 @@
 # ruff: file-ignore[pytest-unittest-raises-assertion]
 
 import datetime as dt
-import json
-from contextlib import nullcontext
+from operator import itemgetter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from backend.services.zhwiki import pexbot as pexbot_data
-from backend.support.routine_status import report_progress
+from data.runtime.progress import report_progress
+from data.runtime.status import read_status, status_path
+from runtime.jobs import JobContext, ProposedEdit, job_run, pexbot
 from shared.support.cache import clear_runtime_cache
-from updater.jobs import JobContext, ProposedEdit, job_run, pexbot
+from tasks.zhwiki import pexbot as pexbot_data
 
 
 def _site() -> Mock:
@@ -67,7 +67,7 @@ class TestRoutineOutput(TestCase):
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
             ) as page,
         ):
             context.publish(
@@ -105,7 +105,9 @@ class TestRoutineOutput(TestCase):
             assert second_output.read_bytes() == b"body"
             assert f"]({first_output.name})" in content
             assert f"]({second_output.name})" in content
-            assert set(path.parent.iterdir()) == {
+            assert {
+                entry for entry in path.parent.iterdir() if entry.is_file()
+            } == {
                 path,
                 first_output,
                 second_output,
@@ -160,7 +162,11 @@ class TestRoutineOutput(TestCase):
             )
             assert first_output.read_bytes() == b"first"
             assert second_output.read_bytes() == b"second"
-            assert set(first_report.parent.iterdir()) == {
+            assert {
+                entry
+                for entry in first_report.parent.iterdir()
+                if entry.is_file()
+            } == {
                 first_report,
                 second_report,
                 first_output,
@@ -179,7 +185,8 @@ class TestRoutineOutput(TestCase):
             patch("pathlib.Path.cwd", return_value=Path(directory)),
         ):
             assert context.write_report() is None
-            assert not (Path(directory) / "dry-run").exists()
+            assert not list((Path(directory) / "dry-run").glob("*.md"))
+            assert not list((Path(directory) / "dry-run").glob("*.wikitext"))
 
     def test_live_publish_checks_concurrent_changes(self) -> None:
         """Refuse to overwrite a concurrently modified page."""
@@ -187,7 +194,7 @@ class TestRoutineOutput(TestCase):
         page = Mock(text="someone else's update")
         with (
             patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
                 return_value=page,
             ),
             self.assertRaises(RuntimeError),
@@ -207,8 +214,10 @@ class TestRoutineOutput(TestCase):
     def test_live_publish_and_unchanged_skip() -> None:
         """Save changed text and skip redundant writes."""
         page = Mock(text="old")
+
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with patch(
-            "updater.jobs._execution.pywikibot.Page",
+            "updater.publisher.pywikibot.Page",
             return_value=page,
         ):
             context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
@@ -231,7 +240,7 @@ class TestRoutineOutput(TestCase):
                 ),
             )
         page.save.assert_called_once_with(
-            summary="summary ([[toolforge:Aranami|Aranami]])",
+            summary="summary ([[toolforge:aranami|Aranami]])",
         )
         assert page.text == "new"
 
@@ -240,8 +249,10 @@ class TestRoutineOutput(TestCase):
         """Keep recorded and published attribution identical."""
         for dry in (False, True):
             page = Mock(text="old")
+
+            page.get.side_effect = lambda _page=page, **_kwargs: _page.text
             with patch(
-                "updater.jobs._execution.pywikibot.Page",
+                "updater.publisher.pywikibot.Page",
                 return_value=page,
             ) as page_factory:
                 context = JobContext(_site(), dt.date(2026, 10, 3), dry=dry)
@@ -249,15 +260,16 @@ class TestRoutineOutput(TestCase):
                     context.site,
                     "Target",
                     "new",
-                    "Updated for 5 May 2025.",
+                    "Update report for May 5 2025.",
                     original_text="old",
                 )
                 context.publish(proposal)
                 expected = (
-                    "Updated for 5 May 2025. ([[toolforge:Aranami|Aranami]])"
+                    "Update report for May 5 2025. "
+                    "([[toolforge:aranami|Aranami]])"
                 )
                 assert context.edits[0].summary == expected
-                assert proposal.summary == "Updated for 5 May 2025."
+                assert proposal.summary == "Update report for May 5 2025."
                 if dry:
                     page_factory.assert_not_called()
                     with (
@@ -270,8 +282,8 @@ class TestRoutineOutput(TestCase):
                         report = context.write_report()
                         assert report is not None
                         assert (
-                            "Updated for 5 May 2025. "
-                            r"(\[\[toolforge:Aranami|Aranami\]\])"
+                            "Update report for May 5 2025. "
+                            r"(\[\[toolforge:aranami|Aranami\]\])"
                             in report.read_text(encoding="utf-8")
                         )
                 else:
@@ -281,12 +293,12 @@ class TestRoutineOutput(TestCase):
     def test_routine_timing_is_independent_of_publication_attribution() -> (
         None
     ):
-        """Keep durations in backend metadata and summaries brief."""
+        """Keep durations in runtime metadata and summaries brief."""
         with (
             TemporaryDirectory() as directory,
             patch("pathlib.Path.cwd", return_value=Path(directory)),
             patch(
-                "backend.support.execution.perf_counter",
+                "runtime.execution.perf_counter",
                 return_value=100,
             ) as clock,
         ):
@@ -312,7 +324,7 @@ class TestRoutineOutput(TestCase):
                 ProposedEdit(context.site, "Direct", "four", "summary"),
             )
         assert [edit.summary for edit in context.edits] == [
-            "summary ([[toolforge:Aranami|Aranami]])",
+            "summary ([[toolforge:aranami|Aranami]])",
         ] * 4
         assert [task.elapsed_seconds for task in context.tasks] == [70, 11.25]
 
@@ -325,7 +337,7 @@ class TestRoutineOutput(TestCase):
         )
         context.publish(context.edits[0])
         assert [edit.summary for edit in context.edits] == [
-            "summary ([[toolforge:Aranami|Aranami]])",
+            "summary ([[toolforge:aranami|Aranami]])",
         ] * 2
 
     @staticmethod
@@ -482,15 +494,17 @@ class TestRoutineOutput(TestCase):
         """Finalize standalone output in the chosen mode."""
         for dry in (False, True):
             page = Mock(text="old")
+
+            page.get.side_effect = lambda _page=page, **_kwargs: _page.text
             with (
                 self.subTest(dry=dry),
                 TemporaryDirectory() as directory,
                 patch("pathlib.Path.cwd", return_value=Path(directory)),
                 patch(
-                    "updater.jobs._execution.pywikibot.Site",
+                    "runtime.jobs.context.pywikibot.Site",
                 ) as site,
                 patch(
-                    "updater.jobs._execution.pywikibot.Page",
+                    "updater.publisher.pywikibot.Page",
                     return_value=page,
                 ) as page_factory,
             ):
@@ -520,22 +534,27 @@ class TestRoutineOutput(TestCase):
                         summary=context.edits[0].summary,
                     )
 
-                    assert not (Path(directory) / "dry-run").exists()
+                    assert not list((Path(directory) / "dry-run").glob("*.md"))
+                    assert not list(
+                        (Path(directory) / "dry-run").glob("*.wikitext"),
+                    )
 
     def test_shared_context_overrides_conflicting_dry_keyword(self) -> None:
         """Honor shared mode and retain its pending report."""
         for dry in (False, True):
             page = Mock(text="old")
+
+            page.get.side_effect = lambda _page=page, **_kwargs: _page.text
             context = JobContext(_site(), dt.date(2026, 10, 3), dry=dry)
             with (
                 self.subTest(dry=dry),
                 TemporaryDirectory() as directory,
                 patch("pathlib.Path.cwd", return_value=Path(directory)),
                 patch(
-                    "updater.jobs._execution.pywikibot.Site",
+                    "runtime.jobs.context.pywikibot.Site",
                 ) as site,
                 patch(
-                    "updater.jobs._execution.pywikibot.Page",
+                    "updater.publisher.pywikibot.Page",
                     return_value=page,
                 ) as page_factory,
             ):
@@ -553,7 +572,10 @@ class TestRoutineOutput(TestCase):
                 assert context.dry is dry
                 assert context.tasks[0].status == "success"
                 assert context.finished_at is None
-                assert not (Path(directory) / "dry-run").exists()
+                assert not list((Path(directory) / "dry-run").glob("*.md"))
+                assert not list(
+                    (Path(directory) / "dry-run").glob("*.wikitext"),
+                )
                 if dry:
                     page_factory.assert_not_called()
                 else:
@@ -563,52 +585,55 @@ class TestRoutineOutput(TestCase):
 
 
 class TestRoutineStatusLifecycle(TestCase):
-    """Persist live lifecycle state independently from logs."""
+    """Keep execution, publication, and unknown counts distinct."""
 
     def setUp(self) -> None:
-        """Give each lifecycle test its own runtime directory."""
-        temporary = TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        working_directory = patch("pathlib.Path.cwd", return_value=self.root)
-        working_directory.start()
-        self.addCleanup(working_directory.stop)
+        """Isolate all runtime evidence for each lifecycle."""
+        self.root = Path(self.enterContext(TemporaryDirectory()))
+        self.enterContext(patch("pathlib.Path.cwd", return_value=self.root))
 
-    def _record(self, name: str = "dyks") -> dict[str, object]:
-        """Read one directly reported routine status.
-
-        Args:
-            name: Stable routine identifier in this test's snapshot.
-
-        Returns:
-            Most recently persisted lifecycle fields for the routine.
-        """
-        snapshot = json.loads(
-            (self.root / "state" / "routine-status.json").read_text(),
+    def _record(self, name: str = "dyks") -> dict:
+        """Return the newest execution for a configured task."""
+        return max(
+            (
+                row
+                for row in read_status(self.root)["executions"].values()
+                if row["task_id"] == name
+            ),
+            key=itemgetter("started_at"),
         )
-        assert snapshot["schema"] == 1
-        assert snapshot["updated_at"].endswith("Z")
-        return snapshot["routines"][name]
 
-    def test_running_state_and_confirmed_save_share_one_run_identity(
+    def test_success_is_independent_of_saved_or_unknown_edit_counts(
         self,
     ) -> None:
-        """Report a running routine and its confirmed save."""
-        context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
-        page = Mock(text="old")
+        """A completed task can have zero or unconfirmed publication."""
+        for delegated in (False, True):
+            context = JobContext(_site(), dt.date(2026, 11, 3), dry=False)
+            with job_run("dyks", context=context):
+                running = self._record()
+                assert running["outcome"] == "running"
+                assert running["updated_count"] is None
+                if delegated:
+                    context.mark_updates_unknown()
+            completed = self._record()
+            assert completed["outcome"] == "succeeded"
+            assert completed["updated_count"] == (None if delegated else 0)
+            assert completed["run_id"] == running["run_id"]
+            assert completed["finished_at"] is not None
+            assert completed["progress"] is None
+
+    def test_confirmed_dates_and_revision_survive_the_execution(self) -> None:
+        """Keep saved revisions separate from preparation dates."""
+        context = JobContext(_site(), dt.date(2026, 11, 3), dry=False)
+        page = Mock(text="old", latest_revision_id=12345)
+
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with (
-            patch(
-                "updater.jobs._execution.pywikibot.Page",
-                return_value=page,
-            ),
+            patch("updater.publisher.pywikibot.Page", return_value=page),
             job_run("dyks", context=context),
         ):
-            running = self._record()
-            assert running["status"] == "running"
-            assert running["dry"] is False
-            assert running["updated"] is None
-            assert running["duration_seconds"] is None
-            assert running["finished_at"] is None
+            context.confirm_report_date(dt.date(2026, 11, 1))
+            context.confirm_report_date(dt.date(2026, 10, 31))
             context.publish(
                 ProposedEdit(
                     context.site,
@@ -618,219 +643,32 @@ class TestRoutineStatusLifecycle(TestCase):
                     original_text="old",
                 ),
             )
-        completed = self._record()
-        assert completed["status"] == "updated"
-        assert completed["updated"] == 1
-        assert completed["run_id"] == running["run_id"]
-        assert completed["started_at"] == running["started_at"]
-        assert completed["finished_at"] >= running["started_at"]
-        assert completed["duration_seconds"] >= 0
-        page.save.assert_called_once()
+        row = self._record()
+        assert row["outcome"] == "succeeded"
+        assert row["updated_count"] == 1
+        assert row["report_date"] == "2026-11-01"
+        publication = next(
+            iter(read_status(self.root)["publications"].values()),
+        )
+        assert publication["outcome"] == "saved"
+        assert publication["run_id"] == row["run_id"]
+        assert publication["revision_id"] == page.latest_revision_id
+        assert publication["last_confirmed_save_at"] is not None
 
-    def test_confirmed_dates_advance_without_using_preparation_progress(
-        self,
-    ) -> None:
-        """Advance only confirmed dates in chronological order."""
-        context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
-        with job_run("pageviews", context=context):
-            assert self._record("pageviews")["report_date"] is None
-            context.confirm_report_date(dt.date(2026, 10, 17))
-            context.confirm_report_date(dt.date(2026, 10, 16))
-            context.confirm_report_date(None)
-        record = self._record("pageviews")
-        assert record["report_date"] == "2026-10-17"
-        assert record["status"] == "no_update"
-        assert record["progress"] is None
+    def test_failure_keeps_safe_attempted_date_and_unknown_saves(self) -> None:
+        """A save exception cannot fabricate a confirmed zero."""
+        context = JobContext(_site(), dt.date(2026, 11, 3), dry=False)
+        page = Mock(text="old")
 
-    def test_failure_facts_use_attempted_dates_and_omit_private_messages(
-        self,
-    ) -> None:
-        """Separate failed catch-up dates from earlier saved reports."""
-        context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
-        error = TimeoutError("https://private/?token=SECRET /private/key")
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
+        page.save.side_effect = TimeoutError("SECRET /private/key")
         with (
             self.assertRaises(TimeoutError),
-            job_run("pageviews", context=context),
-            context.report_attempt("Wikipedia:Failure fixture"),
+            patch("updater.publisher.pywikibot.Page", return_value=page),
+            job_run("dyks", context=context),
         ):
-            context.confirm_report_date(dt.date(2026, 10, 16))
-            report_progress("preparing", report_date=dt.date(2026, 10, 17))
-            raise error
-        record = self._record("pageviews")
-        assert record["status"] == "failed"
-        assert record["report_date"] == "2026-10-16"
-        assert record["failure_date"] == "2026-10-17"
-        assert record["failure_reason"] == "TimeoutError"
-        assert record["progress"] is None
-        reports = json.loads(
-            (self.root / "state/report-updates.json").read_text(),
-        )["reports"]
-        destination = next(iter(reports.values()))
-        assert destination["failure_reason"] == "TimeoutError"
-        assert destination["failure_date"] == "2026-10-17"
-        for filename in ("routine-status.json", "report-updates.json"):
-            content = (self.root / "state" / filename).read_text()
-            assert "SECRET" not in content
-            assert "/private" not in content
-        newer = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
-        with job_run("pageviews", context=newer):
-            assert "failure_reason" not in self._record("pageviews")
-        assert "failure_reason" not in self._record("pageviews")
-        assert "failure_date" not in self._record("pageviews")
-
-    def test_terminal_states_preserve_confirmed_and_unknown_counts(
-        self,
-    ) -> None:
-        """Keep terminal outcomes and uncertain counts distinct."""
-        cases = (
-            ("no_update", False, 0),
-            ("unknown", True, None),
-            ("deferred", False, 0),
-            ("deferred", True, None),
-            ("failed", False, 0),
-            ("failed", True, None),
-        )
-        for expected_status, delegated, count in cases:
-            context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
-            with (
-                self.subTest(status=expected_status, delegated=delegated),
-                self.assertRaisesRegex(RuntimeError, "Primary source failed")
-                if expected_status == "failed"
-                else nullcontext(),
-                job_run("dyks", context=context),
-            ):
-                if delegated:
-                    context.mark_updates_unknown()
-                if expected_status == "deferred":
-                    context.defer("Source data is not available yet.")
-                elif expected_status == "failed":
-                    _fail("Primary source failed.")
-            record = self._record()
-            assert record["status"] == expected_status
-            assert record["updated"] == count
-            assert record["finished_at"] is not None
-            assert record["duration_seconds"] >= 0
-
-    def test_preview_does_not_replace_public_live_state(self) -> None:
-        """Omit previews despite conflicting invocation keywords."""
-        live = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
-        with job_run("dyks", context=live):
-            pass
-        path = self.root / "state" / "routine-status.json"
-        before = path.read_bytes(), path.stat().st_mtime_ns
-        preview = JobContext(_site(), dt.date(2026, 10, 18), dry=True)
-        with (
-            patch(
-                "backend.support.execution.write_routine_status",
-            ) as writer,
-            self.assertLogs("backend.support.execution", level="INFO") as logs,
-            job_run("dyks", dry=False, context=preview),
-        ):
-            preview.mark_updates_unknown()
-        writer.assert_not_called()
-        assert (path.read_bytes(), path.stat().st_mtime_ns) == before
-        assert self._record()["run_id"] == live.tasks[0].run_id
-        assert (
-            logs.records[-1].getMessage().startswith("Finished dyks preview:")
-        )
-
-    def test_older_context_cannot_overwrite_a_newer_run(self) -> None:
-        """Retain the newer state when an older context finishes."""
-        older = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
-        newer = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
-        with job_run("dyks", context=older):
-            older.defer("The older attempt is still waiting.")
-            with job_run("dyks", context=newer):
-                assert self._record()["run_id"] == newer.tasks[0].run_id
-            completed = self._record()
-            assert completed["status"] == "no_update"
-        assert self._record() == completed
-        assert older.tasks[0].status == "deferred"
-
-    def test_status_failures_preserve_saves_and_primary_exceptions(
-        self,
-    ) -> None:
-        """Keep status failures outside the wiki result path."""
-        for fail in (False, True):
-            context = JobContext(_site(), dt.date(2026, 10, 18), dry=False)
-            page = Mock(text="old")
-            primary = RuntimeError("The original wiki failure.")
-            action = Mock(side_effect=primary if fail else None)
-            with (
-                self.subTest(fail=fail),
-                patch(
-                    "backend.support.execution.write_routine_status",
-                    side_effect=OSError("Status storage unavailable."),
-                ) as writer,
-                patch(
-                    "updater.jobs._execution.pywikibot.Page",
-                    return_value=page,
-                ),
-                self.assertLogs(
-                    "backend.support.execution",
-                    level="WARNING",
-                ),
-            ):
-                observed_error = None
-                try:
-                    with job_run("dyks", context=context):
-                        context.publish(
-                            ProposedEdit(
-                                context.site,
-                                "Target",
-                                "new",
-                                "summary",
-                                original_text="old",
-                            ),
-                        )
-                        action()
-                except RuntimeError as caught:
-                    observed_error = caught
-                assert observed_error is (primary if fail else None)
-            page.save.assert_called_once()
-            action.assert_called_once()
-            started, publishing, finished = (
-                call.args[0] for call in writer.call_args_list
-            )
-            for record, phase in (
-                (started, "preparing"),
-                (publishing, "publishing"),
-            ):
-                assert record["status"] == "running"
-                assert record["updated"] is None
-                assert record["duration_seconds"] is None
-                assert record["finished_at"] is None
-                assert record["progress"] == {
-                    "phase": phase,
-                    "report_date": None,
-                    "current": None,
-                    "total": None,
-                }
-            assert all(
-                record["run_id"] == context.tasks[0].run_id
-                and record["started_at"] == started["started_at"]
-                for record in (started, publishing, finished)
-            )
-            assert finished["status"] == ("failed" if fail else "updated")
-            assert finished["updated"] == 1
-            assert finished["progress"] is None
-            assert finished["finished_at"] is not None
-            assert finished["duration_seconds"] >= 0
-            assert context.tasks[0].updated == 1
-            assert context.tasks[0].status == ("failed" if fail else "success")
-
-    @staticmethod
-    def test_saved_revision_is_kept_for_report_permalink() -> None:
-        """Persist the publisher's observed revision after saving."""
-        saved_revision = 12345
-        page = Mock(text="old", latest_revision_id=saved_revision)
-        with (
-            TemporaryDirectory() as temporary,
-            patch("pathlib.Path.cwd", return_value=Path(temporary)),
-            patch("updater.jobs._execution.pywikibot.Page", return_value=page),
-        ):
-            context = JobContext(_site(), dt.date(2026, 10, 3), dry=False)
-            assert context.publish(
+            report_progress("publishing", report_date=dt.date(2026, 11, 2))
+            context.publish(
                 ProposedEdit(
                     context.site,
                     "Target",
@@ -839,9 +677,70 @@ class TestRoutineStatusLifecycle(TestCase):
                     original_text="old",
                 ),
             )
-            records = json.loads(
-                (Path(temporary) / "state/report-updates.json").read_text(),
-            )["reports"]
-            assert (
-                next(iter(records.values()))["revision_id"] == saved_revision
+        row = self._record()
+        assert row["outcome"] == "failed"
+        assert row["updated_count"] is None
+        assert row["failure"]["failure_reason"] == "TimeoutError"
+        assert "SECRET" not in status_path(self.root).read_text()
+        publication = next(
+            iter(read_status(self.root)["publications"].values()),
+        )
+        assert publication["confirmed_edits"] is None
+
+    def test_overlapping_runs_remain_independent(self) -> None:
+        """Retain both overlapping invocations."""
+        older = JobContext(_site(), dt.date(2026, 11, 3), dry=False)
+        newer = JobContext(_site(), dt.date(2026, 11, 3), dry=False)
+        with job_run("dyks", context=older):
+            older.defer("Waiting for source readiness.")
+            with job_run("dyks", context=newer):
+                assert set(read_status(self.root)["executions"]) == {
+                    older.tasks[0].run_id,
+                    newer.tasks[0].run_id,
+                }
+        rows = read_status(self.root)["executions"]
+        assert rows[older.tasks[0].run_id]["outcome"] == "deferred"
+        assert rows[newer.tasks[0].run_id]["outcome"] == "succeeded"
+
+    def test_preview_preserves_live_generation(self) -> None:
+        """Isolate preview execution snapshots."""
+        with job_run(
+            "dyks",
+            context=JobContext(_site(), dt.date(2026, 11, 3), dry=False),
+        ):
+            pass
+        previous = status_path(self.root).read_bytes()
+        with job_run(
+            "dyks",
+            context=JobContext(_site(), dt.date(2026, 11, 3), dry=True),
+        ):
+            pass
+        assert status_path(self.root).read_bytes() == previous
+        assert status_path(self.root, dry=True).exists()
+
+    def test_observability_failure_cannot_change_publication(self) -> None:
+        """Keep publication independent of observability storage."""
+        context = JobContext(_site(), dt.date(2026, 11, 3), dry=False)
+        page = Mock(text="old")
+
+        page.get.side_effect = lambda _page=page, **_kwargs: _page.text
+        with (
+            patch(
+                "data.runtime.status.update_status",
+                side_effect=OSError("status disk"),
+            ),
+            patch("updater.publisher.pywikibot.Page", return_value=page),
+            self.assertLogs("data.runtime.status", level="WARNING"),
+            job_run("dyks", context=context),
+        ):
+            context.publish(
+                ProposedEdit(
+                    context.site,
+                    "Target",
+                    "new",
+                    "summary",
+                    original_text="old",
+                ),
             )
+        page.save.assert_called_once()
+        assert context.tasks[0].updated == 1

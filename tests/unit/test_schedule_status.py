@@ -1,10 +1,6 @@
-"""Verify actual schedules without wiki requests or outcome changes."""
-
-# Keep the existing unittest exception assertions.
-# ruff: file-ignore[pytest-unittest-raises-assertion]
+"""Verify service heartbeat and actual schedule observations."""
 
 import datetime as dt
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -16,175 +12,108 @@ from apscheduler.schedulers.base import (
     STATE_STOPPED,
 )
 from apscheduler.triggers.interval import IntervalTrigger
+from status_fixtures import execution_record
 
-from backend.support.idle_scheduler import IdleScheduler
-from backend.support.public_data import read_schedule_status
-from backend.support.schedule_status import write_schedule_status
-from shared.config import (
-    COLLECTION_DEFINITIONS,
-    TASK_DEFINITIONS,
-    configuration_id,
-)
+from data.runtime.status import read_status, status_path, update_status
+from runtime.idle_scheduler import IdleScheduler
+from runtime.schedule_status import write_schedule_status
+from shared.config import COLLECTION_DEFINITIONS, TASK_DEFINITIONS
 
 
 class TestScheduleStatus(TestCase):
-    """Keep actual predictions separate from measured report results."""
+    """Keep actual predictions separate from measured work outcomes."""
 
-    def test_idle_eligibility_is_validated_separately_from_recurrence(
-        self,
-    ) -> None:
-        """Retain queue evidence and reject malformed optional data."""
-        queued = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)
-        recurrence = queued + dt.timedelta(days=1)
+    def setUp(self) -> None:
+        """Use one isolated status home."""
+        self.root = Path(self.enterContext(TemporaryDirectory()))
+        self.enterContext(patch("pathlib.Path.cwd", return_value=self.root))
+        self.started = dt.datetime.now(dt.UTC)
+
+    def service(self) -> dict:
+        """Return the validated scheduler service observation."""
+        return read_status(self.root)["services"]["scheduler"]
+
+    def test_idle_queue_and_actual_postponement_are_retained(self) -> None:
+        """Retain both queue eligibility and actual next recurrence."""
+        queued = self.started - dt.timedelta(minutes=1)
+        recurrence = self.started + dt.timedelta(days=1)
         scheduler = Mock(spec=IdleScheduler, state=STATE_RUNNING)
         scheduler.get_job.return_value = Mock(next_run_time=recurrence)
         scheduler.pending_since.side_effect = lambda name: (
-            queued if name == "assessment_lists" else None
+            queued
+            if name in {"assessment_lists", "newsletter-daily"}
+            else None
         )
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            path = root / "state" / "schedule-status.json"
-            with patch("pathlib.Path.cwd", return_value=root):
-                write_schedule_status(scheduler)
-            content = path.read_text()
-            observed = read_schedule_status(path)
-            row = observed["routines"]["assessment_lists"]
-            assert row["idle"] is True
-            assert row["queued_since"] == queued.isoformat()
-            assert row["next_run_at"] == recurrence.isoformat()
-            cases = (
-                ("assessment_lists", "idle", 1),
-                ("assessment_lists", "idle", False),
-                ("dyks", "queued_since", queued.isoformat()),
-                ("assessment_lists", "state", "missing"),
-                ("assessment_lists", "state", "stopped"),
-                ("assessment_lists", "queued_since", "2026-01-01T00:00"),
-                (
-                    "assessment_lists",
-                    "queued_since",
-                    (queued + dt.timedelta(days=2)).isoformat(),
-                ),
-            )
-            for name, key, value in cases:
-                invalid = json.loads(content)
-                invalid["routines"][name][key] = value
-                path.write_text(json.dumps(invalid))
-                with (
-                    self.subTest(name=name, key=key, value=value),
-                    self.assertRaises(ValueError),
-                ):
-                    read_schedule_status(path)
-            old = json.loads(content)
-            for row in old["routines"].values():
-                row.pop("idle")
-                row.pop("queued_since")
-            path.write_text(json.dumps(old))
-            assert read_schedule_status(path)["routines"] == old["routines"]
+        write_schedule_status(scheduler, started_at=self.started)
+        service = self.service()
+        row = service["schedules"]["routines"]["assessment_lists"]
+        assert row["idle"] is True
+        assert row["queued_since"] == queued.isoformat()
+        assert row["next_run_at"] == recurrence.isoformat()
+        newsletter = service["schedules"]["collections"]["newsletter-daily"]
+        assert newsletter["idle"] is True
+        assert newsletter["queued_since"] == queued.isoformat()
+        assert newsletter["next_run_at"] == recurrence.isoformat()
+        assert service["freshness"] == "current"
+        stale = read_status(
+            self.root,
+            as_of=self.started + dt.timedelta(minutes=5),
+        )
+        assert stale["services"]["scheduler"]["freshness"] == "stale"
+        assert stale["services"]["scheduler"]["lifecycle"] == "running"
 
-    @staticmethod
-    def test_actual_postponement_and_pauses_preserve_outcomes() -> None:
-        """Expose supplied next runs and paused state."""
-        postponed = dt.datetime(2026, 10, 22, 18, 59, tzinfo=dt.UTC)
-        job = Mock(next_run_time=postponed)
+    def test_pausing_never_changes_execution_outcomes(self) -> None:
+        """Disjoint service writes preserve completed task facts."""
+        run = execution_record(outcome="succeeded")
+        update_status({"executions": {run["run_id"]: run}}, runtime=self.root)
+        before = read_status(self.root)["executions"]
         scheduler = Mock(state=STATE_RUNNING)
-        scheduler.get_job.return_value = job
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            logs = root / "state"
-            logs.mkdir()
-            outcomes = logs / "routine-status.json"
-            outcomes.write_text("existing measured observations")
-            with patch("pathlib.Path.cwd", return_value=root):
-                write_schedule_status(scheduler)
-                current = json.loads(
-                    (logs / "schedule-status.json").read_text(),
-                )
-                scheduler.state = STATE_PAUSED
-                write_schedule_status(scheduler)
-                paused = json.loads(
-                    (logs / "schedule-status.json").read_text(),
-                )
-            assert current["config_id"] == configuration_id()
-            assert set(current["routines"]) == set(TASK_DEFINITIONS)
-            assert set(current["collections"]) == set(COLLECTION_DEFINITIONS)
-            assert (
-                current["collections"]["newsletter-daily"]["next_run_at"]
-                == postponed.isoformat()
-            )
-            assert (
-                current["collections"]["newsletter-daily"]["cutoff"]
-                == COLLECTION_DEFINITIONS["newsletter-daily"].cutoff
-            )
-            assert (
-                current["routines"]["pageviews"]["next_run_at"]
-                == postponed.isoformat()
-            )
-            assert current["routines"]["pageviews"]["state"] == "scheduled"
-            assert paused["state"] == "paused"
-            assert paused["routines"]["pageviews"]["state"] == "paused"
-            assert outcomes.read_text() == "existing measured observations"
-            assert sorted(path.name for path in logs.iterdir()) == [
-                "routine-status.json",
-                "schedule-status.json",
-            ]
+        scheduler.get_job.return_value = Mock(next_run_time=self.started)
+        write_schedule_status(scheduler, started_at=self.started)
+        scheduler.state = STATE_PAUSED
+        write_schedule_status(scheduler, started_at=self.started)
+        saved = self.service()
+        assert saved["lifecycle"] == "paused"
+        assert set(saved["schedules"]["routines"]) == set(TASK_DEFINITIONS)
+        assert set(saved["schedules"]["collections"]) == set(
+            COLLECTION_DEFINITIONS,
+        )
+        assert read_status(self.root)["executions"] == before
 
-    @staticmethod
-    def test_stopped_missing_and_dry_schedules_are_explicit() -> None:
-        """Omit preview observations and stopped predictions."""
+    def test_stopped_and_preview_services_are_separate(self) -> None:
+        """Record stop honestly and isolate preview heartbeat writes."""
         scheduler = Mock(state=STATE_STOPPED)
-        with patch("pathlib.Path.cwd") as cwd:
-            write_schedule_status(scheduler, dry=True)
-            cwd.assert_not_called()
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            with patch("pathlib.Path.cwd", return_value=root):
-                write_schedule_status(scheduler)
-                stopped = json.loads(
-                    (root / "state/schedule-status.json").read_text(),
-                )
-                scheduler.get_job.assert_not_called()
-                scheduler.state = STATE_RUNNING
-                scheduler.get_job.return_value = None
-                write_schedule_status(scheduler)
-                missing = json.loads(
-                    (root / "state/schedule-status.json").read_text(),
-                )
-            assert stopped["state"] == "stopped"
-            assert all(
-                row["next_run_at"] is None
-                for row in stopped["routines"].values()
-            )
-            assert all(
-                row["state"] == "stopped"
-                for row in stopped["routines"].values()
-            )
-            assert all(
-                row["state"] == "missing"
-                for row in missing["routines"].values()
-            )
+        write_schedule_status(scheduler, started_at=self.started)
+        stopped = self.service()
+        assert stopped["lifecycle"] == "stopped"
+        assert all(
+            row["next_run_at"] is None
+            for row in stopped["schedules"]["routines"].values()
+        )
+        before = status_path(self.root).read_bytes()
+        write_schedule_status(scheduler, started_at=self.started, dry=True)
+        assert status_path(self.root).read_bytes() == before
+        assert status_path(self.root, dry=True).exists()
 
-    @staticmethod
-    def test_collection_status_retains_effective_website_interval() -> None:
-        """Observe collection triggers independently of reports."""
+    def test_collection_interval_is_the_actual_registered_trigger(
+        self,
+    ) -> None:
+        """Retain actual registered trigger intervals."""
         interval = 90
         scheduler = Mock(state=STATE_RUNNING)
         job = Mock(
-            next_run_time=dt.datetime(2026, 12, 31, 23, tzinfo=dt.UTC),
+            next_run_time=self.started,
             trigger=IntervalTrigger(seconds=interval, timezone=dt.UTC),
         )
         scheduler.get_job.side_effect = lambda name: (
             job if name == "website" else None
         )
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            with patch("pathlib.Path.cwd", return_value=root):
-                write_schedule_status(scheduler)
-                saved = read_schedule_status(
-                    root / "state/schedule-status.json",
-                )
-        assert saved["collections"]["website"]["interval"] == interval
-        assert saved["collections"]["website"]["state"] == "scheduled"
-        assert saved["collections"]["newsletter-daily"]["state"] == "missing"
+        write_schedule_status(scheduler, started_at=self.started)
+        schedules = self.service()["schedules"]
+        assert schedules["collections"]["website"]["interval"] == interval
+        assert (
+            schedules["collections"]["newsletter-daily"]["state"] == "missing"
+        )
         assert all(
-            row["state"] == "missing" for row in saved["routines"].values()
+            row["state"] == "missing" for row in schedules["routines"].values()
         )
