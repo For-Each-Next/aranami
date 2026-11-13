@@ -167,6 +167,14 @@ class TestSection0Inputs(TestCase):
         assert facts["parameters"] == {"maindateGA": "2026-11-02"}
 
     @staticmethod
+    def test_conflicting_banner_order_withholds_the_prepared_repair() -> None:
+        """Withhold repairs for conflicting known banner groups."""
+        _suggestions, facts = _prepare(
+            "{{WikiProject Video games}}\n{{Talk header}}\n" + _HISTORY,
+        )
+        assert facts is None
+
+    @staticmethod
     def test_collector_shares_one_exact_head_input_between_findings() -> None:
         """Reuse checked source without new reads or duplicate leads."""
         original = _HISTORY + "\n== Discussion ==\nKeep."
@@ -251,6 +259,10 @@ class TestRepairRecords(TestCase):
             {"talk_page_id": None},
             {"parameters": {"action1result": "listed"}},
             {"parameters": None},
+            {"history_insertion": -1},
+            {"history_insertion": True},
+            {"history_insertion": 1.5},
+            {"history_insertion": None},
             {"original_text": "x" * (records.MAX_REPAIR_TEXT_BYTES + 1)},
         ):
             value = {**_input(), **changes}
@@ -263,6 +275,19 @@ class TestRepairRecords(TestCase):
         value["history_template"]["end"] -= 1
         value["id"] = records.repair_identity(value)
         assert not records.valid_repair_input(value)
+
+    @staticmethod
+    def test_complete_repair_maps_can_retain_more_than_256_headers() -> None:
+        """Retain larger worklists within the separate byte bound."""
+        base = _input()
+        inputs = {}
+        for page_id in range(1, 258):
+            record = {**base, "page_id": page_id}
+            record["id"] = records.repair_identity(record)
+            inputs[record["id"]] = record
+        report = _report(base)
+        report["repair_inputs"] = inputs
+        assert records.valid_result(report)
 
     @staticmethod
     def test_finding_links_must_match_the_checked_source_head() -> None:

@@ -1,7 +1,8 @@
 """Project prepared section-zero repairs for manual review.
 
 Pass an exact checked section-zero input from the consistency collector.
-The projection changes only its supplied template spans and parameters;
+The projection changes its supplied template spans and parameters, using
+the prepared insertion boundary to preserve the local banner order;
 runtime retains the complete proposed header for manual preview or diff.
 """
 
@@ -53,10 +54,17 @@ def render_section0_repair(record: dict) -> str:
         (span["start"], span["end"], "")
         for span in record["legacy_dyk_templates"]
     ]
-    if history:
+    insertion = record.get(
+        "history_insertion",
+        history["start"] if history else 0,
+    )
+    if history and insertion == history["start"]:
         edits.append((history["start"], history["end"], replacement))
     else:
-        edits.append((0, 0, replacement + "\n"))
+        if history:
+            edits.append((history["start"], history["end"], ""))
+        prefix = "\n" if insertion and original[insertion - 1] != "\n" else ""
+        edits.append((insertion, insertion, prefix + replacement + "\n"))
     result = original
     for start, end, text in sorted(edits, reverse=True):
         result = result[:start] + text + result[end:]

@@ -12,7 +12,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from starlette.testclient import TestClient
 from test_consistency_presentation import consistency_snapshot
@@ -43,14 +43,13 @@ class TestConsistencyUserscript(TestCase):
             target = urlsplit(action["url"])
             assert target.scheme == "https"
             assert target.netloc == "zh.wikipedia.org"
-            assert target.path == "/w/index.php"
+            assert unquote(target.path) == "/wiki/Talk:Game_01"
             assert parse_qs(target.query) == {
-                "title": ["Talk:Game 01"],
                 "action": ["edit"],
                 "section": ["0"],
-                "aranami-repair": [repair_id],
+                "aranami-check-job": [repair_id],
             }
-            assert action["label"] == interface.text("consistency.review_diff")
+            assert action["label"] == interface.text("consistency.prefill")
         assert repair_links(None, Interface("en")) == []
 
     @staticmethod
@@ -77,6 +76,7 @@ class TestConsistencyUserscript(TestCase):
             assert controls is not None
             assert "data-copy-target=" in controls[1]
             assert "consistency-review-action" in controls[1]
+            assert 'target="_blank" rel="noopener"' in controls[1]
             assert (
                 controls[1].index("data-copy-target=")
                 < controls[1].index(
@@ -84,7 +84,7 @@ class TestConsistencyUserscript(TestCase):
                 )
                 < controls[1].index("data-copy-status")
             )
-            assert "aranami-repair=" in output
+            assert "aranami-check-job=" in output
             assert "wpTextbox1=" not in output
             assert "wpPreview" not in output
             assert 'id="consistency-userscript-code"' not in output
@@ -128,7 +128,7 @@ class TestConsistencyUserscript(TestCase):
         )
         assert fallback is not None
         assert "consistency-review-action" in fallback[1]
-        assert Interface("en").text("consistency.review_diff") in fallback[1]
+        assert Interface("en").text("consistency.prefill") in fallback[1]
 
     @staticmethod
     def test_api_returns_only_one_validated_ready_record_without_writes() -> (
@@ -238,8 +238,8 @@ class TestConsistencyUserscript(TestCase):
             )
             assert "// ==UserScript==" in response.text
             assert "@connect      aranami.toolforge.org" in response.text
-            assert "controls.diff.click()" in response.text
-            assert "wpPreview" not in response.text
+            assert "controls.preview.click()" in response.text
+            assert "wpPreview" in response.text
             assert "wpSave" not in response.text
             assert (
                 "form-action 'self'"

@@ -14,10 +14,12 @@ from __future__ import annotations
 import datetime as dt
 import re
 from dataclasses import dataclass, field, replace
+from functools import cache
 from typing import TYPE_CHECKING
 
 import mwparserfromhell
-from mwparserfromhell.nodes import Tag, Template
+from mwparserfromhell.nodes import Comment, Tag, Template, Text
+from opencc import OpenCC
 from pywikibot import Page
 from pywikibot.exceptions import InvalidTitleError
 from pywikibot.site import Namespace
@@ -46,6 +48,53 @@ _QUOTED_TAGS = {
     "templatedata",
     "blockquote",
     "q",
+}
+# Audited local banner sources on November 14, 2026. The collector
+# resolves redirects and script variants for these identities.
+HISTORY_BANNER_TEMPLATES = {
+    **dict.fromkeys(
+        (
+            "Featured article candidates",
+            "Featured article review",
+            "Featured list candidates",
+            "GA nominee",
+            "GA reassessment",
+            "Peer review",
+            "DYK Invite",
+            "跳至討論",
+            "跳至頁尾",
+            "Talk header",
+            "Notice",
+            "BLP",
+            "Warning",
+            "Censor",
+            "Controversial",
+            "Controversial-issues",
+            "FAQ",
+            "Not a forum",
+            "Not-fansite",
+            "Policy-civil",
+            "NoteTA",
+        ),
+        -1,
+    ),
+    **dict.fromkeys(
+        (
+            "WikiProject banner shell",
+            "WikiProject Video games",
+            "Image requested",
+            "To do",
+            "Consensus",
+            "Translated page",
+            "VRT-talk",
+            "Archive box",
+            "Archive box collapsible",
+            "Archives",
+            "Archive auto search",
+            "Talk archive",
+        ),
+        1,
+    ),
 }
 _MAX_OLDID = 2**63 - 1
 _MAX_OLDID_DIGITS = len(str(_MAX_OLDID))
@@ -706,13 +755,14 @@ def prepare_history_suggestions(  # ruff: ignore[too-many-arguments]
     )
 
 
-def prepare_section0_repair(
+def prepare_section0_repair(  # ruff: ignore[too-many-arguments]
     talk_text: str,
     suggestions: HomepageSuggestions,
     *,
     aliases: Iterable[str],
     legacy_dyk_aliases: Iterable[str],
     site: BaseSite,
+    banner_aliases: Mapping[str, Iterable[str]] | None = None,
 ) -> dict | None:
     """Bind prepared suggestions to literal targets in the exact lead.
 
@@ -722,6 +772,8 @@ def prepare_section0_repair(
         aliases: Source-verified Article history template identities.
         legacy_dyk_aliases: Source-verified standalone DYK identities.
         site: Existing local title rules, without source acquisition.
+        banner_aliases: Verified local aliases for the audited banner
+            identities, including simplified and traditional variants.
 
     Returns:
         Exact lead and nonoverlapping top-level target spans, or none
@@ -764,13 +816,84 @@ def prepare_section0_repair(
         offset += len(text)
     if set(targets) != wanted:
         return None
+    insertion = _history_insertion(
+        sections[0] if sections else code,
+        banner_aliases or {},
+        site,
+    )
+    if insertion is None:
+        return None
     return {
+        "history_insertion": insertion,
         "original_text": original,
         "history_template": targets[id(histories[0])] if histories else None,
         "legacy_dyk_templates": [targets[id(template)] for template in legacy],
         "parameters": dict(suggestions.parameters),
         "obsolete_parameters": list(suggestions.obsolete_parameters),
     }
+
+
+@cache
+def _banner_converter() -> OpenCC:
+    """Reuse character conversion for mixed-script banner names.
+
+    Returns:
+        The simplified-character converter, without source acquisition.
+    """
+    return OpenCC("t2s")
+
+
+def _banner_identity(value: str, site: BaseSite) -> str | None:
+    """Compare verified banner aliases across mixed Chinese scripts.
+
+    Returns:
+        A local identity with traditional characters simplified.
+    """
+    identity = _template_identity(value, site)
+    return _banner_converter().convert(identity) if identity else None
+
+
+def _history_insertion(
+    code: Wikicode,
+    aliases: Mapping[str, Iterable[str]],
+    site: BaseSite,
+) -> int | None:
+    """Place history after notices and before projects or archives.
+
+    Unknown calls and quoted examples retain their relative order.
+    Conflicting known banner groups withhold the automatic replacement.
+
+    Returns:
+        A top-level source boundary, or none for conflicting groups.
+    """
+    identities = {
+        _banner_identity(alias, site): position
+        for name, position in HISTORY_BANNER_TEMPLATES.items()
+        for alias in aliases.get(name, (name,))
+    }
+    before, after = 0, len(str(code))
+    offset = 0
+    leading = True
+    for node in code.nodes:
+        end = offset + len(str(node))
+        if isinstance(node, Comment) or (
+            isinstance(node, Text) and not str(node).strip()
+        ):
+            if leading:
+                before = end
+        else:
+            leading = False
+        if isinstance(node, Template):
+            position = identities.get(_banner_identity(str(node.name), site))
+            if position == -1:
+                before = end
+            elif position == 1:
+                after = min(after, offset)
+        offset = end
+    if before > after:
+        return None
+    # Start of the interval also precedes unfamiliar project banners.
+    return before
 
 
 def extract_dyk_archive_entry(

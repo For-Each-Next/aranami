@@ -11,9 +11,14 @@
 <section class="consistency-group" aria-labelledby="{{ section.key }}">
   <header class="consistency-group-heading"><h2 id="{{ section.key }}">{{ section.label }}</h2><span class="consistency-count">{{ section.total_count if section.total_count is not none else section.findings | length }}</span></header>
   <{{ 'div' if section.ordered else 'ul' }} class="consistency-findings consistency-cards{% if section.ordered %} consistency-history-cards{% endif %}">
-  {% for finding in section.findings %}{% if section.ordered %}{% with finding_ordinal=loop.index %}{% include "includes/consistency_finding.html" %}{% endwith %}{% else %}<li>{% include "includes/consistency_finding.html" %}</li>{% endif %}{% endfor %}
+  {% for finding in section.findings %}{% if section.ordered %}{% with finding_ordinal=section.offset + loop.index %}{% include "includes/consistency_finding.html" %}{% endwith %}{% else %}<li>{% include "includes/consistency_finding.html" %}</li>{% endif %}{% endfor %}
   </{{ 'div' if section.ordered else 'ul' }}>
-  {% if section.more_url %}<p class="consistency-more"><a href="{{ section.more_url }}">{{ t.consistency.view_all | replace('{count}', section.total_count | string) }}</a></p>{% endif %}
+  {% if section.pagination %}<nav class="history-pagination consistency-pagination" aria-label="{{ section.label }}">
+    {% for name, relation, label in [('previous', 'prev', t.backlog.previous), ('next', 'next', t.backlog.next)] %}
+    {% if name == 'next' %}<span>{{ section.pagination.label }}</span>{% endif %}
+    {% if section.pagination[name] %}<a class="ui-button ui-button--fake-button ui-button--fake-button--enabled" href="{{ section.pagination[name] }}" rel="{{ relation }}">{{ label }}</a>{% else %}<button class="ui-button" type="button" disabled>{{ label }}</button>{% endif %}
+    {% endfor %}
+  </nav>{% endif %}
 </section>
 {% endfor %}
 </div>

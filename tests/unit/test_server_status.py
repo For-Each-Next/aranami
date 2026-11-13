@@ -4,6 +4,7 @@
 # ruff: file-ignore[private-member-access, pytest-unittest-raises-assertion, magic-value-comparison]
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
@@ -91,6 +92,7 @@ class TestServerStatus(TestCase):
         """Compare consecutive CPU counters and allocation limits."""
         values = {
             "memory.current": "104857600",
+            "memory.stat": "inactive_file 41943040",
             "memory.max": "4294967296",
             "cpu.max": "200000 100000",
             "cpu.stat": "usage_usec 3000000\nuser_usec 2000000",
@@ -100,7 +102,7 @@ class TestServerStatus(TestCase):
             patch.object(
                 server_status,
                 "_read",
-                side_effect=lambda path: values.get(path.name, ""),
+                side_effect=lambda path, **_kwargs: values.get(path.name, ""),
             ),
             patch.object(
                 server_status.time,
@@ -114,9 +116,56 @@ class TestServerStatus(TestCase):
         assert first["cpu_percent"] is None
         assert second["cpu_percent"] == 50
         assert second["cpu_limit"] == 2
-        assert second["memory_bytes"] == 104_857_600
+        assert second["memory_bytes"] == 62_914_560
         assert second["memory_limit_bytes"] == 4_294_967_296
         assert validate_runtime(second) == second
+
+    @staticmethod
+    def test_memory_excludes_only_inactive_file_cache() -> None:
+        """Read late counters and retain active and anonymous pages."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "memory.current").write_text("4294668288")
+            (root / "memory.stat").write_text(
+                "anon 826122240\nfile 3389153280\nkernel 76255232\n"
+                "file_mapped 47435776\nfile_dirty 0\nfile_writeback 0\n"
+                "inactive_anon 0\nactive_anon 826122240\n"
+                "inactive_file 2760331264\nactive_file 629092352\n",
+            )
+            assert server_status._memory_working_set(root) == 1_534_337_024
+
+    def test_memory_preserves_zero_and_unknown_counters(self) -> None:
+        """Handle unavailable statistics and counter sampling races."""
+        cases = (
+            ("100", "inactive_file 40", 60),
+            ("100", "inactive_file 0", 100),
+            ("0", "inactive_file 0", 0),
+            ("100", "inactive_file 101", 0),
+            ("100", "active_file 40", None),
+            ("100", "", None),
+            ("100", "inactive_file -1", None),
+            ("100", "inactive_file invalid", None),
+            ("100", "inactive_file " + "9" * 20, None),
+            ("100", "inactive_file", None),
+            ("100", None, None),
+            ("max", "inactive_file 40", None),
+            ("", "inactive_file 40", None),
+            (None, "inactive_file 40", None),
+        )
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for current, stat, expected in cases:
+                with self.subTest(current=current, stat=stat):
+                    for name, content in (
+                        ("memory.current", current),
+                        ("memory.stat", stat),
+                    ):
+                        path = root / name
+                        if content is None:
+                            path.unlink(missing_ok=True)
+                        else:
+                            path.write_text(content)
+                    assert server_status._memory_working_set(root) == expected
 
     @staticmethod
     def test_missing_and_unlimited_resources_remain_unknown() -> None:

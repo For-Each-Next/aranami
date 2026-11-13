@@ -123,8 +123,9 @@ Homepage-history findings combine missing fields into numbered semantic article
 cards, ordered by the latest affected display. Each card provides the parameter
 changes to copy and a compact disclosure containing every retained appearance
 and its evidence. Current correct values and populated notice slots are kept.
-The overview renders ten recent articles and links to the complete paginated
-worklist; history cards do not use nested list wrappers.
+The overview shows ten articles per page with Previous and Next controls in
+the same history group. Numbering continues across pages, and the talk-page
+link appears beside the article title; history cards use direct article markup.
 FA/GA keep repeated dates in one field, for example
 `maindateFA = <!-- 2018-10-30, 2022-07-23 --> 2026-10-13`.
 Only comments containing complete dates and separators establish older
@@ -196,27 +197,43 @@ or report rendering.
 
 ## Review a prepared talk-header repair
 
-Install the Tampermonkey script linked on `/checks/`, then select **View changes**
-on a ready homepage-history finding. The link opens that talk page's source
-editor at section 0. The script reads the saved correction from Aranami, fills
-the complete fixed header and edit summary, and opens Wikipedia's diff. Saving
-is a separate manual action in the wiki editor.
+Install or update the Tampermonkey script linked on `/checks/`, then select
+**Auto-fill content** beside **Copy wikitext** on a ready homepage-history
+finding. A new tab opens the talk page's source editor at section 0, with
+`aranami-check-job=<id>` selecting a saved proposal on Toolforge. The script
+fetches that proposal, replaces the complete lead and edit summary, and opens
+Wikipedia's native preview. Review and save the edit in Wikipedia.
 
-The query carries an opaque repair ID, not wikitext or an arbitrary endpoint.
+The query carries an opaque repair ID. The fixed Toolforge API resolves it
+to the already prepared source; neither wikitext nor an endpoint enters the link.
 The read-only API returns only a validated ready proposal and its source title,
 revision and timestamp. The script checks these against the current editor and
 original text, including existing drafts. Changed or unavailable observations
 remain untouched. It supports the native textarea and WikiEditor's textSelection
-integration and never invokes Preview or Save.
+integration on both `/wiki/Talk:...` and `/w/index.php` source-edit URLs.
+It invokes Preview once and leaves publication to the editor.
 
 Collection retains one bounded exact header and repair plan per checked talk
 revision. Runtime delegates span-based projection to updater before saving the
 website snapshot. The web layer only reads that result. Missing or ambiguous
 destinations, targets outside section 0 and legacy notices whose metadata cannot
 be preserved do not receive an automatic action. Parameter snippets remain
-available for manual review. The compact website snapshot keeps complete source
-and output pairs within its eight MiB limit, omitting unavailable action links.
-The separate Parquet cache retains every acquired repair input.
+available for manual review. A separate bounded Parquet projection retains ready source and output pairs,
+so the eight MiB dashboard limit does not remove otherwise ready buttons.
+Checks and the repair API read that projection only when its observation matches
+the dashboard; missing or invalid proposals remain unavailable.
+
+The collector resolves Chinese banner names and redirects, including simplified
+and traditional forms, before choosing the Article history insertion point.
+Following the [talk-page layout reference](https://en.wikipedia.org/wiki/Wikipedia:Talk_page_layout#Lead_(bannerspace)),
+it places history after active nominations, talk headers and guideline notices,
+and before project banners, attribution and archives. Unrelated source remains
+unchanged. Verified local roots include
+[Talk header](https://zh.wikipedia.org/w/index.php?title=Template:Talk_header&oldid=95576082),
+[WikiProject banner shell](https://zh.wikipedia.org/w/index.php?title=Template:WikiProject_banner_shell&oldid=95284439),
+[WikiProject Video games](https://zh.wikipedia.org/w/index.php?title=Template:WikiProject_Video_games&oldid=92848131),
+and [GA nominee](https://zh.wikipedia.org/w/index.php?title=Template:GA_nominee&oldid=88861323).
+Ambiguous layouts require manual review.
 
 ## Quarterly fill suggestions
 

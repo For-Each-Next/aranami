@@ -5,6 +5,24 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.3 (2026-11-13 23:05 UTC)
+
+Overview: Corrected the saved talk-page prefill workflow, placed Article history
+using verified Chinese banner aliases, made consistency results directly
+pageable with clearer article and talk-page links, and corrected the displayed
+container memory working set.
+
+- Added Auto-fill content beside Copy wikitext, opening section zero in a new
+  Wikipedia tab with a saved Toolforge job ID and native preview.
+- Resolved Chinese template redirects and script variants to place Article
+  history after introductory notices and before project banners.
+- Retained ready proposals in a separate bounded Parquet projection so dashboard
+  capacity no longer suppressed otherwise available prefill actions.
+- Replaced the history overview's full-list link with Previous and Next controls
+  and moved each talk-page link beside its article title.
+- Excluded inactive filesystem cache from displayed container memory usage while
+  retaining active pages and unknown results for unavailable counters.
+
 ### 0.9.2 (2026-11-13 17:00 UTC)
 
 Overview: Consolidated the saved-data Django website, Toolforge scheduling,

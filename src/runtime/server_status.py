@@ -17,15 +17,15 @@ _PREVIOUS_CPU: tuple[float, float, float | None] | None = None
 _MAX_COUNTER_DIGITS = 19
 
 
-def _read(path: Path) -> str:
+def _read(path: Path, *, limit: int = 128) -> str:
     """Read one small local resource observation, or an empty value.
 
     Returns:
-        At most 128 characters without propagating unavailable files.
+        At most the requested character limit, or empty on read failure.
     """
     try:
         with path.open(encoding="ascii") as stream:
-            return stream.read(128).strip()
+            return stream.read(limit).strip()
     except OSError, UnicodeError:
         return ""
 
@@ -43,12 +43,37 @@ def _positive_integer(value: str) -> int | None:
     )
 
 
+def _memory_working_set(root: Path) -> int | None:
+    """Measure container memory excluding inactive filesystem cache.
+
+    Args:
+        root: The running container's cgroup v2 directory.
+
+    Returns:
+        Total usage minus inactive file pages, clamped to zero because
+        counters are sampled separately. Missing or invalid counters
+        remain unknown instead of reverting to cache-inclusive usage.
+    """
+    current = _positive_integer(_read(root / "memory.current"))
+    if current is None:
+        return None
+    for line in _read(root / "memory.stat", limit=8192).splitlines():
+        match line.split():
+            case ["inactive_file", value]:
+                inactive = _positive_integer(value)
+                if inactive is None:
+                    return None
+                return max(0, current - inactive)
+    return None
+
+
 def sample_runtime() -> dict[str, object]:
     """Observe the hub environment and its Linux cgroup allocation.
 
     CPU percentages measure time used since the preceding observation;
-    one fully used core is 100%. Memory values cover the hub container.
-    Missing cgroup files leave the associated measurements unknown.
+    one fully used core is 100%. Memory reports the hub container's
+    working set, excluding inactive file cache, against its allocation.
+    Missing cgroup counters leave the associated measurements unknown.
 
     Returns:
         Bounded environment and resource facts for a saved heartbeat.
@@ -88,7 +113,7 @@ def sample_runtime() -> dict[str, object]:
         "python": platform.python_version(),
         "system": platform.system(),
         "machine": platform.machine(),
-        "memory_bytes": _positive_integer(_read(root / "memory.current")),
+        "memory_bytes": _memory_working_set(root),
         "memory_limit_bytes": _positive_integer(_read(root / "memory.max")),
         "cpu_percent": percent,
         "cpu_limit": cpu_limit,

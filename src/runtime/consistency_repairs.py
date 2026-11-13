@@ -12,7 +12,8 @@ import logging
 from collections import Counter
 from typing import TYPE_CHECKING
 
-from data.consistency import MAX_REPAIR_INPUT_BYTES
+from data.caching import consistency as consistency_cache
+from data.consistency import MAX_REPAIR_INPUT_BYTES, valid_result
 from data.website import MAX_SNAPSHOT_BYTES, save_snapshot
 from updater.services.zhwiki.consistency_repairs import (
     render_section0_repair,
@@ -25,16 +26,23 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-def prepare_snapshot_repairs(snapshot: dict) -> dict:
+def prepare_snapshot_repairs(
+    snapshot: dict,
+    *,
+    max_bytes: int | None = None,
+) -> dict:
     """Attach ready proposals without modifying acquired cached facts.
 
     Args:
         snapshot: Complete or initial-progress website observation.
+        max_bytes: Independent result or compact dashboard byte limit.
 
     Returns:
         The original snapshot when there are no repair inputs, otherwise
         a detached envelope containing successfully projected headers.
     """
+    if max_bytes is None:
+        max_bytes = MAX_SNAPSHOT_BYTES
     consistency = snapshot.get("consistency")
     if not isinstance(consistency, dict) or not consistency.get(
         "repair_inputs",
@@ -65,12 +73,12 @@ def prepare_snapshot_repairs(snapshot: dict) -> dict:
             separators=(",", ":"),
         ).encode(),
     )
-    if base_bytes > MAX_SNAPSHOT_BYTES:
+    if base_bytes > max_bytes:
         return result
     inputs, repairs = _prepare_repairs(
         consistency["repair_inputs"],
         references,
-        MAX_SNAPSHOT_BYTES - base_bytes,
+        max_bytes - base_bytes,
     )
     result["consistency"]["repair_inputs"] = inputs
     result["consistency"]["section0_repairs"] = repairs
@@ -91,7 +99,7 @@ def _prepare_repairs(
     Args:
         records: Complete acquired inputs from the separate cache.
         references: Number of finding links for each input identity.
-        remaining: Remaining compact dashboard capacity.
+        remaining: Remaining selected result capacity.
 
     Returns:
         Detached input and output maps that fit every applicable limit.
@@ -141,11 +149,24 @@ def _prepare_repairs(
 
 
 def save_dashboard_snapshot(path: Path, snapshot: dict) -> None:
-    """Project source-backed repairs and atomically retain the snapshot.
+    """Retain complete repairs before replacing the compact snapshot.
+
+    Checks and the correction API can read the separate bounded Parquet
+    result when its check timestamp matches the dashboard. The dashboard
+    retains complete corrections within its shared size limit.
 
     Args:
         path: Existing website snapshot destination.
         snapshot: Acquired facts and optional prepared repair inputs.
 
     """
+    complete = prepare_snapshot_repairs(
+        {"consistency": snapshot.get("consistency")},
+        max_bytes=consistency_cache.MAX_CACHE_BYTES,
+    ).get("consistency")
+    if valid_result(complete):
+        consistency_cache.save(
+            path.with_name("consistency-repairs.parquet"),
+            {"data": complete},
+        )
     save_snapshot(path, prepare_snapshot_repairs(snapshot))

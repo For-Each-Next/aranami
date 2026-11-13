@@ -2083,6 +2083,10 @@ footer nav {
     margin-block: 1rem;
 }
 
+.consistency-pagination {
+    flex-wrap: wrap;
+}
+
 .server-work-list {
     margin: 0;
     padding-inline-start: 1.25rem;

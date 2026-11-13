@@ -280,6 +280,11 @@ sample remains separate from execution history; readers accept only fresh
 samples from the exact running hub boot. The socket watcher shares file checks
 across subscribers, with one-second HTTP fallback on server-status panels.
 
+The Memory value shows the hub container's working set against its allocation:
+`memory.current - inactive_file` from cgroup v2, clamped to zero. This excludes
+inactive filesystem cache while retaining active file pages, anonymous memory
+and kernel allocations. Missing counters display as unknown. The calculation
+does not reclaim caches or change the container's memory limit.
 
 Support English, Simplified Chinese and Traditional Chinese. Query language
 precedes the one-year cookie and Accept-Language. Preserve canonical source

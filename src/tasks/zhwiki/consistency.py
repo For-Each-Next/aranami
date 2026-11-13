@@ -43,6 +43,7 @@ from tasks.consistency_evidence import issue, source_evidence
 from tasks.zhwiki import article_history, homepage, homepage_archives, reviews
 from tasks.zhwiki.consistency_lists import collect_list_checks
 from tasks.zhwiki.homepage_parameters import (
+    HISTORY_BANNER_TEMPLATES,
     AmbiguousArticleHistoryError,
     HomepageAppearance,
     HomepageSuggestions,
@@ -1289,6 +1290,7 @@ def _retain_section0_repair(
         aliases=context.aliases["Article history"],
         legacy_dyk_aliases=context.aliases["DYKtalk"],
         site=context.read.site,
+        banner_aliases=context.aliases,
     )
     if facts is None:
         return
@@ -1362,7 +1364,12 @@ def _attach_homepage_details(  # ruff: ignore[complex-structure, too-many-branch
     context.observations.update(
         _observations(read.site, titles - context.observations.keys()),
     )
-    for name in ("Article history", "DYKtalk", "DYKEntry/archive"):
+    for name in (
+        "Article history",
+        "DYKtalk",
+        "DYKEntry/archive",
+        *HISTORY_BANNER_TEMPLATES,
+    ):
         if name not in context.aliases:
             context.aliases[name] = template_aliases(read.site, name)
     grouped = dict(

@@ -19,7 +19,7 @@ from shared.support.cache import ParquetCache
 if TYPE_CHECKING:
     from pathlib import Path
 
-_MAX_BYTES = 8 * 1024 * 1024
+MAX_CACHE_BYTES = 16 * 1024 * 1024
 _MAX_ROWS = 20_065
 _FINDING_SCHEMA = {
     **dict.fromkeys(
@@ -73,7 +73,7 @@ _CACHE = ParquetCache(
     schema=_SCHEMA,
     contract="consistency-projection:2",
     max_rows=_MAX_ROWS,
-    max_bytes=_MAX_BYTES,
+    max_bytes=MAX_CACHE_BYTES,
 )
 _LEGACY_CACHE = replace(_CACHE, contract="consistency-projection:1")
 
@@ -116,7 +116,7 @@ def save(path: Path, record: dict[str, object]) -> None:
                         if key not in schema
                     }),
                 })
-    if len(rows) > _MAX_ROWS or len(_json(record).encode()) > _MAX_BYTES:
+    if len(rows) > _MAX_ROWS or len(_json(record).encode()) > MAX_CACHE_BYTES:
         message = "Consistency projection exceeds its cache bounds."
         raise ValueError(message)
     header = {
@@ -240,7 +240,7 @@ def _read(path: Path) -> dict[str, object]:
         message = "An empty consistency projection cannot contain records."
         raise ValueError(message)
     result = {**header["envelope"], "data": data}
-    if len(_json(result).encode()) > _MAX_BYTES:
+    if len(_json(result).encode()) > MAX_CACHE_BYTES:
         message = "Decoded consistency projection exceeds its bound."
         raise ValueError(message)
     return result

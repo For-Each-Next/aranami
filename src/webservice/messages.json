@@ -4499,15 +4499,15 @@
     "zh-hans": "重要度分布将在下一次后台更新后显示。",
     "zh-hant": "重要度分布將在下一次背景更新後顯示。"
   },
-  "consistency.review_diff": {
-    "en": "Edit and view changes",
-    "zh-hans": "编辑并查看差异",
-    "zh-hant": "編輯並檢視差異"
+  "consistency.prefill": {
+    "en": "Auto-fill content",
+    "zh-hans": "自动预填内容",
+    "zh-hant": "自動預填內容"
   },
   "consistency.userscript_note": {
-    "en": "With this Tampermonkey script installed, Edit and view changes fills the talk-page lead and edit summary, then opens the diff for review.",
-    "zh-hans": "安装此Tampermonkey脚本后，点击“编辑并查看差异”会填写讨论页首段及编辑摘要，再打开差异供检查。",
-    "zh-hant": "安裝此Tampermonkey指令碼後，點選「編輯並檢視差異」會填入討論頁首段及編輯摘要，再開啟差異供檢查。"
+    "en": "With this Tampermonkey script installed, Auto-fill content loads the prepared talk-page lead from Aranami in a new tab and opens a preview. Review and save it in Wikipedia.",
+    "zh-hans": "安装此 Tampermonkey 脚本后，点击“自动预填内容”会在新标签页从 Aranami 载入预先生成的讨论页序言及编辑摘要，并自动预览。请检查后在维基百科保存。",
+    "zh-hant": "安裝此 Tampermonkey 指令碼後，點選「自動預填內容」會在新分頁從 Aranami 載入預先產生的討論頁序言及編輯摘要，並自動預覽。請檢查後在維基百科儲存。"
   },
   "consistency.userscript_install": {
     "en": "Install / download script",

@@ -36,6 +36,7 @@ from data.articles.quality_analysis import (
     read_quality_analysis,
 )
 from data.articles.quality_authors import read_quality_authors
+from data.caching import consistency as consistency_cache
 from data.caching.game_titles import (
     DEFAULT_PATH as GAME_TITLES_PATH,
     read_game_title_labels,
@@ -1211,17 +1212,24 @@ class _PublicViews:
         navigation: dict[str, object],
     ) -> HttpResponseBase:
         """Return saved worklists or the separate checks page."""
-        if navigation["path"] == "/checks/" and not parameters:
-            return _html(
-                pages.render_consistency_checks(
+        snapshot = self._with_consistency_repairs(snapshot)
+        if navigation["path"] == "/checks/" and set(parameters) <= {"page"}:
+            try:
+                content = pages.render_consistency_checks(
                     snapshot,
                     read_status(self.runtime),
                     _configuration(),
                     locale,
                     navigation=navigation,
-                ),
-                locale,
-            )
+                    parameters=parameters,
+                )
+            except ValueError:
+                return _page_error(
+                    "backlog.not_found",
+                    locale,
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return _html(content, locale)
         if navigation["path"] == "/checks/" and not (
             len(parameters.get("task", [])) == 1
             and parameters["task"][0].startswith("consistency_")
@@ -1279,6 +1287,7 @@ class _PublicViews:
                 "cache",
                 "cache/toolforge",
                 "cache/toolforge/dashboard.json",
+                "cache/toolforge/consistency-repairs.parquet",
                 str(GAME_TITLES_PATH),
                 "state",
                 "state/observability",
@@ -1333,6 +1342,36 @@ class _PublicViews:
                 return value
         return None
 
+    def _with_consistency_repairs(
+        self,
+        snapshot: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        """Read complete corrections for the selected check generation.
+
+        Returns:
+            A detached snapshot with the matching prepared consistency
+            result, or the compact snapshot when that result is missing,
+            malformed or belongs to another check timestamp.
+        """
+        consistency = (snapshot or {}).get("consistency")
+        if (
+            not isinstance(consistency, dict)
+            or (self.runtime / "cache").is_symlink()
+        ):
+            return snapshot
+        try:
+            record = consistency_cache.read(
+                self.runtime / "cache/toolforge/consistency-repairs.parquet",
+            )
+        except OSError, ValueError, TypeError, RecursionError, OverflowError:
+            return snapshot
+        prepared = record.get("data")
+        if isinstance(prepared, dict) and prepared[
+            "checked_at"
+        ] == consistency.get("checked_at"):
+            return {**snapshot, "consistency": prepared}
+        return snapshot
+
     def api(self, request: ASGIRequest) -> HttpResponseBase:
         """Return data through its runtime validation contract."""
         kind = request.path.rsplit("/", 1)[-1]
@@ -1379,7 +1418,7 @@ class _PublicViews:
             )
         ):
             return _error(HTTPStatus.BAD_REQUEST)
-        snapshot = self._dashboard()
+        snapshot = self._with_consistency_repairs(self._dashboard())
         repair = review_repair(
             (snapshot or {}).get("consistency") or {},
             selected[0],

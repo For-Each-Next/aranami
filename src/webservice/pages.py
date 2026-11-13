@@ -1630,13 +1630,14 @@ def render_maintenance_overview(  # ruff: ignore[too-many-arguments]
     return _render("backlog.html", context)
 
 
-def render_consistency_checks(
+def render_consistency_checks(  # ruff: ignore[too-many-arguments]
     snapshot: Record | None,
     status: Record | None,
     config: Record | None,
     locale: str,
     *,
     navigation: Record | None = None,
+    parameters: dict[str, list[str]] | None = None,
 ) -> str:
     """Render independent maintenance checks grouped by issue type.
 
@@ -1646,11 +1647,23 @@ def render_consistency_checks(
         config: Application version and routine configuration.
         locale: Negotiated interface language.
         navigation: Request route and language choices.
+        parameters: Optional native page selection for homepage history.
 
     Returns:
         Escaped issue lists with evidence links, coverage and update
         time, independent of maintenance-category counts.
+
+    Raises:
+        ValueError: The page selection is duplicated or malformed.
     """
+    parameters = parameters or {}
+    if set(parameters) - {"page"}:
+        message = "Invalid consistency page query."
+        raise ValueError(message)
+    selection = maintenance_selection({
+        "task": ["consistency_history"],
+        **parameters,
+    })
     page = _Page(locale)
     context = page.context(page.text("consistency.heading"), live=True)
     context.update(
@@ -1658,36 +1671,66 @@ def render_consistency_checks(
     )
     coverage = coverage_status(snapshot, page.interface)
     coverage["updated"] = page.source_updated(coverage.get("observed_at"))
+    sections = []
+    for group in consistency_groups(snapshot, page.interface):
+        if not group["items"]:
+            continue
+        portion = maintenance_page(
+            group["items"],
+            selection["page"] if group["ordered"] else "1",
+            _CONSISTENCY_HISTORY_PREVIEW
+            if group["ordered"]
+            else len(group["items"]),
+        )
+        sections.append({
+            "key": group["key"],
+            "label": group["label"],
+            "ordered": group["ordered"],
+            "total_count": group["count"] if group["ordered"] else None,
+            "offset": portion["offset"],
+            "pagination": {
+                "label": page.text(
+                    "backlog.range",
+                    start=portion["offset"] + 1,
+                    end=portion["offset"] + len(portion["items"]),
+                    count=f"{group['count']:,}",
+                ),
+                **{
+                    name: local_url(
+                        "/checks/",
+                        page=number,
+                        lang=page.interface.locale,
+                    )
+                    + "#"
+                    + group["key"]
+                    if available
+                    else None
+                    for name, number, available in (
+                        (
+                            "previous",
+                            portion["page"] - 1,
+                            portion["page"] > 1,
+                        ),
+                        (
+                            "next",
+                            portion["page"] + 1,
+                            portion["page"] < portion["pages"],
+                        ),
+                    )
+                },
+            }
+            if group["ordered"] and portion["pages"] > 1
+            else None,
+            "findings": [
+                finding
+                for item in portion["items"]
+                for finding in finding_details(item, page.interface)
+            ],
+        })
     context.update(
         navigation=navigation,
         consistency_status=coverage,
-        consistency_sections=[
-            {
-                "key": group["key"],
-                "label": group["label"],
-                "ordered": group["ordered"],
-                "total_count": group["count"] if group["ordered"] else None,
-                "more_url": local_url(
-                    "/checks/",
-                    task="consistency_history",
-                    lang=page.interface.locale,
-                )
-                if group["ordered"]
-                and group["count"] > _CONSISTENCY_HISTORY_PREVIEW
-                else None,
-                "findings": [
-                    finding
-                    for item in (
-                        group["items"][:_CONSISTENCY_HISTORY_PREVIEW]
-                        if group["ordered"]
-                        else group["items"]
-                    )
-                    for finding in finding_details(item, page.interface)
-                ],
-            }
-            for group in consistency_groups(snapshot, page.interface)
-            if group["items"]
-        ],
+        consistency_sections=sections,
     )
     return _render("consistency.html", context)
 

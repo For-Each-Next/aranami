@@ -450,10 +450,8 @@ class TestConsistencyPresentation(TestCase):
         assert ">Game 13<" not in output
 
     @staticmethod
-    def test_checks_preview_keeps_the_total_and_links_to_every_article() -> (
-        None
-    ):
-        """Bound the preview and retain the complete worklist."""
+    def test_checks_pagination_keeps_total_and_reaches_every_article() -> None:
+        """Navigate the complete list on the checks overview."""
         snapshot = consistency_snapshot()
         snapshot["consistency"]["items"] = [
             row
@@ -471,13 +469,44 @@ class TestConsistencyPresentation(TestCase):
             assert output.index(">Game 13<") < output.index(">Game 04<")
             assert ">Game 03<" not in output
             assert (
-                'href="/checks/?task=consistency_history&amp;lang='
+                'href="/checks/?page=2&amp;lang='
                 + locale
-                + '"'
+                + '#consistency_history"'
             ) in output
             assert (
                 Interface(locale).text("consistency.view_all", count=13)
-                in output
+                not in output
+            )
+            assert 'rel="next"' in output
+            assert 'rel="prev"' not in output
+            later = render_consistency_checks(
+                snapshot,
+                None,
+                None,
+                locale,
+                parameters={"page": ["2"]},
+            )
+            assert later.count('class="ui-card consistency-card') == 3  # ruff: ignore[magic-value-comparison]
+            assert '<span class="consistency-count">13</span>' in later
+            assert '<span class="consistency-ordinal">11.</span>' in later
+            assert '<span class="consistency-ordinal">13.</span>' in later
+            assert later.index(">Game 03<") < later.index(">Game 01<")
+            assert ">Game 04<" not in later
+            assert 'rel="prev"' in later
+            assert 'rel="next"' not in later
+            assert (
+                'href="/checks/?page=1&amp;lang='
+                + locale
+                + '#consistency_history"'
+            ) in later
+            assert (
+                Interface(locale).text(
+                    "backlog.range",
+                    start=11,
+                    end=13,
+                    count="13",
+                )
+                in later
             )
             filtered = render_maintenance(
                 snapshot,
@@ -487,6 +516,74 @@ class TestConsistencyPresentation(TestCase):
             assert ">Game 03<" in filtered
             assert 'action="/checks/"' in filtered
             assert 'href="/checks/" class="back"' in filtered
+
+    @staticmethod
+    def test_checks_pages_preserve_other_groups_and_clamp_to_last_page() -> (
+        None
+    ):
+        """Page homepage history and safely clamp huge page numbers."""
+        snapshot = consistency_snapshot()
+        output = render_consistency_checks(
+            snapshot,
+            None,
+            None,
+            "en",
+            parameters={"page": ["9" * 1000]},
+        )
+        assert output.count('class="consistency-group"') == 6  # ruff: ignore[magic-value-comparison]
+        assert output.count('<ul class="consistency-findings ') == 5  # ruff: ignore[magic-value-comparison]
+        assert '<span class="consistency-ordinal">11.</span>' in output
+        assert '<span class="consistency-ordinal">13.</span>' in output
+        assert 'rel="next"' not in output
+
+    def test_checks_reject_malformed_or_duplicate_page_controls(self) -> None:
+        """Reject unsupported controls before selecting articles."""
+        for parameters in (
+            {"page": ["0"]},
+            {"page": ["-1"]},
+            {"page": ["01"]},
+            {"page": ["bad"]},
+            {"page": ["1", "2"]},
+            {"page": []},
+            {"q": ["Game"]},
+        ):
+            with (
+                self.subTest(parameters=parameters),
+                self.assertRaises(  # ruff: ignore[pytest-unittest-raises-assertion]
+                    ValueError,
+                ),
+            ):
+                render_consistency_checks(
+                    consistency_snapshot(),
+                    None,
+                    None,
+                    "en",
+                    parameters=parameters,
+                )
+
+    @staticmethod
+    def test_talk_link_sits_once_beside_the_numbered_article_title() -> None:
+        """Keep the talk destination beside the title in each locale."""
+        snapshot = consistency_snapshot()
+        finding = next(
+            row
+            for row in snapshot["consistency"]["items"]
+            if row["kind"] == "homepage_history"
+        )
+        snapshot["consistency"]["items"] = [finding]
+        for locale in ("en", "zh-hans", "zh-hant"):
+            output = render_consistency_checks(snapshot, None, None, locale)
+            heading = output.split('<h3 id="consistency-', 1)[1].split(
+                "</h3>",
+                1,
+            )[0]
+            talk = f'href="{finding["talk_url"]}"'
+            assert '<span class="consistency-ordinal">1.</span>' in heading
+            assert ">Game 01<" in heading
+            assert '<span class="consistency-talk">' in heading
+            assert talk in heading
+            assert output.count(talk) == 1
+            assert Interface(locale).text("consistency.talk") in heading
 
     @staticmethod
     def test_compact_cards_keep_history_separate_from_needed_updates() -> None:

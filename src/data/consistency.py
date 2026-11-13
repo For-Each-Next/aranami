@@ -26,8 +26,8 @@ _MAX_URL = 4096
 _MAX_SUGGESTED_PARAMETERS = 3000
 _MAX_LEGACY_DYK_TEMPLATES = 1000
 _MAX_APPEARANCES = 1000
-MAX_REPAIR_INPUTS = 256
-MAX_REPAIR_INPUT_BYTES = 2 * 1024 * 1024
+MAX_REPAIR_INPUTS = 2048
+MAX_REPAIR_INPUT_BYTES = 4 * 1024 * 1024
 MAX_REPAIR_TEXT_BYTES = 128 * 1024
 _MAX_EDIT_SUMMARY_BYTES = 255
 _REPAIR_FIELDS = {
@@ -452,7 +452,10 @@ def valid_repair_input(value: object) -> bool:
     Returns:
         Whether source guards, spans and bounded literal facts agree.
     """
-    if not isinstance(value, dict) or set(value) != _REPAIR_FIELDS:
+    if not isinstance(value, dict) or set(value) not in (
+        _REPAIR_FIELDS,
+        _REPAIR_FIELDS | {"history_insertion"},
+    ):
         return False
     try:
         original = value["original_text"]
@@ -486,8 +489,20 @@ def valid_repair_input(value: object) -> bool:
             [*legacy, *([history] if history is not None else [])],
             key=itemgetter("start"),
         )
+        insertion = value.get("history_insertion")
         return (
-            all(
+            (
+                (insertion is None and "history_insertion" not in value)
+                or (
+                    type(insertion) is int
+                    and 0 <= insertion <= len(original)
+                    and not any(
+                        span["start"] < insertion < span["end"]
+                        for span in spans
+                    )
+                )
+            )
+            and all(
                 left["end"] <= right["start"]
                 for left, right in pairwise(spans)
             )

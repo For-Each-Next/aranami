@@ -1,8 +1,9 @@
-# Aranami archive
+# Aranami
 
-This repository preserves the final Aranami v0.9.2 source. Development after
-v0.8.8 was consolidated into one commit. The deployed Toolforge service runs
-independently of this read-only GitHub archive.
+This repository preserves the final Aranami v0.9.3 source. The v0.9.2 archive
+consolidated unpublished development after v0.8.8; v0.9.3 adds the corrected
+consistency prefill workflow, direct pagination and memory display. Toolforge
+operation remains independent of this read-only GitHub archive.
 
 Aranami (荒波, “rough waves”) maintains Wikipedia project reports and provides
 article-maintenance tools and newsletter drafts. It serves
@@ -80,9 +81,9 @@ refetched. Project snapshots always come from new complete queries.
 [Architecture](docs/architecture.md) defines ownership, data and migration.
 The [documentation index](docs/README.md) links component references.
 
-The final source is retained on `trunk` and tagged `v0.9.2` in
+The final source is retained on `trunk` and tagged `v0.9.3` in
 [aranami-old](https://github.com/For-Each-Next/aranami-old).
-[CHANGELOG](CHANGELOG.md) records the consolidated release.
+[CHANGELOG](CHANGELOG.md) records the completed releases.
 Historical records remain available through normal data readers after old-format
 extractors retire. Source is licensed under [CC0 1.0 Universal](LICENSE);
 upstream content and bundled assets retain their attributed licenses.

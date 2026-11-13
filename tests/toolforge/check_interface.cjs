@@ -893,7 +893,7 @@ async function checkInterface(assetRoot) {
                     const evidence = await evaluate(`(() => ({
                         tables: document.querySelectorAll('.maintenance-table').length,
                         findings: document.querySelectorAll('.consistency-findings article.consistency-card').length,
-                        talk: document.querySelectorAll('.consistency-findings a[href*="/Talk:"], .consistency-findings a[href*="_talk:"]').length,
+                        talk: document.querySelectorAll('.consistency-findings .consistency-talk a').length,
                         sources: document.querySelectorAll('.consistency-findings a[href*="oldid="]').length,
                         dated: [...document.querySelectorAll('.consistency-findings time')].every(time => Boolean(time.dateTime)),
                         native: [...document.querySelectorAll('.consistency-worklist form')].every(form => form.method === 'get'),
@@ -915,14 +915,14 @@ async function checkInterface(assetRoot) {
                             const target = new URL(actions[0].href);
                             return {install: new URL(install.href).pathname,
                                 actions: actions.length, origin: target.origin, path: target.pathname,
-                                title: target.searchParams.get('title'), action: target.searchParams.get('action'),
-                                section: target.searchParams.get('section'), id: /^[a-f0-9]{64}$/.test(target.searchParams.get('aranami-repair')),
+                                title: decodeURIComponent(target.pathname.slice('/wiki/'.length)).replaceAll('_', ' '), action: target.searchParams.get('action'),
+                                section: target.searchParams.get('section'), id: /^[a-f0-9]{64}$/.test(target.searchParams.get('aranami-check-job')),
                                 fields: [...target.searchParams.keys()].sort(),
                                 inactive: !document.getElementById('aranami-repair-status')};
                         })()`);
                         assert.deepEqual(handoff, {install: '/consistency-repair.user.js', actions: 1,
-                            origin: 'https://zh.wikipedia.org', path: '/w/index.php', title: 'Talk:Game 01', action: 'edit', section: '0', id: true,
-                            fields: ['action', 'aranami-repair', 'section', 'title'], inactive: true},
+                            origin: 'https://zh.wikipedia.org', path: '/wiki/Talk:Game_01', title: 'Talk:Game 01', action: 'edit', section: '0', id: true,
+                            fields: ['action', 'aranami-check-job', 'section'], inactive: true},
                         'ready repairs link the current talk lead and install script without caller code or automatic page edits');
                         const adjacent = await evaluate(`(() => {
                             const action = document.querySelector('.consistency-review-action');
@@ -936,31 +936,31 @@ async function checkInterface(assetRoot) {
                                 desktopRow: innerWidth <= 640 || Math.abs(target.top - button.top) < 1,
                                 label: action.textContent};
                         })()`);
-                        assert.deepEqual(adjacent, {shared: true, contained: true, desktopRow: true, label: interfaceMessages['consistency.review_diff'][locale]},
-                            'edit-and-diff sits beside Copy before its status, with contained mobile wrapping');
+                        assert.deepEqual(adjacent, {shared: true, contained: true, desktopRow: true, label: interfaceMessages['consistency.prefill'][locale]},
+                            'auto-fill sits beside Copy before its status, with contained mobile wrapping');
                         const userscriptSource = fs.readFileSync(path.join(assetRoot, 'consistency-repair.user.js'), 'utf8');
-                        const nativeDiff = await evaluate(`(async () => {
+                        const nativePreview = await evaluate(`(async () => {
                             const form = document.createElement('form');
                             form.id = 'editform';
                             form.hidden = true;
                             form.action = 'https://zh.wikipedia.org/w/index.php?title=Talk%3AGame%2001&action=submit';
-                            form.innerHTML = '<textarea id="wpTextbox1" name="wpTextbox1"></textarea><input id="wpSummary" name="wpSummary"><input name="wpSection" value="0"><input name="editRevId" value="201"><input name="wpEdittime" value="20261102140000"><button id="wpDiff" name="wpDiff">Diff</button>';
+                            form.innerHTML = '<textarea id="wpTextbox1" name="wpTextbox1"></textarea><input id="wpSummary" name="wpSummary"><input name="wpSection" value="0"><input name="editRevId" value="201"><input name="wpEdittime" value="20261102140000"><button id="wpPreview" name="wpPreview">Preview</button>';
                             document.body.append(form);
                             const original = '<!-- keep -->\\n{{Article history|currentstatus=GA}}\\n';
                             const fixed = original.replace('|currentstatus=GA', '|currentstatus=GA|maindateGA=2026-10-30');
                             const summary = 'Update recorded homepage appearances.';
                             form.querySelector('#wpTextbox1').value = original + '\\n';
                             form.querySelector('#wpSummary').value = '/* */ ';
-                            const id = new URL(document.querySelector('.consistency-review-action').href).searchParams.get('aranami-repair');
+                            const id = new URL(document.querySelector('.consistency-review-action').href).searchParams.get('aranami-check-job');
                             const config = {wgNamespaceNumber: 1, wgPageName: 'Talk:Game_01', wgCurRevisionId: 201, wgArticleId: 101, wgUserLanguage: document.documentElement.lang};
                             const requests = [];
                             let clicks = 0;
                             let cleared = false;
                             form.addEventListener('submit', event => event.preventDefault());
-                            form.querySelector('#wpDiff').addEventListener('click', event => {event.preventDefault(); clicks++;});
-                            const handoffURL = new URL('https://zh.wikipedia.org/w/index.php?title=Talk%3AGame%2001&action=edit&section=0&aranami-repair=' + id);
+                            form.querySelector('#wpPreview').addEventListener('click', event => {event.preventDefault(); clicks++;});
+                            const handoffURL = new URL('https://zh.wikipedia.org/wiki/Talk:Game_01?action=edit&section=0&aranami-check-job=' + id);
                             new Function('location', 'history', 'unsafeWindow', 'GM_xmlhttpRequest', ${JSON.stringify(userscriptSource)})(handoffURL,
-                                {state: null, replaceState: (_state, _title, url) => {cleared = !new URL(url).searchParams.has('aranami-repair');}},
+                                {state: null, replaceState: (_state, _title, url) => {cleared = !new URL(url).searchParams.has('aranami-check-job');}},
                                 {mw: {config: {get: key => config[key]}, loader: {using: async () => {}}}},
                                 request => {requests.push(request.url); request.onload({status: 200, response: {schema: 1, repair: {
                                     id, title: 'Talk:Game 01', revision_id: 201, talk_page_id: 101, timestamp: '2026-11-02T14:00:00Z', original_text: original, text: fixed, edit_summary: summary,
@@ -973,8 +973,8 @@ async function checkInterface(assetRoot) {
                             delete document.documentElement.dataset.aranamiRepair;
                             return result;
                         })()`);
-                        assert.deepEqual(nativeDiff, {clicks: 1, requests: 1, source: true, summary: true, section: '0', revision: '201', cleared: true},
-                            'the userscript fills real native source controls and clicks the diff while preserving section and conflict guards');
+                        assert.deepEqual(nativePreview, {clicks: 1, requests: 1, source: true, summary: true, section: '0', revision: '201', cleared: true},
+                            'the userscript fills real native source controls and clicks preview while preserving section and conflict guards');
                         assert.ok(evidence.direct, 'homepage cards retain their labeled article semantics');
                         assert.equal(evidence.listTags, 0, 'homepage cards have no list wrappers');
                         assert.deepEqual(evidence.ordinals, Array.from({length: 10}, (_, index) => `${index + 1}.`), 'homepage card headings retain ordered numbering');

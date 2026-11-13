@@ -19,9 +19,9 @@ const payload = () => ({schema: 1, repair: {
 
 async function run(options = {}) {
   const calls = {requests: [], diff: 0, preview: 0, save: 0, changes: [], notices: [], observers: 0, disconnected: 0};
-  const location = new URL(options.url || `https://zh.wikipedia.org/w/index.php?title=Talk%3AGame&action=edit&section=0&aranami-repair=${id}`);
+  const location = new URL(options.url || `https://zh.wikipedia.org/w/index.php?title=Talk%3AGame&action=edit&section=0&aranami-check-job=${id}`);
   const fields = {wpSection: {value: "0"}, editRevId: {value: "201"}, wpEdittime: {value: "20261102140000"}};
-  const form = {action: `https://zh.wikipedia.org/w/index.php?title=Talk%3AGame&action=submit&aranami-repair=${id}`,
+  const form = {action: `https://zh.wikipedia.org/w/index.php?title=Talk%3AGame&action=submit&aranami-check-job=${id}`,
     elements: {namedItem: name => fields[name]}, prepend: notice => calls.notices.push(notice)};
   const control = value => ({form, value, dispatchEvent: event => calls.changes.push(event.type)});
   const controls = {
@@ -31,8 +31,9 @@ async function run(options = {}) {
     wpSave: {form, click: () => {calls.save++;}},
   };
   Object.assign(fields, options.fields || {});
+  if (options.formAction) form.action = options.formAction;
   if (options.wrongForm) controls.wpTextbox1.form = {};
-  if (options.disabledDiff) controls.wpDiff.disabled = true;
+  if (options.disabledPreview) controls.wpPreview.disabled = true;
   const config = {wgNamespaceNumber: 1, wgPageName: "Talk:Game", wgCurRevisionId: 201, wgArticleId: 2, wgUserLanguage: "en", ...options.config};
   let effectiveText = controls.wpTextbox1.value;
   const jquery = textbox => ({textSelection: (action, value) => {
@@ -47,7 +48,7 @@ async function run(options = {}) {
     createElement: () => ({setAttribute() {}, textContent: ""}),
   };
   const context = {
-    URL, TextEncoder, Event, location, document,
+    URL, TextEncoder, Event, location, document, window: {},
     history: {state: null, replaceState: (_state, _title, url) => {calls.replaced = url;}},
     unsafeWindow: {mw: {config: {get: key => config[key]}, loader: {using: async () => {}}}, ...(options.textSelection ? {jQuery: jquery} : {})},
     GM_xmlhttpRequest(request) {
@@ -68,16 +69,16 @@ async function run(options = {}) {
 }
 
 test("only explicit current talk-page section-zero links activate", async () => {
-  for (const tail of ["", `?title=Talk%3AGame&action=edit&section=1&aranami-repair=${id}`,
-    `?title=Talk%3AGame&action=edit&section=0&oldid=201&aranami-repair=${id}`,
-    `?title=Talk%3AGame&action=edit&section=0&aranami-repair=${id}&aranami-repair=${id}`,
-    "?title=Talk%3AGame&action=edit&section=0&aranami-repair=untrusted"]) {
+  for (const tail of ["", `?title=Talk%3AGame&action=edit&section=1&aranami-check-job=${id}`,
+    `?title=Talk%3AGame&action=edit&section=0&oldid=201&aranami-check-job=${id}`,
+    `?title=Talk%3AGame&action=edit&section=0&aranami-check-job=${id}&aranami-check-job=${id}`,
+    "?title=Talk%3AGame&action=edit&section=0&aranami-check-job=untrusted"]) {
     const {calls} = await run({url: "https://zh.wikipedia.org/w/index.php" + tail});
     assert.equal(calls.requests.length, 0);
     assert.equal(calls.diff, 0);
   }
   for (const options of [{config: {wgNamespaceNumber: 0}}, {missingEditor: true}, {wrongForm: true},
-    {disabledDiff: true}, {fields: {wpSection: {value: "1"}}}]) {
+    {disabledPreview: true}, {fields: {wpSection: {value: "1"}}}]) {
     const {calls} = await run(options);
     assert.equal(calls.requests.length, 0);
     assert.equal(calls.diff, 0);
@@ -85,7 +86,7 @@ test("only explicit current talk-page section-zero links activate", async () => 
   }
 });
 
-test("ready repair fills complete code and summary, and opens only the native diff", async () => {
+test("ready repair fills complete code and summary, and opens only the native preview", async () => {
   for (const textSelection of [false, true]) {
     const {calls, controls, fields} = await run({textSelection});
     assert.equal(calls.requests.length, 1);
@@ -97,11 +98,11 @@ test("ready repair fills complete code and summary, and opens only the native di
     assert.equal(fields.wpSection.value, "0");
     assert.equal(fields.editRevId.value, "201");
     assert.deepEqual(calls.changes, ["input", "change", "input", "change"]);
-    assert.equal(calls.diff, 1);
-    assert.equal(calls.preview, 0);
+    assert.equal(calls.diff, 0);
+    assert.equal(calls.preview, 1);
     assert.equal(calls.save, 0);
-    assert.equal(new URL(calls.replaced).searchParams.has("aranami-repair"), false);
-    assert.equal(new URL(controls.editform.action).searchParams.has("aranami-repair"), false);
+    assert.equal(new URL(calls.replaced).searchParams.has("aranami-check-job"), false);
+    assert.equal(new URL(controls.editform.action).searchParams.has("aranami-check-job"), false);
   }
 });
 
@@ -127,7 +128,7 @@ test("saved source guards reject stale heads, wrong destinations and modified dr
 test("only CRLF and one native appended newline are source equivalents", async () => {
   for (const initialText of [original.replaceAll("\n", "\r\n"), original + "\n"]) {
     const {calls, controls} = await run({initialText});
-    assert.equal(calls.diff, 1);
+    assert.equal(calls.preview, 1);
     assert.equal(controls.wpTextbox1.value, fixed);
   }
 });
@@ -151,7 +152,38 @@ test("invalid saved API responses and transport failures cannot fill or submit",
   }
 });
 
-test("the source has no automatic preview or save control", () => {
-  assert.equal(source.includes("wpPreview"), false);
+test("the source has no automatic diff or save control", () => {
+  assert.equal(source.includes("wpDiff"), false);
   assert.equal(source.includes("wpSave"), false);
+});
+
+test("pretty talk URLs fetch the saved job and preview its entire lead", async () => {
+  for (const title of ["Talk:Game", "Talk:海岛大亨系列", "讨论:海岛大亨系列", "討論:海岛大亨系列"]) {
+    const repair = {...payload().repair, title: title.replace(/^[^:]+:/, "Talk:")};
+    const {calls, controls} = await run({
+      url: `https://zh.wikipedia.org/wiki/${encodeURIComponent(title)}?action=edit&section=0&aranami-check-job=${id}`,
+      config: {wgPageName: repair.title},
+      formAction: `https://zh.wikipedia.org/w/index.php?title=${encodeURIComponent(title)}&action=submit`,
+      payload: {schema: 1, repair},
+    });
+    assert.equal(calls.requests.length, 1);
+    assert.equal(calls.requests[0].url, `https://aranami.toolforge.org/api/consistency-repair?repair=${id}`);
+    assert.equal(controls.wpTextbox1.value, fixed);
+    assert.equal(calls.preview, 1);
+    assert.equal(calls.diff + calls.save, 0);
+  }
+});
+
+test("URL titles cannot redirect a saved correction to a different page", async () => {
+  for (const options of [
+    {url: `https://zh.wikipedia.org/wiki/Talk:Other?action=edit&section=0&aranami-check-job=${id}`},
+    {url: `https://zh.wikipedia.org/wiki/Talk:Game?title=Talk:Other&action=edit&section=0&aranami-check-job=${id}`},
+    {url: `https://zh.wikipedia.org/wiki/Talk:%E0%A4?action=edit&section=0&aranami-check-job=${id}`},
+    {url: `https://zh.wikipedia.org/w/index.php?title=Talk:Game&title=Talk:Other&action=edit&section=0&aranami-check-job=${id}`},
+    {formAction: "https://zh.wikipedia.org/w/index.php?title=Talk:Other&action=submit"},
+  ]) {
+    const {calls, controls} = await run(options);
+    assert.equal(controls.wpTextbox1.value, original);
+    assert.equal(calls.changes.length + calls.preview + calls.diff + calls.save, 0);
+  }
 });

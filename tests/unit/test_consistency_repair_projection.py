@@ -35,6 +35,8 @@ _DYK = ("Template:DYKtalk",)
 def _record(
     text: str,
     appearances: tuple[HomepageAppearance, ...] = (),
+    *,
+    banner_aliases: dict[str, tuple[str, ...]] | None = None,
 ) -> dict:
     """Prepare source facts from a real leading-section fixture.
 
@@ -54,6 +56,7 @@ def _record(
         aliases=_ALIASES,
         legacy_dyk_aliases=_DYK,
         site=_SITE,
+        banner_aliases=banner_aliases,
     )
     assert facts is not None
     value = {
@@ -81,13 +84,14 @@ class TestSection0Projection(TestCase):
         original = copy.deepcopy(record)
         result = render_section0_repair(record)
         assert record == original
-        assert result.startswith(before)
+        assert result.startswith("<!-- " + history + " -->\n")
+        assert "{{Maintained|Editor}}\n" in result
         assert result.endswith(after)
         assert tail not in result
         assert (
             record["original_text"] + tail == before + history + after + tail
         )
-        active = mwparserfromhell.parse(result).filter_templates()[1]
+        active = mwparserfromhell.parse(result).filter_templates()[0]
         assert str(active.name).strip() == "Article history"
         assert str(active.get("action1").value) == "GAN"
         assert str(active.get("action1result").value) == "listed"
@@ -112,6 +116,82 @@ class TestSection0Projection(TestCase):
         assert str(template.get("dyk1entry").value).strip() == hook
         assert str(template.get("dyk1date").value).strip() == "2020-08-13"
         assert str(template.get("maindateGA").value).strip() == "2020-08-07"
+
+    @staticmethod
+    def test_new_history_follows_redirected_mixed_script_notices() -> None:
+        """Put history after notices and ahead of the project shell."""
+        before = (
+            "<!-- {{WikiProject banner shell}} is only an example -->\n"
+            "{{GAN}}\n{{跳至讨论}}\n{{討論顶板}}\n{{Warning}}\n"
+        )
+        after = "{{多个專題|1={{WPVG|class=GA}}}}\n{{译自|en|Game}}\n"
+        aliases = {
+            "GA nominee": ("Template:GA nominee", "Template:GAN"),
+            "跳至討論": ("Template:跳至讨论",),
+            "Talk header": ("Template:討論頂板",),
+            "WikiProject banner shell": ("Template:多個專題",),
+            "Translated page": ("Template:译自",),
+        }
+        record = _record(before + after, banner_aliases=aliases)
+        result = render_section0_repair(record)
+        assert result.index("{{Warning}}") < result.index("{{Article history")
+        assert result.index("{{Article history") < result.index("{{多个專題")
+        assert result.endswith(after)
+        assert before.rstrip() in result
+
+    @staticmethod
+    def test_existing_history_moves_after_header_before_project_banners() -> (
+        None
+    ):
+        """Relocate history and preserve unrelated source spans."""
+        header = "{{Talk header}}\n"
+        projects = "{{WikiProject Video games|class=GA}}\n{{Archives}}\n"
+        history = "{{Article history|action1=GAN|action1result=listed}}"
+        for source in (
+            history + "\n" + header + projects,
+            header + projects + history + "\n",
+        ):
+            result = render_section0_repair(_record(source))
+            assert result.index("{{Talk header}}") < result.index(
+                "{{Article history",
+            )
+            assert result.index("{{Article history") < result.index(
+                "{{WikiProject Video games",
+            )
+            assert header.rstrip() in result
+            assert projects in result
+            assert result.count("{{Article history") == 1
+            template = mwparserfromhell.parse(result).filter_templates()[1]
+            assert str(template.get("action1result").value) == "listed"
+
+    @staticmethod
+    def test_history_precedes_unfamiliar_project_banners() -> None:
+        """Put history before known and unfamiliar project banners."""
+        source = (
+            "{{Talk header}}\n{{WikiProject Taiwan|class=GA}}\n"
+            "{{Article history}}\n{{WikiProject Video games|class=GA}}\n"
+        )
+        result = render_section0_repair(_record(source))
+        assert result.index("{{Talk header}}") < result.index(
+            "{{Article history",
+        )
+        assert result.index("{{Article history") < result.index(
+            "{{WikiProject Taiwan",
+        )
+        assert "{{WikiProject Taiwan|class=GA}}\n" in result
+        assert "{{WikiProject Video games|class=GA}}\n" in result
+
+    @staticmethod
+    def test_quoted_and_nested_notices_cannot_move_history() -> None:
+        """Keep quoted rules inert and preserve unknown wrappers."""
+        source = (
+            "{{Article history}}\n{{WikiProject Video games}}\n"
+            "<nowiki>{{Talk header}}</nowiki>\n"
+            "{{wrapper|example={{Warning}}}}\n"
+        )
+        result = render_section0_repair(_record(source))
+        assert result.startswith("{{Article history")
+        assert result.endswith(source[source.index("\n") :])
 
     @staticmethod
     def test_obsolete_fields_are_removed_only_after_numbered_migration() -> (
