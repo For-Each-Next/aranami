@@ -5,6 +5,16 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.12 (2026-11-14 10:52 UTC)
+
+Overview: Retired the completed redirect-recovery workflow from the website
+and background services.
+
+- Removed the recovery page, navigation, browser controls and dedicated
+  data readers, returning the retired URL through the normal missing-page flow.
+- Removed the recovery scanner, source queries and runtime scheduling,
+  together with its current operating and development documentation.
+
 ### 0.9.11 (2026-11-14 10:49 UTC)
 
 Overview: Kept the editor directory compact on wide screens.

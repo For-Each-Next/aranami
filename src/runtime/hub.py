@@ -54,7 +54,6 @@ from runtime.quality_analysis import (
     refresh_startup_quality,
     schedule_quality_analysis,
 )
-from runtime.redirects import RedirectScanner
 from shared.assessment_profiles import assessment_profile
 from shared.config import COLLECTION_DEFINITIONS, PROJECT_DATA_SCOPES
 from shared.deployment import project_version
@@ -216,7 +215,7 @@ def _yield_b_authorship() -> bool:
     status = read_status(Path.cwd())
     return any(
         row.get("boot_id") == get_boot_id()
-        and row.get("task_id") not in {"newsletter-history", "redirects"}
+        and row.get("task_id") != "newsletter-history"
         and row.get("outcome") in {"queued", "running"}
         for row in status.get("executions", {}).values()
     )
@@ -381,14 +380,12 @@ def stop_jobs(
     )
 
 
-def _serve_until_stopped(  # ruff: ignore[too-many-arguments]
+def _serve_until_stopped(
     server: DashboardHTTPServer | None,
     scheduler: BackgroundScheduler,
     updater: DashboardUpdater | None,
     stopped: Event,
     control: dict[str, bool],
-    *,
-    scanner: RedirectScanner | None = None,
 ) -> None:
     """Serve observations while honoring drain and stop signals."""
     if server is None:
@@ -401,40 +398,11 @@ def _serve_until_stopped(  # ruff: ignore[too-many-arguments]
                 "Deployment requested a safe hub drain; "
                 "keeping the pod alive until work is saved.",
             )
-            if scanner is not None:
-                scanner.stop()
             stop_jobs(scheduler, updater)
             updater.confirm_drained()
             drained = True
             _LOGGER.info("Hub drain confirmed; waiting for termination.")
         server.handle_request()
-
-
-def _start_redirect_scanner(
-    config: HubConfig,
-    resources: ExitStack,
-    scheduler: IdleScheduler,
-) -> RedirectScanner | None:
-    """Start the live scanner under the hub's cleanup stack.
-
-    Returns:
-        The managed scanner, or none in preview mode.
-    """
-    if config.dry:
-        return None
-    scanner = RedirectScanner(
-        run_immediately=config.run_immediately,
-        wait_for_idle=scheduler.wait_until_idle,
-    )
-    resources.callback(scanner.stop)
-    scanner.start()
-    return scanner
-
-
-def _request_scanner_stop(scanner: RedirectScanner | None) -> None:
-    """Wake a live scanner without blocking signal handling."""
-    if scanner is not None:
-        scanner.request_stop()
 
 
 def _schedule_collections(
@@ -533,12 +501,10 @@ def run(config: HubConfig) -> None:
     configure_pywikibot()
     shutdown_reason = "HTTP loop ended"
     control = {"drain": False}
-    scanner = None
 
     def stop(signum: int, _frame: FrameType | None) -> None:
         """Request graceful shutdown from the process's main thread."""
         nonlocal shutdown_reason
-        _request_scanner_stop(scanner)
         if signum == signal.SIGUSR1:
             control["drain"] = True
             return
@@ -605,7 +571,6 @@ def run(config: HubConfig) -> None:
         if updater is not None:
             _schedule_collections(scheduler, updater, config)
         scheduler.resume()
-        scanner = _start_redirect_scanner(config, resources, scheduler)
         try:
             _serve_until_stopped(
                 server,
@@ -613,13 +578,11 @@ def run(config: HubConfig) -> None:
                 updater,
                 stopped,
                 control,
-                scanner=scanner,
             )
         except KeyboardInterrupt:
             shutdown_reason = "KeyboardInterrupt"
             stopped.set()
         finally:
-            _request_scanner_stop(scanner)
             _LOGGER.info(
                 "Aranami runtime hub stopping (%s); waiting for active work.",
                 shutdown_reason,

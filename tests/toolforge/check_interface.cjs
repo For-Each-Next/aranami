@@ -19,7 +19,7 @@ const chromium = process.env.ARANAMI_CHROMIUM || "/Applications/Chromium.app/Con
 const widths = [320, 390, 600, 601, 639, 640, 641, 768, 943, 944, 1120, 1440, 1680, 1920];
 const locales = ["en", "zh-hans", "zh-hant"];
 const selectedSurfaces = process.env.ARANAMI_CHECK_SURFACES?.split(",");
-const surfaces = ["home", "discussions", "quality-authorship", "quality-analysis", "backlog", "checks", "redirects", "maintenance", "consistency", "quarterly", "reports", "reports2", "logs", "dataset", "about", "contentcredits", "maintenancecredits", "codex", "gpl", "lgpl", "error", "newsletter"].filter(surface => !selectedSurfaces || selectedSurfaces.includes(surface));
+const surfaces = ["home", "discussions", "quality-authorship", "quality-analysis", "backlog", "checks", "maintenance", "consistency", "quarterly", "reports", "reports2", "logs", "dataset", "about", "contentcredits", "maintenancecredits", "codex", "gpl", "lgpl", "error", "newsletter"].filter(surface => !selectedSurfaces || selectedSurfaces.includes(surface));
 const failures = [];
 fs.mkdirSync(outputRoot, { recursive: true });
 
@@ -65,7 +65,6 @@ async function checkInterface(assetRoot) {
             '/quality-authorship/': requestURL.searchParams.get('count_b') === '1' ? 'quality-authorship-b' : 'quality-authorship',
             '/reports/': requestURL.searchParams.get('page') === '2' ? 'reports2' : 'reports',
             '/data/': requestURL.searchParams.get('page') === '2' ? 'dataset2' : 'dataset',
-            '/redirects/': 'redirects',
             '/assets/icons/credits.html': 'contentcredits',
             '/assets/icons/maintenance/credits.html': 'maintenancecredits',
             '/codex-license.html': 'codex',
@@ -899,7 +898,7 @@ async function checkInterface(assetRoot) {
             assert.ok(result.literal && result.readonly && result.native && result.safe && result.unique, `newsletter source semantics failed: ${JSON.stringify(result)}`);
             assert.equal(result.fits, true, 'expanded newsletter textarea should autosize to wrapped source');
         };
-        const initialControls = `(() => [...document.querySelectorAll('button, input:not([type=hidden]), select, summary, a.ui-button, .brand img, main h1, .newsletter-text')].filter(element => !element.closest('[data-redirect-controls], [data-execution-history], [data-quality-authorship-table], [data-quality-authorship-filter], [data-quality-analysis-filter], [data-quality-matrix], [data-authorship-basis], [data-quality-analysis], #analysis-chart-articles') && !element.matches('[data-redirect-hide], .heading-copy')).map(element => {
+        const initialControls = `(() => [...document.querySelectorAll('button, input:not([type=hidden]), select, summary, a.ui-button, .brand img, main h1, .newsletter-text')].filter(element => !element.closest('[data-execution-history], [data-quality-authorship-table], [data-quality-authorship-filter], [data-quality-analysis-filter], [data-quality-matrix], [data-authorship-basis], [data-quality-analysis], #analysis-chart-articles') && !element.matches('.heading-copy')).map(element => {
             const style = getComputedStyle(element);
             const box = element.getBoundingClientRect();
             return {tag: element.tagName, id: element.id, hidden: element.hidden,
@@ -1084,29 +1083,6 @@ async function checkInterface(assetRoot) {
                         overflow: [...document.querySelectorAll('main *')].filter(element => visible(element) && element.getBoundingClientRect().right > innerWidth + 1).slice(0, 8).map(element => ({ tag: element.tagName, class: element.className, right: element.getBoundingClientRect().right })) };
                 })()`);
                 assert.ok(layout.page <= layout.viewport + 1, JSON.stringify(layout));
-                if (surface === "redirects") {
-                    const evidence = await evaluate(`(() => {
-                        const rows = [...document.querySelectorAll('[data-redirect-id]')];
-                        const row = rows[0];
-                        const button = row.querySelector('[data-redirect-hide]');
-                        const before = !row.hidden;
-                        button.click();
-                        const hidden = row.hidden;
-                        const stored = JSON.parse(localStorage.getItem('aranami-redirects-hidden-v1'));
-                        document.querySelector('#redirect-show-hidden').click();
-                        const shown = !row.hidden;
-                        button.click();
-                        const restored = !row.hidden && !JSON.parse(localStorage.getItem('aranami-redirects-hidden-v1')).includes(row.dataset.redirectId);
-                        document.querySelector('#redirect-show-hidden').click();
-                        return {count: rows.length, before, hidden, stored: stored.includes(row.dataset.redirectId), shown, restored,
-                            evidence: row.querySelectorAll('.redirect-evidence a[href*="oldid="]').length,
-                            next: Boolean(document.querySelector('.redirect-pagination a[rel=next]'))};
-                    })()`);
-                    assert.equal(evidence.count, 10, 'redirect worklist must paginate saved findings');
-                    assert.ok(evidence.before && evidence.hidden && evidence.stored && evidence.shown && evidence.restored, 'personal redirect hiding must be reversible and retained');
-                    assert.equal(evidence.evidence, 3, 'redirect findings need current, article-content and banner revisions');
-                    assert.equal(evidence.next, true, 'redirect pagination must have a native next link');
-                }
                 if (surface === "consistency" || surface === "quarterly") {
                     const evidence = await evaluate(`(() => ({
                         tables: document.querySelectorAll('.maintenance-table').length,

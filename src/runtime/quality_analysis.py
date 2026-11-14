@@ -175,7 +175,7 @@ def _should_yield(
         return True
     return any(
         row.get("boot_id") == owner
-        and row.get("task_id") not in {task_id, "redirects"}
+        and row.get("task_id") != task_id
         and row.get("outcome") in {"queued", "running"}
         for row in status.get("executions", {}).values()
     )

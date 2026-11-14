@@ -85,14 +85,12 @@ def read_only_headers(
     status: int,
     *,
     websocket_origin: str | None = None,
-    wikipedia_refresh: bool = False,
 ) -> dict[str, str]:
     """Return the security and cache policy for saved public responses.
 
     Args:
         status: HTTP response code, including method rejections.
         websocket_origin: Trusted origin allowed for status pushes.
-        wikipedia_refresh: Allow an explicit redirect-page source check.
 
     Returns:
         Transport-independent headers shared by both runtime servers.
@@ -100,8 +98,6 @@ def read_only_headers(
     connect_sources = "'self'"
     if websocket_origin:
         connect_sources += f" {websocket_origin}"
-    if wikipedia_refresh:
-        connect_sources += " https://zh.wikipedia.org"
     headers = {
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",

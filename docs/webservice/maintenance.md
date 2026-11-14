@@ -7,55 +7,6 @@ does not correct articles, templates or project pages automatically. Background
 collection supplies the results; opening or filtering a page makes no wiki
 source requests.
 
-## Redirect recovery
-
-Use `/redirects/`, also linked from Tools, to review current mainspace redirects
-whose talk pages carry deletion-history notices and formerly carried the Video
-games project banner. The scanner resolves current redirects to the banner and
-deletion templates through Wiki Replicas, including indirect aliases. A database
-join selects deletion-template talk pages whose current subjects are redirects,
-in batches of fifty ordered by talk-page ID. Pywikibot preloads current talks
-and subjects in bounded groups of fifty and excludes talks that still have the
-banner. Historical revisions are read only for qualifying pages. The scanner
-never follows the subject redirect to another article when checking identity.
-
-Each match links the observed redirect revision, the historical talk revision
-containing the banner, and historical article content when found. The excerpt
-removes leading templates, comments and reference markup for quick reading.
-Missing historical article content remains explicitly unavailable. Follow the
-revision links and check the latest wiki state before making a manual edit.
-
-The scanner samples the newest ten and oldest five talk revisions. For matching
-pages, it searches the newest twenty and, if needed, oldest five article
-revisions for nonredirect content. These samples can miss banners or articles
-that occur only in intermediate history. A completed scan describes the saved
-deletion-template selection and these history samples, not all past project
-redirects.
-
-Results appear as each candidate is saved; the visible page checks for changes
-every thirty seconds. Select ten or twenty rows per page. Hide removes a result
-from view in this browser, with Show hidden and Restore all controls to recover
-it. These preferences stay in browser storage and do not alter the shared
-worklist. Without JavaScript, revision links and pagination remain usable.
-
-Collection runs separately on Toolforge while other scheduled work is idle,
-starting candidate checks at least 1.2 seconds apart to target up to fifty pages
-per minute. Serial API requests are
-at least 0.2 seconds apart, including failed attempts. Slow responses, history
-reads and server backoff can reduce throughput; source failures retain the
-five-minute retry delay. New scheduled work can start immediately; the scanner
-yields before its next source request and resumes after the other work finishes.
-It checkpoints each completed candidate and resumes after shutdown. Saved
-page-ID cursors resume the database selection. Older API
-cursors remain readable, and switching acquisition preserves queued pages,
-checked IDs and retained matches. An incomplete scan with no matches does not
-establish that no relevant redirects exist. A completed pass remains a dated
-worklist and does not automatically start another sweep. Once per UTC day,
-the collector removes findings whose subjects now have a Video games
-PageAssessments entry, including redirect-class assessments. Failed checks
-retain the prior worklist and retry later. Title links keep `redirect=no`;
-the title and sampled-content links enable the project assessor gadget.
-
 ## Article tasks
 
 The overview groups configured maintenance categories and templates. Select a

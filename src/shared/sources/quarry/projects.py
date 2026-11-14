@@ -35,9 +35,6 @@ if TYPE_CHECKING:
 _BATCH_SIZE = 500
 _MAX_REDIRECT_DEPTH = 8
 _MAX_HISTORY_REDIRECTS = 100_000
-_REDIRECT_RECOVERY_BATCH_SIZE = 50
-_MAX_RECOVERY_TEMPLATES = 256
-_MAX_SOURCE_TEMPLATE_SCOPE = 64
 _PAGE_SCHEMA = {
     "page_id": pl.Int64,
     "page_namespace": pl.Int64,
@@ -54,15 +51,6 @@ _MEMBER_SCHEMA = {
     "page_id": pl.Int64,
     "page_namespace": pl.Int64,
     "page_title": pl.String,
-}
-_REDIRECT_RECOVERY_SCHEMA = {
-    "page_id": pl.Int64,
-    "page_namespace": pl.Int64,
-    "page_title": pl.String,
-    "page_revision": pl.Int64,
-    "page_is_redirect": pl.Int64,
-    "talk_page_id": pl.Int64,
-    "talk_revision": pl.Int64,
 }
 
 type TagSpec = tuple[str, Literal["main", "talk"], Literal["cat", "tl"], str]
@@ -170,122 +158,6 @@ def query_history_redirects(
         seen = pl.concat([seen, frontier]).unique()
     message = "Article history redirect chains exceed their depth bound."
     raise ValueError(message)
-
-
-def query_redirect_recovery_candidates(
-    site: BaseSite,
-    templates: Iterable[str],
-    *,
-    after_page_id: int = 0,
-    limit: int = _REDIRECT_RECOVERY_BATCH_SIZE,
-) -> pl.DataFrame:
-    """Read tagged talks paired with current article redirects.
-
-    Current subject and discussion identities come from one replica
-    observation. Multiple selected template aliases do not repeat a
-    talk page. Reuse the final talk-page ID as the next keyset cursor;
-    replica lag means this is observed metadata, not live API state.
-
-    Args:
-        site: Wiki supplying local template titles and replica metadata.
-        templates: Resolved full local deletion-template aliases.
-        after_page_id: Exclusive lower bound on stable talk-page IDs.
-        limit: Maximum batch size, from one through fifty.
-
-    Returns:
-        Eager rows ordered by talk-page ID, with subject ``page_id``,
-        ``page_namespace``, database ``page_title``, ``page_revision``
-        and ``page_is_redirect``; paired ``talk_page_id`` and
-        ``talk_revision``; and canonical ``full_title`` and
-        ``talk_title``.
-        Empty selection or exhausted coverage returns the same schema.
-
-    Raises:
-        ValueError: Bounds or local template identities are invalid.
-    """
-    if (
-        type(after_page_id) is not int
-        or after_page_id < 0
-        or type(limit) is not int
-        or not 1 <= limit <= _REDIRECT_RECOVERY_BATCH_SIZE
-    ):
-        message = "Redirect recovery requires bounded keyset selectors."
-        raise ValueError(message)
-    names = {}
-    for title in templates:
-        prefix, separator, _ = title.partition(":")
-        if (
-            not separator
-            or site.namespaces.lookup_name(prefix) != Namespace.TEMPLATE
-        ):
-            message = "Redirect recovery requires local template identities."
-            raise ValueError(message)
-        page = pywikibot.Page(site, title)
-        names[page.title(with_ns=False).replace(" ", "_")] = page.title()
-        if len(names) > _MAX_RECOVERY_TEMPLATES:
-            message = "Redirect recovery template selection exceeds its bound."
-            raise ValueError(message)
-    if not names:
-        return _with_titles(
-            site,
-            pl.DataFrame(schema=_REDIRECT_RECOVERY_SCHEMA),
-        )
-    page = tables.Page.__table__
-    talk = page.alias("recovery_talk")
-    subject = page.alias("recovery_subject")
-    target = tables.Linktarget.__table__
-    transclusion = tables.Templatelinks.__table__
-    statement = (
-        select(
-            subject.c.page_id,
-            subject.c.page_namespace,
-            subject.c.page_title,
-            subject.c.page_latest.label("page_revision"),
-            subject.c.page_is_redirect,
-            talk.c.page_id.label("talk_page_id"),
-            talk.c.page_latest.label("talk_revision"),
-        )
-        .distinct()
-        .select_from(target)
-        .join(transclusion, transclusion.c.tl_target_id == target.c.lt_id)
-        .join(talk, talk.c.page_id == transclusion.c.tl_from)
-        .join(
-            subject,
-            and_(
-                subject.c.page_namespace == Namespace.MAIN,
-                subject.c.page_title == talk.c.page_title,
-            ),
-        )
-        .where(
-            target.c.lt_namespace == Namespace.TEMPLATE,
-            target.c.lt_title.in_(names),
-            transclusion.c.tl_from_namespace == Namespace.TALK,
-            talk.c.page_namespace == Namespace.TALK,
-            talk.c.page_is_redirect == 0,
-            subject.c.page_is_redirect == 1,
-            talk.c.page_id > after_page_id,
-        )
-        .order_by(talk.c.page_id)
-        .limit(limit)
-    )
-    return _with_titles(
-        site,
-        _replica(site.dbName())
-        .query(
-            statement,
-            schema_overrides=_REDIRECT_RECOVERY_SCHEMA,
-            purpose="page_tags",
-            scope={
-                "page_kind": "talk_pages",
-                **(
-                    {"templates": list(names.values())}
-                    if len(names) <= _MAX_SOURCE_TEMPLATE_SCOPE
-                    else {}
-                ),
-            },
-        )
-        .collect(),
-    )
 
 
 def _history_redirect_rows(

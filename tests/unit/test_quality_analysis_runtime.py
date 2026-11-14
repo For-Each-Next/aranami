@@ -396,12 +396,6 @@ class AnalysisAdmissionTests(TestCase):
                 "quality-authorship",
             )
             saved["executions"]["self"]["task_id"] = "quality-analysis"
-            saved["executions"]["idle_scan"] = {
-                "boot_id": _BOOT,
-                "task_id": "redirects",
-                "outcome": "running",
-            }
-            assert not worker._should_yield(Path(), _BOOT, stop)
             saved["executions"]["foreground"] = {
                 "boot_id": _BOOT,
                 "task_id": "project-data",

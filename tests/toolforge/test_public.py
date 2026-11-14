@@ -152,6 +152,37 @@ class RetiredInspectionRoutesTests(unittest.TestCase):
                 assert 'href="/data/"' not in about
                 assert 'href="/tasks/"' not in about
 
+    def test_redirect_recovery_uses_standard_missing_route(self) -> None:
+        """Remove recovery links, assets and external CSP access."""
+        with tempfile.TemporaryDirectory() as temporary:
+            app = create_app(Path(temporary))
+            with TestClient(app) as client:
+                missing = client.get("/missing")
+                policy = missing.headers["Content-Security-Policy"]
+                for path in (
+                    "/redirects/",
+                    "/redirects/?page=2&limit=20",
+                    "/redirects.js",
+                ):
+                    for method in ("GET", "HEAD"):
+                        with self.subTest(path=path, method=method):
+                            response = client.request(method, path)
+                            assert response.status_code == HTTPStatus.NOT_FOUND
+                            assert "location" not in response.headers
+                            assert response.content == (
+                                missing.content if method == "GET" else b""
+                            )
+                            headers = response.headers
+                            assert headers["Cache-Control"] == "no-store"
+                            assert headers["Content-Security-Policy"] == policy
+                for locale in ("en", "zh-hans", "zh-hant"):
+                    about = client.get(f"/about/?lang={locale}")
+                    assert 'href="/redirects/"' not in about.text
+                    assert (
+                        "https://zh.wikipedia.org"
+                        not in about.headers["Content-Security-Policy"]
+                    )
+
 
 class PublicWebsiteTests(unittest.TestCase):  # ruff: ignore[too-many-public-methods] - Routes share one isolated HTTP fixture.
     """Verify routes, bounded logs, and unavailable-state behavior."""

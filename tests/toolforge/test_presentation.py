@@ -23,7 +23,6 @@ from urllib.parse import parse_qs, urlsplit
 
 import polars as pl
 from analysis_fixtures import saved_analysis_fixture
-from redirect_fixtures import redirect_snapshot
 from status_fixtures import (
     active_collection_record,
     executions,
@@ -52,7 +51,6 @@ from webservice.pages import (
     render_newsletter,
     render_quality_analysis,
     render_quality_authorship,
-    render_redirects,
     render_reports,
 )
 from webservice.presentation import (
@@ -603,13 +601,6 @@ def write_interface_fixtures(destination: Path) -> None:
                 fixture["status"],
                 fixture["config"],
                 locale,
-            ),
-            "redirects": render_redirects(
-                redirect_snapshot(),
-                {},
-                locale,
-                status=fixture["status"],
-                config=fixture["config"],
             ),
             "maintenance": render_maintenance(
                 maintenance,
@@ -2331,7 +2322,6 @@ class PresentationTests(unittest.TestCase):
             root / "public_html" / "live.js",
             root / "public_html" / "newsletter.js",
             root / "public_html" / "navigation.js",
-            root / "public_html" / "redirects.js",
             *(
                 root / "public_html" / f"{name}.js"
                 for name in (

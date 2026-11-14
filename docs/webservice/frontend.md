@@ -39,7 +39,7 @@ keeps its original source and license attribution.
 JavaScript enhances sorting, pagination, copying and fragment navigation through
 browser APIs. Write purpose comments and JSDoc for non-obvious helpers, with
 four-space indentation and named functions. Module entry points load using
-`type="module"`; standalone live-status, newsletter and redirect scripts remain
+`type="module"`; standalone live-status and newsletter scripts remain
 independent. Preserve supported native navigation when scripts fail.
 
 On fragment replacement, validate the response, reject stale requests, replace
@@ -195,11 +195,6 @@ Maintenance filters and sorting apply to the complete saved selection before
 10/20/50-row pagination. Preserve title/page-ID ties, unknown-last behavior,
 assessment hierarchy and URL history. Category selection and title search use
 native forms; enhancement replaces results in place and ignores stale requests.
-
-The redirect worklist can explicitly check displayed talk pages for restored
-project banners through Wikipedia's API. Confirmed matches are hidden for the
-browser visit; failures leave findings visible and saved evidence unchanged.
-Historical text is a sampled revision, linked to its source when available.
 
 Newsletter source stays literal, escaped text in autosizing readonly controls.
 Copying must not reinterpret wikitext. Keep a native fallback when Clipboard

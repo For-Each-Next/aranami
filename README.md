@@ -1,6 +1,6 @@
 # Aranami
 
-Aranami v0.9.11 improves article-statistics performance from the preserved
+Aranami v0.9.12 improves article-statistics performance from the preserved
 v0.9.8 release. The [CHANGELOG](CHANGELOG.md) records completed work.
 The original v0.9.8 release remains available in its Git tag.
 
@@ -25,9 +25,6 @@ and daily Pageviews support later reports and newsletter drafts.
   metadata inconsistencies and quarterly update hints, grouped by issue type.
   The linked Tampermonkey script fills prepared talk-header repairs for a
   manual diff review.
-- [Redirect recovery](https://aranami.toolforge.org/redirects/): redirects whose
-  talk-page history contains a removed Video games project banner, with revision
-  evidence and historical article excerpts for manual review.
 - [Current quality articles and contributors](https://aranami.toolforge.org/quality-analysis/):
   one current-cohort overview, article directory and author statistics page,
   with a global B/BL switch, listing revisions and saved contribution details.
@@ -58,7 +55,6 @@ their saved facts; delayed drafts can continue improving.
 | Pageviews | 19:00 normally, :00 retries while behind | Daily and longer-period project/task-force rankings |
 | PexBot reports | Idle after 00:00 | Configured maintenance refreshes, with a 24-hour cooldown |
 | Website | Every hour :00 | Reviews hourly and daily datasets on a new UTC boundary |
-| Redirect recovery | Resumable background pass while scheduled work is idle | Replica discovery and preloaded current pages use batches of 50; saved matches appear incrementally |
 
 The primary collection starts with page lists at every UTC hour, with the full
 daily capture at 00:00:00. Source collection finishes before dependent reports

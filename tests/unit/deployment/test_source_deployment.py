@@ -344,7 +344,6 @@ class TestSourcePayload(TestCase):
             "src/webservice/public_html/live.js",
             "src/webservice/public_html/navigation.js",
             "src/webservice/public_html/newsletter.js",
-            "src/webservice/public_html/redirects.js",
             *(
                 f"src/webservice/public_html/{name}.js"
                 for name in (

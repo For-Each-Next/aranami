@@ -122,7 +122,6 @@ class CollectionDefinition:
     idle: bool = False
 
 
-REDIRECT_SCAN_CHECK_SECONDS = 86400
 ASSESSMENT_CATEGORIES = (
     "乙上级电子游戏条目",
     "请求乙上级评审的电子游戏条目",

@@ -98,9 +98,9 @@ class TestServerWork(TestCase):
         """List concurrent collections and omit wiki reports."""
         database = active_collection_record("project-data", 51)
         database["started_at"] = "2026-10-18T12:00:10Z"
-        redirects = active_collection_record("redirects", 52)
-        redirects["started_at"] = "2026-10-18T12:00:20Z"
-        for run in (database, redirects):
+        analysis = active_collection_record("quality-analysis", 52)
+        analysis["started_at"] = "2026-10-18T12:00:20Z"
+        for run in (database, analysis):
             self.status["executions"][run["run_id"]] = run
         self.status["executions"]["0" * 32].update(
             outcome="running",
@@ -109,7 +109,7 @@ class TestServerWork(TestCase):
         )
         assert [row["task_id"] for row in self.work()["items"]] == [
             "website",
-            "redirects",
+            "quality-analysis",
             "project-data",
         ]
 

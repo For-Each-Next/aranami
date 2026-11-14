@@ -300,33 +300,6 @@ is unknown coverage, not confirmed disagreement. Quarterly suggestions require
 exact historical boundaries. [Maintenance](webservice/maintenance.md) defines
 the checks and their limits. These pages suggest manual work and never edit it.
 
-Redirect recovery runs in its own worker while scheduled work is idle. A serial,
-checkpointed scanner joins template membership, talk pages and current subject
-redirects on Wiki Replicas, reading fifty candidates at a time in talk-page-ID
-order. Replica observations also resolve the templates' canonical aliases.
-Pywikibot preloads current talk and subject pages in bounded groups of fifty;
-only qualifying redirects require bounded historical content reads. The scanner
-retains historical Video games banner evidence. Every candidate starts at least
-1.2 seconds after the previous one, targeting up to
-50 pages per minute. Serial source attempts are at least 0.2 seconds apart,
-including failures; server backoff and slower history reads can reduce
-throughput. Before each source attempt, the worker waits for ordinary collection
-and report jobs and queued idle reports to finish. New scheduled work starts
-without waiting for an active scan request; the scan yields before its next
-request and resumes its existing candidate afterward.
-Both pacing waits are interruptible, and bounded history searches do not claim
-exhaustive coverage. Each completed candidate becomes available to
-HTTP readers immediately through an atomic Parquet snapshot. The webservice
-remains read-only, and hide preferences stay in browser storage. Deployment drain
-and shutdown cancel waits and join this worker before confirming completion.
-A completed scan remains a dated historical worklist rather than automatically
-restarting its source sweep. Saved page-ID cursors resume the Replica keyset.
-On request, the redirect page checks the displayed talk pages directly against
-Wikipedia and hides confirmed restored banners for the current browser visit.
-Failed checks leave findings visible and do not alter the saved worklist.
-Earlier API cursors remain readable; switching acquisition restarts selection
-from page ID zero and skips checked IDs while preserving queued work and facts.
-
 Django serves authored templates and bounded GET/HEAD responses; the ASGI
 adapter retains read-only WebSocket subscriptions. Use
 escaped text and security headers, with debug/reload disabled. Dynamic responses are

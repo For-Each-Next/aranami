@@ -34,7 +34,6 @@ process lifetime, including manual jobs.
 | `data/archive/<day>.parquet`, `data/raw/<project>-<day>.parquet` | Immutable full daily project observations |
 | `data/raw/pageviews-*--*` | Latest/previous detailed traffic generations and coverage |
 | `data/parsed/` | Durable history, authorship, milestones and scope evidence |
-| `data/parsed/redirects-zhwiki.parquet` | Incremental redirect evidence and resumable scan checkpoint |
 | `data/parsed/newsletter--*` | Current and original prepared newsletter facts |
 | `data/parsed/` | Prepared report bundles and independent dated newsletter archives |
 | `data/parsed/assessments--*`, `backups/report-layout/` | Retained legacy observations and recovery originals |

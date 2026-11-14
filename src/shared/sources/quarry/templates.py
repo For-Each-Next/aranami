@@ -19,13 +19,10 @@ from sqlalchemy import select
 from shared.sources.quarry import Replica, tables
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from pywikibot.site import BaseSite
 
 MAX_ALIASES = 5000
 _MAX_REDIRECT_DEPTH = 8
-_ALIAS_TARGET_BATCH_SIZE = 50
 _PAGE_SCHEMA = {
     "page_id": pl.Int64,
     "page_title": pl.String,
@@ -243,79 +240,3 @@ def template_alias_metadata(
         row["page_latest"],
         aliases,
     )
-
-
-def query_template_redirect_aliases(
-    site: BaseSite,
-    titles: Iterable[str],
-) -> tuple[str, ...]:
-    """Read incoming template aliases for exact targets in one batch.
-
-    Targets are not resolved through their own redirects. A caller can
-    therefore discover chained incoming aliases by querying each newly
-    observed frontier. Only local template redirects are returned.
-
-    Args:
-        site: Wiki whose replica supplies the redirect metadata.
-        titles: At most fifty distinct full local template titles.
-
-    Returns:
-        Canonical full alias titles ordered by source page ID. Empty
-        input returns an empty tuple without opening a connection.
-
-    Raises:
-        ValueError: Targets are invalid or alias coverage is incomplete.
-    """
-    names = {}
-    for title in titles:
-        prefix, separator, _ = title.partition(":")
-        if (
-            not separator
-            or site.namespaces.lookup_name(prefix) != Namespace.TEMPLATE
-        ):
-            message = "Template aliases require exact local template targets."
-            raise ValueError(message)
-        page = Page(site, title)
-        names[page.title(with_ns=False).replace(" ", "_")] = page.title()
-        if len(names) > _ALIAS_TARGET_BATCH_SIZE:
-            message = "Template alias targets exceed their batch bound."
-            raise ValueError(message)
-    if not names:
-        return ()
-    page, redirect = tables.Page.__table__, tables.Redirect.__table__
-    statement = (
-        select(page.c.page_id, page.c.page_title)
-        .select_from(redirect)
-        .join(page, page.c.page_id == redirect.c.rd_from)
-        .where(
-            page.c.page_namespace == Namespace.TEMPLATE,
-            page.c.page_is_redirect == 1,
-            redirect.c.rd_namespace == Namespace.TEMPLATE,
-            redirect.c.rd_title.in_(names),
-            redirect.c.rd_interwiki.is_(None)
-            | redirect.c.rd_interwiki.in_([""]),
-        )
-        .order_by(page.c.page_id)
-        .limit(MAX_ALIASES + 1)
-    )
-    frame = (
-        _replica(site.dbName())
-        .query(
-            statement,
-            schema_overrides=_ALIAS_SCHEMA,
-            purpose="template_aliases" if len(names) == 1 else "page_tags",
-            scope={"template": next(iter(names.values()))}
-            if len(names) == 1
-            else {"templates": list(names.values()), "page_kind": "pages"},
-        )
-        .collect()
-    )
-    if (
-        frame.height > MAX_ALIASES
-        or frame.select(pl.any_horizontal(pl.all().is_null()).any()).item()
-        or frame.filter(pl.col("page_id") <= 0).height
-        or frame["page_id"].n_unique() != frame.height
-    ):
-        message = "Incoming template alias coverage is incomplete."
-        raise ValueError(message)
-    return tuple(_full_title(site, title) for title in frame["page_title"])

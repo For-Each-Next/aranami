@@ -2047,90 +2047,6 @@ footer nav {
     margin-inline-start: 1rem;
 }
 
-.redirect-controls,
-.redirect-card-heading,
-.redirect-pagination,
-.redirect-pagination form,
-.redirect-pagination > div {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: .75rem;
-}
-
-.redirect-controls {
-    margin-block: 1rem;
-}
-
-.redirect-controls > span,
-.redirect-scope {
-    color: var(--color-subtle);
-    font-size: .9rem;
-}
-
-.redirect-progress {
-    margin-block: 1rem;
-}
-
-.redirect-findings {
-    list-style: none;
-    padding: 0;
-    display: grid;
-    gap: 1rem;
-}
-
-.redirect-finding.ui-card {
-    display: block;
-    padding: 1rem;
-    min-width: 0;
-}
-
-.redirect-card-heading {
-    justify-content: space-between;
-    align-items: baseline;
-}
-
-.redirect-card-heading h2 {
-    margin: 0;
-    font-size: 1.25rem;
-    overflow-wrap: anywhere;
-}
-
-.redirect-preview {
-    white-space: pre-line;
-    overflow-wrap: anywhere;
-}
-
-.redirect-evidence {
-    font-size: .9rem;
-    margin-block-end: 0;
-}
-
-.redirect-evidence > div {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 .5rem;
-}
-
-.redirect-evidence dt {
-    color: var(--color-subtle);
-}
-
-.redirect-evidence dd {
-    margin: 0;
-    overflow-wrap: anywhere;
-}
-
-.redirect-personally-hidden {
-    border-style: dashed;
-    opacity: .7;
-}
-
-.redirect-pagination {
-    justify-content: space-between;
-    margin-block: 1rem;
-}
-
 .history-pagination {
     display: flex;
     align-items: center;
@@ -2331,8 +2247,7 @@ footer nav {
 /* Shared table footers keep existing pagination behavior on every route. */
 .ui-table-pager,
 .history-pagination,
-.dataset-pagination,
-.redirect-pagination {
+.dataset-pagination {
     display: flex;
     align-items: center;
     justify-content: space-between;

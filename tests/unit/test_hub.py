@@ -80,7 +80,6 @@ class TestHubDispatch(TestCase):
             for task, boot, expected in (
                 ("website", "current", True),
                 ("newsletter-history", "current", False),
-                ("redirects", "current", False),
                 ("project-data", "current", True),
                 ("website", "previous", False),
             ):
@@ -317,12 +316,6 @@ class TestHubDispatch(TestCase):
 class TestHubLifecycle(TestCase):
     """Coordinate one scheduler, collection, HTTP, and signals."""
 
-    def setUp(self) -> None:
-        """Isolate the scanner from lifecycle fixtures."""
-        scanner = patch.object(hub, "RedirectScanner")
-        scanner.start()
-        self.addCleanup(scanner.stop)
-
     def test_saved_repairs_refresh_under_the_lease_before_scheduler_start(
         self,
     ) -> None:
@@ -373,11 +366,6 @@ class TestHubLifecycle(TestCase):
                 ),
                 patch.object(hub.monitor, "start", side_effect=start),
                 patch.object(hub, "_schedule_collections"),
-                patch.object(
-                    hub,
-                    "_start_redirect_scanner",
-                    return_value=None,
-                ),
                 patch.object(
                     hub,
                     "_serve_until_stopped",
@@ -651,7 +639,6 @@ class TestHubLifecycle(TestCase):
             patch.object(hub.signal, "signal"),
             patch.object(hub, "DashboardUpdater") as updater_type,
             patch.object(hub, "DashboardHTTPServer") as server_type,
-            patch.object(hub, "RedirectScanner") as scanner_type,
             patch.object(hub, "Event") as stopped,
             patch.object(hub.monitor, "start") as start,
         ):
@@ -659,7 +646,6 @@ class TestHubLifecycle(TestCase):
             hub.run(hub.HubConfig(dry=True))
         updater_type.assert_not_called()
         server_type.assert_not_called()
-        scanner_type.assert_not_called()
         assert start.call_args.kwargs["dry"] is True
         start.return_value.add_job.assert_not_called()
         start.return_value.shutdown.assert_called_once_with(wait=True)

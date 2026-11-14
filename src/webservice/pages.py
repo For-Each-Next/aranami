@@ -61,7 +61,6 @@ from webservice.quality_analysis import (
     quality_analysis_context,
 )
 from webservice.quality_authorship import quality_authorship_context
-from webservice.redirects import redirect_selection
 from webservice.status_view import report_context, status_context
 
 if TYPE_CHECKING:
@@ -1848,68 +1847,6 @@ def render_consistency_checks(  # ruff: ignore[too-many-arguments]
         consistency_sections=sections,
     )
     return _render("consistency.html", context)
-
-
-def render_redirects(  # ruff: ignore[too-many-arguments]
-    snapshot: Record | None,
-    parameters: dict[str, list[str]],
-    locale: str,
-    *,
-    navigation: Record | None = None,
-    status: Record | None = None,
-    config: Record | None = None,
-    unavailable: bool = False,
-) -> str:
-    """Present redirect findings with exact source revisions.
-
-    Args:
-        snapshot: Validated saved scanner observations, when available.
-        parameters: Native page and page-size selections.
-        locale: Negotiated interface language.
-        navigation: Request route and language choices.
-        status: Saved service observations for the shared footer.
-        config: Application version and routine configuration.
-        unavailable: Saved data could not be read or validated.
-
-    Returns:
-        Escaped findings and explicit bounded-history scan coverage.
-    """
-    page = _Page(locale)
-    context = page.context(page.text("redirects.heading"), live=True)
-    context.update(
-        page.live_status(status or {}, config or {}, dt.datetime.now(dt.UTC)),
-    )
-    selection = redirect_selection(snapshot, parameters, locale)
-    state = (
-        "unavailable"
-        if unavailable
-        else (snapshot or {}).get(
-            "status",
-            "missing",
-        )
-    )
-    context.update(
-        navigation=navigation,
-        redirects=selection,
-        redirect_scan=snapshot,
-        redirect_state=page.text(f"redirects.status.{state}"),
-        redirect_updated=_time((snapshot or {}).get("updated_at")),
-        redirect_range=page.text(
-            "redirects.range",
-            first=selection["first"],
-            last=selection["last"],
-            total=selection["total"],
-        ),
-        redirect_progress=page.text(
-            "redirects.progress",
-            checked=(snapshot or {}).get("checked_count", 0),
-            discovered=(snapshot or {}).get("discovered_count", 0),
-        ),
-        redirect_identity=sha256(
-            json.dumps(snapshot, sort_keys=True).encode(),
-        ).hexdigest(),
-    )
-    return _render("redirects.html", context)
 
 
 def render_maintenance(  # ruff: ignore[too-many-arguments]

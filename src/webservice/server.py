@@ -41,10 +41,6 @@ from data.caching.game_titles import (
 from data.consistency import review_repair
 from data.newsletter.observations import OBSERVATIONS_PATH
 from data.paths import artifact_path
-from data.redirects import (
-    DEFAULT_PATH as REDIRECTS_PATH,
-    read as read_redirects,
-)
 from data.runtime.events import event_extra
 from data.runtime.log_store import (
     available_logs,
@@ -462,7 +458,6 @@ def _response_policy(
     for name, value in read_only_headers(
         response.status_code,
         websocket_origin="wss://aranami.toolforge.org",
-        wikipedia_refresh=request.path == "/redirects/",
     ).items():
         if name == "Cache-Control" and isinstance(
             response,
@@ -777,7 +772,6 @@ class _PublicViews:
         parameters.pop("lang", None)
         navigation = _navigation(request, locale)
         saved_tool = {
-            "/redirects/": self._redirects_page,
             "/quality-authorship/": self._quality_authorship_page,
             "/quality-analysis/": self._quality_analysis_page,
         }.get(path)
@@ -953,43 +947,6 @@ class _PublicViews:
                 "Location": "/quality-analysis/?" + urlencode(query),
             },
         )
-
-    def _redirects_page(
-        self,
-        parameters: dict[str, list[str]],
-        locale: str,
-        navigation: dict[str, object],
-    ) -> HttpResponseBase:
-        """Read incremental saved scan data without starting collection.
-
-        Returns:
-            A bounded worklist or a localized invalid-selection error.
-        """
-        unavailable = False
-        try:
-            snapshot = read_redirects(self.runtime / REDIRECTS_PATH)
-        except FileNotFoundError:
-            snapshot = None
-        except OSError, ValueError:
-            snapshot = None
-            unavailable = True
-        try:
-            content = pages.render_redirects(
-                snapshot,
-                parameters,
-                locale,
-                navigation=navigation,
-                status=read_status(self.runtime),
-                config=_configuration(),
-                unavailable=unavailable,
-            )
-        except ValueError:
-            return _page_error(
-                "backlog.not_found",
-                locale,
-                HTTPStatus.BAD_REQUEST,
-            )
-        return _html(content, locale)
 
     def _information_page(
         self,
@@ -2155,7 +2112,6 @@ def create_app(runtime: Path, assets: Path = _ASSETS) -> DjangoWebsite:
             "/maintenance/",
             "/maintenance/checks/",
             "/checks/",
-            "/redirects/",
             "/reports/",
             "/data/",
             "/logs/",
