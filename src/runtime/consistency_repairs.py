@@ -16,10 +16,10 @@ from data.caching import consistency as consistency_cache
 from data.consistency import MAX_REPAIR_INPUT_BYTES, valid_result
 from data.website import (
     MAX_SNAPSHOT_BYTES,
+    read_snapshot,
     save_snapshot,
     validate_dashboard_snapshot,
 )
-from shared.support.files import read_json_object
 from updater.services.zhwiki.consistency_repairs import (
     render_section0_repair,
     section0_edit_summary,
@@ -184,7 +184,7 @@ def _saved_repair_snapshot(path: Path) -> dict | None:
         The validated dashboard with complete saved plans, or none when
         the observations are invalid or do not share the same identity.
     """
-    snapshot = read_json_object(path, MAX_SNAPSHOT_BYTES)
+    snapshot = read_snapshot(path)
     if not validate_dashboard_snapshot(snapshot):
         _LOGGER.warning("Saved dashboard cannot refresh repair proposals.")
         return None

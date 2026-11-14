@@ -525,6 +525,7 @@ def _retirement_moves(home: Path) -> list[tuple[Path, Path]]:
         "conversion",
         "wikitext",
         ".wikitext-locks",
+        ".page-staging",
     ):
         source, target = home / "data" / name, backup / name
         if not _canonical_below(home, source) or target.is_symlink():

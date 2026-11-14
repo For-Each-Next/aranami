@@ -5,7 +5,7 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
-### 0.9.8 (2026-11-14 08:40 UTC)
+### 0.9.8 (2026-11-14 09:00 UTC)
 
 Overview: Moved report generation onto prepared metadata with incremental
 revision acquisition, permanent project page archives and a migrated flat
@@ -37,6 +37,8 @@ Parquet layout, while unifying quality analysis and fixing newsletter grouping.
   retained raw text and avoided refetching bodies when parsing rules change.
 - Migrated historical records without inventing missing revisions, retained
   rollback copies and added resumable migration verification before activation.
+- Read migrated Parquet dashboards when refreshing saved repair proposals,
+  and retired obsolete staging folders after successful service replacement.
 - Batched missing revision text into 256 hexadecimal shards, reused parsed
   metadata and pruned raw revisions against two consecutive daily page lists.
 - Reused accepted newsletter history including unchanged oldid 87963056,

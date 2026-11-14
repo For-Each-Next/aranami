@@ -22,6 +22,7 @@ from data.website import (
     APPEARANCE_SECTIONS,
     MAX_SNAPSHOT_BYTES,
     REPORT_KEYS,
+    read_snapshot,
     save_snapshot,
     validate_dashboard_snapshot,
 )
@@ -143,9 +144,9 @@ class TestConsistencyRepairSidecar(TestCase):
         snapshot["payload"] = "x" * (MAX_SNAPSHOT_BYTES - baseline - 300_000)
         with TemporaryDirectory() as directory:
             runtime = Path(directory)
-            path = runtime / "data/parsed/dashboard.json"
+            path = runtime / "data/parsed/dashboard.parquet"
             coordinator.save_dashboard_snapshot(path, snapshot)
-            compact = json.loads(path.read_text())
+            compact = read_snapshot(path)
             prepared = consistency_cache.read(
                 path.with_name("consistency-repairs.parquet"),
             )["data"]
@@ -202,11 +203,11 @@ class TestConsistencyRepairSidecar(TestCase):
         snapshot["payload"] = "x" * (MAX_SNAPSHOT_BYTES - baseline - 300_000)
         with TemporaryDirectory() as directory:
             runtime = Path(directory)
-            path = runtime / "data/parsed/dashboard.json"
+            path = runtime / "data/parsed/dashboard.parquet"
             coordinator.save_dashboard_snapshot(path, snapshot)
             sidecar = path.with_name("consistency-repairs.parquet")
             full = consistency_cache.read(sidecar)["data"]
-            compact = json.loads(path.read_text())
+            compact = read_snapshot(path)
             expected = copy.deepcopy(full["section0_repairs"])
             for data in (full, compact["consistency"]):
                 for proposal in data["section0_repairs"].values():
@@ -244,7 +245,7 @@ class TestConsistencyRepairSidecar(TestCase):
             assert retained["section0_repairs"] == expected
             assert retained["repair_inputs"] == full["repair_inputs"]
             assert len(retained["section0_repairs"]) == 768
-            updated = json.loads(path.read_text())
+            updated = read_snapshot(path)
             assert len(updated["consistency"]["section0_repairs"]) < 768
             assert updated["updated_at"] == compact["updated_at"]
             assert updated["reports"] == compact["reports"]

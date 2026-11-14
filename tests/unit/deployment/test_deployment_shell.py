@@ -389,9 +389,11 @@ class TestDeploymentShell(TestCase):  # ruff: ignore[too-many-public-methods]
     def test_successful_rollout_retires_legacy_data(self) -> None:
         """Retire old folders only after services become available."""
         source = self._legacy_data()
+        (self.root / "data/.page-staging").mkdir()
         result = self._deploy(self._stage())
         assert result.returncode == 0, result.stderr
         assert not source.exists()
+        assert not (self.root / "data/.page-staging").exists()
         assert (
             self.root
             / "deployment-backups/data-layout-v3/hourly"
