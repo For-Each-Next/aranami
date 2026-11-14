@@ -7,9 +7,10 @@ promotions and departed project members do not add author credits.
 
 A leading quality-by-importance checkbox matrix selects any current article
 class, from featured through unassessed. The default includes FA, FL, A, AL,
-GA and Bplus. The inclusive year range defaults to 2002 through the current
+GA and Bplus. The inclusive year range defaults to 2009 through the current
 year; unknown dates are included by default through a separate checkbox.
-Matrix labels contain no counts. Every chart and both directories use the
+Quality distribution rows show article grades first, list grades next and
+unassessed articles last. Matrix labels contain no counts. Every chart and both directories use the
 same cohort. Table-local title, author and contribution-type filters further
 restrict the article directory without changing the cohort charts.
 
@@ -151,9 +152,8 @@ select rows from the same bounded saved frontend catalog and render them through
 Matplotlib without source requests or persistent writes. Generation tokens reject
 stale requests and responses. Tables update locally while the new figures load.
 The browser keeps the prepared default charts until a filtered Matplotlib
-response is ready. A failed request retains the last successful figures. Figure
-controls support zoom, pan and reset; focused figures also accept arrow keys,
-plus/minus and Home. Miniature violins retain statistic tooltips and article-list
+response is ready. A failed request retains the last successful figures. Focused figures accept arrow keys, plus/minus and Home for keyboard
+pan, zoom and reset. Miniature violins retain statistic tooltips and article-list
 clicks. Matplotlib creates the geometry; browser controls manipulate its SVG.
 
 Analysis and all-grade authorship keep separate short-lived workers scheduled hourly

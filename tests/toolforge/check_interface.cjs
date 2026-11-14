@@ -282,9 +282,10 @@ async function checkInterface(assetRoot) {
                 return {kind:table.className, widths, centered: headings.every(cell => getComputedStyle(cell).textAlign === 'center' && (!cell.querySelector('button') || getComputedStyle(cell.querySelector('button')).justifyContent === 'center')), widerTitle: compact.every(width => widths[title] > width * 1.2),
                     localScroll: table.getBoundingClientRect().width <= scroller.clientWidth + 1 || ['auto', 'scroll'].includes(getComputedStyle(scroller).overflowX),
                     fits: document.documentElement.scrollWidth <= innerWidth + 1 && (!dialog || dialog.scrollWidth <= dialog.clientWidth + 1),
+                    articleTitleBounded: !table.classList.contains('quality-article-directory') || widths[title] <= 320.5,
                     missing, authorDirectory, missingLabel: ${JSON.stringify(interfaceMessages['quality_analysis.unknown_listing'][locale])}, misleadingLabel: ${JSON.stringify(interfaceMessages['quality_authorship.current_revision'][locale])}};
             }))()`);
-            assert.ok(tables.length > 0 && tables.every(table => table.centered && table.widerTitle && table.localScroll && table.fits), 'article/user names need more room than compact columns and overflow must stay in table scrollers: ' + JSON.stringify(tables));
+            assert.ok(tables.length > 0 && tables.every(table => table.centered && table.widerTitle && table.localScroll && table.fits && table.articleTitleBounded), 'article/user names need more room than compact columns and overflow must stay in table scrollers: ' + JSON.stringify(tables));
             assert.ok(tables.every(table => table.missing.every(text => text.includes(table.missingLabel) && !text.includes(table.misleadingLabel))), 'missing listing dates must use the localized unavailable date label: ' + JSON.stringify(tables));
             const directories = tables.flatMap(table => table.authorDirectory ? [table.authorDirectory] : []);
             assert.ok(directories.every(table => Math.abs(table.width - table.target) <= 1 && Math.abs(table.countWidth - table.countTarget) <= 1 && Math.abs(table.activeWidth - table.activeTarget) <= 1 && table.activeSingleLine && table.nameHeading === interfaceMessages['quality_analysis.contributors'][locale] && table.wraps && table.stable), 'author directories must fill the available width, wrap long names and preserve count width: ' + JSON.stringify(directories));
@@ -1486,13 +1487,13 @@ async function checkInterface(assetRoot) {
                             unknown: matrix.querySelector('[data-matrix-unknown]').checked,
                             countsHidden: !matrix.querySelector('[data-matrix-count], [data-matrix-grade-count]'),
                             from: matrix.querySelector('[data-matrix-from]').value,
-                            firstYear: Number(document.querySelector('[data-analysis-year]').dataset.analysisYear),
+                            firstYear: Number(document.querySelector('.analysis-year-data tbody th').textContent),
                             pies: document.querySelectorAll('[data-analysis-pie]').length,
                             footer: Boolean(host.querySelector('.ui-table-pager__start') && host.querySelector('.ui-table-pager__center') && host.querySelector('.ui-table-pager__end')),
                             sizesUnlinked: !host.querySelector('tbody td:last-child a'),
                             fits: document.documentElement.scrollWidth <= innerWidth + 1};
                     })()`);
-                    assert.deepEqual(metrics, {rows: 20, records: 48, enhanced: true, unknown: true, countsHidden: true, from: '2002', firstYear: 2009, pies: 2, footer: true, sizesUnlinked: true, fits: true});
+                    assert.deepEqual(metrics, {rows: 20, records: 48, enhanced: true, unknown: true, countsHidden: true, from: '2009', firstYear: 2009, pies: 2, footer: true, sizesUnlinked: true, fits: true});
                     await checkQualityOrdinals();
                     await checkQualityTableLayout(locale);
                     const coverage = await evaluate(`(() => {
@@ -1512,15 +1513,15 @@ async function checkInterface(assetRoot) {
                     await checkQualityDistributions('initial');
                     const chartControls = await evaluate(`(() => [...document.querySelectorAll('[data-quality-chart]')].map(host => {
                         const svg = host.querySelector('svg'), original = svg.getAttribute('viewBox');
-                        host.querySelector('[data-chart-action="in"]').click();
+                        svg.focus(); svg.dispatchEvent(new KeyboardEvent('keydown', {key:'+', bubbles:true}));
                         const zoomed = Number(svg.getAttribute('viewBox').split(' ')[2]) < Number(original.split(' ')[2]);
                         const before = svg.getAttribute('viewBox');
                         svg.focus(); svg.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
                         const panned = svg.getAttribute('viewBox') !== before;
-                        host.querySelector('[data-chart-action="reset"]').click();
-                        return zoomed && panned && svg.getAttribute('viewBox') === original;
-                    })))()`);
-                    assert.ok(chartControls.length === 3 && chartControls.every(Boolean), 'Matplotlib browser controls must zoom, pan with the keyboard and reset each figure');
+                        svg.dispatchEvent(new KeyboardEvent('keydown', {key:'Home', bubbles:true}));
+                        return zoomed && panned && svg.getAttribute('viewBox') === original && !host.querySelector('button');
+                    }))()`);
+                    assert.ok(chartControls.length === 3 && chartControls.every(Boolean), 'Matplotlib figures must support keyboard navigation and retain unobstructed charts');
 
                     const initialYears = await evaluate(`(() => {
                         const data = document.querySelector('[data-quality-matrix]').qualityMetadata;
@@ -1562,7 +1563,7 @@ async function checkInterface(assetRoot) {
                             const dialog = document.getElementById('analysis-chart-articles');
                             const expected = host.analysisRows.filter(row => row.dataset.cohort === '1' && row.dataset.grade === 'B' && row.dataset.year === '2026').length;
                             const exact = dialog.open && dialog.querySelectorAll('[data-chart-article]').length === expected && expected > 0;
-                            dialog.close(); from.value = '2002'; from.dispatchEvent(new Event('change')); unknown.click();
+                            dialog.close(); from.value = '2009'; from.dispatchEvent(new Event('change')); unknown.click();
                             form.querySelector('[data-matrix-all]').click();
                             if (total() !== 48) form.querySelector('[data-matrix-all]').click();
                             const previousRow = host.querySelector('[data-analysis-row]');
@@ -1638,7 +1639,7 @@ async function checkInterface(assetRoot) {
                                 return !svg.querySelector(':scope > title') && svg.getAttribute('aria-label').endsWith(expected) && (measured ? dots.length === 2 && dots.every(dot => Number(dot.getAttribute('x1')) === 0) && Number(median.getAttribute('x1')) === 0 && extrema.length === 2 && Number(svg.querySelector('.analysis-violin-mean')?.dataset.meanX) === 0 : dots.length === 0 && !median && !extrema.length && !svg.querySelector('.analysis-violin-mean'));
                             };
                             const quantileStates = violinState('C', 1) && violinState('B', 0);
-                            from.value = '2002'; from.dispatchEvent(new Event('change'));
+                            from.value = '2009'; from.dispatchEvent(new Event('change'));
                             for (const input of form.querySelectorAll('[data-matrix-cell]')) input.checked = false;
                             form.querySelector('[data-matrix-cell]').dispatchEvent(new Event('change'));
                             const emptySelection = annual.tHead.rows[0].cells.length === 2 && [...annual.tBodies[0].rows].every(row => row.cells.length === 2) && document.querySelectorAll('.analysis-legend li, .analysis-year-columns [data-chart-value]').length === 0 && host.querySelectorAll('[data-analysis-row]').length === 0;

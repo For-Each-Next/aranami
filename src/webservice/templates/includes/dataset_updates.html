@@ -21,13 +21,13 @@
 {% else %}<p class="context">{{ t.dataset_updates.no_previous }}</p>{% endif %}
 </section>
 <section id="dataset-updates-current" class="dataset-updates" aria-labelledby="dataset-updates-current-heading">
-<h2 id="dataset-updates-current-heading"{% if current.state == 'running' and updates.expires %} data-observation-expires="{{ updates.expires }}" data-stale-text="{{ t.dataset_updates.planned }}"{% endif %}>{{ t.dataset_updates.running if current.state == 'running' else t.dataset_updates.planned }}</h2>
-<div{% if current.state == 'running' and updates.expires %} data-observation-expires="{{ updates.expires }}" data-stale-text="{{ t.dataset_updates.stale }}"{% endif %}>
+<h2 id="dataset-updates-current-heading">{{ t.dataset_updates.schedule }}</h2>
+<div>
 {% if current.get('items', []) %}<ul class="dataset-update-files">
 {% for item in current.get('items', []) %}<li data-key="{{ item.key | default(item.filename) }}">
-<p><span role="img" aria-label="{{ t.dataset_updates.running if item.state == 'running' else t.dataset_updates.planned }}">⌛</span> <strong>{{ item.filename }}</strong></p>
-<ul class="dataset-update-details"><li>{{ t.dataset_updates.started if item.started and item.started.known else t.dataset_updates.scheduled }} {{ instant(item.started if item.started and item.started.known else current.scheduled) }}; {{ baseline(item) }}</li>
+<p><span role="img" aria-label="{{ t.dataset_updates.running if item.state == 'running' else t.dataset_updates.scheduled if item.scheduled and item.scheduled.known else t.dataset_updates.waiting }}">⌛</span> <strong>{{ item.filename }}</strong></p>
+<ul class="dataset-update-details"><li>{% if item.started and item.started.known %}{{ t.dataset_updates.started }} {{ instant(item.started) }}{% elif item.scheduled and item.scheduled.known %}{{ t.dataset_updates.scheduled }} {{ instant(item.scheduled) }}{% else %}{{ t.dataset_updates.waiting }}{% endif %}{% if not item.is_task %}; {{ baseline(item) }}{% endif %}</li>
 {% if item.elapsed and item.elapsed.running %}<li>{{ t.dataset_updates.elapsed }} <span data-clock="dataset-elapsed" data-started-at="{{ item.elapsed.started }}"{% if updates.expires %} data-clock-expires="{{ updates.expires }}"{% endif %} data-clock-unknown="{{ t.data.unknown }}">{{ item.elapsed.label }}</span>{% if item.activity %} · {{ item.activity }}{% endif %}</li>{% elif item.activity %}<li>{{ item.activity }}</li>{% endif %}
-{{ consumers(item) }}</ul></li>{% endfor %}</ul>
+{% if not item.is_task %}{{ consumers(item) }}{% endif %}</ul></li>{% endfor %}</ul>
 {% else %}<p class="context">{{ t.dataset_updates.unavailable if current.state == 'unavailable' else t.dataset_updates.no_planned }}</p>{% endif %}
 </div></section>

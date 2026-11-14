@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from status_fixtures import status_snapshot
 
+from webservice.dataset_updates import dataset_updates_context
 from webservice.pages import render_about, render_live_status
 from webservice.presentation import Interface
 from webservice.status_view import status_context
@@ -148,7 +149,7 @@ class DatasetUpdatePresentationTests(TestCase):
         item = data["current"]["items"][0]
         item.update(state="pending", started=None, elapsed=None, activity=None)
         output = _render_updates(data, "zh-hans")
-        assert "计划更新资料</h2>" in output
+        assert "更新排程</h2>" in output
         assert "正在更新资料" not in output
         assert 'data-clock="dataset-elapsed"' not in output
         assert "<strong>next.parquet</strong>" in output
@@ -160,3 +161,152 @@ class DatasetUpdatePresentationTests(TestCase):
         assert Interface("en").text("dataset_updates.no_previous") in output
         assert Interface("en").text("dataset_updates.no_planned") in output
         assert 'class="dataset-update-files"' not in output
+
+
+class DatasetUpdateContextTests(TestCase):
+    """Verify time windows and independently owned collectors."""
+
+    def setUp(self) -> None:
+        """Prepare current scheduler observations."""
+        self.interface = Interface("en")
+        self.status = {
+            "services": {
+                "scheduler": {
+                    "freshness": "current",
+                    "lifecycle": "running",
+                    "boot_id": "1" * 32,
+                    "heartbeat_at": _NOW.isoformat(),
+                    "schedules": {"collections": {}},
+                },
+            },
+            "executions": {},
+            "dataset_updates": {"tasks": {}},
+        }
+
+    def context(self, now: dt.datetime = _NOW) -> dict:
+        """Read the pure presentation at a controlled clock.
+
+        Returns:
+            Localized observed outcomes and scheduled work.
+        """
+        return dataset_updates_context(self.interface, self.status, now)
+
+    def test_manual_collector_runs_without_scheduler_ownership(self) -> None:
+        """Show manual activity before it opens any output file."""
+        self.status["services"]["scheduler"]["freshness"] = "stale"
+        self.status["executions"]["a" * 32] = {
+            "run_id": "a" * 32,
+            "boot_id": "2" * 32,
+            "task_id": "quality-authorship",
+            "kind": "collection",
+            "outcome": "running",
+            "started_at": _NOW.isoformat(),
+            "updated_at": _NOW.isoformat(),
+            "finished_at": None,
+            "progress": {"phase": "preparing"},
+        }
+        result = self.context()
+        assert result["current"]["state"] == "running"
+        (item,) = result["current"]["items"]
+        assert item["is_task"]
+        assert item["elapsed"]["running"]
+        assert item["started"]["known"]
+        stale = self.context(_NOW + dt.timedelta(seconds=91))
+        assert stale["current"]["state"] == "unavailable"
+        assert stale["current"]["items"] == []
+
+    def test_next_hour_contains_all_collectors_and_queued_work(self) -> None:
+        """Include the hourly boundary and exclude later work."""
+        schedules = self.status["services"]["scheduler"]["schedules"][
+            "collections"
+        ]
+        for task, offset in [
+            ("website", 10),
+            ("quality-analysis", 60),
+            ("quality-authorship", 61),
+        ]:
+            schedules[task] = {
+                "state": "scheduled",
+                "next_run_at": (
+                    _NOW + dt.timedelta(minutes=offset)
+                ).isoformat(),
+            }
+        schedules["newsletter-history"] = {
+            "state": "scheduled",
+            "queued_since": (_NOW - dt.timedelta(minutes=2)).isoformat(),
+            "next_run_at": (_NOW + dt.timedelta(hours=2)).isoformat(),
+        }
+        result = self.context()
+        keys = {item["key"] for item in result["current"]["items"]}
+        assert keys == {
+            "task:website",
+            "task:quality-analysis",
+            "task:newsletter-history",
+        }
+        assert all(
+            item["scheduled"]["known"] for item in result["current"]["items"]
+        )
+        assert not any(
+            item["elapsed"]["running"] for item in result["current"]["items"]
+        )
+
+    def test_previous_results_expire_after_two_hours_and_deduplicate(
+        self,
+    ) -> None:
+        """Keep recent outcomes by actual file finish, even mid-run."""
+
+        def row(name: str, age: dt.timedelta) -> dict:
+            """Prepare an observed completed file.
+
+            Returns:
+                A safe row with known acquisition timestamps.
+            """
+            return {
+                "filename": "data/raw/" + name + ".parquet",
+                "state": "succeeded",
+                "started_at": _NOW.isoformat(),
+                "finished_at": (_NOW - age).isoformat(),
+            }
+
+        self.status["dataset_updates"]["tasks"]["website"] = {
+            "current": {
+                "run_id": "a" * 32,
+                "files": {
+                    "boundary": row("boundary", dt.timedelta(hours=2)),
+                    "old": row("old", dt.timedelta(hours=2, microseconds=1)),
+                    "recent": row("same", dt.timedelta(minutes=1)),
+                },
+            },
+            "previous": {
+                "run_id": "b" * 32,
+                "files": {
+                    "earlier": row("same", dt.timedelta(minutes=2)),
+                },
+            },
+        }
+        items = self.context()["previous"]["items"]
+        assert [item["filename"] for item in items] == [
+            "data/raw/same.parquet",
+            "data/raw/boundary.parquet",
+        ]
+        assert (
+            items[0]["finished"]["value"]
+            == (_NOW - dt.timedelta(minutes=1)).isoformat()
+        )
+
+    def test_rotated_recent_file_remains_visible(self) -> None:
+        """Read retained results after both task slots have rotated."""
+        self.status["dataset_updates"]["recent"] = [
+            {
+                "run_id": "a" * 32,
+                "task_id": "quality-analysis",
+                "file": {
+                    "filename": "data/raw/retained.parquet",
+                    "state": "succeeded",
+                    "started_at": _NOW.isoformat(),
+                    "finished_at": _NOW.isoformat(),
+                },
+            },
+        ]
+        (item,) = self.context()["previous"]["items"]
+        assert item["filename"] == "data/raw/retained.parquet"

@@ -5,6 +5,20 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.17 (2026-11-14 17:20 UTC)
+
+Overview: Made manual dataset updates observable, limited recent results to two
+hours and refined article statistics and rating-date coverage.
+
+- Listed active collectors and all updates due within one hour under Update
+  schedule; kept completed file outcomes visible for two hours.
+- Added manual collection heartbeats, preserved newer overlapping runs and
+  closed unstarted file observations when collection finished.
+- Reported rating-date acquisition times from matching retained source proof.
+- Ordered quality rows as articles, lists and unassessed; set the minimum and
+  default rating year to 2009 and removed chart toolbar buttons.
+- Limited article-title cells to 320px in the main article/list directory.
+
 ### 0.9.16 (2026-11-14 12:53 UTC)
 
 Overview: Retired category-maintenance collection and legacy quality variants,

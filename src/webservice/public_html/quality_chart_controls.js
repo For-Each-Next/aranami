@@ -1,4 +1,4 @@
-/** Add keyboard and pointer navigation to Matplotlib-generated SVG figures. */
+/** Keep keyboard navigation on Matplotlib-generated SVG figures. */
 const figures = new WeakMap();
 
 /** Keep the visible rectangle inside the original figure at a bounded scale. */
@@ -23,27 +23,6 @@ function zoom(state, factor) {
 
 /** Attach once to a host, looking up its latest replacement figure per event. */
 function listen(host) {
-    host.addEventListener("click", event => {
-        const state = figures.get(host);
-        if (state?.dragged) {
-            state.dragged = false;
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            return;
-        }
-        const button = event.target.closest("[data-chart-action]");
-        if (!state || !button || !host.contains(button)) return;
-        const action = button.dataset.chartAction;
-        if (action === "in" || action === "out") zoom(state, action === "in" ? .8 : 1.25);
-        else if (action === "reset") {
-            state.view = [...state.original];
-            constrain(state);
-        } else if (action === "pan") {
-            state.pan = !state.pan;
-            button.setAttribute("aria-pressed", String(state.pan));
-            state.svg.style.cursor = state.pan ? "grab" : "";
-        }
-    }, true);
     host.addEventListener("keydown", event => {
         const state = figures.get(host);
         if (!state || event.target !== state.svg) return;
@@ -60,39 +39,9 @@ function listen(host) {
         } else return;
         event.preventDefault();
     });
-    host.addEventListener("wheel", event => {
-        const state = figures.get(host);
-        if (!state?.pan || !state.svg.contains(event.target)) return;
-        event.preventDefault();
-        zoom(state, event.deltaY < 0 ? .8 : 1.25);
-    }, {passive:false});
-    host.addEventListener("pointerdown", event => {
-        const state = figures.get(host);
-        if (!state?.pan || event.button !== 0 || !state.svg.contains(event.target)) return;
-        state.pointer = {id:event.pointerId, x:event.clientX, y:event.clientY, view:[...state.view]};
-        state.dragged = false;
-        host.setPointerCapture(event.pointerId);
-    });
-    host.addEventListener("pointermove", event => {
-        const state = figures.get(host), pointer = state?.pointer;
-        if (!pointer || event.pointerId !== pointer.id) return;
-        const dx = event.clientX - pointer.x, dy = event.clientY - pointer.y;
-        if (Math.abs(dx) + Math.abs(dy) < 4 && !state.dragged) return;
-        state.dragged = true;
-        const box = state.svg.getBoundingClientRect();
-        state.view[0] = pointer.view[0] - dx * pointer.view[2] / box.width;
-        state.view[1] = pointer.view[1] - dy * pointer.view[3] / box.height;
-        constrain(state);
-    });
-    for (const name of ["pointerup", "pointercancel"]) host.addEventListener(name, event => {
-        const state = figures.get(host);
-        if (state?.pointer?.id !== event.pointerId) return;
-        state.pointer = undefined;
-        if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId);
-    });
 }
 
-/** Restore localized controls after initial rendering or a filtered SVG swap. */
+/** Restore keyboard navigation after rendering or a filtered SVG swap. */
 export function initializeQualityChartControls(root = document) {
     for (const host of root.querySelectorAll("[data-quality-chart]")) {
         const svg = host.querySelector("svg");
@@ -100,22 +49,7 @@ export function initializeQualityChartControls(root = document) {
         const view = (svg.getAttribute("viewBox") || "").trim().split(/\s+/).map(Number);
         if (view.length !== 4 || !view.every(Number.isFinite) || view[2] <= 0 || view[3] <= 0) continue;
         if (!figures.has(host)) listen(host);
-        figures.set(host, {svg, original:[...view], view:[...view], pan:false, dragged:false});
+        figures.set(host, {svg, original:[...view], view:[...view]});
         svg.setAttribute("tabindex", "0");
-        const labels = JSON.parse(host.dataset.qualityChartLabels || "{}");
-        host.querySelector("[data-chart-controls]")?.remove();
-        const controls = document.createElement("div");
-        controls.className = "analysis-chart-controls";
-        controls.dataset.chartControls = "";
-        for (const [action, key, fallback] of [["in", "zoom_in", "+"], ["out", "zoom_out", "−"], ["pan", "pan", "Pan"], ["reset", "reset", "Reset"]]) {
-            const button = document.createElement("button");
-            button.type = "button";
-            button.className = "ui-button";
-            button.dataset.chartAction = action;
-            button.textContent = labels[key] || fallback;
-            if (action === "pan") button.setAttribute("aria-pressed", "false");
-            controls.append(button);
-        }
-        host.prepend(controls);
     }
 }

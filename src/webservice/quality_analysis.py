@@ -53,7 +53,19 @@ _IMPORTANCE = tuple(
     for label in _PROFILE.importance
     if label.code not in {"NA", "Bottom"}
 )
-_FIRST_FILTER_YEAR = 2002
+_DISTRIBUTION_GRADES = tuple(
+    label.code
+    for group in (0, 1, 2)
+    for label in _PROFILE.classes
+    if label.code in _GRADES
+    and (
+        2
+        if label.code == "Unassessed"
+        else int(label.code != label.article_group)
+    )
+    == group
+)
+_FIRST_FILTER_YEAR = 2009
 _DETAIL_SHARE_THRESHOLD = 0.1
 _MAIN_SHARE_THRESHOLD = 0.33
 _PROSE_LENGTH_LINEAR = 25_000
@@ -707,7 +719,10 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
     }
     grades = [
         {**row, "length": length_lookup.get(("grade", row["grade"]))}
-        for row in grades
+        for row in sorted(
+            grades,
+            key=lambda row: _DISTRIBUTION_GRADES.index(row["grade"]),
+        )
     ]
     importance = [
         {**row, "length": length_lookup.get(("importance", row["importance"]))}
@@ -792,6 +807,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                     "label": grade_label(code, interface),
                     "article_label": grade_label(code, interface),
                     "order": _GRADES.index(code),
+                    "distribution_order": _DISTRIBUTION_GRADES.index(code),
                     "color": _assessment_color(code, "class"),
                     "checked": code
                     not in {
@@ -861,10 +877,6 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             "all_grades": bool(data.get("all_grades")),
             "locale": interface.locale,
             "length_scale_maximum": length_maximum,
-            "chart_controls": {
-                key: interface.text(f"quality_analysis.chart_{key}")
-                for key in ("zoom_in", "zoom_out", "pan", "reset")
-            },
             "grades": grades,
             "importance_totals": importance,
             "importance_available": data.get("importance_available", True),

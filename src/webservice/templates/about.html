@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block assets %}<script type="module" src="{{ asset_url('components.js') }}"></script>{% endblock %}
-{% block contents_links %}<ul><li><a href="#main">{{ t.nav.about }}</a></li><li><a href="#server-status-heading">{{ t.server.heading }}</a></li><li><a href="#dataset-updates-previous-heading">{{ t.dataset_updates.previous }}</a></li><li><a href="#dataset-updates-current-heading">{{ t.dataset_updates.planned }}</a></li><li><a href="#credits">{{ t.about.credits }}</a></li></ul>{% endblock %}
+{% block contents_links %}<ul><li><a href="#main">{{ t.nav.about }}</a></li><li><a href="#server-status-heading">{{ t.server.heading }}</a></li><li><a href="#dataset-updates-previous-heading">{{ t.dataset_updates.previous }}</a></li><li><a href="#dataset-updates-current-heading">{{ t.dataset_updates.schedule }}</a></li><li><a href="#credits">{{ t.about.credits }}</a></li></ul>{% endblock %}
 {% block content %}
 <div class="about-page">
   <p class="page-description">{{ introduction }}</p>

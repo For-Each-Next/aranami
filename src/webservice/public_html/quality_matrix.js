@@ -49,7 +49,7 @@ export function loadQualityMetadata(form) {
 
 /** Include unknown dates independently of the inclusive year range. */
 export function yearSelected(year, from, to, unknown) {
-    return year === null || year === "" ? unknown : Number(year) >= from && Number(year) <= to;
+    return year === null || year === "" ? unknown : Number(year) >= Math.max(2009, from) && Number(year) <= to;
 }
 
 /** Recover an exact linear quantile from a saved, counted length histogram. */
@@ -429,7 +429,8 @@ export function initializeQualityMatrix() {
         const body = host?.closest("figure").querySelector("tbody");
         if (!body) return;
         const entries = [];
-        for (const option of options) {
+        const ordered = dimension === "grade" ? [...options].sort((left, right) => (left.distribution_order ?? left.order) - (right.distribution_order ?? right.order)) : options;
+        for (const option of ordered) {
             const count = selected.filter(cell => cell[dimension] === option.value).reduce((sum, cell) => sum + cell.pages, 0);
             if (!count) continue;
             const row = node("tr"), heading = node("th"), label = chartLink(dimension, option.value, option.label);

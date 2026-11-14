@@ -6,6 +6,7 @@ import json
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from threading import Event, RLock, Thread
 from time import perf_counter
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _LOGGER = logging.getLogger(__name__)
+_HEARTBEAT_SECONDS = 30
 
 
 @dataclass(slots=True)
@@ -52,6 +54,7 @@ class CollectionExecution:
     _clock: float = field(default_factory=perf_counter)
     _source_identity: tuple[str, ...] | None = None
     _source_progress_at: float = 0
+    _lock: RLock = field(default_factory=RLock, repr=False, compare=False)
 
     def elapsed_seconds(self) -> float:
         """Return the monotonic duration observed so far.
@@ -71,35 +74,36 @@ class CollectionExecution:
         Args:
             finished: Whether collection has reached its actual end.
         """
-        self.sequence += 1
-        save_status(
-            "executions",
-            self.run_id,
-            {
-                "run_id": self.run_id,
-                "boot_id": get_boot_id(),
-                "task_id": self.task_id,
-                "kind": "collection",
-                "trigger": self.trigger,
-                "started_at": self.started_at,
-                "finished_at": utc_now() if finished else None,
-                "detected_at": None,
-                "duration_seconds": self.elapsed_seconds()
-                if finished
-                else None,
-                "outcome": self.outcome if finished else "running",
-                "progress": None if finished else self.progress,
-                "failure": self.failure,
-                "stages": self.stages,
-                "stages_truncated": self.stages_truncated,
-                "report_date": None,
-                "updated_count": None,
-                "updated_at": utc_now(),
-                "sequence": self.sequence,
-            },
-            runtime=self.runtime,
-            dry=self.dry,
-        )
+        with self._lock:
+            self.sequence += 1
+            save_status(
+                "executions",
+                self.run_id,
+                {
+                    "run_id": self.run_id,
+                    "boot_id": get_boot_id(),
+                    "task_id": self.task_id,
+                    "kind": "collection",
+                    "trigger": self.trigger,
+                    "started_at": self.started_at,
+                    "finished_at": utc_now() if finished else None,
+                    "detected_at": None,
+                    "duration_seconds": self.elapsed_seconds()
+                    if finished
+                    else None,
+                    "outcome": self.outcome if finished else "running",
+                    "progress": None if finished else self.progress,
+                    "failure": self.failure,
+                    "stages": self.stages,
+                    "stages_truncated": self.stages_truncated,
+                    "report_date": None,
+                    "updated_count": None,
+                    "updated_at": utc_now(),
+                    "sequence": self.sequence,
+                },
+                runtime=self.runtime,
+                dry=self.dry,
+            )
 
     def report_progress(self, progress: dict) -> None:
         """Retain a bounded progress observation from this collection.
@@ -107,15 +111,16 @@ class CollectionExecution:
         Args:
             progress: Validated phase, optional date, and counters.
         """
-        previous = self.progress
-        if previous == progress:
-            return
-        self.progress = progress
-        if (previous or {}).get("work") != progress.get("work"):
-            self._source_progress_at = 0
-            self._source_identity = None
-        self.stage(progress["phase"], progress=progress)
-        self.persist()
+        with self._lock:
+            previous = self.progress
+            if previous == progress:
+                return
+            self.progress = progress
+            if (previous or {}).get("work") != progress.get("work"):
+                self._source_progress_at = 0
+                self._source_identity = None
+            self.stage(progress["phase"], progress=progress)
+            self.persist()
 
     def stage(
         self,
@@ -131,16 +136,17 @@ class CollectionExecution:
             source: Public source facts when an adapter performed work.
             progress: Validated explicit work observations.
         """
-        self.stages.append({
-            "time": self.started_at if kind == "started" else utc_now(),
-            "kind": kind,
-            "title": "",
-            **({"source": source} if source is not None else {}),
-            **({"progress": progress} if progress is not None else {}),
-        })
-        if len(self.stages) > MAX_STAGES:
-            del self.stages[1]
-            self.stages_truncated = True
+        with self._lock:
+            self.stages.append({
+                "time": self.started_at if kind == "started" else utc_now(),
+                "kind": kind,
+                "title": "",
+                **({"source": source} if source is not None else {}),
+                **({"progress": progress} if progress is not None else {}),
+            })
+            if len(self.stages) > MAX_STAGES:
+                del self.stages[1]
+                self.stages_truncated = True
 
     def source_activity(self, kind: str, source: dict) -> None:
         """Expose actual source work without flooding saved status.
@@ -153,39 +159,40 @@ class CollectionExecution:
             kind: Source read or completed-load boundary.
             source: Validated bounded public source facts.
         """
-        identity = (
-            kind,
-            source["provider"],
-            source["dataset"],
-            source["wiki"],
-            source.get("purpose", ""),
-            json.dumps(source.get("scope", {}), sort_keys=True),
-            (source.get("metadata") or {}).get("file", ""),
-        )
-        repeated = identity == self._source_identity
-        now = perf_counter()
-        if (
-            self._source_identity is not None
-            and now - self._source_progress_at < 1
-            and source.get("dataset") != "parquet"
-        ):
-            return
-        self._source_identity = identity
-        self._source_progress_at = now
-        work = (self.progress or {}).get("work")
-        current = (self.progress or {}).get("current") if work else None
-        total = (self.progress or {}).get("total") if work else None
-        self.progress = {
-            "phase": kind,
-            "report_date": None,
-            "current": current,
-            "total": total,
-            "source": source,
-            **({"work": work} if work is not None else {}),
-        }
-        if not repeated:
-            self.stage(kind, source=source)
-        self.persist()
+        with self._lock:
+            identity = (
+                kind,
+                source["provider"],
+                source["dataset"],
+                source["wiki"],
+                source.get("purpose", ""),
+                json.dumps(source.get("scope", {}), sort_keys=True),
+                (source.get("metadata") or {}).get("file", ""),
+            )
+            repeated = identity == self._source_identity
+            now = perf_counter()
+            if (
+                self._source_identity is not None
+                and now - self._source_progress_at < 1
+                and source.get("dataset") != "parquet"
+            ):
+                return
+            self._source_identity = identity
+            self._source_progress_at = now
+            work = (self.progress or {}).get("work")
+            current = (self.progress or {}).get("current") if work else None
+            total = (self.progress or {}).get("total") if work else None
+            self.progress = {
+                "phase": kind,
+                "report_date": None,
+                "current": current,
+                "total": total,
+                "source": source,
+                **({"work": work} if work is not None else {}),
+            }
+            if not repeated:
+                self.stage(kind, source=source)
+            self.persist()
 
     def fail(self, error: BaseException | None = None) -> None:
         """Record a failure even when independent datasets were saved.
@@ -193,12 +200,52 @@ class CollectionExecution:
         Args:
             error: Source failure, or none for partial collection.
         """
-        self.outcome = "failed"
-        self.failure = (
-            exception_failure_details(error)
-            if error
-            else {"failure_reason": "PartialCollection"}
-        )
+        with self._lock:
+            self.outcome = "failed"
+            self.failure = (
+                exception_failure_details(error)
+                if error
+                else {"failure_reason": "PartialCollection"}
+            )
+
+    def succeed(self) -> None:
+        """Confirm completion unless a source already failed."""
+        with self._lock:
+            if self.outcome == "running":
+                self.outcome = "succeeded"
+
+
+@contextmanager
+def _heartbeat(run: CollectionExecution) -> Iterator[None]:
+    """Keep a quiet collector observable until its body has finished.
+
+    Yields:
+        A scope whose worker is stopped and joined before final status.
+    """
+    stopped = Event()
+
+    def refresh() -> None:
+        """Refresh ownership without adding progress stages."""
+        while not stopped.wait(_HEARTBEAT_SECONDS):
+            try:
+                run.persist()
+            except Exception:
+                _LOGGER.warning(
+                    "Could not refresh collection heartbeat.",
+                    exc_info=True,
+                )
+
+    thread = Thread(
+        target=refresh,
+        name=f"aranami-collection-{run.run_id}",
+        daemon=True,
+    )
+    thread.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        thread.join()
 
 
 @contextmanager
@@ -244,13 +291,13 @@ def collection_run(
             extra=event_extra("collection_started", task_id=task_id, dry=dry),
         )
         try:
-            yield run
+            with _heartbeat(run):
+                yield run
         except BaseException as error:
             run.fail(error)
             raise
         else:
-            if run.outcome == "running":
-                run.outcome = "succeeded"
+            run.succeed()
         finally:
             run.stage("finished")
             run.persist(finished=True)

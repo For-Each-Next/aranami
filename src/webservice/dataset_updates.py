@@ -6,7 +6,7 @@ import datetime as dt
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
-from shared.config import TASK_DEFINITIONS
+from shared.config import COLLECTION_DEFINITIONS, TASK_DEFINITIONS
 from webservice.job_history import source_description
 from webservice.presentation import catalog, timestamp, title_url, utc_time
 
@@ -168,8 +168,157 @@ def _item(
             "label": f"{int(minutes)}:{remainder:05.2f}",
         },
         "activity": _activity(run, interface) if running else "",
+        "scheduled": _time(row.get("scheduled_at")),
+        "is_task": False,
         "reports": _reports(row["filename"], interface),
     }
+
+
+def _task_item(
+    task: str,
+    interface: Interface,
+    now: dt.datetime,
+    execution: dict | None = None,
+    scheduled_at: str | None = None,
+) -> dict:
+    """Describe a collector before it opens a dataset.
+
+    Returns:
+        A task row with its own start, schedule and source activity.
+    """
+    execution = execution or {}
+    started = execution.get("started_at")
+    item = _item(
+        {
+            "filename": interface.text(f"routine.{task}"),
+            "state": "running" if started else "pending",
+            "started_at": started,
+            "scheduled_at": scheduled_at,
+        },
+        interface,
+        now,
+        execution,
+    )
+    item.update(key=f"task:{execution.get('run_id', task)}", is_task=True)
+    return item
+
+
+def _active_until(
+    execution: dict,
+    scheduler: dict,
+    now: dt.datetime,
+) -> dt.datetime | None:
+    """Use the owning process's fresh observation for active work.
+
+    Returns:
+        Observation expiry, or none for completed or stale owners.
+    """
+    if (
+        execution.get("kind") != "collection"
+        or execution.get("outcome") != "running"
+        or execution.get("finished_at")
+    ):
+        return None
+    scheduler_owned = execution.get("boot_id") == scheduler.get("boot_id")
+    observed = timestamp(
+        scheduler.get("heartbeat_at")
+        if scheduler_owned
+        else execution.get("updated_at"),
+    )
+    if scheduler_owned and (
+        scheduler.get("freshness") != "current"
+        or scheduler.get("lifecycle") not in {"running", "draining"}
+    ):
+        return None
+    if observed and dt.timedelta(0) <= now - observed < dt.timedelta(
+        seconds=90,
+    ):
+        return observed + dt.timedelta(seconds=90)
+    return None
+
+
+def _schedule_items(
+    interface: Interface,
+    status: dict,
+    now: dt.datetime,
+) -> list[dict]:
+    """List collectors due in the next hour and their definite files.
+
+    Returns:
+        Ordered summaries, including queued work and known destinations.
+    """
+    scheduler = status.get("services", {}).get("scheduler", {})
+    if (
+        scheduler.get("freshness") != "current"
+        or scheduler.get("lifecycle") != "running"
+    ):
+        return []
+    schedules = scheduler.get("schedules", {}).get("collections", {})
+    items = []
+    for task, schedule in sorted(
+        schedules.items(),
+        key=lambda pair: pair[1].get("next_run_at") or "",
+    ):
+        instant = timestamp(schedule.get("next_run_at"))
+        queued = timestamp(schedule.get("queued_since"))
+        if task not in COLLECTION_DEFINITIONS or (
+            queued is None
+            and (
+                schedule.get("state") != "scheduled"
+                or instant is None
+                or not now <= instant <= now + dt.timedelta(hours=1)
+            )
+        ):
+            continue
+        scheduled_at = (queued or instant).isoformat()
+        items.append(
+            _task_item(task, interface, now, scheduled_at=scheduled_at),
+        )
+        items.extend(
+            _item(row, interface, now, {})
+            for row in status.get("dataset_updates", {}).get("planned", [])
+            if row.get("task_id") == task
+            and row.get("scheduled_at") == schedule.get("next_run_at")
+        )
+    return items
+
+
+def _recent_items(
+    interface: Interface,
+    status: dict,
+    now: dt.datetime,
+) -> list[dict]:
+    """Keep the latest outcome for each file during two hours.
+
+    Returns:
+        Recent completed file rows, newest first.
+    """
+    previous = {}
+    evidence = status.get("dataset_updates", {})
+    rows = [item["file"] for item in evidence.get("recent", [])]
+    rows.extend(
+        row
+        for records in evidence.get("tasks", {}).values()
+        for run in records.values()
+        if run
+        for row in run.get("files", {}).values()
+    )
+    for row in rows:
+        finished = timestamp(row.get("finished_at"))
+        if (
+            row["state"] not in {"succeeded", "failed", "unknown"}
+            or finished is None
+            or not dt.timedelta(0) <= now - finished <= dt.timedelta(hours=2)
+        ):
+            continue
+        old = previous.get(row["filename"])
+        if old is None or finished > timestamp(old["finished"]["value"]):
+            previous[row["filename"]] = _item(row, interface, now, {})
+    return sorted(
+        previous.values(),
+        key=lambda item: item["finished"]["value"],
+        reverse=True,
+    )
 
 
 def dataset_updates_context(
@@ -177,7 +326,7 @@ def dataset_updates_context(
     status: dict,
     now: dt.datetime,
 ) -> dict:
-    """Present observed updates without fabricating old run details.
+    """Show recent outcomes, active owners and the next hour's schedule.
 
     Args:
         interface: Selected authored locale.
@@ -185,67 +334,42 @@ def dataset_updates_context(
         now: Actual UTC rendering time for elapsed duration.
 
     Returns:
-        Separate previous and current sections shared by page/live UI.
+        Recent completed file updates and ongoing/upcoming collections.
     """
     scheduler = status.get("services", {}).get("scheduler", {})
-    fresh = scheduler.get("freshness") == "current" and scheduler.get(
-        "lifecycle",
-    ) in {"running", "draining"}
-    heartbeat = timestamp(scheduler.get("heartbeat_at"))
-    expires = (
-        (heartbeat + dt.timedelta(seconds=90)).isoformat()
-        if fresh and heartbeat
-        else None
-    )
-    evidence = status.get("dataset_updates", {})
-    previous, current = [], []
-    starts, finishes, scheduled = [], [], []
-    active = False
-    for records in evidence.get("tasks", {}).values():
-        run = records.get("current") or {}
-        execution = status.get("executions", {}).get(run.get("run_id"), {})
-        is_active = (
-            fresh
-            and run.get("boot_id") == scheduler.get("boot_id")
-            and execution.get("outcome") == "running"
-            and not run.get("finished_at")
-        )
-        last = run if run.get("finished_at") else records.get("previous") or {}
-        previous.extend(
-            _item(row, interface, now, {})
-            for row in last.get("files", {}).values()
-            if row["state"] in {"succeeded", "failed", "unknown"}
-        )
-        if last.get("started_at"):
-            starts.append(last["started_at"])
-        if last.get("finished_at"):
-            finishes.append(last["finished_at"])
-        if is_active:
-            active = True
+    active_runs = {
+        run_id: execution
+        for run_id, execution in status.get("executions", {}).items()
+        if execution.get("task_id") in COLLECTION_DEFINITIONS
+        and _active_until(execution, scheduler, now) is not None
+    }
+    current = [
+        _task_item(execution["task_id"], interface, now, execution)
+        for execution in active_runs.values()
+    ]
+    for records in status.get("dataset_updates", {}).get("tasks", {}).values():
+        for run in records.values():
+            if not run or run.get("run_id") not in active_runs:
+                continue
             current.extend(
-                _item(row, interface, now, execution)
+                _item(row, interface, now, active_runs[run["run_id"]])
                 for row in run.get("files", {}).values()
                 if row["state"] in {"running", "pending"}
             )
-    if not active and fresh:
-        for row in evidence.get("planned", []):
-            current.append(_item(row, interface, now, {}))
-            scheduled.append(row["scheduled_at"])
+    current.extend(_schedule_items(interface, status, now))
+    expiries = [
+        _active_until(execution, scheduler, now)
+        for execution in active_runs.values()
+    ]
     return {
-        "previous": {
-            "items": previous,
-            "started": _time(min(starts) if starts else None),
-            "finished": _time(max(finishes) if finishes else None),
-        },
+        "previous": {"items": _recent_items(interface, status, now)},
         "current": {
             "items": current,
             "state": "running"
-            if active
+            if active_runs
             else "planned"
-            if fresh
+            if scheduler.get("freshness") == "current"
             else "unavailable",
-            "scheduled": _time(min(scheduled) if scheduled else None),
-            "started": _time(None),
         },
-        "expires": expires,
+        "expires": min(expiries).isoformat() if expiries else None,
     }

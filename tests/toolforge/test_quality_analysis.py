@@ -276,6 +276,43 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
             assert "data-analysis-filter-note" not in output
 
     @staticmethod
+    def test_distribution_groups_articles_before_lists_and_unassessed() -> (
+        None
+    ):
+        """Keep class counts in the requested order for every locale."""
+        source = analysis_fixture()
+        expected = [
+            "FA",
+            "A",
+            "GA",
+            "Bplus",
+            "B",
+            "C",
+            "Start",
+            "Stub",
+            "FL",
+            "AL",
+            "BL",
+            "CL",
+            "List",
+            "SL",
+            "Unassessed",
+        ]
+        source["grade_totals"] = [
+            {**source["grade_totals"][0], "grade": code, "pages": index + 1}
+            for index, code in enumerate(reversed(expected))
+        ]
+        counts = {row["grade"]: row["pages"] for row in source["grade_totals"]}
+        for locale in ("en", "zh-hans", "zh-hant"):
+            context = quality_analysis_context(source, Interface(locale))[
+                "quality_analysis"
+            ]
+            assert [row["grade"] for row in context["grades"]] == expected
+            assert {
+                row["grade"]: row["pages"] for row in context["grades"]
+            } == counts
+
+    @staticmethod
     def test_vertical_columns_and_inline_prose_distributions() -> None:
         """Render stacks and pooled strata from saved statistics."""
         source = analysis_fixture()
@@ -337,7 +374,14 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
             result = quality_analysis_context(source, interface)[
                 "quality_analysis"
             ]
-            assert result["grades"][0]["color"] == "#72989c"
+            assert (
+                next(
+                    row["color"]
+                    for row in result["grades"]
+                    if row["grade"] == "Unassessed"
+                )
+                == "#72989c"
+            )
             assert result["articles"][0]["grade_color"] == "#72989c"
             assert result["articles"][0]["importance_color"] == "#72989c"
             assert result["lengths"][0]["color"] == "#72989c"

@@ -399,6 +399,10 @@ Collection retains bounded file-level outcomes separately from service health.
 The About page reads those records and exposes retained Parquet baselines through
 the existing read-only, paginated dataset viewer. Missing historical clocks stay
 unknown; an expired heartbeat never claims that a collection is still active.
+The update schedule lists ongoing collectors, including independent manual
+processes, and every collection due or queued within the next hour. Recent
+file outcomes are displayed for two hours. Manual collection ownership refreshes
+every thirty seconds; its process identity is independent of the scheduler.
 
 Hourly category collection includes all fifteen article/list grade categories.
 It compares complete category membership with PageAssessments in both directions

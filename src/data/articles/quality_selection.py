@@ -16,7 +16,7 @@ from shared.support.files import encode_json
 KEY = ["grade", "importance", "year"]
 _POINTS = 129
 _DEFAULT_VARIANTS = 2
-_MIN_YEAR = 2002
+_MIN_YEAR = 2009
 _MAX_YEAR = 9999
 _MAX_ARTICLES = 30_000
 _HISTOGRAM = pl.List(pl.Struct({"value": pl.Int64, "count": pl.Int64}))

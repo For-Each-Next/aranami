@@ -141,6 +141,7 @@ class QualityChartRequestTests(TestCase):
             ("cells", "FA:High,FA:High"),
             ("cells", "FA:Private"),
             ("from", "2001"),
+            ("from", "2008"),
             ("to", "2027"),
             ("unknown", "yes"),
             ("basis", "private"),
@@ -153,6 +154,15 @@ class QualityChartRequestTests(TestCase):
                 )
                 assert response.status_code == HTTPStatus.BAD_REQUEST
         self.render.assert_not_called()
+
+    def test_first_supported_listing_year_is_inclusive(self) -> None:
+        """Accept the first supported year within the saved catalog."""
+        response = self.client.get(
+            "/quality-analysis/charts/",
+            params={**self.controls, "from": "2009"},
+        )
+        assert response.status_code == HTTPStatus.OK
+        assert self.render.call_args.args[0]["year_from"] == 2009
 
     def test_replaced_generation_rejects_stale_results(self) -> None:
         """Reject sources replaced during rendering."""

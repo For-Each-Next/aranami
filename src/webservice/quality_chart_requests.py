@@ -20,7 +20,7 @@ from webservice.quality_charts import render_charts
 if TYPE_CHECKING:
     from pathlib import Path
 
-_FIRST_YEAR = 2002
+_FIRST_YEAR = 2009
 _QUERY_FIELDS = {
     "generation",
     "basis",

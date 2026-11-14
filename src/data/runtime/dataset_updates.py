@@ -1,6 +1,7 @@
 """Retain bounded per-file update evidence outside task history.
 
 Each collection keeps its latest terminal attempt and active attempt.
+A bounded index retains each file's latest outcome for two hours.
 Baseline hard links preserve the actual previous bytes of mutable files.
 Readers validate paths without creating state or collecting data.
 """
@@ -19,7 +20,7 @@ from threading import RLock
 
 import polars as pl
 
-from shared.support.files import atomic_json, read_json_object
+from shared.support.files import atomic_json, encode_json, read_json_object
 lazy from data.caching.project_observations import cache, category_cache
 lazy from data.project_data import snapshot_path
 lazy from shared.config import COLLECTION_DEFINITIONS, PROJECT_DATA_SCOPES
@@ -28,6 +29,8 @@ STATE_PATH = Path("state/observability/dataset-updates.json")
 MAX_FILES = 2048
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_TASKS = 16
+_MAX_RECENT = 4096
+_RECENT_AGE = dt.timedelta(hours=2)
 _LOCK = RLock()
 _ID = re.compile(r"[0-9a-f]{32}")
 _STATES = {"pending", "running", "succeeded", "failed", "unknown"}
@@ -139,7 +142,7 @@ def baseline_evidence(
 
 def _empty() -> dict:
     """Return unavailable evidence without creating runtime files."""
-    return {"schema": 1, "tasks": {}}
+    return {"schema": 1, "tasks": {}, "recent": []}
 
 
 def _validate_time(value: object) -> None:
@@ -188,7 +191,10 @@ def _validate(value: dict, runtime: Path) -> None:
     Raises:
         ValueError: Saved identities, counts or files are invalid.
     """
-    if set(value) != {"schema", "tasks"} or value["schema"] != 1:
+    if (
+        set(value) not in ({"schema", "tasks"}, {"schema", "tasks", "recent"})
+        or value["schema"] != 1
+    ):
         message = "Invalid dataset-update schema."
         raise ValueError(message)
     tasks = value["tasks"]
@@ -219,6 +225,37 @@ def _validate(value: dict, runtime: Path) -> None:
                 raise ValueError(message)
             for row in run["files"].values():
                 _validate_file(row, runtime)
+    _validate_recent(value.get("recent", []), runtime)
+
+
+def _validate_recent(recent: list, runtime: Path) -> None:
+    """Check independently retained completed file observations.
+
+    Raises:
+        ValueError: Recent identities, outcomes or bounds are invalid.
+    """
+    if not isinstance(recent, list) or len(recent) > _MAX_RECENT:
+        message = "Invalid recent dataset-update count."
+        raise ValueError(message)
+    filenames = set()
+    for item in recent:
+        if (
+            set(item) != {"run_id", "task_id", "file"}
+            or not _ID.fullmatch(item["run_id"])
+            or not re.fullmatch(r"[a-z][a-z0-9-]{0,79}", item["task_id"])
+        ):
+            message = "Invalid recent dataset-update identity."
+            raise ValueError(message)
+        row = item["file"]
+        _validate_file(row, runtime)
+        if (
+            row["state"] not in {"succeeded", "failed", "unknown"}
+            or row.get("finished_at") is None
+            or row["filename"] in filenames
+        ):
+            message = "Invalid recent dataset-update outcome."
+            raise ValueError(message)
+        filenames.add(row["filename"])
 
 
 def _available(run: dict, runtime: Path) -> None:
@@ -246,11 +283,82 @@ def read_updates(runtime: Path) -> dict:
         for run in records.values():
             if run is not None:
                 _available(run, runtime)
+    for item in value.get("recent", []):
+        _available({"files": {"recent": item["file"]}}, runtime)
     return value
 
 
+def _recent_outcomes(
+    value: dict,
+    record: dict,
+    now: dt.datetime,
+) -> list[dict]:
+    """Retain each file's latest terminal outcome for two hours.
+
+    Returns:
+        A bounded newest-first index independent of rotating task slots.
+        Existing slots seed the index when reading a legacy envelope.
+    """
+    candidates = list(value.get("recent", []))
+    runs = [
+        run
+        for records in value["tasks"].values()
+        for run in records.values()
+        if run is not None
+    ]
+    for run in [*runs, record]:
+        candidates.extend(
+            {
+                "run_id": run["run_id"],
+                "task_id": run["task_id"],
+                "file": row,
+            }
+            for row in run["files"].values()
+            if row["state"] in {"succeeded", "failed", "unknown"}
+            and row.get("finished_at") is not None
+        )
+    latest = {}
+    for item in candidates:
+        row = item["file"]
+        finished = dt.datetime.fromisoformat(row["finished_at"])
+        if not dt.timedelta(0) <= now - finished <= _RECENT_AGE:
+            continue
+        previous = latest.get(row["filename"])
+        if previous is None or finished > dt.datetime.fromisoformat(
+            previous["file"]["finished_at"],
+        ):
+            latest[row["filename"]] = item
+    return sorted(
+        latest.values(),
+        key=lambda item: (
+            dt.datetime.fromisoformat(item["file"]["finished_at"]),
+            item["file"]["filename"],
+        ),
+        reverse=True,
+    )[:_MAX_RECENT]
+
+
+def _bound_recent(value: dict) -> None:
+    """Fit optional history within the envelope limit."""
+    remaining = _MAX_BYTES - len(encode_json({**value, "recent": []}))
+    retained = []
+    for item in value["recent"]:
+        required = len(encode_json(item)) + bool(retained)
+        if required > remaining:
+            break
+        retained.append(item)
+        remaining -= required
+    value["recent"] = retained
+
+
 def save_run(runtime: Path, record: dict) -> None:
-    """Atomically merge one collection's latest observed file states."""
+    """Merge file evidence without letting late runs replace newer work.
+
+    The current slot follows collection start order. The previous slot
+    retains the newest finished predecessor, including a late completion
+    from an overlapping run. Terminal observations cannot be reopened
+    by an older in-flight writer for that same run.
+    """
     target = runtime / STATE_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
     with _LOCK, target.with_suffix(".lock").open("a+b") as lock:
@@ -261,18 +369,33 @@ def save_run(runtime: Path, record: dict) -> None:
         except FileNotFoundError:
             value = _empty()
         old = value["tasks"].get(record["task_id"], {})
-        previous = old.get("previous")
-        current = old.get("current")
-        if (
-            current
-            and current["run_id"] != record["run_id"]
-            and current.get("finished_at")
-        ):
-            previous = current
+        runs = {run["run_id"]: run for run in old.values() if run is not None}
+        saved = runs.get(record["run_id"])
+        if not saved or not saved.get("finished_at"):
+            runs[record["run_id"]] = record
+        ordered = sorted(
+            runs.values(),
+            key=lambda run: (
+                dt.datetime.fromisoformat(run["started_at"]),
+                run["run_id"],
+            ),
+            reverse=True,
+        )
+        current = ordered[0]
+        previous = next(
+            (run for run in ordered[1:] if run.get("finished_at")),
+            None,
+        )
+        value["recent"] = _recent_outcomes(
+            value,
+            runs[record["run_id"]],
+            dt.datetime.now(dt.UTC),
+        )
         value["tasks"][record["task_id"]] = {
             "previous": previous,
-            "current": record,
+            "current": current,
         }
+        _bound_recent(value)
         _validate(value, runtime)
         atomic_json(target, value, max_bytes=_MAX_BYTES)
         if record.get("finished_at"):
@@ -282,6 +405,7 @@ def save_run(runtime: Path, record: dict) -> None:
                 for run in records.values()
                 if run
             }
+            retained.update(item["run_id"] for item in value["recent"])
             baseline_root = runtime / "cache/dataset-updates"
             if not baseline_root.is_symlink():
                 for directory in baseline_root.glob("*"):

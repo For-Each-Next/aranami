@@ -123,22 +123,23 @@ class DatasetUpdateRun:
         if self.dry:
             return
         with self.lock:
-            saved = (
-                read_updates(self.runtime)["tasks"]
-                .get(
-                    self.record["task_id"],
-                    {},
-                )
-                .get("current")
+            records = read_updates(self.runtime)["tasks"].get(
+                self.record["task_id"],
+                {},
             )
-            if saved and saved["run_id"] == self.record["run_id"]:
-                self.record = saved
+            for saved in records.values():
+                if saved and saved["run_id"] == self.record["run_id"]:
+                    self.record = saved
+                    break
             self.record["finished_at"] = utc_now()
             for row in self.record["files"].values():
                 if row["state"] == "running":
                     row["state"] = (
                         "failed" if outcome == "failed" else "unknown"
                     )
+                    row["finished_at"] = self.record["finished_at"]
+                elif row["state"] == "pending":
+                    row["state"] = "unknown"
                     row["finished_at"] = self.record["finished_at"]
             self.persist()
 

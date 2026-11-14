@@ -849,6 +849,16 @@
     "zh-hans": "正在更新资料",
     "zh-hant": "正在更新資料"
   },
+  "dataset_updates.schedule": {
+    "en": "Update schedule",
+    "zh-hans": "更新排程",
+    "zh-hant": "更新排程"
+  },
+  "dataset_updates.waiting": {
+    "en": "Waiting to begin",
+    "zh-hans": "等待开始",
+    "zh-hant": "等待開始"
+  },
   "dataset_updates.baseline": {
     "en": "Previous file:",
     "zh-hans": "此前文件：",
@@ -895,14 +905,14 @@
     "zh-hant": "已用時："
   },
   "dataset_updates.no_previous": {
-    "en": "No completed dataset update has been recorded.",
-    "zh-hans": "尚无已完成的资料更新记录。",
-    "zh-hant": "尚無已完成的資料更新紀錄。"
+    "en": "No dataset update finished in the last two hours.",
+    "zh-hans": "最近两小时内没有已结束的资料更新。",
+    "zh-hant": "最近兩小時內沒有已結束的資料更新。"
   },
   "dataset_updates.no_planned": {
-    "en": "No dataset update is currently planned.",
-    "zh-hans": "目前没有计划更新的资料。",
-    "zh-hant": "目前沒有計劃更新的資料。"
+    "en": "No dataset update is running or due within the next hour.",
+    "zh-hans": "目前没有正在执行或未来一小时内的资料更新。",
+    "zh-hant": "目前沒有正在執行或未來一小時內的資料更新。"
   },
   "dataset_updates.unavailable": {
     "en": "Current dataset update plans are unavailable.",

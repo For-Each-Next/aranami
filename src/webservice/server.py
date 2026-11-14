@@ -1757,6 +1757,7 @@ class _PublicViews:
             "state/observability",
             "state/observability/status.json",
             "state/observability/server-sample.json",
+            "state/observability/dataset-updates.json",
         ):
             try:
                 info = (self.runtime / name).lstat()

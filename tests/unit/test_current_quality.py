@@ -16,12 +16,14 @@ import polars as pl
 
 from data.articles import (
     authorship_store,
+    b_listings,
     current_authorship,
     current_quality as store,
+    history_store,
     quality_analysis,
     quality_authors,
 )
-from data.articles.storage import AUTHORSHIP_PATH
+from data.articles.storage import AUTHORSHIP_PATH, HISTORY_PATH
 from data.reports import ReportResult, ReportStore
 from webservice.pages import render_quality_analysis
 from webservice.quality_analysis import main_author_directory
@@ -226,6 +228,194 @@ class CurrentQualityTests(TestCase):
     """Keep every section bound to the same selected current pages."""
 
     @staticmethod
+    def test_saved_date_clock_retains_actual_source_observation() -> None:
+        """Persist source time independently of award and render."""
+        acquired = _NOW - dt.timedelta(hours=2)
+        history = pl.DataFrame(
+            [
+                {
+                    "page_id": 1,
+                    "title": "Game 1",
+                    "talk_page_id": 201,
+                    "revision_id": 301,
+                    "observed_at": acquired,
+                    "contract": "fixture",
+                    "events": [
+                        {
+                            **dict.fromkeys(history_store.EVENT_SCHEMA),
+                            "kind": "quality",
+                            "date": _DAY,
+                            "grade": "GA",
+                            "action": "added",
+                            "parameter": "action1",
+                        },
+                    ],
+                },
+            ],
+            schema=history_store.SCHEMA,
+        )
+        with TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            quality_analysis.checkpoint(
+                runtime,
+                members=_articles(),
+                observed_at=_NOW,
+            )
+            history_store.merge_save(runtime / HISTORY_PATH, history)
+            assert store.refresh_saved_quality(runtime)
+            saved = store.read_current_quality(runtime)
+            assert saved["analysis"]["coverage_updated_at"]["dates"] == (
+                acquired.isoformat()
+            )
+
+    @staticmethod
+    def test_date_clock_requires_matching_acquired_history() -> None:
+        """Exclude other grades, dates and talk heads from freshness."""
+        acquired = _NOW - dt.timedelta(hours=2)
+        matching = {
+            "page_id": 1,
+            "title": "Game 1",
+            "talk_page_id": 201,
+            "revision_id": 301,
+            "observed_at": acquired,
+            "contract": "fixture",
+            "events": [
+                {
+                    **dict.fromkeys(history_store.EVENT_SCHEMA),
+                    "kind": "quality",
+                    "date": _DAY,
+                    "grade": "GA",
+                    "action": "added",
+                },
+            ],
+        }
+        history = pl.DataFrame(
+            [
+                matching,
+                {
+                    **matching,
+                    "page_id": 3,
+                    "talk_page_id": 203,
+                    "revision_id": 303,
+                    "observed_at": _NOW,
+                },
+                {
+                    **matching,
+                    "page_id": 4,
+                    "talk_page_id": 204,
+                    "revision_id": 305,
+                    "observed_at": _NOW,
+                },
+            ],
+            schema=history_store.SCHEMA,
+        )
+        with (
+            patch.object(history_store, "load", return_value=history),
+            patch.object(
+                b_listings,
+                "load",
+                return_value={
+                    "inference": pl.DataFrame(
+                        schema=b_listings.INFERENCE_SCHEMA,
+                    ),
+                },
+            ),
+        ):
+            assert store._listing_date_clock(_articles(), Path()) == acquired
+            assert (
+                store._listing_date_clock(
+                    _articles().filter(pl.col("page_id") != 1),
+                    Path(),
+                )
+                is None
+            )
+
+    @staticmethod
+    def test_date_clock_uses_completed_listing_scan_not_cohort_time() -> None:
+        """Retain exact scan clocks and list-grade equivalence."""
+        acquired = _NOW - dt.timedelta(hours=3)
+        inference = {
+            **dict.fromkeys(b_listings.INFERENCE_SCHEMA),
+            "page_id": 2,
+            "talk_page_id": 202,
+            "scanned_talk_rev_id": 302,
+            "class": "乙",
+            "observed_at": _NOW,
+            "banner_transition_status": "proven",
+            "banner_entry_timestamp": dt.datetime.combine(
+                _DAY,
+                dt.time(),
+                dt.UTC,
+            ),
+            "attempted_at": acquired,
+        }
+        history = pl.DataFrame(
+            [
+                {
+                    "page_id": 4,
+                    "title": "Game 4",
+                    "talk_page_id": 204,
+                    "revision_id": 304,
+                    "observed_at": acquired - dt.timedelta(hours=1),
+                    "contract": "fixture",
+                    "events": [
+                        {
+                            **dict.fromkeys(history_store.EVENT_SCHEMA),
+                            "kind": "quality",
+                            "date": _DAY,
+                            "grade": "A",
+                            "action": "added",
+                        },
+                    ],
+                },
+            ],
+            schema=history_store.SCHEMA,
+        )
+        articles = _articles().with_columns(
+            pl
+            .when(pl.col("page_id") == 4)
+            .then(pl.lit("AL"))
+            .otherwise(pl.col("grade"))
+            .alias("grade"),
+        )
+        with (
+            patch.object(history_store, "load", return_value=history),
+            patch.object(
+                b_listings,
+                "load",
+                return_value={
+                    "inference": pl.DataFrame(
+                        [inference],
+                        schema=b_listings.INFERENCE_SCHEMA,
+                    ),
+                },
+            ),
+        ):
+            assert store._listing_date_clock(articles, Path()) == acquired
+            assert store._listing_date_clock(
+                articles.filter(pl.col("page_id") == 4),
+                Path(),
+            ) == acquired - dt.timedelta(hours=1)
+            inference["banner_transition_status"] = "partial"
+            with patch.object(
+                b_listings,
+                "load",
+                return_value={
+                    "inference": pl.DataFrame(
+                        [inference],
+                        schema=b_listings.INFERENCE_SCHEMA,
+                    ),
+                },
+            ):
+                assert (
+                    store._listing_date_clock(
+                        articles.filter(pl.col("page_id") == 2),
+                        Path(),
+                    )
+                    is None
+                )
+
+    @staticmethod
     def test_ten_percent_evidence_survives_saved_projection_and_html() -> None:
         """Retain the inclusive dialog threshold through storage."""
         evidence = _evidence().with_columns(
@@ -296,6 +486,47 @@ class CurrentQualityTests(TestCase):
             assert ">Boundary</a>" in popup
             assert ">10.0%</td>" in popup
             assert ">Minor</a>" not in popup
+
+    @staticmethod
+    def test_default_presets_begin_in_2009_and_keep_unknown_dates() -> None:
+        """Exclude older listings while retaining the full catalog."""
+        articles = _articles().with_columns(
+            pl
+            .when(pl.col("page_id") == 1)
+            .then(pl.lit(dt.date(2008, 12, 31)))
+            .when(pl.col("page_id") == 3)
+            .then(pl.lit(dt.date(2009, 1, 1)))
+            .when(pl.col("page_id") == 4)
+            .then(None)
+            .otherwise(pl.col("listed_date"))
+            .alias("listed_date"),
+        )
+        selected = store.prepare_current_quality(
+            articles,
+            _evidence(),
+            _b_tables(),
+            _activity(),
+            observed_at=_NOW,
+        )
+        assert {row["page_id"] for row in selected["articles"]} == {
+            1,
+            2,
+            3,
+            4,
+        }
+        assert {
+            row["page_id"] for row in selected["defaults"][0]["articles"]
+        } == {
+            3,
+            4,
+        }
+        assert {
+            row["page_id"] for row in selected["defaults"][1]["articles"]
+        } == {
+            2,
+            3,
+            4,
+        }
 
     @staticmethod
     def test_default_and_all_grade_presets_are_precomputed() -> None:

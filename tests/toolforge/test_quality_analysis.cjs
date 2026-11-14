@@ -61,11 +61,12 @@ test("chart selections match the exact year and grade independently of table vis
 
 
 test("year ranges include both endpoints and independently include unknown dates", () => {
-    assert.equal(context.yearSelected(2002, 2002, 2026, false), true);
-    assert.equal(context.yearSelected("2026", 2002, 2026, false), true);
-    assert.equal(context.yearSelected(2027, 2002, 2026, true), false);
-    assert.equal(context.yearSelected(null, 2002, 2026, true), true);
-    assert.equal(context.yearSelected("", 2002, 2026, false), false);
+    assert.equal(context.yearSelected(2008, 2002, 2026, false), false);
+    assert.equal(context.yearSelected(2009, 2009, 2026, false), true);
+    assert.equal(context.yearSelected("2026", 2009, 2026, false), true);
+    assert.equal(context.yearSelected(2027, 2009, 2026, true), false);
+    assert.equal(context.yearSelected(null, 2009, 2026, true), true);
+    assert.equal(context.yearSelected("", 2009, 2026, false), false);
 });
 
 test("saved cells combine exact quantiles without treating unknown measurements as zero", () => {

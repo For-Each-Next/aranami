@@ -16,12 +16,14 @@ from data.articles import (
     assessment_comparison,
     authorship_corrections,
     authorship_store,
+    b_listings,
     current_authorship,
+    history_store,
     quality_analysis,
     quality_authors,
     quality_selection,
 )
-from data.articles.storage import AUTHORSHIP_PATH, DEFAULT_ROOT
+from data.articles.storage import AUTHORSHIP_PATH, DEFAULT_ROOT, HISTORY_PATH
 from data.reports import ReportStore
 from shared.assessment_profiles import assessment_profile
 from shared.support.dataset_activity import dataset_activity
@@ -617,7 +619,7 @@ def prepare_current_quality(
             & (
                 pl.col("listed_date").is_null()
                 | pl.col("listed_date").is_between(
-                    dt.date(2002, 1, 1),
+                    dt.date(2009, 1, 1),
                     dt.date(observed_at.year, 12, 31),
                 )
             ),
@@ -824,16 +826,92 @@ def refresh_saved_quality(runtime: Path = Path()) -> bool:
         return _refresh_locked(runtime)
 
 
+def _listing_date_clock(
+    articles: pl.DataFrame,
+    runtime: Path,
+) -> dt.datetime | None:
+    """Find actual acquisition clocks behind currently displayed dates.
+
+    Returns:
+        The latest matching history observation or completed range scan.
+        Award dates, cohort observations and file/render times never
+        substitute for missing source-acquisition evidence.
+    """
+    selected = articles.filter(pl.col("listed_date").is_not_null()).select(
+        "page_id",
+        "talk_page_id",
+        "talk_revision_id",
+        pl
+        .when(pl.col("grade") == "AL")
+        .then(pl.lit("A"))
+        .otherwise(pl.col("grade"))
+        .alias("_grade"),
+        pl.col("listed_date").alias("_date"),
+    )
+    if selected.is_empty():
+        return None
+    identity = ["page_id", "talk_page_id", "talk_revision_id"]
+    history = (
+        history_store
+        .load(runtime / HISTORY_PATH)
+        .select(
+            "page_id",
+            "talk_page_id",
+            pl.col("revision_id").alias("talk_revision_id"),
+            "observed_at",
+            "events",
+        )
+        .join(selected, on=identity, how="inner", validate="1:1")
+        .explode("events", empty_as_null=False)
+        .unnest("events")
+        .filter(
+            (pl.col("kind") == "quality")
+            & (pl.col("action") == "added")
+            & (pl.col("grade") == pl.col("_grade"))
+            & (pl.col("date") == pl.col("_date")),
+        )["observed_at"]
+        .max()
+    )
+    profile = assessment_profile("zhwiki", "电子游戏")
+    inferred = (
+        b_listings
+        .load(runtime)["inference"]
+        .filter(
+            (pl.col("banner_transition_status") == "proven")
+            | (pl.col("reason") == "earliest_visible"),
+        )
+        .select(
+            "page_id",
+            "talk_page_id",
+            pl.col("scanned_talk_rev_id").alias("talk_revision_id"),
+            profile.expression(
+                "class",
+                "class",
+                preserve_unknown=False,
+            ).alias("_grade"),
+            pl.col("banner_entry_timestamp").dt.date().alias("_date"),
+            "attempted_at",
+        )
+        .join(selected, on=[*identity, "_grade", "_date"], how="semi")[
+            "attempted_at"
+        ]
+        .max()
+    )
+    return max(
+        (value for value in (history, inferred) if value is not None),
+        default=None,
+    )
+
+
 def _coverage_clocks(
     articles: pl.DataFrame,
     high: pl.DataFrame,
     b_tables: dict[str, pl.DataFrame],
     observed_at: dt.datetime,
+    *,
+    dates: dt.datetime | None,
 ) -> dict[str, str | None]:
     """Retain actual fetch clocks for evidence used by this cohort.
-
-    Listing-history acquisition time is not retained in this projection;
-    leave it unknown instead of substituting the award or render time.
 
     Returns:
         Independent UTC clocks for membership, lengths and both credit
@@ -909,7 +987,7 @@ def _coverage_clocks(
             (value for value in (listed_high, listed_other) if value),
             default=None,
         ),
-        "dates": None,
+        "dates": dates,
     }
     return {
         key: value.isoformat() if value is not None else None
@@ -957,6 +1035,7 @@ def _refresh_locked(runtime: Path) -> bool:
             high,
             b_tables,
             clock,
+            dates=_listing_date_clock(articles, runtime),
         ),
         "selection": selection,
     }
