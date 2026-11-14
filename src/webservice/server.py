@@ -66,6 +66,7 @@ from webservice.django_setup import setup_django
 from webservice.http import accepts_gzip, encoded_response, read_only_headers
 from webservice.live import LiveFeed
 from webservice.page_cache import PageCache
+from webservice.quality_cache import QualityResourceCache
 lazy from data.newsletter.archive import (
     DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
     NewsletterDraftArchive,
@@ -704,6 +705,7 @@ class _PublicViews:
         self.runtime = runtime
         self.assets = assets
         self.asset_cache = AssetCache()
+        self.quality_resources = QualityResourceCache()
         self.pages = PageCache()
         self.socket_clients = 0
         self.live_feed = LiveFeed(
@@ -1476,6 +1478,63 @@ class _PublicViews:
             else _error(HTTPStatus.NOT_FOUND)
         )
 
+    def quality_resource(self, request: ASGIRequest) -> HttpResponseBase:
+        """Deliver a saved catalog or standalone author detail.
+
+        Returns:
+            Immutable bytes, a conditional response, or a missing URL.
+        """
+        match = re.fullmatch(
+            r"/quality-analysis/resources/(en|zh-hans|zh-hant)/"
+            r"(0|1|all)/(current|listed)/"
+            r"((?:catalog-[0-9a-f]{64}\.json|"
+            r"author-quality-author-[1-9][0-9]*-[0-9a-f]{64}\.html))",
+            request.path,
+        )
+        if match is None or request.scope.get("query_string"):
+            return _error(HTTPStatus.NOT_FOUND)
+        locale, cohort, basis, name = match.groups()
+        path = quality_pages.path_for(
+            self.runtime,
+            locale,
+            include_b=cohort == "1",
+            basis=basis,
+            all_grades=cohort == "all",
+        )
+        try:
+            asset = self.quality_resources.read(path, name)
+        except OSError, ValueError, PolarsError:
+            asset = None
+        if asset is None:
+            return _error(HTTPStatus.NOT_FOUND)
+        headers = {
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Content-Language": locale,
+            "ETag": asset.etag,
+            "Vary": "Accept-Encoding",
+        }
+        validators = {
+            value.strip().removeprefix("W/")
+            for value in request.headers.get("If-None-Match", "").split(",")
+        }
+        if "*" in validators or asset.etag.removeprefix("W/") in validators:
+            return _AssetHttpResponse(
+                status=HTTPStatus.NOT_MODIFIED,
+                headers=headers,
+            )
+        compressed = asset.gzip and accepts_gzip(
+            request.headers.get("Accept-Encoding", ""),
+        )
+        if compressed:
+            headers["Content-Encoding"] = "gzip"
+        return _AssetHttpResponse(
+            asset.compressed if compressed else asset.content,
+            content_type="application/json; charset=utf-8"
+            if name.endswith(".json")
+            else "text/html; charset=utf-8",
+            headers=headers,
+        )
+
     def asset(self, request: ASGIRequest) -> HttpResponseBase:
         """Revalidate cached source assets without directory listings.
 
@@ -2111,6 +2170,10 @@ def create_app(runtime: Path, assets: Path = _ASSETS) -> DjangoWebsite:
     patterns.extend([
         url_path("api/live", _route(views.live_api)),
         url_path("api/logs", _route(views.api_logs)),
+        re_path(
+            r"^quality-analysis/resources/.*$",
+            _route(views.quality_resource),
+        ),
         re_path(r"^.*$", _route(views.asset)),
     ])
     return DjangoWebsite(

@@ -1,0 +1,20 @@
+{% from "includes/popup_dialog.html" import popup with context %}
+{% from "includes/quality_authorship_tables.html" import article_table with context %}
+<!doctype html>
+<html lang="{{ language_tag }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ author.dialog_title }} · Aranami</title>
+  <link rel="stylesheet" href="{{ asset_url('styles.css') }}">
+  <link rel="stylesheet" href="{{ asset_url('quality_analysis.css') }}">
+  <script src="{{ asset_url('live.js') }}" defer></script>
+</head>
+<body>
+<main class="shell">
+  <h1>{{ author.dialog_title }}</h1>
+  <p><a href="{{ return_url }}#quality-authors">{{ t.quality_analysis.by_author }}</a></p>
+  {% call popup(author.popup_id, author.dialog_title, return_url ~ "#quality-authors", opened=true) %}{{ article_table(author.articles, author.dialog_title) }}{% endcall %}
+</main>
+</body>
+</html>

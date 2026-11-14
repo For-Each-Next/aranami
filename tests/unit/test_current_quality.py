@@ -23,6 +23,8 @@ from data.articles import (
 )
 from data.articles.storage import AUTHORSHIP_PATH
 from data.reports import ReportResult, ReportStore
+from webservice.pages import render_quality_analysis
+from webservice.quality_analysis import main_author_directory
 
 _NOW = dt.datetime(2026, 11, 14, 12, tzinfo=dt.UTC)
 _DAY = dt.date(2020, 1, 2)
@@ -208,6 +210,74 @@ class CurrentQualityTests(TestCase):
     """Keep every section bound to the same selected current pages."""
 
     @staticmethod
+    def test_ten_percent_evidence_survives_saved_projection_and_html() -> None:
+        """Retain the inclusive dialog threshold through storage."""
+        evidence = _evidence().with_columns(
+            pl
+            .when((pl.col("page_id") == 1) & (pl.col("grade") == "GA"))
+            .then(
+                pl.lit(
+                    _contributors((
+                        ("1", "Alice", 50),
+                        ("2", "Bob", 35),
+                        ("3", "Boundary", 10),
+                        ("4", "Minor", 5),
+                    )),
+                    dtype=_evidence().schema["contributors"],
+                ),
+            )
+            .otherwise(pl.col("contributors"))
+            .alias("contributors"),
+        )
+        with TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            quality_analysis.checkpoint(
+                runtime,
+                members=_articles(),
+                observed_at=_NOW,
+            )
+            authorship_store.save(runtime / AUTHORSHIP_PATH, evidence)
+            b = _b_tables()
+            current_authorship.checkpoint(
+                runtime,
+                members=b["members"],
+                evidence=b["evidence"],
+            )
+            quality_authors.save_activity(
+                runtime / quality_authors.ACTIVITY_PATH,
+                _activity(),
+            )
+            assert store.refresh_saved_quality(runtime)
+            saved = store.read_current_quality(runtime)
+            selection = saved["analysis"]["selection"]
+            article = next(
+                row for row in selection["articles"] if row["page_id"] == 1
+            )
+            assert [
+                editor["name"] for editor in article["authorship_editors"]
+            ] == ["Alice", "Bob", "Boundary"]
+            authors = main_author_directory(
+                selection["articles"],
+                selection["authors"],
+            )
+            bob = next(author for author in authors if author["name"] == "Bob")
+            assert [item["page_id"] for item in bob["articles"]] == [1]
+            assert bob["credit"] == 1
+            output = render_quality_analysis(
+                saved,
+                None,
+                None,
+                "en",
+                _NOW,
+                resources={},
+            )
+            popup = output.split('id="quality-article-1-authorship"', 1)[1]
+            popup = popup.split("</dialog>", 1)[0]
+            assert ">Boundary</a>" in popup
+            assert ">10.0%</td>" in popup
+            assert ">Minor</a>" not in popup
+
+    @staticmethod
     def test_default_and_all_grade_presets_are_precomputed() -> None:
         """Prepare C and unknown dates in the complete-grade preset."""
         extra = (
@@ -308,7 +378,7 @@ class CurrentQualityTests(TestCase):
             assert game["authors"] == ["Alice"]
             assert [
                 editor["name"] for editor in game["authorship_editors"]
-            ] == ["Alice", "Bob"]
+            ] == ["Alice", "Bob", None]
             assert game["authorship_start_revision"] == 11
             assert game["authorship_end_revision"] == 51
 

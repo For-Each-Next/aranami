@@ -1,5 +1,52 @@
 /** Combine saved matrix statistics and keep every report view in one cohort. */
 
+const metadataRequests = new WeakMap();
+
+/** Reuse the parsed catalog for both article controls and matrix filters. */
+export function qualityMetadata(form = document.querySelector("[data-quality-matrix]")) {
+    if (!form) return null;
+    if (!form.qualityMetadata && form.dataset.metadata) {
+        form.qualityMetadata = JSON.parse(form.dataset.metadata);
+        form.qualityMetadata.authorshipIcon = form.dataset.authorshipIcon;
+    }
+    return form.qualityMetadata || null;
+}
+
+/** Fetch a saved catalog once, allowing a fresh attempt after any failure. */
+export function loadQualityMetadata(form) {
+    const saved = qualityMetadata(form);
+    if (saved) return Promise.resolve(saved);
+    if (metadataRequests.has(form)) return metadataRequests.get(form);
+    const request = (async () => {
+        const url = new URL(form.dataset.metadataUrl, location.href);
+        if (url.origin !== location.origin) throw new Error("Invalid quality catalog URL");
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+        try {
+            const response = await fetch(url, {
+                credentials: "same-origin", redirect: "error", signal: controller.signal,
+                headers: {Accept: "application/json"},
+            });
+            if (!response.ok || (response.url && new URL(response.url).origin !== location.origin) ||
+                    !response.headers.get("content-type")?.startsWith("application/json"))
+                throw new Error("Quality catalog unavailable");
+            const data = await response.json();
+            if (!data || ![data.cells, data.extra, data.grades, data.importance].every(Array.isArray) ||
+                    !data.labels || typeof data.labels !== "object" ||
+                    !data.extra.every(row => Array.isArray(row) && row.length >= 13))
+                throw new Error("Invalid quality catalog");
+            data.authorshipIcon = form.dataset.authorshipIcon;
+            form.qualityMetadata = data;
+            return data;
+        } finally {
+            clearTimeout(timeout);
+        }
+    })();
+    metadataRequests.set(form, request);
+    request.catch(() => metadataRequests.delete(form));
+    return request;
+}
+
 /** Include unknown dates independently of the inclusive year range. */
 export function yearSelected(year, from, to, unknown) {
     return year === null || year === "" ? unknown : Number(year) >= from && Number(year) <= to;
@@ -38,8 +85,33 @@ export function combineCells(cells) {
     return {
         pages, measured,
         quantiles: [.025, .16, .5, .84, .975].map(p => histogramQuantile(histogram, p)),
+        quartiles: [.25, .75].map(p => histogramQuantile(histogram, p)),
         density: [...points].sort((a, b) => a[0] - b[0]).map(([x, y]) => [x, y / maximum]),
     };
+}
+
+/** Explain both the population and exact length percentiles for every violin. */
+export function violinSummary(statistics, template) {
+    const number = value => value === null ? "—" : value.toLocaleString("en-US", {maximumFractionDigits: 2});
+    const values = {
+        pages: number(statistics.pages), measured: number(statistics.measured),
+        p25: number(statistics.quartiles[0]), p50: number(statistics.quantiles[2]), p75: number(statistics.quartiles[1]),
+    };
+    return template.replace(/\{(pages|measured|p25|p50|p75)\}/g, (_, key) => values[key]);
+}
+
+/** Keep year-table columns selected and the legend limited to plotted categories. */
+export function qualityYearSummary(selected, grades, firstYear, lastYear) {
+    const years = [];
+    for (let year = Math.max(2009, firstYear); year <= lastYear; year++) {
+        const cells = selected.filter(cell => cell.year === year);
+        years.push({
+            year,
+            pages: cells.reduce((sum, cell) => sum + cell.pages, 0),
+            grades: grades.map(grade => cells.filter(cell => cell.grade === grade.value).reduce((sum, cell) => sum + cell.pages, 0)),
+        });
+    }
+    return {years, legend: grades.filter((_, index) => years.some(year => year.grades[index] > 0))};
 }
 
 const svgNamespace = "http://www.w3.org/2000/svg";
@@ -70,30 +142,54 @@ const format = value => value === null ? "—" : Math.round(value).toLocaleStrin
 export function catalogRows() {
     const form = document.querySelector("[data-quality-matrix]");
     if (!form) return [];
-    const data = JSON.parse(form.dataset.metadata);
-    data.authorshipIcon = form.dataset.authorshipIcon;
-    return (data.extra || []).map(values => Object.fromEntries(["page_id", "title", "grade", "importance", "listed_date", "listed_oldid", "prose_characters", "source_bytes", "authors", "author_ranks", "title_label", "date_label", "authorship"].map((key, index) => [key, values[index]]))).map(article => ({
+    const data = qualityMetadata(form);
+    if (!data) return [];
+    return (data.extra || []).map(values => Object.fromEntries(["page_id", "title", "grade", "importance", "listed_date", "listed_oldid", "prose_characters", "source_bytes", "authors", "author_ranks", "title_label", "date_label", "authorship", "review_url", "main_contributors"].map((key, index) => [key, values[index]]))).map(article => ({
         article, metadata: data,
-        dataset: {pageId: String(article.page_id), title: article.title, grade: article.grade, importance: article.importance, year: article.listed_date?.slice(0, 4) || "", measured: article.prose_characters === null ? "0" : "1", cohort: "0", authorRanks: JSON.stringify(article.author_ranks || [])},
-        cells: [null, article.title_label, data.grades.findIndex(item => item.value === article.grade), data.importance.findIndex(item => item.value === article.importance), article.listed_date, (article.authors || []).join(", "), article.prose_characters, article.source_bytes].map(value => ({dataset: {sort: value === null ? "" : String(value)}, textContent: value === null ? "" : String(value)})),
+        dataset: {pageId: String(article.page_id), title: article.title, grade: article.grade, importance: article.importance, year: article.listed_date?.slice(0, 4) || "", measured: article.prose_characters === null ? "0" : "1", cohort: "0", mainAuthors: JSON.stringify(article.authorship?.available === true ? article.authors || [] : []), mainAuthorLabels: JSON.stringify(article.authorship?.available === true ? (article.main_contributors || []).map(author => author.label) : []), significantAuthors: JSON.stringify(article.authorship?.available === true ? article.authorship.editors.map(editor => editor.name) : [])},
+        cells: [null, article.title_label, data.grades.find(item => item.value === article.grade)?.order ?? data.grades.findIndex(item => item.value === article.grade), data.importance.find(item => item.value === article.importance)?.order ?? data.importance.findIndex(item => item.value === article.importance), article.listed_date, (article.main_contributors || []).map(author => author.label).join(", "), article.prose_characters, article.source_bytes].map(value => ({dataset: {sort: value === null ? "" : String(value)}, textContent: value === null ? "" : String(value)})),
     }));
 }
 
-/** Materialize only visible table rows, with escaped text and exact links. */
+/** Build a fresh visible row with the same markup as the prepared article table. */
 export function articleElement(record) {
-    if (!record.article) return record;
-    if (record.element) return record.element;
+    if (!record.article) return record.cloneNode(true);
     const article = record.article, metadata = record.metadata, row = node("tr");
+    const labels = metadata.labels;
+    const parenthesis = [labels.parenthesis_open || " (", labels.parenthesis_close || ")"];
     row.setAttribute("data-analysis-row", ""); Object.assign(row.dataset, record.dataset);
     const wikiLink = (title, label) => {const link = node("a", label); link.href = `https://zh.wikipedia.org/wiki/${encodeURIComponent(title.replaceAll(" ", "_"))}`; return link;};
     for (const cell of record.cells) {const item = node("td", cell.textContent); Object.assign(item.dataset, cell.dataset); row.append(item);}
-    row.cells[1].replaceChildren(wikiLink(article.title, article.title_label));
-    row.cells[2].textContent = metadata.grades.find(item => item.value === article.grade)?.label || article.grade;
-    row.cells[3].textContent = metadata.importance.find(item => item.value === article.importance)?.label || article.importance;
-    row.cells[4].textContent = article.date_label || metadata.labels.unknown_listing;
-    if (article.listed_oldid && article.date_label) {const link = node("a", article.date_label); link.href = `https://zh.wikipedia.org/w/index.php?oldid=${article.listed_oldid}`; row.cells[4].replaceChildren(link);}
-    row.cells[5].replaceChildren();
-    for (const name of article.authors || []) {if (row.cells[5].childNodes.length) row.cells[5].append(document.createTextNode("、")); row.cells[5].append(wikiLink(`User:${name}`, name));}
+    const talk = node("span", undefined, "analysis-talk");
+    talk.append(document.createTextNode(parenthesis[0]), wikiLink(`Talk:${article.title}`, labels.talk || "talk"), document.createTextNode(parenthesis[1]));
+    row.cells[1].replaceChildren(wikiLink(article.title, article.title_label), document.createTextNode(" "), talk);
+    for (const [column, options, value] of [[2, metadata.grades, article.grade], [3, metadata.importance, article.importance]]) {
+        const assessment = options.find(item => item.value === value);
+        const label = node("span", undefined, "analysis-assessment-label");
+        const icon = svgNode("svg", {viewBox: "0 0 12 12", width: 12, height: 12, class: "analysis-swatch", "aria-hidden": "true"});
+        icon.append(svgNode("rect", {width: 12, height: 12, fill: assessment?.article_color || assessment?.color || "#72989c"}));
+        label.append(icon, document.createTextNode(assessment?.article_label || assessment?.label || value));
+        row.cells[column].replaceChildren(label);
+    }
+    row.cells[4].replaceChildren();
+    if (article.listed_date) {
+        const time = node("time", article.date_label);
+        time.dateTime = article.listed_date;
+        if (article.listed_oldid) {
+            const link = node("a");
+            link.href = `https://zh.wikipedia.org/w/index.php?oldid=${article.listed_oldid}`;
+            link.title = labels.listing_evidence || "";
+            link.append(time);
+            row.cells[4].append(link);
+        } else row.cells[4].append(time);
+    } else row.cells[4].append(node("span", labels.unknown_listing, "context"));
+    if (article.review_url) {
+        const review = node("span", undefined, "analysis-review"), link = node("a", labels.review || "review");
+        link.href = article.review_url;
+        review.append(document.createTextNode(parenthesis[0]), link, document.createTextNode(parenthesis[1]));
+        row.cells[4].append(document.createTextNode(" "), review);
+    }
+    renderMainContributors(row.cells[5], article, labels);
     const popupId = `quality-article-${article.page_id}-authorship`;
     const details = node("a", undefined, "analysis-authorship-info");
     details.href = `#${popupId}`; details.title = metadata.labels.authorship_details.replace("{title}", article.title_label);
@@ -101,40 +197,98 @@ export function articleElement(record) {
     const icon = svgNode("svg", {width:16,height:16,viewBox:"0 0 20 20","aria-hidden":"true",focusable:"false"});
     icon.append(svgNode("use", {href: metadata.authorshipIcon})); details.append(icon);
     details.addEventListener("click", event => {
+        if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
         event.preventDefault(); event.stopPropagation();
         let dialog = document.querySelector("[data-catalog-authorship]");
         if (!dialog) {dialog = node("dialog", undefined, "ui-dialog page-updates analysis-authorship-dialog"); dialog.setAttribute("data-catalog-authorship", ""); document.body.append(dialog);}
         dialog.id = popupId; dialog.setAttribute("aria-labelledby", `${popupId}-heading`);
         const header = node("header", undefined, "ui-dialog__header"), heading = node("h3", details.getAttribute("aria-label"), "ui-dialog__header__title"), close = node("button", "×", "ui-button ui-dialog__header__close-button"), body = node("div", undefined, "ui-dialog__body");
         heading.id = `${popupId}-heading`; close.type = "button"; close.addEventListener("click", () => dialog.close()); header.append(heading, close); body.append(node("p", metadata.labels.authorship_note));
-        const proof = article.authorship || {available: false};
-        if (!proof.available) body.append(node("p", metadata.labels.authorship_unavailable, "notice"));
-        else {
-            const boundary = node("p", metadata.labels.until), date = node("a", proof.range_end?.date || "—"); date.href = proof.range_end.url; boundary.append(date);
-            if (proof.visualization_url) {const visual = node("a", metadata.labels.visualization); visual.href = proof.visualization_url; boundary.append(document.createTextNode(" · "), visual);}
-            body.append(boundary);
-            const table = node("table", undefined, "analysis-editor-table"), head = node("thead"), headRow = node("tr"), tbody = node("tbody");
-            for (const label of [metadata.labels.contributors, metadata.labels.editor_share, metadata.labels.editor_bytes]) headRow.append(node("th", label));
-            head.append(headRow);
-            for (const editor of proof.editors) {const line = node("tr"), name = node("th"); if (editor.url) {const link = node("a", editor.name); link.href = editor.url; name.append(link);} else name.textContent = editor.name; line.append(name, node("td", editor.share_label), node("td", editor.bytes_label)); tbody.append(line);}
-            table.append(head, tbody); body.append(table);
-        }
+        renderAuthorshipDetails(body, article.authorship, metadata.labels);
         dialog.replaceChildren(header, body); details.focus(); dialog.showModal();
     });
-    row.cells[5].append(details);
-    row.cells[6].textContent = format(article.prose_characters);
-    row.cells[7].textContent = article.source_bytes === null ? "—" : (article.source_bytes / 1000).toLocaleString(document.documentElement.lang, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    row.cells[5].append(document.createTextNode(" "), details);
+    row.cells[6].textContent = article.prose_characters === null ? "—" : Math.round(article.prose_characters).toLocaleString("en-US");
+    row.cells[7].textContent = article.source_bytes === null ? "—" : (article.source_bytes / 1000).toLocaleString("en-US", {minimumFractionDigits: 1, maximumFractionDigits: 1});
     for (const column of [0, 6, 7]) row.cells[column].classList.add("analysis-number");
     if (article.prose_characters !== null) {if (document.documentElement.lang === "en") row.cells[6].append(document.createTextNode(" ")); row.cells[6].append(node("small", metadata.labels.words));}
     if (article.source_bytes !== null) row.cells[7].append(document.createTextNode(" "), node("small", "kB"));
-    record.element = row; return row;
+    return row;
+}
+
+/** Show qualified main contributors without turning missing evidence into none. */
+export function renderMainContributors(cell, article, labels) {
+    cell.replaceChildren();
+    if (article.authorship?.available !== true) {
+        cell.append(node("span", labels.main_unavailable, "context"));
+        return;
+    }
+    const contributors = article.main_contributors || [];
+    if (!contributors.length) {
+        cell.append(node("span", labels.no_main_contributors, "context"));
+        return;
+    }
+    for (const contributor of contributors) {
+        if (cell.childNodes.length) cell.append(document.createTextNode("、"));
+        if (contributor.url) {
+            const link = node("a", contributor.label);
+            link.href = contributor.url;
+            cell.append(link);
+        } else cell.append(node("span", contributor.label));
+    }
+}
+
+/** Distinguish unavailable evidence from a saved result with no qualifying editor. */
+export function renderAuthorshipDetails(body, proof, labels) {
+    if (proof?.available !== true) {
+        body.append(node("p", labels.authorship_unavailable, "notice"));
+        return;
+    }
+    const boundary = node("p");
+    if (proof.range_end?.url) {
+        const date = node("a", proof.range_end.date || "—");
+        date.href = proof.range_end.url;
+        boundary.append(document.createTextNode(labels.until), date);
+    }
+    if (proof.visualization_url) {
+        const visual = node("a", labels.visualization);
+        visual.href = proof.visualization_url;
+        if (boundary.childNodes.length) boundary.append(document.createTextNode(" · "));
+        boundary.append(visual);
+    }
+    if (boundary.childNodes.length) body.append(boundary);
+    const table = node("table", undefined, "analysis-editor-table");
+    const head = node("thead"), headRow = node("tr"), tbody = node("tbody");
+    for (const label of [labels.contributors, labels.editor_share, labels.editor_bytes])
+        headRow.append(node("th", label));
+    head.append(headRow);
+    for (const editor of proof.editors) {
+        const line = node("tr"), name = node("th");
+        if (editor.url) {
+            const link = node("a", editor.name);
+            link.href = editor.url;
+            name.append(link);
+        } else name.textContent = editor.name;
+        line.append(name, node("td", editor.share_label), node("td", editor.bytes_label));
+        tbody.append(line);
+    }
+    if (!proof.editors.length) {
+        const row = node("tr"), message = node("td", labels.no_top_editors);
+        message.colSpan = 3;
+        row.append(message);
+        tbody.append(row);
+    }
+    table.append(head, tbody);
+    body.append(table);
 }
 
 /** Apply checkbox and date choices without any network requests. */
 export function initializeQualityMatrix() {
     const form = document.querySelector("[data-quality-matrix]");
-    if (!form) return;
-    const data = JSON.parse(form.dataset.metadata);
+    if (!form || form.hasAttribute("data-matrix-enhanced")) return;
+    const data = qualityMetadata(form);
+    if (!data) return;
+    form.setAttribute("data-matrix-enhanced", "");
     const inputs = [...form.querySelectorAll("[data-matrix-cell]")];
     const rows = document.querySelector("[data-quality-analysis]")?.analysisRows || [...document.querySelectorAll("[data-analysis-row]")];
     const from = form.querySelector("[data-matrix-from]");
@@ -182,14 +336,22 @@ export function initializeQualityMatrix() {
             const caption = node("span", undefined, "analysis-assessment-label"), swatch = svgNode("svg", {viewBox: "0 0 12 12", width: 12, height: 12, class: "analysis-swatch", "aria-hidden": "true"});
             swatch.append(svgNode("rect", {width: 12, height: 12, fill: option.color})); caption.append(swatch, label); heading.append(caption);
             const statistics = combineCells(selected.filter(cell => cell[dimension] === option.value));
-            const maximum = Math.max(1, ...statistics.density.map(point => point[0]));
-            const mini = svgNode("svg", {viewBox:"-10 0 1020 60", preserveAspectRatio:"none", class:"analysis-mini-violin", "data-analysis-violin":option.value, role:"img", "aria-label":`${option.label}: ${format(statistics.quantiles[2])}`});
-            mini.append(svgNode("title", {}, `${statistics.measured}/${statistics.pages} · ${format(statistics.quantiles[2])}`), svgNode("line", {x1:0,x2:1000,y1:30,y2:30,class:"analysis-violin-track"}));
+            const maximum = Math.max(1, ...statistics.density.map(point => point[0]), ...statistics.quantiles.filter(value => value !== null));
+            const summary = violinSummary(statistics, data.labels.violin_summary || "Total: {pages}; measured: {measured}; P25: {p25}; P50: {p50}; P75: {p75}");
+            const mini = svgNode("svg", {viewBox:"-10 0 1020 60", preserveAspectRatio:"none", class:"analysis-mini-violin", "data-analysis-violin":option.value, role:"img", "aria-label":`${option.label}: ${summary}`});
+            mini.append(svgNode("title", {}, summary), svgNode("line", {x1:0,x2:1000,y1:30,y2:30,class:"analysis-violin-track"}));
             if (statistics.density.length) {
                 const upper = statistics.density.map(([x,y]) => `${x / maximum * 1000} ${30 - y * 24}`), lower = [...statistics.density].reverse().map(([x,y]) => `${x / maximum * 1000} ${30 + y * 24}`);
                 mini.append(svgNode("path", {d:`M ${[...upper,...lower].join(" L ")} Z`,fill:option.color,class:"analysis-violin-density"}));
+            }
+            if (statistics.quantiles[2] !== null) {
                 const median = statistics.quantiles[2] / maximum * 1000;
                 mini.append(svgNode("line", {x1:median,x2:median,y1:17,y2:43,class:"analysis-violin-median"}));
+            }
+            for (const [index, value] of statistics.quartiles.entries()) {
+                if (value === null) continue;
+                const x = value / maximum * 1000;
+                mini.append(svgNode("line", {x1:x,x2:x,y1:30,y2:30,class:"analysis-violin-quartile","data-percentile":index ? "75" : "25"}));
             }
             const miniCell = node("td", undefined, "analysis-mini-cell"), miniLink = chartLink(dimension, option.value, option.label);
             miniLink.dataset.chartMeasured = "1"; miniLink.append(mini); miniCell.append(miniLink);
@@ -202,11 +364,15 @@ export function initializeQualityMatrix() {
 
     function renderYears(selected) {
         if (!yearSvg || !yearTable) return;
-        const years = [];
-        for (let year = Math.max(2009, Number(from.value)); year <= Number(to.value); year++) {
-            const cells = selected.filter(cell => cell.year === year);
-            years.push({year, pages: cells.reduce((sum, cell) => sum + cell.pages, 0), grades: grades.map(grade => cells.filter(cell => cell.grade === grade.value).reduce((sum, cell) => sum + cell.pages, 0))});
-        }
+        const selectedGrades = grades.filter(grade => inputs.some(input => input.checked && input.dataset.grade === grade.value));
+        const {years, legend} = qualityYearSummary(selected, selectedGrades, Number(from.value), Number(to.value));
+        const legendList = document.querySelector(".analysis-legend");
+        if (legendList) legendList.replaceChildren(...legend.map(grade => {
+            const item = node("li"), icon = svgNode("svg", {viewBox: "0 0 12 12", width: 12, height: 12, "aria-hidden": "true"});
+            icon.append(svgNode("rect", {width: 12, height: 12, class: `analysis-grade-${grade.value}`, fill: grade.color}));
+            item.append(icon, document.createTextNode(` ${grade.label}`));
+            return item;
+        }));
         const step = Math.max(1, Math.ceil(Math.max(0, ...years.map(year => year.pages)) / 4));
         const width = Math.max(600, 72 + years.length * 46), slot = (width - 64) / Math.max(1, years.length);
         yearSvg.setAttribute("viewBox", `0 0 ${width} 300`); yearSvg.setAttribute("width", width);
@@ -215,12 +381,12 @@ export function initializeQualityMatrix() {
             yearSvg.append(svgNode("line", {x1: 48, x2: width - 16, y1: 248 - index * 55, y2: 248 - index * 55, class: "analysis-year-grid"}), svgNode("text", {x: 38, y: 248 - index * 55, "text-anchor": "end", "dominant-baseline": "middle", class: "analysis-axis-label"}, format(index * step)));
         }
         const head = node("tr"); head.append(node("th", yearLabel));
-        for (const grade of grades) head.append(node("th", grade.label));
+        for (const grade of selectedGrades) head.append(node("th", grade.label));
         head.append(node("th", totalLabel, "analysis-total-column")); yearTable.tHead.replaceChildren(head); yearTable.tBodies[0].replaceChildren();
         for (const [index, year] of years.entries()) {
             const x = 48 + (index + .5) * slot, group = svgNode("g", {"data-analysis-year": year.year, "aria-label": `${year.year}: ${year.pages}`});
             let offset = 0;
-            for (const [position, grade] of grades.entries()) {
+            for (const [position, grade] of selectedGrades.entries()) {
                 const count = year.grades[position], height = count / (step * 4) * 220;
                 if (count) {
                     const link = chartLink("grade", grade.value, `${year.year} · ${grade.label}`, year.year, true);
@@ -248,10 +414,13 @@ export function initializeQualityMatrix() {
             const keep = chosen.has(key(row.dataset.grade, row.dataset.importance)) && yearSelected(row.dataset.year, Number(from.value), Number(to.value), unknown.checked);
             row.dataset.cohort = keep ? "1" : "0"; if (keep) ids.add(row.dataset.pageId);
         }
+        form.qualitySelectedIds = ids;
         for (const row of document.querySelectorAll("[data-matrix-page]")) row.dataset.cohort = ids.has(row.dataset.matrixPage) ? "1" : "0";
         for (const row of authorRows) {
             const link = row.cells[2].querySelector("a"), dialog = document.getElementById(link.getAttribute("aria-controls"));
-            const count = [...dialog.querySelectorAll("[data-matrix-page]")].filter(item => item.dataset.cohort !== "0").length;
+            const pages = row.qualityPageIds ||= row.dataset.pageIds ? JSON.parse(row.dataset.pageIds).map(String) : null;
+            const count = pages ? pages.filter(id => ids.has(id)).length :
+                [...(dialog?.querySelectorAll("[data-matrix-page]") || [])].filter(item => item.dataset.cohort !== "0").length;
             row.dataset.cohort = count ? "1" : "0"; row.cells[2].dataset.sort = String(count); link.textContent = authorCounts.get(row).replace("{count}", String(count));
         }
         for (const [input, matches] of parents) {

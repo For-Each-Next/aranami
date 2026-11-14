@@ -1,6 +1,6 @@
 [project]
 name = "aranami"
-version = "0.9.8"
+version = "0.9.9"
 description = "Wikipedia reports and a read-only dashboard with Django."
 readme = "README.md"
 authors = [
@@ -11,7 +11,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.15"
 keywords = ["dashboard", "mediawiki", "pywikibot", "toolforge", "django", "wikipedia"]
 classifiers = [
-    "Development Status :: 7 - Inactive",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Environment :: Web Environment",
     "Framework :: Django",

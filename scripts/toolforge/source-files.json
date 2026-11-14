@@ -324,6 +324,7 @@
     "src/webservice/public_html/styles.css",
     "src/webservice/quality_analysis.py",
     "src/webservice/quality_authorship.py",
+    "src/webservice/quality_cache.py",
     "src/webservice/quality_pages.py",
     "src/webservice/redirects.py",
     "src/webservice/server.py",
@@ -381,6 +382,7 @@
     "src/webservice/templates/newsletter.html",
     "src/webservice/templates/quality_analysis.html",
     "src/webservice/templates/quality_authorship.html",
+    "src/webservice/templates/quality_detail.html",
     "src/webservice/templates/redirects.html",
     "src/webservice/templates/reports.html"
   ]

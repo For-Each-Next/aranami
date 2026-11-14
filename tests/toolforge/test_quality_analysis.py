@@ -164,6 +164,8 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
         assert [editor["name"] for editor in proof["editors"]] == [
             "Main author",
             "192.0.2.1",
+            "Boundary",
+            "Other",
         ]
         assert (
             "Special%3AContributions%2F192.0.2.1" in proof["editors"][1]["url"]
@@ -238,10 +240,7 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
             assert "oldid=94091952" not in output
             assert "sandbox analysis" not in output
             assert output.count('data-analysis-pie="') == 2
-            assert (
-                Interface(locale).text("quality_analysis.filter_note")
-                in output
-            )
+            assert "data-analysis-filter-note" not in output
 
     @staticmethod
     def test_vertical_columns_and_inline_prose_distributions() -> None:

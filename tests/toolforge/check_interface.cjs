@@ -49,6 +49,11 @@ async function main() {
 
 async function checkInterface(assetRoot) {
     let pendingStartupScripts;
+    let pendingQualityCatalogs;
+    let qualityCatalogFailures = 0;
+    let qualityDetailFailures = 0;
+    let qualityDetailScriptsUnavailable = false;
+    const qualityResourceRequests = [];
     const server = http.createServer((request, response) => {
         const requestURL = new URL(request.url, "http://localhost");
         const locale = locales.includes(requestURL.searchParams.get('lang')) ? requestURL.searchParams.get('lang') : 'en';
@@ -67,6 +72,9 @@ async function checkInterface(assetRoot) {
             '/assets/icons/lgpl-2.1.html': 'lgpl',
         }[requestURL.pathname];
         const pathname = attribution ? `/${locale}/${attribution}.html` : requestURL.pathname === '/maintenance/' ? `/${locale}/maintenance.html` : requestURL.pathname;
+        if (qualityDetailScriptsUnavailable && pathname.endsWith('.js')) {
+            response.writeHead(503).end(); return;
+        }
         const filename = ((pathname.endsWith(".js") || pathname.endsWith(".css")) || pathname.startsWith("/assets/"))
             ? path.join(assetRoot, pathname) : path.join(fixtureRoot, pathname);
         if (!filename.startsWith(fixtureRoot + path.sep) && !filename.startsWith(assetRoot + path.sep)) {
@@ -74,8 +82,24 @@ async function checkInterface(assetRoot) {
         }
         try {
             response.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
-            response.setHeader("Content-Type", ({ ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" })[path.extname(filename)] || "text/plain");
+            response.setHeader("Content-Type", ({ ".html": "text/html; charset=utf-8", ".json": "application/json", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" })[path.extname(filename)] || "text/plain");
             const send = () => response.end(fs.readFileSync(filename));
+            if (pathname.startsWith('/quality-analysis/resources/')) {
+                qualityResourceRequests.push(pathname);
+                if (pathname.endsWith('.html') && qualityDetailFailures > 0) {
+                    qualityDetailFailures--;
+                    response.writeHead(503).end(); return;
+                }
+                if (pathname.endsWith('.json')) {
+                    if (qualityCatalogFailures > 0) {
+                        qualityCatalogFailures--;
+                        response.writeHead(503).end(); return;
+                    }
+                    if (pendingQualityCatalogs) {
+                        pendingQualityCatalogs.push(send); return;
+                    }
+                }
+            }
             if (pendingStartupScripts && pathname.endsWith(".js")) pendingStartupScripts.push(send);
             else send();
         } catch { response.writeHead(404).end(); }
@@ -162,6 +186,60 @@ async function checkInterface(assetRoot) {
             const result = await call("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
             if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
             return result.result.value;
+        };
+        const waitForQuality = async (state = 'ready') => evaluate(`new Promise(resolve => {
+            const check = () => {
+                const form = document.querySelector('[data-quality-matrix]');
+                if (!form || (${JSON.stringify(state)} === 'ready' ? form.dataset.qualityReady === '1' : form.dataset.qualityLoadState === ${JSON.stringify(state)})) resolve();
+                else setTimeout(check, 10);
+            };
+            check();
+        })`);
+        const checkQualityOrdinals = async () => {
+            const columns = await evaluate(`(() => {
+                const selectors = '.analysis-directory .ui-table__table, .quality-authorship-table .ui-table__table, .analysis-chart-article-table';
+                return [...document.querySelectorAll(selectors)].filter(table => table.getBoundingClientRect().width > 0).map(table => {
+                    const heading = table.tHead.rows[0].cells[0];
+                    const cell = [...table.tBodies[0].rows].find(row => !row.hidden)?.cells[0];
+                    const fontSize = parseFloat(getComputedStyle(heading).fontSize);
+                    const width = heading.getBoundingClientRect().width;
+                    if (!cell) return {width, target: fontSize * 4, fits: true};
+                    const original = cell.textContent;
+                    cell.textContent = '999';
+                    const range = document.createRange(); range.selectNodeContents(cell);
+                    const text = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
+                    const fits = text.left >= box.left && text.right <= box.right && getComputedStyle(cell).whiteSpace === 'nowrap';
+                    cell.textContent = original;
+                    return {width, target: fontSize * 4, fits};
+                });
+            })()`);
+            assert.ok(columns.length > 0 && columns.every(column => Math.abs(column.width - column.target) <= 1 && column.fits),
+                'quality ordinal columns must stay four em wide and fit three digits: ' + JSON.stringify(columns));
+        };
+        const checkQualityDistributions = async phase => {
+            const state = await evaluate(`(() => {
+                const counts = [...document.querySelectorAll('.analysis-count')].map(label => {
+                    const number = label.querySelector('span'), percent = label.querySelector('small');
+                    const saved = [number.textContent, percent.textContent];
+                    number.textContent = '13,074'; percent.textContent = '100.0%';
+                    const countRange = document.createRange(); countRange.selectNodeContents(number);
+                    const shareRange = document.createRange(); shareRange.selectNodeContents(percent);
+                    const countBox = countRange.getBoundingClientRect(), shareBox = shareRange.getBoundingClientRect(), cell = label.closest('td').getBoundingClientRect();
+                    const fits = countBox.right <= shareBox.left && countBox.left >= cell.left && shareBox.right <= cell.right;
+                    [number.textContent, percent.textContent] = saved;
+                    return fits;
+                });
+                const violins = [...document.querySelectorAll('.analysis-mini-violin')].map(svg => {
+                    const median = svg.querySelector('.analysis-violin-median');
+                    const dots = [...svg.querySelectorAll('.analysis-violin-quartile')];
+                    const title = svg.querySelector('title')?.textContent || '';
+                    const label = svg.getAttribute('aria-label') || '';
+                    const markers = median ? dots.length === 2 && dots.map(dot => dot.dataset.percentile).join(',') === '25,75' && dots.every(dot => dot.getAttribute('x1') === dot.getAttribute('x2') && dot.getAttribute('y1') === dot.getAttribute('y2') && getComputedStyle(dot).strokeLinecap === 'round') && Number(dots[0].getAttribute('x1')) <= Number(median.getAttribute('x1')) && Number(median.getAttribute('x1')) <= Number(dots[1].getAttribute('x1')) : dots.length === 0;
+                    return {markers, caption: ['P25', 'P50', 'P75'].every(text => title.includes(text) && label.includes(text))};
+                });
+                return {counts: counts.length > 0 && counts.every(Boolean), violins: violins.length > 0 && violins.every(item => item.markers && item.caption), fits: document.documentElement.scrollWidth <= innerWidth + 1};
+            })()`);
+            assert.deepEqual(state, {counts: true, violins: true, fits: true}, phase + ': distribution counts, quartile markers and captions must fit without page overflow');
         };
         const inputCapabilities = await evaluate(`({
             hover: matchMedia('(hover: hover)').matches,
@@ -692,7 +770,7 @@ async function checkInterface(assetRoot) {
             assert.ok(result.literal && result.readonly && result.native && result.safe && result.unique, `newsletter source semantics failed: ${JSON.stringify(result)}`);
             assert.equal(result.fits, true, 'expanded newsletter textarea should autosize to wrapped source');
         };
-        const initialControls = `(() => [...document.querySelectorAll('button, input:not([type=hidden]), select, summary, a.ui-button, .brand img, main h1, .newsletter-text')].filter(element => !element.closest('[data-redirect-controls], [data-execution-history], [data-quality-authorship-table], [data-quality-authorship-filter], [data-quality-analysis-filter], [data-quality-matrix], [data-authorship-basis], [data-quality-analysis]') && !element.matches('[data-redirect-hide], .heading-copy')).map(element => {
+        const initialControls = `(() => [...document.querySelectorAll('button, input:not([type=hidden]), select, summary, a.ui-button, .brand img, main h1, .newsletter-text')].filter(element => !element.closest('[data-redirect-controls], [data-execution-history], [data-quality-authorship-table], [data-quality-authorship-filter], [data-quality-analysis-filter], [data-quality-matrix], [data-authorship-basis], [data-quality-analysis], #analysis-chart-articles') && !element.matches('[data-redirect-hide], .heading-copy')).map(element => {
             const style = getComputedStyle(element);
             const box = element.getBoundingClientRect();
             return {tag: element.tagName, id: element.id, hidden: element.hidden,
@@ -815,6 +893,7 @@ async function checkInterface(assetRoot) {
                 pendingStartupScripts = undefined;
                 for (const send of scripts) send();
                 await loaded;
+                if (surface === 'quality-analysis') await waitForQuality();
                 const after = await evaluate(initialControls);
                 assert.deepEqual(after, before, "initialization changed control visibility, colors, typography, or layout");
                 const afterHeadings = await evaluate(headingGeometry);
@@ -848,6 +927,7 @@ async function checkInterface(assetRoot) {
                     loaded,
                 ]);
                 assert.ok(!navigation.errorText, `navigation failed: ${navigation.errorText}`);
+                if (surface === 'quality-analysis') await waitForQuality();
                 assert.deepEqual(await evaluate("window.aranamiStartupErrors"), [], "page initialization raised an error");
                 await checkSemantics();
                 await assertHeadingAlignment();
@@ -1496,11 +1576,36 @@ async function checkInterface(assetRoot) {
                             fits: document.documentElement.scrollWidth <= innerWidth + 1};
                     })()`);
                     assert.deepEqual(metrics, {rows: 20, records: 48, enhanced: true, unknown: true, countsHidden: true, from: '2002', firstYear: 2009, pies: 2, footer: true, sizesUnlinked: true, fits: true});
+                    await checkQualityOrdinals();
+                    await checkQualityDistributions('initial');
+                    const initialYears = await evaluate(`(() => {
+                        const data = document.querySelector('[data-quality-matrix]').qualityMetadata;
+                        const expected = data.grades.filter(grade => grade.checked).map(grade => grade.label);
+                        const columns = [...document.querySelectorAll('.analysis-year-data thead th')].slice(1, -1).map(cell => cell.textContent);
+                        const plotted = new Set([...document.querySelectorAll('.analysis-year-columns [data-chart-value]')].map(link => link.dataset.chartValue));
+                        const legend = [...document.querySelectorAll('.analysis-legend li')];
+                        const actual = data.grades.filter(grade => plotted.has(grade.value));
+                        return {columns: JSON.stringify(columns) === JSON.stringify(expected),
+                            legend: legend.length === actual.length && legend.every((item, index) => item.textContent.trim() === actual[index].label && item.querySelector('rect').getAttribute('fill') === actual[index].color),
+                            noScrollHint: !document.querySelector('.analysis-year-scroll + p.context')};
+                    })()`);
+                    assert.deepEqual(initialYears, {columns: true, legend: true, noScrollHint: true}, 'initial annual table and legend must match the prepared cohort without a scroll hint');
                     if ([320, 1440].includes(width)) {
                         const interaction = await evaluate(`(() => {
                             const host = document.querySelector('[data-quality-analysis]'), form = document.querySelector('[data-quality-matrix]');
                             const original = window.fetch; let requests = 0;
                             window.fetch = (...args) => {requests++; return original(...args);};
+                            const rowStyles = row => [...row.cells].map(cell => {
+                                const style = getComputedStyle(cell);
+                                return [style.fontFamily, style.fontSize, style.lineHeight, style.textAlign, style.paddingInlineStart, style.paddingInlineEnd];
+                            });
+                            const initialStyles = rowStyles(host.querySelector('[data-analysis-row]'));
+                            const proofLink = host.querySelector('.analysis-authorship-info');
+                            proofLink.click();
+                            const proofDialog = document.getElementById(proofLink.getAttribute('aria-controls'));
+                            const anonymous = [...proofDialog.querySelectorAll('tbody th')].find(cell => cell.textContent.trim() === '192.0.2.1');
+                            const attribution = proofDialog.open && anonymous?.querySelector('a')?.href.includes('Contributions') && proofDialog.textContent.includes('Boundary_Editor') && proofDialog.textContent.includes(form.qualityMetadata.labels.authorship_note);
+                            proofDialog.close();
                             const total = () => Number(document.querySelector('[data-matrix-total]').textContent.replaceAll(',', ''));
                             const initial = total();
                             for (const code of ['B','BL','C','CL']) form.querySelector('[data-matrix-grade="'+code+'"]').click();
@@ -1516,9 +1621,14 @@ async function checkInterface(assetRoot) {
                             dialog.close(); from.value = '2002'; from.dispatchEvent(new Event('change')); unknown.click();
                             form.querySelector('[data-matrix-all]').click();
                             if (total() !== 48) form.querySelector('[data-matrix-all]').click();
+                            const previousRow = host.querySelector('[data-analysis-row]');
                             host.querySelector('[data-analysis-next]').click();
                             const visible = [...host.querySelectorAll('[data-analysis-row]')];
                             const pagination = visible.length === 20 && visible.every((row,index) => Number(row.cells[0].textContent) === 21 + index);
+                            const rowParity = visible.every(row => JSON.stringify(rowStyles(row)) === JSON.stringify(initialStyles) && row.querySelectorAll('.analysis-assessment-label .analysis-swatch').length === 2 && Boolean(row.querySelector('.analysis-talk')));
+                            host.querySelector('[data-analysis-prev]').click();
+                            const freshRows = host.querySelector('[data-analysis-row]') !== previousRow;
+                            host.querySelector('[data-analysis-next]').click();
                             const headings = [...host.querySelectorAll('thead th')].slice(-2).map(item => item.textContent);
                             const shortHeaders = document.documentElement.lang === 'en' || headings.join('/') === '正文/大小';
                             const compactUnits = visible.filter(row => row.dataset.measured === '1').every(row => row.cells[6].querySelector('small') && (document.documentElement.lang === 'en' || !row.cells[6].textContent.includes(' 字')));
@@ -1528,26 +1638,97 @@ async function checkInterface(assetRoot) {
                             const firstChartPage = dialog.querySelectorAll('[data-chart-article]').length === 20;
                             dialog.querySelector('[data-chart-next]').click();
                             const chartPagination = firstChartPage && dialog.querySelectorAll('[data-chart-article]').length === 20 && dialog.querySelector('[data-chart-article] td').textContent === '21';
+                            const chartTable = dialog.querySelector('.analysis-chart-article-table');
+                            const chartHeadings = [...chartTable.tHead.rows[0].cells];
+                            const initialDate = host.analysisRows.filter(row => row.dataset.cohort === '1').map(row => row.cells[4].dataset.sort).filter(Boolean).sort().at(-1);
+                            chartHeadings[4].querySelector('button').click();
+                            const dateAscending = chartHeadings[4].getAttribute('aria-sort') === 'ascending' && chartTable.tBodies[0].rows[0].cells[0].textContent === '1';
+                            chartHeadings[4].querySelector('button').click();
+                            const dateDescending = chartHeadings[4].getAttribute('aria-sort') === 'descending' && chartTable.tBodies[0].rows[0].cells[4].dataset.sort === initialDate;
+                            chartHeadings[5].querySelector('button').click();
+                            const numbers = [...chartTable.tBodies[0].rows].map(row => Number(row.cells[5].dataset.sort));
+                            const numericAscending = numbers.every((value, index) => !index || numbers[index - 1] <= value);
+                            dialog.querySelector('[data-chart-last]').click();
+                            const tail = [...chartTable.tBodies[0].rows].map(row => row.cells[5].dataset.sort || null);
+                            const missingAt = tail.indexOf(null);
+                            const nullsLast = missingAt >= 0 && tail.slice(missingAt).every(value => value === null);
+                            const chartSorting = !chartHeadings[0].querySelector('button') && chartHeadings.slice(1).every(heading => heading.querySelector('button')) && dateAscending && dateDescending && numericAscending && nullsLast;
+                            dialog.close();
+                            document.querySelector('[data-chart-group="importance"][data-chart-value="High"]').dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true}));
+                            const chartSortReset = chartHeadings[4].getAttribute('aria-sort') === 'descending' && chartTable.tBodies[0].rows[0].cells[0].textContent === '1';
                             dialog.close(); host.analysisRows.forEach((row,index) => row.dataset.importance = oldImportance[index]);
                             const author = host.querySelector('[data-analysis-author]'); author.value = 'Author_B'; author.dispatchEvent(new Event('input'));
-                            const rank = host.querySelector('[data-analysis-author-rank]'); rank.value = '1'; rank.dispatchEvent(new Event('change'));
-                            const first = host.querySelectorAll('[data-analysis-row]').length;
-                            rank.value = '2'; rank.dispatchEvent(new Event('change'));
-                            const second = host.querySelectorAll('[data-analysis-row]').length;
+                            const role = host.querySelector('[data-analysis-author-role]');
+                            const exactRoles = [...role.options].map(option => option.value).join(',') === 'main,significant';
+                            role.value = 'main'; role.dispatchEvent(new Event('change'));
+                            const secondaryNotMain = host.querySelectorAll('[data-analysis-row]').length === 0;
+                            role.value = 'significant'; role.dispatchEvent(new Event('change'));
+                            const secondarySignificant = host.querySelectorAll('[data-analysis-row]').length > 0;
+                            author.value = 'Author_A'; author.dispatchEvent(new Event('input'));
+                            role.value = 'main'; role.dispatchEvent(new Event('change'));
+                            const primaryMatches = host.querySelectorAll('[data-analysis-row]').length > 0;
+                            author.value = 'Boundary_Editor'; author.dispatchEvent(new Event('input'));
+                            role.value = 'significant'; role.dispatchEvent(new Event('change'));
+                            const boundaryIncluded = host.querySelectorAll('[data-analysis-row]').length > 0 && [...host.querySelectorAll('#analysis-author-names option')].some(option => option.value === 'Boundary_Editor');
                             host.querySelector('[data-analysis-reset]').click();
                             const totalsOnly = [...document.querySelectorAll('[data-matrix-author]')].every(row => row.cells[2].querySelectorAll('a').length === 1);
-                            const defaultGrades = JSON.parse(form.dataset.metadata).grades.filter(item => item.checked).map(item => item.value);
+                            const annual = document.querySelector('.analysis-year-data');
+                            const selectAnnualGrade = code => {
+                                for (const input of form.querySelectorAll('[data-matrix-cell]')) input.checked = input.dataset.grade === code;
+                                form.querySelector('[data-matrix-cell]').dispatchEvent(new Event('change'));
+                                const grade = form.qualityMetadata.grades.find(grade => grade.value === code);
+                                const hasBars = form.qualityMetadata.cells.some(cell => cell.grade === code && cell.year >= 2009 && cell.year <= Number(form.querySelector('[data-matrix-to]').value) && cell.pages > 0);
+                                const legend = [...document.querySelectorAll('.analysis-legend li')];
+                                const bars = [...document.querySelectorAll('.analysis-year-columns [data-chart-value]')];
+                                return annual.tHead.rows[0].cells.length === 3 && annual.tHead.rows[0].cells[1].textContent === grade.label && [...annual.tBodies[0].rows].every(row => row.cells.length === 3) && legend.length === Number(hasBars) && legend.every(item => item.textContent.trim() === grade.label && item.querySelector('rect').getAttribute('fill') === grade.color) && Boolean(bars.length) === hasBars && bars.every(link => link.dataset.chartValue === code && link.querySelector('rect').getAttribute('fill') === grade.color);
+                            };
+                            const yearSelection = selectAnnualGrade('GA') && selectAnnualGrade('FA');
+                            from.value = '2026'; from.dispatchEvent(new Event('change'));
+                            const violinState = (code, measured) => {
+                                selectAnnualGrade(code);
+                                const svg = document.querySelector('[data-analysis-violin="' + code + '"]');
+                                const expected = form.qualityMetadata.labels.violin_summary.replace('{pages}', '1').replace('{measured}', String(measured)).replace('{p25}', measured ? '0' : '—').replace('{p50}', measured ? '0' : '—').replace('{p75}', measured ? '0' : '—');
+                                const dots = [...svg.querySelectorAll('.analysis-violin-quartile')];
+                                const median = svg.querySelector('.analysis-violin-median');
+                                return svg.querySelector('title').textContent === expected && svg.getAttribute('aria-label').endsWith(expected) && (measured ? dots.length === 2 && dots.every(dot => Number(dot.getAttribute('x1')) === 0) && Number(median.getAttribute('x1')) === 0 : dots.length === 0 && !median);
+                            };
+                            const quantileStates = violinState('C', 1) && violinState('B', 0);
+                            from.value = '2002'; from.dispatchEvent(new Event('change'));
+                            for (const input of form.querySelectorAll('[data-matrix-cell]')) input.checked = false;
+                            form.querySelector('[data-matrix-cell]').dispatchEvent(new Event('change'));
+                            const emptySelection = annual.tHead.rows[0].cells.length === 2 && [...annual.tBodies[0].rows].every(row => row.cells.length === 2) && document.querySelectorAll('.analysis-legend li, .analysis-year-columns [data-chart-value]').length === 0 && host.querySelectorAll('[data-analysis-row]').length === 0;
+                            const defaultGrades = form.qualityMetadata.grades.filter(item => item.checked).map(item => item.value);
                             for (const input of form.querySelectorAll('[data-matrix-cell]')) input.checked = defaultGrades.includes(input.dataset.grade);
                             form.querySelector('[data-matrix-cell]').dispatchEvent(new Event('change'));
                             window.fetch = original;
-                            return {expanded,ranged,exact,pagination,shortHeaders,compactUnits,chartPagination,rank:second > first,totalsOnly,requests};
+                            return {attribution:Boolean(attribution),expanded,ranged,exact,pagination,rowParity,freshRows,shortHeaders,compactUnits,chartPagination,chartSorting,chartSortReset,roles:exactRoles && secondaryNotMain && secondarySignificant && primaryMatches && boundaryIncluded,totalsOnly,yearSelection,quantileStates,emptySelection,requests};
                         })()`);
-                        assert.deepEqual(interaction, {expanded:true,ranged:true,exact:true,pagination:true,shortHeaders:true,compactUnits:true,chartPagination:true,rank:true,totalsOnly:true,requests:0});
+                        assert.deepEqual(interaction, {attribution:true,expanded:true,ranged:true,exact:true,pagination:true,rowParity:true,freshRows:true,shortHeaders:true,compactUnits:true,chartPagination:true,chartSorting:true,chartSortReset:true,roles:true,totalsOnly:true,yearSelection:true,quantileStates:true,emptySelection:true,requests:0});
+                        await checkQualityDistributions('filtered');
+                        await evaluate("document.querySelector('[data-chart-group]').dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true}))");
+                        await checkQualityOrdinals();
+                        await press('Escape', 27);
                         for (const section of ['distribution','years']) {
                             await evaluate(`document.getElementById('analysis-${section}').scrollIntoView()`);
                             const shot = await call('Page.captureScreenshot', {format:'png',captureBeyondViewport:false},sessionId);
                             fs.writeFileSync(path.join(outputRoot, `${locale}-quality-analysis-${section}-${width}.png`), Buffer.from(shot.data,'base64'));
                         }
+                        await evaluate(`(() => {
+                            const host = document.querySelector('[data-quality-analysis]'), form = document.querySelector('[data-quality-matrix]');
+                            for (const input of form.querySelectorAll('[data-matrix-cell]')) input.checked = true;
+                            form.querySelector('[data-matrix-cell]').dispatchEvent(new Event('change'));
+                            host.querySelector('[data-analysis-next]').click();
+                            document.getElementById('analysis-articles').scrollIntoView();
+                        })()`);
+                        await checkQualityDistributions('all grades');
+                        const articleShot = await call('Page.captureScreenshot', {format:'png',captureBeyondViewport:false},sessionId);
+                        fs.writeFileSync(path.join(outputRoot, `${locale}-quality-analysis-articles-page2-${width}.png`), Buffer.from(articleShot.data,'base64'));
+                        await evaluate(`(() => {
+                            const form = document.querySelector('[data-quality-matrix]');
+                            const grades = form.qualityMetadata.grades.filter(grade => grade.checked).map(grade => grade.value);
+                            for (const input of form.querySelectorAll('[data-matrix-cell]')) input.checked = grades.includes(input.dataset.grade);
+                            form.querySelector('[data-matrix-cell]').dispatchEvent(new Event('change'));
+                        })()`);
                         await evaluate('window.scrollTo(0,0)');
                     }
                 }
@@ -1905,6 +2086,156 @@ async function checkInterface(assetRoot) {
                 failures.push({ label, error: error.message });
                 console.error(`${label}: ${error.message}`);
                 if (["CHECK_TIMEOUT", "CDP_CLOSED"].includes(error.code)) break matrix;
+            }
+        }
+        let qualityDeferredLoads = 0;
+        let qualityResourceRetries = 0;
+        let qualityLazyDetails = 0;
+        let qualityDetailFallbacks = 0;
+        if (surfaces.includes('quality-analysis')) for (const locale of locales) {
+            const label = `${locale}/quality-analysis/deferred-resources`;
+            try {
+                await call('Emulation.setDeviceMetricsOverride', {width: 1440, height: 936, deviceScaleFactor: 1, mobile: false}, sessionId);
+                pendingQualityCatalogs = [];
+                qualityResourceRequests.length = 0;
+                const loaded = wait('Page.loadEventFired', sessionId);
+                await Promise.all([call('Page.navigate', {url: `${base}/${locale}/quality-analysis.html`}, sessionId), loaded]);
+                await bounded(new Promise(resolve => {
+                    const check = () => pendingQualityCatalogs?.length ? resolve() : setTimeout(check, 10);
+                    check();
+                }), 'deferred quality catalog request');
+                const initial = await evaluate(`(() => {
+                    const form = document.querySelector('[data-quality-matrix]');
+                    const host = document.querySelector('[data-quality-analysis]');
+                    return {rows: host.querySelectorAll('[data-analysis-row]:not([hidden])').length,
+                        catalogInline: form.hasAttribute('data-metadata'),
+                        controlsHidden: host.querySelector('[data-analysis-controls]').hidden,
+                        filtersDisabled: [...form.querySelectorAll('input')].every(input => input.disabled),
+                        overview: document.querySelector('[data-matrix-total]').textContent,
+                        authorDialogs: [...document.querySelectorAll('[data-quality-detail]')].some(link => document.getElementById(link.dataset.qualityDetail)),
+                        pies: document.querySelectorAll('[data-analysis-pie]').length,
+                        loading: form.dataset.qualityLoadState};
+                })()`);
+                assert.equal(initial.rows, 20, 'initial page must show its prepared first article page before catalog arrival');
+                assert.equal(initial.pies, 2, 'initial overview must not wait for the catalog');
+                assert.ok(initial.controlsHidden && initial.filtersDisabled && !initial.catalogInline && !initial.authorDialogs);
+                assert.equal(initial.loading, 'loading');
+                assert.equal(qualityResourceRequests.filter(name => name.endsWith('.html')).length, 0, 'closed author details must not be requested at startup');
+                const shot = await call('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false}, sessionId);
+                fs.writeFileSync(path.join(outputRoot, `${locale}-quality-analysis-before-catalog.png`), Buffer.from(shot.data, 'base64'));
+                const earlyDetail = await evaluate(`(() => {
+                    const link = [...document.querySelectorAll('[data-quality-detail]')].find(link => !link.closest('tr').hidden);
+                    link.click(); return link.dataset.qualityDetail;
+                })()`);
+                await evaluate(`new Promise(resolve => {
+                    const check = () => document.getElementById(${JSON.stringify(earlyDetail)})?.open ? resolve() : setTimeout(check, 10);
+                    check();
+                })`);
+                const earlyRows = await evaluate(`(() => {
+                    const form = document.querySelector('[data-quality-matrix]');
+                    const selected = new Set(JSON.parse(form.dataset.selectedPageIds).map(String));
+                    const rows = [...document.getElementById(${JSON.stringify(earlyDetail)}).querySelectorAll('[data-matrix-page]:not([hidden])')];
+                    return {count: rows.length, matches: rows.every(row => selected.has(row.dataset.matrixPage))};
+                })()`);
+                assert.ok(earlyRows.count > 0 && earlyRows.matches, 'details opened before catalog arrival must use the prepared default cohort');
+                await checkQualityOrdinals();
+                await press('Escape', 27);
+                const queued = pendingQualityCatalogs;
+                pendingQualityCatalogs = undefined;
+                for (const send of queued) send();
+                await waitForQuality();
+                assert.equal(await evaluate("document.querySelector('[data-matrix-total]').textContent"), initial.overview, 'catalog initialization must preserve prepared default totals');
+                assert.equal(qualityResourceRequests.filter(name => name.endsWith('.json')).length, 1, 'catalog consumers must share one request');
+                qualityDeferredLoads++;
+
+                const fresh = wait('Page.loadEventFired', sessionId);
+                qualityResourceRequests.length = 0;
+                await Promise.all([call('Page.navigate', {url: `${base}/${locale}/quality-analysis.html`}, sessionId), fresh]);
+                await waitForQuality();
+                qualityDetailFailures = 1;
+                const detail = await evaluate(`(() => {
+                    const link = [...document.querySelectorAll('[data-quality-detail]')].find(link => !link.closest('tr').hidden);
+                    link.focus();
+                    window.qualityTestOpener = link;
+                    return {id: link.dataset.qualityDetail, href: link.href};
+                })()`);
+                await press('Enter', 13);
+                await evaluate(`new Promise(resolve => {
+                    const check = () => window.qualityTestOpener.qualityDetailStatus?.textContent && !window.qualityTestOpener.hasAttribute('aria-busy') ? resolve() : setTimeout(check, 10);
+                    check();
+                })`);
+                assert.equal(await evaluate(`Boolean(document.getElementById(${JSON.stringify(detail.id)}))`), false, 'failed detail requests must not create an empty dialog');
+                assert.equal(await evaluate('window.qualityTestOpener.href'), detail.href, 'failed detail requests must preserve native navigation');
+                await press('Enter', 13);
+                await evaluate(`new Promise(resolve => {
+                    const check = () => document.getElementById(${JSON.stringify(detail.id)})?.open ? resolve() : setTimeout(check, 10);
+                    check();
+                })`);
+                const opened = await evaluate(`(() => {
+                    const dialog = document.getElementById(${JSON.stringify(detail.id)});
+                    const ids = [...document.querySelectorAll('[id]')].map(element => element.id);
+                    return {focused: dialog.contains(document.activeElement),
+                        enhanced: Boolean(dialog.querySelector('[data-table-enhanced]')),
+                        rows: dialog.querySelectorAll('tbody tr:not([hidden])').length,
+                        unique: new Set(ids).size === ids.length,
+                        fits: dialog.getBoundingClientRect().width <= innerWidth};
+                })()`);
+                assert.ok(opened.focused && opened.enhanced && opened.rows > 0 && opened.unique && opened.fits, 'lazy details must keep native modal focus, visible rows and unique IDs');
+                await checkQualityOrdinals();
+                const detailShot = await call('Page.captureScreenshot', {format:'png',captureBeyondViewport:false},sessionId);
+                fs.writeFileSync(path.join(outputRoot, `${locale}-quality-author-lazy-detail.png`), Buffer.from(detailShot.data,'base64'));
+                assert.equal(qualityResourceRequests.filter(name => name.endsWith('.html')).length, 2, 'failed details must retry once on demand');
+                await press('Escape', 27);
+                await evaluate('new Promise(resolve => requestAnimationFrame(resolve))');
+                assert.equal(await evaluate('document.activeElement === window.qualityTestOpener'), true, 'Escape must restore lazy detail opener focus');
+                await press('Enter', 13);
+                await evaluate(`new Promise(resolve => {
+                    const check = () => document.getElementById(${JSON.stringify(detail.id)})?.open ? resolve() : setTimeout(check, 10);
+                    check();
+                })`);
+                assert.equal(qualityResourceRequests.filter(name => name.endsWith('.html')).length, 2, 'reopening a loaded detail must reuse its dialog');
+                await press('Escape', 27);
+                qualityLazyDetails++;
+
+                qualityCatalogFailures = 1;
+                const reloaded = wait('Page.loadEventFired', sessionId);
+                await Promise.all([call('Page.navigate', {url: `${base}/${locale}/quality-analysis.html`}, sessionId), reloaded]);
+                await waitForQuality('error');
+                const failed = await evaluate(`(() => {
+                    const form = document.querySelector('[data-quality-matrix]');
+                    return {rows: document.querySelectorAll('[data-quality-analysis] [data-analysis-row]:not([hidden])').length,
+                        retry: !form.querySelector('[data-quality-retry]').hidden,
+                        message: Boolean(form.querySelector('[data-quality-load-status]').textContent),
+                        controlsHidden: document.querySelector('[data-analysis-controls]').hidden};
+                })()`);
+                assert.deepEqual(failed, {rows: 20, retry: true, message: true, controlsHidden: true}, 'failed catalog reads must preserve native evidence and offer retry');
+                await evaluate("document.querySelector('[data-quality-retry]').click()");
+                await waitForQuality();
+                assert.equal(await evaluate("document.querySelector('[data-quality-analysis]').analysisRows.length"), 48, 'catalog retry must restore the complete saved selection');
+                qualityResourceRetries++;
+                qualityDetailScriptsUnavailable = true;
+                const fallbackLoaded = wait('Page.loadEventFired', sessionId);
+                await Promise.all([call('Page.navigate', {url: detail.href}, sessionId), fallbackLoaded]);
+                const fallback = await evaluate(`(() => {
+                    const dialog = document.getElementById(${JSON.stringify(detail.id)});
+                    const back = document.querySelector('main > p > a');
+                    return {visible: dialog.open && dialog.getBoundingClientRect().height > 0,
+                        rows: dialog.querySelectorAll('tbody tr').length,
+                        back: Boolean(back && back.getBoundingClientRect().height > 0),
+                        returnUrl: back?.href};
+                })()`);
+                assert.ok(fallback.visible && fallback.rows > 0 && fallback.back, 'standalone details must remain readable when JavaScript cannot load');
+                assert.equal(new URL(fallback.returnUrl).pathname, '/quality-analysis/');
+                qualityDetailFallbacks++;
+            } catch (error) {
+                failures.push({label, error: error.message});
+                console.error(`${label}: ${error.message}`);
+            } finally {
+                const queued = pendingQualityCatalogs || [];
+                pendingQualityCatalogs = undefined;
+                for (const send of queued) send();
+                qualityCatalogFailures = qualityDetailFailures = 0;
+                qualityDetailScriptsUnavailable = false;
             }
         }
         let withoutJavaScript = 0;
@@ -2271,6 +2602,32 @@ async function checkInterface(assetRoot) {
                     })()`);
                     assert.equal(fallback, true, "report details need native fragment access and dismissal without JavaScript");
                 }
+                if (surface === 'quality-analysis') {
+                    const detailLoaded = wait('Page.loadEventFired', sessionId);
+                    const detail = await evaluate(`(() => {
+                        const link = document.querySelector('[data-quality-detail]');
+                        const id = link.dataset.qualityDetail;
+                        link.click();
+                        return id;
+                    })()`);
+                    await detailLoaded;
+                    const nativeDetail = await evaluate(`(() => {
+                        const dialog = document.getElementById(${JSON.stringify(detail)});
+                        return {visible: getComputedStyle(dialog).display !== 'none' && dialog.getBoundingClientRect().height > 0,
+                            rows: dialog.querySelectorAll('tbody tr').length,
+                            locale: document.documentElement.lang,
+                            returnUrl: dialog.querySelector('noscript a').href};
+                    })()`);
+                    assert.ok(nativeDetail.visible && nativeDetail.rows > 0, 'author evidence must remain readable through native detail navigation');
+                    assert.equal(nativeDetail.locale.toLowerCase(), locale);
+                    const returnUrl = new URL(nativeDetail.returnUrl);
+                    assert.equal(returnUrl.pathname, '/quality-analysis/');
+                    assert.equal(returnUrl.searchParams.get('lang'), locale);
+                    const returned = wait('Page.loadEventFired', sessionId);
+                    await evaluate(`document.getElementById(${JSON.stringify(detail)}).querySelector('noscript a').click()`);
+                    await returned;
+                    assert.equal(await evaluate("Boolean(document.querySelector('[data-quality-analysis]'))"), true, 'native detail dismissal must return to the article page');
+                }
                 if (surface === "newsletter") {
                     await checkNewsletterControlHeights();
                     await checkNewsletterAccordion();
@@ -2290,7 +2647,7 @@ async function checkInterface(assetRoot) {
                 console.error(`${label}: ${error.message}`);
             }
         }
-        const result = { browser: browserVersion, inputCapabilities, stableInitializations, checked, reportHistoryRaces, reportHistoryFallbacks, asynchronousMaintenance, maintenanceFallbacks, withoutJavaScript, widths, locales, surfaces, failures };
+        const result = { browser: browserVersion, inputCapabilities, stableInitializations, checked, qualityDeferredLoads, qualityResourceRetries, qualityLazyDetails, qualityDetailFallbacks, reportHistoryRaces, reportHistoryFallbacks, asynchronousMaintenance, maintenanceFallbacks, withoutJavaScript, widths, locales, surfaces, failures };
         fs.writeFileSync(path.join(outputRoot, "results.json"), JSON.stringify(result, null, 2));
         console.log(JSON.stringify(result, null, 2));
         assert.equal(failures.length, 0, "responsive interface checks failed");

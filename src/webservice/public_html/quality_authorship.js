@@ -1,5 +1,128 @@
 /** Sort and paginate saved editor tables without replacing their native cells. */
 
+let detailHandlersInstalled = false;
+let tableSequence = 0;
+const detailRequests = new Map();
+
+/** Keep delayed details consistent with the currently selected matrix cohort. */
+export function applyQualityDetailCohort(dialog) {
+    const form = document.querySelector("[data-quality-matrix]");
+    if (form && !form.qualitySelectedIds && form.dataset.selectedPageIds)
+        form.qualitySelectedIds = new Set(JSON.parse(form.dataset.selectedPageIds).map(String));
+    const ids = form?.qualitySelectedIds;
+    if (!ids) return;
+    for (const row of dialog.querySelectorAll("[data-matrix-page]"))
+        row.dataset.cohort = ids.has(row.dataset.matrixPage) ? "1" : "0";
+}
+
+/** Fetch only the requested same-origin dialog and share concurrent attempts. */
+export function loadQualityDetail(value, id) {
+    const url = new URL(value, location.href);
+    if (url.origin !== location.origin) return Promise.reject(new Error("Invalid quality detail URL"));
+    url.hash = "";
+    const key = `${url.href}#${id}`;
+    const existing = document.getElementById(id);
+    if (existing?.nodeName === "DIALOG" && existing.dataset.qualityDetailUrl === url.href)
+        return Promise.resolve(existing);
+    if (detailRequests.has(key)) return detailRequests.get(key);
+    const request = (async () => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        try {
+            const response = await fetch(url, {
+                credentials: "same-origin", redirect: "error", signal: controller.signal,
+                headers: {Accept: "text/html"},
+            });
+            if (!response.ok || (response.url && new URL(response.url).origin !== location.origin) ||
+                    !response.headers.get("content-type")?.startsWith("text/html"))
+                throw new Error("Quality detail unavailable");
+            const page = new DOMParser().parseFromString(await response.text(), "text/html");
+            const dialog = page.getElementById(id);
+            if (dialog?.nodeName !== "DIALOG" ||
+                    dialog.querySelector("script, iframe, object, embed, base, link, style"))
+                throw new Error("Invalid quality detail");
+            dialog.removeAttribute("open");
+            dialog.dataset.qualityDetailUrl = url.href;
+            return dialog;
+        } finally {clearTimeout(timeout);}
+    })();
+    detailRequests.set(key, request);
+    request.then(() => detailRequests.delete(key), () => detailRequests.delete(key));
+    return request;
+}
+
+/** Enhance native detail links while retaining modified-click navigation. */
+export function initializeQualityDetails() {
+    if (detailHandlersInstalled) return;
+    detailHandlersInstalled = true;
+    let intent = 0;
+    const openers = new WeakMap();
+    document.addEventListener("keydown", event => {if (event.key === "Escape") intent++;});
+    document.addEventListener("close", event => {
+        const opener = openers.get(event.target);
+        if (opener?.isConnected) opener.focus();
+    }, true);
+    document.addEventListener("click", async event => {
+        const link = event.target.closest?.("a[data-quality-detail]");
+        if (!link || event.defaultPrevented || event.button || event.ctrlKey || event.metaKey ||
+                event.shiftKey || event.altKey || link.hasAttribute("download") ||
+                (link.target && link.target !== "_self") || typeof fetch !== "function" ||
+                typeof DOMParser !== "function" || typeof HTMLDialogElement === "undefined" ||
+                typeof HTMLDialogElement.prototype.showModal !== "function") return;
+        const url = new URL(link.href, location.href);
+        if (url.origin !== location.origin) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const request = ++intent;
+        const id = link.dataset.qualityDetail;
+        link.setAttribute("aria-busy", "true");
+        let status = link.qualityDetailStatus;
+        if (!status) {
+            status = document.createElement("span");
+            status.className = "context";
+            status.setAttribute("role", "status");
+            link.after(status);
+            link.qualityDetailStatus = status;
+        }
+        status.textContent = ` ${link.dataset.loading || "Loading details…"}`;
+        try {
+            const incoming = await loadQualityDetail(url.href, id);
+            if (request !== intent || !link.isConnected) return;
+            let dialog = document.getElementById(id);
+            if (dialog !== incoming) {
+                dialog?.close();
+                dialog?.remove();
+                (document.querySelector("[data-quality-results]") || document.body).append(incoming);
+                dialog = incoming;
+            }
+            applyQualityDetailCohort(dialog);
+            initializeQualityAuthorship(dialog);
+            dialog.dispatchEvent(new Event("quality-detail-open"));
+            openers.set(dialog, link);
+            link.focus();
+            if (!dialog.open) dialog.showModal();
+        } catch {
+            if (request === intent && link.isConnected)
+                status.textContent = ` ${link.dataset.loadFailed || "Details could not load. Try again or open the link in a new tab."}`;
+        } finally {
+            link.removeAttribute("aria-busy");
+            if (request !== intent || document.getElementById(id)?.open) status.textContent = "";
+        }
+    }, true);
+    // Legacy pages retain inline dialogs; enhance each only when it is opened.
+    document.addEventListener("click", event => {
+        const link = event.target.closest?.('a[aria-haspopup="dialog"]');
+        if (!link || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey ||
+                link.hasAttribute("data-quality-detail")) return;
+        const dialog = document.getElementById(link.getAttribute("aria-controls"));
+        if (dialog?.nodeName === "DIALOG") {
+            applyQualityDetailCohort(dialog);
+            initializeQualityAuthorship(dialog);
+            dialog.dispatchEvent(new Event("quality-detail-open"));
+        }
+    }, true);
+}
+
 /** Compare observed values while keeping missing observations last. */
 export function compareValues(left, right, descending, locale) {
     if (left === null) return right === null ? 0 : 1;
@@ -83,13 +206,14 @@ function initializeQualityFilter(form) {
 }
 
 /** Add accessible sorting and pagination to each server-rendered directory. */
-export function initializeQualityAuthorship() {
+export function initializeQualityAuthorship(root = document) {
+    initializeQualityDetails();
     for (const form of document.querySelectorAll(
         "[data-quality-authorship-filter]:not([data-auto-submit])",
     )) initializeQualityFilter(form);
-    for (const [index, host] of document
-        .querySelectorAll("[data-quality-authorship-table]")
-        .entries()) {
+    for (const host of root.querySelectorAll("[data-quality-authorship-table]")) {
+        const dialog = host.closest("dialog");
+        if (root === document && dialog && !dialog.open) continue;
         const table = host.querySelector("table");
         if (!table || host.hasAttribute("data-table-enhanced")) continue;
         host.setAttribute("data-table-enhanced", "");
@@ -113,7 +237,7 @@ export function initializeQualityAuthorship() {
         );
         const label = document.createElement("label");
         label.className = "ui-table-pager__start";
-        label.htmlFor = `quality-page-size-${index}`;
+        label.htmlFor = `quality-page-size-${++tableSequence}`;
         label.textContent = host.dataset.pageSize;
         const select = document.createElement("select");
         select.id = label.htmlFor;
@@ -230,19 +354,22 @@ export function initializeQualityAuthorship() {
             buttons.push(button);
             heading.replaceChildren(button);
         }
-        document.addEventListener("quality-cohort-change", () => {page = 1; render();});
-        const dialog = host.closest("dialog");
-        if (dialog) {
-            for (const opener of document.querySelectorAll(
-                `a[aria-controls="${dialog.id}"]`,
-            )) {
-                opener.addEventListener("click", () => {
-                    column = defaultColumn;
-                    descending = true;
-                    page = 1;
-                    render();
-                });
+        const cohortChanged = () => {
+            if (!host.isConnected) {
+                document.removeEventListener("quality-cohort-change", cohortChanged);
+                return;
             }
+            page = 1;
+            render();
+        };
+        document.addEventListener("quality-cohort-change", cohortChanged);
+        if (dialog) {
+            dialog.addEventListener("quality-detail-open", () => {
+                column = defaultColumn;
+                descending = true;
+                page = 1;
+                render();
+            });
         }
         render();
     }

@@ -266,7 +266,7 @@ class TestSourcePayload(TestCase):
             project["dependencies"],
         )
         assert {
-            "Development Status :: 7 - Inactive",
+            "Development Status :: 5 - Production/Stable",
             "Environment :: Web Environment",
             "Framework :: Django",
         } <= set(project["classifiers"])

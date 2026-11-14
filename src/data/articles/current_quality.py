@@ -219,7 +219,7 @@ def _article_rows(
     articles: pl.DataFrame,
     proofs: pl.DataFrame,
 ) -> pl.DataFrame:
-    """Attach main authors and the strict ten-percent dialog evidence.
+    """Attach main authors and inclusive ten-percent dialog evidence.
 
     Returns:
         Complete current articles with explicit absent provenance.
@@ -250,7 +250,7 @@ def _article_rows(
         contributors
         .filter(
             pl.col("bytes").cast(pl.UInt64) * 10
-            > pl.col("authorship_eligible_bytes").cast(pl.UInt64),
+            >= pl.col("authorship_eligible_bytes").cast(pl.UInt64),
         )
         .sort("page_id", "bytes", "editor", descending=[False, True, False])
         .group_by("page_id", maintain_order=True)

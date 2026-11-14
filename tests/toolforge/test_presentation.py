@@ -272,6 +272,43 @@ def _b_quality_authorship_fixture() -> dict:
     return b_directory
 
 
+def _quality_documents(
+    destination: Path,
+    fixture: dict,
+    analysis: dict,
+    locale: str,
+    now: dt.datetime,
+) -> dict[str, str]:
+    """Write deferred resources beside the localized quality fixtures.
+
+    Returns:
+        Default and B-inclusive pages with production resource links.
+    """
+    documents = {}
+    for include_b in (False, True):
+        resources = {}
+        prefix = (
+            f"/quality-analysis/resources/{locale}/{int(include_b)}/current/"
+        )
+        surface = "quality-analysis-b" if include_b else "quality-analysis"
+        documents[surface] = render_quality_analysis(
+            saved_analysis_fixture(now, include_b=True)
+            if include_b
+            else analysis,
+            fixture["status"],
+            fixture["config"],
+            locale,
+            now,
+            resources=resources,
+            resource_prefix=prefix,
+        )
+        resource_directory = destination / prefix.lstrip("/")
+        resource_directory.mkdir(parents=True, exist_ok=True)
+        for name, content in resources.items():
+            (resource_directory / name).write_text(content)
+    return documents
+
+
 def write_interface_fixtures(destination: Path) -> None:
     """Write localized synthetic pages for offline browser verification.
 
@@ -525,20 +562,7 @@ def write_interface_fixtures(destination: Path) -> None:
         directory = destination / locale
         directory.mkdir(parents=True, exist_ok=True)
         documents = {
-            "quality-analysis": render_quality_analysis(
-                analysis,
-                fixture["status"],
-                fixture["config"],
-                locale,
-                now,
-            ),
-            "quality-analysis-b": render_quality_analysis(
-                saved_analysis_fixture(now, include_b=True),
-                fixture["status"],
-                fixture["config"],
-                locale,
-                now,
-            ),
+            **_quality_documents(destination, fixture, analysis, locale, now),
             "home": render_dashboard(
                 snapshot,
                 fixture["status"],

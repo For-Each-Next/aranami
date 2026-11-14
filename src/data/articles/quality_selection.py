@@ -104,6 +104,77 @@ def cells(articles: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def quartiles(
+    saved: list[dict],
+    grades: list[str],
+    last_year: int,
+) -> list[dict]:
+    """Derive default-cohort quartiles from saved weighted histograms.
+
+    Returns:
+        P25 and P75 for each measured grade and importance group.
+        Missing histograms produce no percentile observations.
+    """
+    if not saved:
+        return []
+    samples = (
+        pl
+        .DataFrame(
+            saved,
+            schema={
+                "grade": pl.String,
+                "importance": pl.String,
+                "year": pl.Int64,
+                "histogram": _HISTOGRAM,
+            },
+        )
+        .filter(
+            pl.col("grade").is_in(grades)
+            & (
+                pl.col("year").is_null()
+                | pl.col("year").is_between(_MIN_YEAR, last_year)
+            ),
+        )
+        .explode("histogram")
+        .unnest("histogram")
+        .drop_nulls(["value", "count"])
+    )
+    output = []
+    for dimension in ("grade", "importance"):
+        histogram = (
+            samples
+            .group_by(dimension, "value")
+            .agg(pl.col("count").sum())
+            .sort(dimension, "value")
+            .with_columns(
+                pl.col("count").sum().over(dimension).alias("total"),
+                pl.col("count").cum_sum().over(dimension).alias("end"),
+            )
+            .group_by(dimension)
+            .agg(
+                _weighted_quantile(0.25).alias("p25"),
+                _weighted_quantile(0.75).alias("p75"),
+            )
+        )
+        output.extend(
+            {"group": dimension, **row} for row in histogram.to_dicts()
+        )
+    return output
+
+
+def _weighted_quantile(share: float) -> pl.Expr:
+    """Interpolate order statistics without expanding repeated values.
+
+    Returns:
+        A linear quantile expression for one grouped histogram.
+    """
+    position = (pl.col("total") - 1) * share
+    lower = pl.col("value").filter(pl.col("end") > position.floor()).first()
+    upper = pl.col("value").filter(pl.col("end") > position.ceil()).first()
+    fraction = position.first() - position.first().floor()
+    return lower + (upper - lower) * fraction
+
+
 def validate(frame: pl.DataFrame) -> None:
     """Reject an incomplete or oversized prepared selection payload.
 

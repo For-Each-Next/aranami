@@ -14,6 +14,7 @@ from math import ceil, cos, pi, sin
 from operator import itemgetter
 from urllib.parse import quote
 
+from data.articles.quality_selection import quartiles
 from shared.assessment_profiles import assessment_profile
 from webservice.presentation import (
     Interface,
@@ -54,6 +55,7 @@ _IMPORTANCE = tuple(
 _HALF_CIRCLE = 0.5
 _FIRST_FILTER_YEAR = 2002
 _DETAIL_SHARE_THRESHOLD = 0.1
+_MAIN_SHARE_THRESHOLD = 0.33
 
 
 def _grade_label(code: str, interface: Interface) -> str:
@@ -200,6 +202,19 @@ def _years(data: dict, interface: Interface) -> dict:
         })
     return {
         "years": years,
+        "year_legend": [
+            {
+                "grade": code,
+                "label": _grade_label(code, interface),
+                "color": _PROFILE.color(code, "class"),
+            }
+            for code in _GRADES
+            if any(
+                segment["grade"] == code
+                for year in years
+                for segment in year["segments"]
+            )
+        ],
         "year_chart_width": chart_width,
         "year_axis": [
             {"label": _number(index * step), "y": 248 - index * 55}
@@ -235,6 +250,15 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
     Returns:
         Localized ranges and the common maximum label.
     """
+    selection = data.get("selection") or {}
+    quartile_lookup = {
+        (row["group"], row[row["group"]]): row
+        for row in quartiles(
+            selection.get("cells", []),
+            [row["grade"] for row in data.get("grade_totals", [])],
+            selection.get("last_year", 9999),
+        )
+    }
     visible = [
         row
         for row in data.get("lengths", [])
@@ -267,6 +291,10 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
     for row in visible:
         low, high = row.get("central_68_low"), row.get("central_68_high")
         median = row.get("median_characters")
+        points = quartile_lookup.get(
+            (row["group"], row["grade"] or row["importance"]),
+            {},
+        )
         lengths.append({
             **row,
             "label": interface.text(
@@ -283,6 +311,26 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
                 2,
             ),
             "median_x": round((median or 0) / range_maximum * 1000, 2),
+            "quartiles": [
+                {
+                    "percentile": percentile,
+                    "value": points[f"p{percentile}"],
+                    "x": round(
+                        points[f"p{percentile}"] / range_maximum * 1000,
+                        2,
+                    ),
+                }
+                for percentile in (25, 75)
+                if points.get(f"p{percentile}") is not None
+            ],
+            "summary": interface.text(
+                "quality_analysis.violin_summary",
+                pages=_number(row.get("pages")),
+                measured=_number(row.get("measured")),
+                p25=_percentile_label(points.get("p25")),
+                p50=_percentile_label(median),
+                p75=_percentile_label(points.get("p75")),
+            ),
             "violin_path": _violin_path(
                 row.get("density", []),
                 range_maximum,
@@ -297,6 +345,15 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
     return lengths, _number(range_maximum)
 
 
+def _percentile_label(value: float | None) -> str:
+    """Format fractional percentiles separately from whole count labels.
+
+    Returns:
+        Up to two decimal places, or an explicit unknown marker.
+    """
+    return "—" if value is None else f"{value:,.2f}".rstrip("0").rstrip(".")
+
+
 def _articles(data: dict, interface: Interface) -> list[dict]:
     """Localize complete saved rows and their exact revision links.
 
@@ -308,10 +365,8 @@ def _articles(data: dict, interface: Interface) -> list[dict]:
         page_id = row["page_id"]
         date = row.get("listed_date")
         importance = row.get("importance") or "Unknown"
-        contributors = [
-            {"name": name, "url": title_url(f"User:{name}")}
-            for name in row.get("authors", [])
-        ]
+        authorship = _authorship(row, interface)
+        contributors = _main_contributors(authorship, interface)
         articles.append({
             **row,
             "default_selected": bool(
@@ -363,6 +418,13 @@ def _articles(data: dict, interface: Interface) -> list[dict]:
             }),
             "characters_label": _number(row.get("prose_characters")),
             "contributors": contributors,
+            "main_authors": [author["name"] for author in contributors],
+            "main_author_labels": [author["label"] for author in contributors],
+            "significant_authors": [
+                author["name"] for author in authorship["editors"]
+            ]
+            if authorship["available"]
+            else [],
             "authorship_popup_id": f"quality-article-{page_id}-authorship",
             "authorship_popup_title": interface.text(
                 "quality_analysis.authorship_details",
@@ -371,7 +433,7 @@ def _articles(data: dict, interface: Interface) -> list[dict]:
                     interface.locale,
                 ),
             ),
-            "authorship": _authorship(row, interface),
+            "authorship": authorship,
             "source_label": "—"
             if row.get("source_bytes") is None
             else f"{row['source_bytes'] / 1000:,.1f}",
@@ -441,7 +503,7 @@ def _authorship(row: dict, interface: Interface) -> dict:
         "editors": [
             _editor(editor, interface)
             for editor in source.get("contributors", [])
-            if editor.get("share", 0) > _DETAIL_SHARE_THRESHOLD
+            if editor.get("share", 0) >= _DETAIL_SHARE_THRESHOLD
         ],
     }
 
@@ -467,9 +529,117 @@ def _editor(source: dict, interface: Interface) -> dict:
         "name": name
         or interface.text("quality_analysis.unknown_editor", editor=identity),
         "url": url,
+        "anonymous": identity.startswith("0|"),
+        "share": source["share"],
         "share_label": f"{source['share'] * 100:.1f}%",
         "bytes_label": _number(source.get("bytes")),
     }
+
+
+def _main_contributors(proof: dict, interface: Interface) -> list[dict]:
+    """Select above-33% contributors with unlinked anonymous labels.
+
+    Returns:
+        Raw filter identities and separate display labels and links.
+    """
+    if not proof["available"]:
+        return []
+    return [
+        {
+            "name": editor["name"],
+            "label": interface.text("quality_analysis.anonymous_user")
+            if editor["anonymous"]
+            else editor["name"],
+            "url": None if editor["anonymous"] else editor["url"],
+        }
+        for editor in proof["editors"]
+        if editor["share"] > _MAIN_SHARE_THRESHOLD
+    ]
+
+
+def _catalog_article(row: dict, interface: Interface) -> list:
+    """Encode one deferred article with consistent contributor roles.
+
+    Returns:
+        Compact article values, observed proof and display descriptors.
+    """
+    proof = _authorship(row, interface)
+    main = _main_contributors(proof, interface)
+    return [
+        *(
+            row.get(key)
+            for key in (
+                "page_id",
+                "title",
+                "grade",
+                "importance",
+                "listed_date",
+                "listed_oldid",
+                "prose_characters",
+                "source_bytes",
+            )
+        ),
+        [editor["name"] for editor in main],
+        None,
+        display_title(row["title"].replace("_", " "), interface.locale),
+        interface.date(row["listed_date"]) if row["listed_date"] else None,
+        proof if proof["available"] else None,
+        review_url({
+            "nomination_link": row.get("listed_review_link"),
+            "title": row["title"],
+        }),
+        main,
+    ]
+
+
+def main_author_directory(
+    articles: list[dict],
+    authors: list[dict],
+) -> list[dict]:
+    """Apply the website threshold to the registered-author directory.
+
+    Returns:
+        Author records containing only observed above-33% articles.
+    """
+    interface = Interface("en")
+    qualified = {
+        row["page_id"]: {
+            author["name"]
+            for author in _main_contributors(
+                _authorship(row, interface),
+                interface,
+            )
+            if author["url"] is not None
+        }
+        for row in articles
+    }
+    output = []
+    for author in authors:
+        selected = [
+            {
+                **article,
+                "coauthors": [
+                    name
+                    for name in article.get("coauthors", [])
+                    if name in qualified.get(article.get("page_id"), set())
+                ],
+            }
+            for article in author["articles"]
+            if author["name"] in qualified.get(article.get("page_id"), set())
+        ]
+        if selected:
+            output.append({
+                **author,
+                "articles": selected,
+                "credit": len(selected),
+                "grades": {
+                    grade: sum(
+                        article["grade"] == grade for article in selected
+                    )
+                    for grade in author["grades"]
+                },
+            })
+    return output
 
 
 def quality_analysis_context(data: dict, interface: Interface) -> dict:
@@ -527,56 +697,51 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
         matrix = {
             "cells": selection["cells"],
             "extra": [
-                [
-                    row.get(key)
-                    for key in (
-                        "page_id",
-                        "title",
-                        "grade",
-                        "importance",
-                        "listed_date",
-                        "listed_oldid",
-                        "prose_characters",
-                        "source_bytes",
-                        "authors",
-                        "author_ranks",
-                    )
-                ]
-                + [
-                    display_title(
-                        row["title"].replace("_", " "),
-                        interface.locale,
-                    ),
-                    interface.date(row["listed_date"])
-                    if row["listed_date"]
-                    else None,
-                    _authorship(row, interface)
-                    if row.get("authorship_available")
-                    else None,
-                ]
+                _catalog_article(row, interface)
                 for row in selection["articles"]
                 if row["page_id"] not in default_ids
             ],
             "labels": {
-                key: interface.text(f"quality_analysis.{key}")
-                for key in (
-                    "until",
-                    "visualization",
-                    "authorship_unavailable",
-                    "unknown_listing",
-                    "contributors",
-                    "authorship_note",
-                    "editor_share",
-                    "editor_bytes",
-                    "words",
-                    "authorship_details",
-                )
+                **{
+                    key: interface.text(f"quality_analysis.{key}")
+                    for key in (
+                        "until",
+                        "visualization",
+                        "authorship_unavailable",
+                        "no_top_editors",
+                        "unknown_listing",
+                        "contributors",
+                        "authorship_note",
+                        "editor_share",
+                        "editor_bytes",
+                        "words",
+                        "authorship_details",
+                        "review",
+                        "listing_evidence",
+                        "violin_summary",
+                        "main_unavailable",
+                        "no_main_contributors",
+                        "anonymous_user",
+                    )
+                },
+                "talk": interface.text("quality_authorship.talk"),
+                "unknown": interface.text("data.unknown"),
+                "parenthesis_open": interface.text(
+                    "quality_authorship.parenthesis_open",
+                ),
+                "parenthesis_close": interface.text(
+                    "quality_authorship.parenthesis_close",
+                ),
             },
             "last_year": selection["last_year"],
             "grades": [
                 {
                     "value": code,
                     "label": _grade_label(code, interface),
+                    "article_label": interface.text(
+                        f"assessment.class.{code}",
+                    ),
+                    "order": _GRADES.index(code),
                     "color": _PROFILE.color(code, "class"),
                     "checked": code
                     not in {
@@ -599,6 +764,8 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                 {
                     "value": code,
                     "label": interface.text(f"assessment.importance.{code}"),
+                    "article_color": _PROFILE.color(code, "importance"),
+                    "order": _IMPORTANCE.index(code),
                     "color": "#72989c"
                     if code == "Unknown"
                     else _PROFILE.color(code, "importance"),
@@ -629,6 +796,18 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             "importance_totals": importance,
             "importance_available": data.get("importance_available", True),
             **_years(data, interface),
+            "year_table_grades": [
+                grade for grade in matrix["grades"] if grade["checked"]
+            ]
+            if matrix
+            else [
+                {"value": code, "label": _grade_label(code, interface)}
+                for code in _GRADES
+                if any(
+                    row["grade"] == code
+                    for row in data.get("grade_totals", [])
+                )
+            ],
             "lengths": lengths,
             "lengths_available": data.get("lengths_available", True),
             "grade_lengths": [

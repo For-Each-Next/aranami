@@ -227,9 +227,9 @@ and latest-activity columns are also sortable. Row numbers are not sortable.
 Sorting resets pagination, and opening either dialog restores its default order
 and first page. Native tables and fragment links work without JavaScript.
 
-Each registered primary author with the greatest retained contribution receives
-one whole article count. Every other editor reaching at least 33% of the
-eligible content also receives one count, including a qualifying runner-up.
+Each registered editor whose retained contribution is strictly greater than
+33% of eligible content receives one whole article count. The largest
+contribution alone does not qualify when it remains at or below that threshold.
 An article may therefore count for multiple authors. Scores use the final
 revision of the listing's UTC day. References are excluded when reliable exact
 alignment is available; otherwise the retained API-byte fallback includes them.
@@ -268,7 +268,7 @@ are absent, six literal `b1`–`b6` values of `yes` or `y` establish B for this
 historical inference; missing grades without a complete checklist are unassessed.
 Hidden text, conflicting banners and dynamic grades remain unknown.
 Authorship uses the exact article revision at or before that UTC timestamp.
-The same greatest-contributor or 33% rule applies. Dates link to the entry talk
+The same greater-than-33% main-contributor rule applies. Dates link to the entry talk
 revision. Parquet retains exact talk identities, timestamps, article cutoffs
 and contributor evidence; unchanged talk/parser keys reuse saved results even
 after article edits. Compatible parser updates retain completed proofs and
@@ -343,7 +343,9 @@ transport work. Failed reads preserve the last accepted view and expose an
 availability warning. Keep the monotonic server-time anchor for clocks, apply
 the saved service/dataset freshness policies, and never infer task progress from
 elapsed time. Completed durations remain fixed. Dynamic responses are no-store;
-exact digest assets can use immutable caching and ETags. Allow the canonical
+exact digest assets can use immutable caching and ETags. Prepared quality
+catalogs and contributor detail pages use the same digest-based cache policy;
+their initial HTML remains `no-store`. Allow the canonical
 secure WebSocket origin in CSP.
 
 ## Verify changes

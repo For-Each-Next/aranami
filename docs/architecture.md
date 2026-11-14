@@ -330,7 +330,9 @@ from page ID zero and skips checked IDs while preserving queued work and facts.
 Django serves authored templates and bounded GET/HEAD responses; the ASGI
 adapter retains read-only WebSocket subscriptions. Use
 escaped text and security headers, with debug/reload disabled. Dynamic responses are
-no-store; matching digest assets are immutable. Locale selection is query,
+no-store; matching digest assets and prepared quality resources are immutable.
+Quality resource URLs identify the locale and saved preset explicitly.
+Locale selection is query,
 cookie, then Accept-Language. Saved title identities and link anchors keep
 their original spelling; article and discussion-heading display labels follow
 the interface's Chinese script conversion. Taiwan article labels additionally

@@ -56,7 +56,10 @@ from webservice.presentation import (
     utc_time,
     wiki_link,
 )
-from webservice.quality_analysis import quality_analysis_context
+from webservice.quality_analysis import (
+    main_author_directory,
+    quality_analysis_context,
+)
 from webservice.quality_authorship import quality_authorship_context
 from webservice.redirects import redirect_selection
 from webservice.status_view import report_context, status_context
@@ -1504,6 +1507,8 @@ def render_quality_analysis(  # ruff: ignore[too-many-arguments] - Shared page-r
     now: dt.datetime | None = None,
     *,
     navigation: Record | None = None,
+    resources: dict[str, str] | None = None,
+    resource_prefix: str = "/quality-analysis/resources/en/0/current/",
 ) -> str:
     """Render precomputed article metrics and complete native tables.
 
@@ -1514,6 +1519,8 @@ def render_quality_analysis(  # ruff: ignore[too-many-arguments] - Shared page-r
         locale: Negotiated interface language.
         now: Optional aware clock for deterministic status display.
         navigation: Current route and localized language links.
+        resources: Optional output for the separate catalog and details.
+        resource_prefix: URL prefix for this preset's resources.
 
     Returns:
         Escaped charts, measurement coverage and all article rows.
@@ -1546,13 +1553,93 @@ def render_quality_analysis(  # ruff: ignore[too-many-arguments] - Shared page-r
             ],
             "articles": selection["articles"],
         }
-        authorship = {**authorship, "authors": selection["authors"]}
+        authorship = {
+            **authorship,
+            "authors": selection["authors"],
+        }
+    authorship["authors"] = main_author_directory(
+        analysis.get("articles", []),
+        authorship.get("authors", []),
+    )
     context.update(quality_analysis_context(analysis, page.interface))
+    if selection:
+        context["quality_analysis"]["selected_page_ids"] = [
+            row["page_id"] for row in defaults["articles"]
+        ]
     context.update(
         quality_authorship_context(authorship, page.interface, now),
     )
     context["navigation"] = navigation
+    if resources is not None:
+        _quality_resources(context, resources, resource_prefix)
     return _render("quality_analysis.html", context)
+
+
+def _quality_resources(
+    context: dict,
+    resources: dict[str, str],
+    prefix: str,
+) -> None:
+    """Separate the optional catalog and author details from a page."""
+    analysis = context["quality_analysis"]
+    matrix = analysis.get("matrix")
+    selected_ids = (
+        set(analysis["selected_page_ids"])
+        if "selected_page_ids" in analysis
+        else None
+    )
+    if matrix:
+        content = json.dumps(
+            matrix,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        name = f"catalog-{sha256(content.encode()).hexdigest()}.json"
+        resources[name] = content
+        analysis["metadata_url"] = prefix + name
+    return_url = local_url(
+        "/quality-analysis/",
+        lang=analysis["locale"],
+        **({"count_b": "1"} if analysis["include_b"] else {}),
+        **({"all_grades": "1"} if analysis["all_grades"] else {}),
+        **({"listing_authors": "1"} if analysis["listing_authors"] else {}),
+    )
+    number = 0
+    for author in context["quality_authorship"]["authors"]:
+        author["page_ids"] = [
+            article["page_id"]
+            for article in author["articles"]
+            if article.get("page_id") is not None
+        ]
+        if selected_ids is not None:
+            visible = 0
+            for article in author["articles"]:
+                article["default_selected"] = (
+                    article.get("page_id") in selected_ids
+                )
+                visible += int(article["default_selected"])
+                article["display_number"] = visible
+            author["credit"] = visible
+            author["default_selected"] = bool(visible)
+            number += int(bool(visible))
+            author["number"] = number
+            author["summary"] = Interface(analysis["locale"]).text(
+                "quality_authorship.articles_one"
+                if visible == 1
+                else "quality_authorship.articles",
+                count=visible,
+            )
+        content = _render(
+            "quality_detail.html",
+            {**context, "author": author, "return_url": return_url},
+        )
+        name = (
+            f"author-{author['popup_id']}-"
+            f"{sha256(content.encode()).hexdigest()}.html"
+        )
+        resources[name] = content
+        author["detail_url"] = prefix + name + "#" + author["popup_id"]
 
 
 def render_quality_authorship(  # ruff: ignore[too-many-arguments]

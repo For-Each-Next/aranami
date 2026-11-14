@@ -4394,11 +4394,6 @@
     "zh-hans": "重置筛选",
     "zh-hant": "重設篩選"
   },
-  "quality_analysis.filter_note": {
-    "en": "Filters apply to this table. The summary charts always describe the complete cohort.",
-    "zh-hans": "筛选仅作用于此表；汇总图表始终描述全部选定内容。",
-    "zh-hant": "篩選僅作用於此表；彙總圖表始終描述全部選定內容。"
-  },
   "quality_analysis.result_count": {
     "en": "{count} of {total} articles and lists",
     "zh-hans": "共{total}条目及列表，符合条件{count}项",
@@ -4464,11 +4459,6 @@
     "zh-hans": "查看图表数据",
     "zh-hant": "檢視圖表資料"
   },
-  "quality_analysis.chart_scroll": {
-    "en": "Scroll horizontally to inspect more years. Exact values are available in the chart data table.",
-    "zh-hans": "可横向滚动查看更多年份，也可在图表数据表中查看精确值。",
-    "zh-hant": "可橫向捲動檢視更多年份，也可在圖表資料表中檢視精確值。"
-  },
   "quality_analysis.grade_pie": {
     "en": "By grade",
     "zh-hans": "按品质",
@@ -4525,9 +4515,9 @@
     "zh-hant": "{title}的作者貢獻"
   },
   "quality_analysis.authorship_note": {
-    "en": "Authorship uses the saved revision range below. Shares measure attributable prose bytes; only editors contributing more than 10% are shown.",
-    "zh-hans": "作者贡献依据下面保存的历史版本范围估算，比例按可归属的正文字节计算，仅列出贡献超过10%的编辑者。",
-    "zh-hant": "作者貢獻依據下面儲存的歷史版本範圍估算，比例按可歸屬的正文字節計算，僅列出貢獻超過10%的編輯者。"
+    "en": "This page lists “significant contributors” whose contribution share reaches 10%.",
+    "zh-hans": "本页列出贡献比例达到10%的「重大贡献者」。",
+    "zh-hant": "本頁列出貢獻比例達到10%的「重大貢獻者」。"
   },
   "quality_analysis.revision_range": {
     "en": "Revision range",
@@ -4545,14 +4535,14 @@
     "zh-hant": "歸屬位元組"
   },
   "quality_analysis.authorship_unavailable": {
-    "en": "Listing-time authorship evidence has not been collected yet.",
-    "zh-hans": "入选时的作者证据尚未取得。",
-    "zh-hant": "入選時的作者證據尚未取得。"
+    "en": "Authorship data has not been obtained for this revision.",
+    "zh-hans": "尚未取得此版本的作者归属数据。",
+    "zh-hant": "尚未取得此版本的作者歸屬資料。"
   },
   "quality_analysis.no_top_editors": {
-    "en": "No editor has a saved share above 10%.",
-    "zh-hans": "没有编辑者的已保存贡献比例超过10%。",
-    "zh-hant": "沒有編輯者的已儲存貢獻比例超過10%。"
+    "en": "Authorship data is available, but no editor has a contribution share of at least 10%.",
+    "zh-hans": "已取得作者归属数据，但没有编辑者的贡献比例达到10%。",
+    "zh-hant": "已取得作者歸屬資料，但沒有編輯者的貢獻比例達到10%。"
   },
   "quality_analysis.review": {
     "en": "review",
@@ -4644,31 +4634,6 @@
     "zh-hans": "作者",
     "zh-hant": "作者"
   },
-  "quality_analysis.author_rank": {
-    "en": "Contribution rank",
-    "zh-hans": "贡献排名",
-    "zh-hant": "貢獻排名"
-  },
-  "quality_analysis.author_first": {
-    "en": "1st author",
-    "zh-hans": "第1位",
-    "zh-hant": "第1位"
-  },
-  "quality_analysis.author_second": {
-    "en": "Top 2 authors",
-    "zh-hans": "前2位",
-    "zh-hant": "前2位"
-  },
-  "quality_analysis.author_third": {
-    "en": "Top 3 authors",
-    "zh-hans": "前3位",
-    "zh-hant": "前3位"
-  },
-  "quality_analysis.all_authors": {
-    "en": "All authors",
-    "zh-hans": "全部",
-    "zh-hant": "全部"
-  },
   "quality_analysis.use_listing_authors": {
     "en": "Use authorship analysis of the listing-time revision",
     "zh-hans": "使用入选时版本的作者贡献分析资料",
@@ -4688,5 +4653,65 @@
     "en": "Length distribution",
     "zh-hans": "长度分布",
     "zh-hant": "長度分布"
+  },
+  "quality_analysis.loading_catalog": {
+    "en": "Loading article filters…",
+    "zh-hans": "正在加载条目筛选…",
+    "zh-hant": "正在載入條目篩選…"
+  },
+  "quality_analysis.catalog_failed": {
+    "en": "Article filters could not load. The saved overview remains visible. Retry, or reload the page if the report has changed.",
+    "zh-hans": "无法加载条目筛选，已保留报告概览。请重试；若报告已更新，请重新加载页面。",
+    "zh-hant": "無法載入條目篩選，已保留報告概覽。請重試；若報告已更新，請重新載入頁面。"
+  },
+  "quality_analysis.retry": {
+    "en": "Retry",
+    "zh-hans": "重试",
+    "zh-hant": "重試"
+  },
+  "quality_analysis.loading_details": {
+    "en": "Loading author details…",
+    "zh-hans": "正在加载作者详情…",
+    "zh-hant": "正在載入作者詳細資料…"
+  },
+  "quality_analysis.details_failed": {
+    "en": "Author details could not load. Retry, or reload this page if the report has changed.",
+    "zh-hans": "无法加载作者详情。请重试；若报告已更新，请重新加载页面。",
+    "zh-hant": "無法載入作者詳細資料。請重試；若報告已更新，請重新載入頁面。"
+  },
+  "quality_analysis.author_role": {
+    "en": "Contribution type",
+    "zh-hans": "贡献类型",
+    "zh-hant": "貢獻類型"
+  },
+  "quality_analysis.main_contributors": {
+    "en": "Main contributors",
+    "zh-hans": "主要贡献者",
+    "zh-hant": "主要貢獻者"
+  },
+  "quality_analysis.significant_contributors": {
+    "en": "Significant contributors",
+    "zh-hans": "重大贡献者",
+    "zh-hant": "重大貢獻者"
+  },
+  "quality_analysis.violin_summary": {
+    "en": "Total articles: {pages}; measured: {measured}. P25: {p25} characters (longer than about 25%); P50: {p50} characters (median); P75: {p75} characters (longer than about 75%).",
+    "zh-hans": "条目总数：{pages}；已测量：{measured}。P25：{p25}字（比约25%的已测量条目长）；P50：{p50}字（中位数）；P75：{p75}字（比约75%的已测量条目长）。",
+    "zh-hant": "條目總數：{pages}；已測量：{measured}。P25：{p25}字（比約25%的已測量條目長）；P50：{p50}字（中位數）；P75：{p75}字（比約75%的已測量條目長）。"
+  },
+  "quality_analysis.anonymous_user": {
+    "en": "Anonymous user",
+    "zh-hans": "匿名用户",
+    "zh-hant": "匿名使用者"
+  },
+  "quality_analysis.no_main_contributors": {
+    "en": "None",
+    "zh-hans": "无",
+    "zh-hant": "無"
+  },
+  "quality_analysis.main_unavailable": {
+    "en": "Not obtained",
+    "zh-hans": "未取得数据",
+    "zh-hant": "未取得資料"
   }
 }

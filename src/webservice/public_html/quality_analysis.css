@@ -21,7 +21,8 @@
 .analysis-violin-density { fill-opacity: .75; stroke: #52797e; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .analysis-violin-track { stroke: #dce6e7; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .analysis-violin-median { stroke: #163c41; stroke-width: 2; vector-effect: non-scaling-stroke; }
-@media (forced-colors: active) { .analysis-violin-density { fill: Highlight; stroke: CanvasText; } .analysis-violin-track, .analysis-violin-median { stroke: CanvasText; } }
+.analysis-violin-quartile { stroke: #163c41; stroke-width: 6; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+@media (forced-colors: active) { .analysis-violin-density { fill: Highlight; stroke: CanvasText; } .analysis-violin-track, .analysis-violin-median, .analysis-violin-quartile { stroke: CanvasText; } }
 .analysis-filters { display: flex; gap: .8rem; flex-wrap: wrap; align-items: end; margin: 1rem 0; }
 .analysis-filters[hidden], .analysis-directory [hidden] { display: none; }
 .analysis-filters label { display: flex; flex-direction: column; gap: .35rem; min-width: 0; font-size: .9rem; }
@@ -31,6 +32,19 @@
 .analysis-directory table td:nth-child(2) { min-width: 12rem; overflow-wrap: anywhere; }
 .analysis-directory table td:nth-child(5) { min-width: 8rem; }
 .analysis-directory table td:nth-child(6) { min-width: 10rem; overflow-wrap: anywhere; }
+/* Give ordinal columns room for three digits without taking article space. */
+.analysis-directory .ui-table__table th:first-child,
+.quality-authorship-table .ui-table__table th:first-child,
+.page-updates .analysis-chart-article-table th:first-child {
+    inline-size: 4em;
+    min-inline-size: 4em;
+    box-sizing: border-box;
+    text-align: end;
+    white-space: nowrap;
+}
+.analysis-directory .ui-table__table td:first-child,
+.quality-authorship-table .ui-table__table td:first-child,
+.page-updates .analysis-chart-article-table td:first-child { white-space: nowrap; }
 .analysis-talk, .analysis-review { white-space: nowrap; font-size: .9em; }
 .analysis-authorship-info { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5rem; min-height: 1.5rem; vertical-align: middle; border-radius: 50%; }
 .analysis-authorship-evidence { margin-block: 1rem 1.5rem; }
@@ -48,7 +62,7 @@
 @media (max-width: 390px) { .analysis-summary { gap: .6rem; } .analysis-summary > div { padding: .8rem; } .analysis-summary dd { font-size: 1.5rem; } .analysis-filters label { flex: 1 1 100%; } }
 @media (forced-colors: active) { .analysis-pie-slice, .analysis-year-columns rect { fill: Highlight; stroke: CanvasText; } .analysis-year-grid { stroke: CanvasText; } .analysis-axis-label, .analysis-column-total { fill: CanvasText; } .analysis-summary > div { border: 1px solid CanvasText; } }
 .analysis-pies { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.5rem; margin: 1.25rem 0; }
-.analysis-pie-panel { margin: 0; min-width: 0; }
+.analysis-pie-panel { margin: 0; min-width: 0; overflow-x: auto; }
 .analysis-pie-panel h4 { font-size: 1.05rem; margin-bottom: .5rem; }
 .analysis-pie { display: block; width: 100%; max-width: 280px; height: auto; margin: .5rem auto 1rem; }
 .analysis-pie-empty { fill: #f5f7f7; stroke: #a2a9b1; stroke-width: 1; }
@@ -93,6 +107,7 @@
 @media (max-width: 390px) { .analysis-pie-key { font-size: .85rem; } .analysis-assessment-label { gap: .25rem; } }
 
 .analysis-pie-key th:first-child, .analysis-pie-key td.analysis-number { width: 1%; white-space: nowrap; }
-.analysis-count { display: grid; grid-template-columns: minmax(3ch, 1fr) 4.6ch; gap: .3rem; align-items: baseline; justify-items: end; }
+.analysis-pie-key th:nth-child(2), .analysis-pie-key td.analysis-number { min-inline-size: 9em; }
+.analysis-count { display: grid; grid-template-columns: minmax(6ch, 1fr) 6ch; gap: .5rem; align-items: baseline; justify-items: end; }
 .analysis-count small { color: #52696e; }
 [data-authorship-basis] { margin: -.5rem 0 1.5rem; }

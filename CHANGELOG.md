@@ -5,6 +5,28 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.9 (2026-11-14 09:49 UTC)
+
+Overview: Reduced the initial article-statistics payload and loaded contributor
+details on demand, while aligning table rendering, attribution filters and charts.
+
+- Separated the full article catalog and contributor details from the initial
+  overview, preserving prepared charts and the first twenty article rows.
+- Added atomic prepared resources, digest-based browser caching and bounded
+  compressed-response reuse, with retry and native detail-page fallbacks.
+- Rebuilt visible article rows from current data with consistent links and
+  styling, removed adjacent-row preloading, and sized ordinal columns to four em.
+- Added sorting to chart article dialogs, keeping missing observations last
+  and restoring the default order when a new chart selection opens.
+- Unified main-contributor filters and author totals above 33%, anonymized IP
+  main-contributor labels, and retained significant contributors at or above 10%.
+- Distinguished missing attribution from acquired data with no qualifying
+  contributor, using the same thresholds in initial and later article rows.
+- Matched annual legends to plotted categories and data columns to selected
+  grades, and removed the table-filter and horizontal-scroll explanatory text.
+- Added P25/P75 violin markers and count/percentile hover details, preserving
+  missing lengths and widening the distribution count and percentage column.
+
 ### 0.9.8 (2026-11-14 09:00 UTC)
 
 Overview: Moved report generation onto prepared metadata with incremental
