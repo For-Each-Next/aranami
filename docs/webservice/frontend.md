@@ -1,8 +1,8 @@
 # Website development
 
 Django serves Aranami's multilingual pages and saved-data APIs. Use this guide
-when changing the dashboard, maintenance, newsletter, reports, logs or About
-pages. Requests read retained observations; background acquisition remains in
+when changing the dashboard, consistency checks, newsletter, reports, logs
+or About pages. Requests read retained observations; background acquisition remains in
 tasks coordinated by runtime.
 
 [Quality analysis](quality-analysis.md) documents the saved quality charts,
@@ -243,17 +243,10 @@ verified review anchors. Latest activity links to the editor's contributions and
 remains a separately saved public-edit observation; missing dates stay unknown.
 Page requests never query Wikipedia or the replicas.
 
-The optional `Count B-Class` control includes current B articles and B-class
-lists with `?count_b=1`; the default omits them. The selected total describes
-developed articles and links separately to its high-quality subset, for example
-`47 articles (45 high-quality | 7 featured)`. Zero subsets are omitted, and both
-nonzero subset links share one pair of parentheses.
-The switch updates saved results immediately without reloading the page. It
-retains focus, locale and URL state; superseded responses cannot replace the
-latest choice. Failure retains the prior results and restores its switch state.
-Direct GET links switch views without JavaScript; no Apply button is rendered. Sorting and pagination
-are restored on refreshed tables. Main-page highlights refresh hourly; newsletter
-facts retain their independent daily cadence.
+The universal class matrix selects any combination of article and list grades.
+Prepared normal and all-class presets share the same catalog; there is no
+separate B-class switch. Contributor tables retain one total count. Main-page
+highlights refresh hourly; newsletter facts keep their independent daily cadence.
 
 B/BL listing dates use the first talk revision of the latest continuous
 literal B/BL banner range, including page creation when fully visible.

@@ -1,10 +1,12 @@
 /** Filter and sort the complete saved article list without source requests. */
 import { compareValues, initializeQualityAuthorship } from "./quality_authorship.js";
 import { initializeQualityCoverage } from "./quality_coverage.js";
+import { initializeQualityChartControls } from "./quality_chart_controls.js";
 import { initializeQualityMatrix, initializeQualitySelection, prepareCatalogRows, catalogRows, articleElement, qualityMetadata, loadQualityMetadata } from "./quality_matrix.js";
 
 /** Keep the prepared overview usable while its full catalog loads after paint. */
 export function initializeQualityPage(previous = {}) {
+    if (typeof initializeQualityChartControls === "function") initializeQualityChartControls();
     const form = document.querySelector("[data-quality-matrix]");
     const complete = () => {
         initializeQualityAnalysis(previous);
@@ -327,82 +329,7 @@ function analysisState() {
     };
 }
 
-/** Replace the complete saved selection so the switch governs every section. */
-export function initializeQualityAnalysisFilter() {
-    const form = document.querySelector("[data-quality-analysis-filter]");
-    const results = document.querySelector("[data-quality-results]");
-    if (!form || !results || form.hasAttribute("data-auto-submit")) return;
-    const input = form.querySelector('[name="count_b"]');
-    const status = form.querySelector("[data-quality-analysis-status]");
-    if (!input || !status) return;
-    form.dataset.autoSubmit = "";
-    if (typeof fetch !== "function" || typeof DOMParser !== "function") {
-        input.addEventListener("change", () => form.requestSubmit());
-        return;
-    }
-    let applied = input.checked;
-    let sequence = 0;
-    let controller;
-
-    /** Apply only the latest valid same-origin saved-data response. */
-    async function update(push) {
-        const request = ++sequence;
-        controller?.abort();
-        controller = new AbortController();
-        const selected = input.checked;
-        const previous = analysisState();
-        const url = new URL(form.action, location.href);
-        url.search = new URLSearchParams(new FormData(form)).toString();
-        results.setAttribute("aria-busy", "true");
-        status.textContent = form.dataset.updating;
-        try {
-            const response = await fetch(url, {
-                credentials: "same-origin", headers: {Accept: "text/html"},
-                redirect: "error", signal: controller.signal,
-            });
-            if (!response.ok || !response.headers.get("content-type")?.includes("text/html"))
-                throw new Error("Quality results unavailable");
-            const page = new DOMParser().parseFromString(await response.text(), "text/html");
-            if (request !== sequence) return;
-            const incoming = page.querySelector("[data-quality-results]");
-            if (!incoming || incoming.dataset.countB !== (selected ? "1" : "0") ||
-                    incoming.querySelector("script, iframe, object, embed") ||
-                    !incoming.querySelector("#analysis-overview") ||
-                    !incoming.querySelector("#analysis-articles") ||
-                    !incoming.querySelector("#quality-authors"))
-                throw new Error("Invalid quality results");
-            for (const dialog of results.querySelectorAll("dialog[open]")) dialog.close();
-            results.replaceChildren(...incoming.childNodes);
-            results.dataset.countB = incoming.dataset.countB;
-            initializeQualityPage(previous);
-            applied = selected;
-            if (push && url.href !== location.href) history.pushState(null, "", url);
-            for (const link of document.querySelectorAll(".language-switcher a[hreflang]")) {
-                const destination = new URL(link.href, location.href);
-                if (selected) destination.searchParams.set("count_b", "1");
-                else destination.searchParams.delete("count_b");
-                link.href = destination.href;
-            }
-            status.textContent = "";
-        } catch (error) {
-            if (request !== sequence || error.name === "AbortError") return;
-            input.checked = applied;
-            status.textContent = form.dataset.updateFailed;
-        } finally {
-            if (request === sequence) results.removeAttribute("aria-busy");
-        }
-    }
-    input.addEventListener("change", () => update(true));
-    form.addEventListener("submit", event => {event.preventDefault(); update(true);});
-    window.addEventListener("popstate", () => {
-        const selected = new URL(location.href).searchParams.get("count_b") === "1";
-        if (selected === applied) return;
-        input.checked = selected;
-        update(false);
-    });
-}
-
+document.addEventListener?.("quality-charts-replaced", () => initializeQualityChartControls());
 initializeQualityPage();
-initializeQualityAnalysisFilter();
 const basis = document.querySelector("[data-authorship-basis]");
 if (basis) basis.querySelector("input[type=checkbox]").addEventListener("change", () => basis.requestSubmit());

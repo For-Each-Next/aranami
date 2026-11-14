@@ -20,6 +20,7 @@ from runtime import quality_analysis as worker
 from shared.config import COLLECTION_DEFINITIONS
 
 _BOOT = "a" * 32
+_RUN = "b" * 32
 
 
 class AnalysisWorkerTests(TestCase):
@@ -52,7 +53,7 @@ class AnalysisWorkerTests(TestCase):
             patch.object(
                 worker,
                 "collection_run",
-                return_value=nullcontext(),
+                return_value=nullcontext(Mock(run_id=_RUN)),
             ) as execution,
             patch.object(worker, "get_boot_id", return_value=_BOOT),
             patch.object(
@@ -76,6 +77,7 @@ class AnalysisWorkerTests(TestCase):
             Path(worker.__file__).resolve().parents[1],
         )
         assert options["env"]["PYTHONDONTWRITEBYTECODE"] == "1"
+        assert options["env"]["ARANAMI_DATASET_RUN_ID"] == _RUN
         assert options["env"]["POLARS_MAX_THREADS"]
         assert not {"stdout", "stderr", "shell"} & set(options)
         child.wait.assert_called_once_with(timeout=180)
@@ -94,7 +96,11 @@ class AnalysisWorkerTests(TestCase):
             0,
         ]
         with (
-            patch.object(worker, "collection_run", return_value=nullcontext()),
+            patch.object(
+                worker,
+                "collection_run",
+                return_value=nullcontext(Mock(run_id=_RUN)),
+            ),
             patch.object(worker.subprocess, "Popen", return_value=child),
             self.assertRaises(subprocess.TimeoutExpired),
         ):
@@ -116,7 +122,11 @@ class AnalysisWorkerTests(TestCase):
             0,
         ]
         with (
-            patch.object(worker, "collection_run", return_value=nullcontext()),
+            patch.object(
+                worker,
+                "collection_run",
+                return_value=nullcontext(Mock(run_id=_RUN)),
+            ),
             patch.object(worker.subprocess, "Popen", return_value=child),
             self.assertRaises(KeyboardInterrupt),
         ):
@@ -130,7 +140,11 @@ class AnalysisWorkerTests(TestCase):
         child = Mock()
         child.wait.return_value = child.poll.return_value = 7
         with (
-            patch.object(worker, "collection_run", return_value=nullcontext()),
+            patch.object(
+                worker,
+                "collection_run",
+                return_value=nullcontext(Mock(run_id=_RUN)),
+            ),
             patch.object(worker.subprocess, "Popen", return_value=child),
             self.assertRaises(subprocess.CalledProcessError) as raised,
         ):
@@ -221,7 +235,7 @@ class AuthorWorkerTests(TestCase):
             patch.object(
                 worker,
                 "collection_run",
-                return_value=nullcontext(),
+                return_value=nullcontext(Mock(run_id=_RUN)),
             ) as execution,
             patch.object(
                 worker.subprocess,

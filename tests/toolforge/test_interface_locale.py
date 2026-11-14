@@ -123,19 +123,20 @@ class InterfaceLocaleTests(unittest.TestCase):
     def test_language_links_retain_route_and_query(self) -> None:
         """Keep filters and page number when changing script."""
         params = (
-            "task=references&sort=title&order=desc&page=2&q=Game&quality=B"
+            "task=consistency_history&sort=title&order=desc&page=2"
+            "&q=Game&quality=B"
         )
         with patch(
             "webservice.server._PublicViews._maintenance_page",
         ) as render:
             # Obtain navigation without reading runtime data.
             render.return_value = Response("fixture")
-            self.client.get("/maintenance/?" + params + "&lang=en")
+            self.client.get("/checks/?" + params + "&lang=en")
             navigation = render.call_args.args[3]
-        assert navigation["path"] == "/maintenance/"
+        assert navigation["path"] == "/checks/"
         for link in navigation["languages"]:
             target = urlsplit(link["url"])
-            assert target.path == "/maintenance/"
+            assert target.path == "/checks/"
             values = parse_qs(target.query)
             assert values["page"] == ["2"]
             assert values["q"] == ["Game"]

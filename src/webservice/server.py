@@ -17,6 +17,7 @@ import re
 from contextlib import ExitStack, asynccontextmanager, suppress
 from http import HTTPStatus
 from pathlib import Path
+from threading import BoundedSemaphore
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -63,6 +64,10 @@ from webservice.http import accepts_gzip, encoded_response, read_only_headers
 from webservice.live import LiveFeed
 from webservice.page_cache import PageCache
 from webservice.quality_cache import QualityResourceCache
+from webservice.quality_chart_requests import (
+    StaleQualityChartError,
+    filtered_charts,
+)
 lazy from data.newsletter.archive import (
     DEFAULT_PATH as DRAFT_ARCHIVE_PATH,
     NewsletterDraftArchive,
@@ -108,26 +113,6 @@ _WEB_HEARTBEAT_SECONDS = 30
 _LOGGER = logging.getLogger(__name__)
 _LANGUAGES = {"en": "English", "zh-hans": "简体中文", "zh-hant": "繁体中文"}
 _LANGUAGE_COOKIE = "aranami-language"
-
-
-def _legacy_checks_url(
-    path: str,
-    parameters: dict[str, list[str]],
-    query: str,
-) -> str | None:
-    """Preserve old checks links after moving them to their own route.
-
-    Returns:
-        The replacement URL, or None for unrelated requests.
-    """
-    task = parameters.get("task", [])
-    if path == "/maintenance/checks/" or (
-        path == "/maintenance/"
-        and len(task) == 1
-        and task[0].startswith("consistency_")
-    ):
-        return "/checks/" + (f"?{query}" if query else "")
-    return None
 
 
 _ATTRIBUTION_PATHS = (
@@ -575,7 +560,6 @@ def _navigation(request: ASGIRequest, locale: str) -> dict[str, object]:
             "stream",
             "issue",
             "file",
-            "count_b",
             "listing_authors",
             "all_grades",
         }
@@ -702,6 +686,7 @@ class _PublicViews:
         self.asset_cache = AssetCache()
         self.quality_resources = QualityResourceCache()
         self.pages = PageCache()
+        self.chart_lock = BoundedSemaphore(1)
         self.socket_clients = 0
         self.live_feed = LiveFeed(
             lambda: read_status(self.runtime),
@@ -731,7 +716,7 @@ class _PublicViews:
         with title_display_scope(labels):
             return self._page(request, title_identity=title_identity)
 
-    def _page(  # ruff: ignore[complex-structure,too-many-locals]
+    def _page(  # ruff: ignore[too-many-locals]
         self,
         request: ASGIRequest,
         *,
@@ -753,21 +738,13 @@ class _PublicViews:
                 query,
                 keep_blank_values=True,
                 errors="strict",
-                max_num_fields=12
-                if path in {"/maintenance/", "/checks/"}
-                else 5,
+                max_num_fields=12 if path == "/checks/" else 5,
             )
         except ValueError, UnicodeError:
             return _page_error(
                 "backlog.not_found",
                 locale,
                 HTTPStatus.BAD_REQUEST,
-            )
-        legacy_url = _legacy_checks_url(path, parameters, query)
-        if legacy_url:
-            return HttpResponse(
-                status=HTTPStatus.TEMPORARY_REDIRECT,
-                headers={"Location": legacy_url},
             )
         parameters.pop("lang", None)
         navigation = _navigation(request, locale)
@@ -854,14 +831,7 @@ class _PublicViews:
             A complete analysis page without source acquisition or
             request-time statistical calculations.
         """
-        if set(parameters) - {
-            "count_b",
-            "listing_authors",
-            "all_grades",
-        } or parameters.get(
-            "count_b",
-            ["0"],
-        ) not in (["0"], ["1"]):
+        if set(parameters) - {"listing_authors", "all_grades"}:
             return _page_error(
                 "backlog.not_found",
                 locale,
@@ -881,14 +851,12 @@ class _PublicViews:
             if parameters.get("listing_authors") == ["1"]
             else "current"
         )
-        include_b = parameters.get("count_b") == ["1"]
         all_grades = parameters.get("all_grades") == ["1"]
-        key = ("/quality-analysis/", locale, include_b, basis, all_grades)
+        key = ("/quality-analysis/", locale, basis, all_grades)
         try:  # ruff: ignore[too-many-statements-in-try-clause] - One optional prepared-page read boundary.
             preset = quality_pages.path_for(
                 self.runtime,
                 Interface(locale).message_locale,
-                include_b=include_b,
                 basis=basis,
                 all_grades=all_grades,
             )
@@ -907,7 +875,7 @@ class _PublicViews:
         return _html(
             pages.render_quality_analysis(
                 {
-                    "analysis": {"available": False, "include_b": include_b},
+                    "analysis": {"available": False},
                     "authorship": {"available": False, "authors": []},
                 },
                 read_status(self.runtime),
@@ -929,18 +897,21 @@ class _PublicViews:
         Returns:
             A canonical saved-data URL preserving the selected cohort.
         """
-        if set(parameters) - {"count_b"} or parameters.get(
-            "count_b",
-            ["0"],
-        ) not in (["0"], ["1"]):
+        if set(parameters) - {"listing_authors", "all_grades"} or any(
+            parameters.get(name, ["0"]) not in (["0"], ["1"])
+            for name in ("listing_authors", "all_grades")
+        ):
             return _page_error(
                 "backlog.not_found",
                 locale,
                 HTTPStatus.BAD_REQUEST,
             )
         query = {"lang": locale}
-        if parameters.get("count_b") == ["1"]:
-            query["count_b"] = "1"
+        query.update({
+            name: "1"
+            for name in ("listing_authors", "all_grades")
+            if parameters.get(name) == ["1"]
+        })
         return HttpResponse(
             status=HTTPStatus.MOVED_PERMANENTLY,
             headers={
@@ -1244,17 +1215,6 @@ class _PublicViews:
                 locale,
                 HTTPStatus.BAD_REQUEST,
             )
-        if not parameters:
-            return _html(
-                pages.render_maintenance_overview(
-                    snapshot,
-                    read_status(self.runtime),
-                    _configuration(),
-                    locale,
-                    navigation=navigation,
-                ),
-                locale,
-            )
         try:
             content = pages.render_maintenance(
                 snapshot,
@@ -1326,9 +1286,9 @@ class _PublicViews:
             for path in (root, root.parent, root.parent.parent)
         ):
             return None
-        path = root / "dashboard.parquet"
-        if not path.exists():
-            path = root / "dashboard.json"
+        path = root / "dashboard.json"
+        if not path.exists() and not path.is_symlink():
+            path = root / "dashboard.parquet"
         try:
             value = read_snapshot(path)
         except OSError, ValueError, TypeError, RecursionError, OverflowError:
@@ -1435,6 +1395,33 @@ class _PublicViews:
             else _error(HTTPStatus.NOT_FOUND)
         )
 
+    def quality_charts(self, request: ASGIRequest) -> HttpResponseBase:
+        """Render saved matrix observations through Matplotlib only.
+
+        Returns:
+            Bounded SVG documents, a stale-generation conflict or a
+            standard invalid/unavailable response without source work.
+        """
+        if not self.chart_lock.acquire(blocking=False):
+            return _error(HTTPStatus.TOO_MANY_REQUESTS)
+        try:
+            parameters = parse_qs(
+                request.scope.get("query_string", b"").decode("ascii"),
+                keep_blank_values=True,
+                errors="strict",
+                max_num_fields=7,
+            )
+            result = filtered_charts(self.runtime, parameters)
+        except StaleQualityChartError:
+            return _error(HTTPStatus.CONFLICT)
+        except ValueError, UnicodeError:
+            return _error(HTTPStatus.BAD_REQUEST)
+        except LookupError, OSError, PolarsError:
+            return _error(HTTPStatus.SERVICE_UNAVAILABLE)
+        finally:
+            self.chart_lock.release()
+        return _json(result)
+
     def quality_resource(self, request: ASGIRequest) -> HttpResponseBase:
         """Deliver a saved catalog or standalone author detail.
 
@@ -1443,7 +1430,7 @@ class _PublicViews:
         """
         match = re.fullmatch(
             r"/quality-analysis/resources/(en|zh-hans|zh-hant)/"
-            r"(0|1|all)/(current|listed)/"
+            r"(0|all)/(current|listed)/"
             r"((?:catalog-[0-9a-f]{64}\.json|"
             r"author-quality-author-[1-9][0-9]*-[0-9a-f]{64}\.html))",
             request.path,
@@ -1454,7 +1441,6 @@ class _PublicViews:
         path = quality_pages.path_for(
             self.runtime,
             locale,
-            include_b=cohort == "1",
             basis=basis,
             all_grades=cohort == "all",
         )
@@ -2109,8 +2095,6 @@ def create_app(runtime: Path, assets: Path = _ASSETS) -> DjangoWebsite:
             "/quality-authorship/",
             "/quality-analysis/",
             "/about/",
-            "/maintenance/",
-            "/maintenance/checks/",
             "/checks/",
             "/reports/",
             "/data/",
@@ -2124,6 +2108,7 @@ def create_app(runtime: Path, assets: Path = _ASSETS) -> DjangoWebsite:
         for kind in ("config", "status", "dashboard", "consistency-repair")
     )
     patterns.extend([
+        url_path("quality-analysis/charts/", _route(views.quality_charts)),
         url_path("api/live", _route(views.live_api)),
         url_path("api/logs", _route(views.api_logs)),
         re_path(

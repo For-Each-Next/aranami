@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -20,13 +21,16 @@ from data.articles.storage import AUTHORSHIP_PATH
 def saved_analysis_fixture(
     now: dt.datetime,
     *,
-    include_b: bool = False,
+    all_grades: bool = False,
+    runtime: Path | None = None,
 ) -> dict:
     """Prepare real Parquet summaries with long, zero and unknown rows.
 
     Args:
         now: Shared aware UTC observation clock for these fixtures.
-        include_b: Select the complete B/BL-inclusive report variant.
+        all_grades: Select the complete universal-grade report preset.
+        runtime: Retain fixture sources here for local chart requests;
+            omit to remove them when this function returns.
 
     Returns:
         A complete saved-data report with enough rows for pagination.
@@ -62,7 +66,8 @@ def saved_analysis_fixture(
             "measured_at": now if measured else None,
             "attempted_at": now,
         })
-    with TemporaryDirectory() as directory:
+    context = TemporaryDirectory() if runtime is None else nullcontext(runtime)
+    with context as directory:
         runtime = Path(directory)
         frame = pl.DataFrame(rows, schema=store.ARTICLE_SCHEMA)
         store.checkpoint(
@@ -90,7 +95,7 @@ def saved_analysis_fixture(
         assert current_quality.refresh_saved_quality(runtime)
         return current_quality.read_current_quality(
             runtime,
-            include_b=include_b,
+            all_grades=all_grades,
         )
 
 

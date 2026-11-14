@@ -405,7 +405,6 @@ class PublicWebsiteTests(unittest.TestCase):  # ruff: ignore[too-many-public-met
                 "/about/",
                 "/reports/",
                 "/logs/",
-                "/maintenance/",
                 "/checks/",
             ):
                 with self.subTest(target=target):
@@ -444,13 +443,13 @@ class PublicWebsiteTests(unittest.TestCase):  # ruff: ignore[too-many-public-met
             assert head[2] == b""
             translated = self.request("/about/", language="zh-TW,en;q=0.5")
             assert translated[1]["Content-Language"] == "zh-Hant-TW"
-            assert self.request("/maintenance/?task=valid")[0] == 503
-            assert self.request("/maintenance/?task=../private")[0] == 400
+            assert self.request("/maintenance/?task=valid")[0] == 404
+            assert self.request("/maintenance/?task=../private")[0] == 404
             assert self.request("/logs/?q=one&q=two")[0] == 400
         assert not (self.runtime / "state").exists()
 
-    def test_checks_have_separate_route_and_preserve_old_links(self) -> None:
-        """Keep localized checks outside maintenance."""
+    def test_checks_work_after_retiring_maintenance_routes(self) -> None:
+        """Keep localized checks available through the current route."""
         assert self.request("/checks/?task=valid")[0] == 400
         checks_head = self.request("/checks/", "HEAD")
         assert checks_head[0] == 200
@@ -461,15 +460,13 @@ class PublicWebsiteTests(unittest.TestCase):  # ruff: ignore[too-many-public-met
         assert b'href="/checks/" aria-current="page"' in checks
         assert b'id="live-uptime"' in checks
         old_checks = self.request("/maintenance/checks/?lang=zh-hant")
-        assert old_checks[0] == 307
-        assert old_checks[1]["Location"] == "/checks/?lang=zh-hant"
+        assert old_checks[0] == 404
+        assert "Location" not in old_checks[1]
         old_history = self.request(
             "/maintenance/?task=consistency_history&lang=zh-hant&page=2",
         )
-        assert old_history[0] == 307
-        assert old_history[1]["Location"] == (
-            "/checks/?task=consistency_history&lang=zh-hant&page=2"
-        )
+        assert old_history[0] == 404
+        assert "Location" not in old_history[1]
 
     def test_attribution_routes_share_locale_navigation_without_sources(
         self,
@@ -496,76 +493,21 @@ class PublicWebsiteTests(unittest.TestCase):  # ruff: ignore[too-many-public-met
         assert not (self.runtime / "state").exists()
         assert not (self.runtime / "cache").exists()
 
-    def test_maintenance_overview_uses_saved_categories_and_task_links(
-        self,
-    ) -> None:
-        """Keep the overview separate from filtered task worklists."""
-        snapshot = {
-            "backlog": {
-                "observed_at": "2026-10-31T12:00:00Z",
-                "total": 1,
-                "groups": [
-                    {
-                        "key": "sources",
-                        "category": "缺少可靠来源的条目",
-                        "source_url": (
-                            "https://zh.wikipedia.org/wiki/Category:Sources"
-                        ),
-                        "label": "Sources <&>",
-                        "section_key": "sources",
-                        "section_label": "References <&>",
-                        "count": 1,
-                        "items": [],
-                    },
-                ],
-            },
-        }
-        with (
-            patch("pywikibot.Site", side_effect=AssertionError("No sources")),
-            patch(
-                "webservice.server._PublicViews._dashboard",
-                return_value=snapshot,
-            ),
-        ):
-            status, headers, body = self.request("/maintenance/?lang=zh-hant")
-            assert status == 200
-            assert headers["Content-Language"] == "zh-Hant"
-            text = body.decode()
-            assert "<h1>條目維護</h1>" in text
-            assert '<h2 id="backlog-section-sources">' in text
-            assert 'href="#backlog-section-sources"' in text
-            assert "References &lt;&amp;&gt;" in text
-            assert "Sources &lt;&amp;&gt;" in text
-            assert 'href="/maintenance/?task=sources&amp;page=1"' in text
-            assert "2026-10-31 12:00" in text
-            assert 'href="/maintenance/?lang=en"' in text
-            head = self.request("/maintenance/?lang=zh-hant", "HEAD")
-            assert head[0] == 200
-            assert head[2] == b""
-            assert head[1]["Content-Length"] == headers["Content-Length"]
-            detail = self.request("/maintenance/?task=sources")[2].decode()
-            assert '<form class="maintenance-search"' in detail
-            assert 'class="ui-table__table__sort-button"' in detail
-            assert 'href="/maintenance/" class="back"' in detail
-            assert self.request("/maintenance/?task=missing")[0] == 404
-            assert self.request("/maintenance/?sort=title")[0] == 400
+    def test_retired_maintenance_routes_are_missing(self) -> None:
+        """Retire the page, worklists and browser module together."""
+        with patch("pywikibot.Site", side_effect=AssertionError("No sources")):
+            for target in (
+                "/maintenance/",
+                "/maintenance/?task=sources",
+                "/maintenance/?lang=zh-hant",
+                "/maintenance.js",
+            ):
+                with self.subTest(target=target):
+                    assert self.request(target)[0] == 404
+                    head = self.request(target, "HEAD")
+                    assert head[0] == 404
+                    assert head[2] == b""
         assert not (self.runtime / "state").exists()
-
-        with patch(
-            "webservice.server._PublicViews._dashboard",
-            return_value={
-                "backlog": {
-                    "observed_at": "2026-10-31T12:00:00Z",
-                    "total": 0,
-                    "groups": [],
-                },
-            },
-        ):
-            status, _, body = self.request("/maintenance/?lang=en")
-            assert status == 200
-            assert b"No articles currently need maintenance." in body
-            assert b"2026-10-31 12:00" in body
-            assert b"temporarily unavailable" not in body
 
     def test_live_status_bypasses_page_cache_and_never_collects(self) -> None:
         """Share live snapshots without source or dataset reads."""
@@ -770,8 +712,8 @@ class PublicWebsiteTests(unittest.TestCase):  # ruff: ignore[too-many-public-met
         for target in (
             "/?" + "x" * 4097,
             "/api/status?" + "x" * 4097,
-            "/maintenance/?a=1&b=2&c=3&d=4&e=5&f=6",
-            "/maintenance/?task=%FF",
+            "/checks/?a=1&b=2&c=3&d=4&e=5&f=6",
+            "/checks/?task=%FF",
         ):
             with self.subTest(target=target):
                 assert self.request(target)[0] == 400

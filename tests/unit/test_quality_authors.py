@@ -21,7 +21,6 @@ from data.articles import (
     current_assessments,
     quality_authors as store,
 )
-from data.articles.storage import AUTHORSHIP_PATH, MILESTONES_PATH
 from shared.sources.quarry import users
 from tasks.articles import quality_authors as collector
 
@@ -352,52 +351,6 @@ class QualityAuthorPreparationTests(TestCase):
                 evidence,
             ).is_empty()
 
-    @staticmethod
-    def test_directory_aggregates_credits_and_real_activity() -> None:
-        """Keep totals and listing dates tied to saved evidence."""
-        events, evidence = _quality_frames([
-            ("1", "Yumeto", 50),
-            ("2", "Newbamboo", 50),
-        ])
-        with TemporaryDirectory() as temporary:
-            runtime = Path(temporary)
-            for relative in (AUTHORSHIP_PATH, MILESTONES_PATH):
-                path = runtime / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.touch()
-            current_assessments.save(
-                runtime / current_assessments.DEFAULT_PATH,
-                _assessments(),
-                observed_at=_NOW + dt.timedelta(hours=1),
-            )
-            store.save_activity(runtime / store.ACTIVITY_PATH, _activity())
-            with (
-                patch.object(authorship_store, "load", return_value=evidence),
-                patch.object(
-                    store.milestone_store,
-                    "read_events",
-                    return_value=events,
-                ),
-            ):
-                result = store.read_quality_authors(runtime)
-        assert result["available"] is True
-        assert (
-            result["observed_at"] == (_NOW + dt.timedelta(hours=1)).isoformat()
-        )
-        authors = {author["name"]: author for author in result["authors"]}
-        assert authors["Yumeto"]["credit"] == 1
-        assert authors["Yumeto"]["grades"] == {
-            "FA": 1,
-            "FL": 0,
-            "A": 0,
-            "AL": 0,
-            "GA": 0,
-            "Bplus": 0,
-        }
-        assert authors["Yumeto"]["last_active"] == _EDIT.isoformat()
-        assert authors["Newbamboo"]["last_active"] is None
-        assert authors["Yumeto"]["articles"][0]["date"] == "2022-12-01"
-
 
 class CurrentQualityAuthorPreparationTests(TestCase):
     """Apply current eligibility without rewriting historical credit."""
@@ -487,60 +440,6 @@ class CurrentQualityAuthorPreparationTests(TestCase):
         assert current["grade"].to_list() == ["FA", "FA", "FA"]
 
 
-class CurrentQualityAuthorDirectoryTests(TestCase):
-    """Require current assessments at the saved-data reader boundary."""
-
-    def setUp(self) -> None:
-        """Retain historical evidence before current collection."""
-        temporary = TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.runtime = Path(temporary.name)
-        self.current_path = self.runtime / current_assessments.DEFAULT_PATH
-        for relative in (AUTHORSHIP_PATH, MILESTONES_PATH):
-            path = self.runtime / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.touch()
-        events, evidence = _quality_frames([("1", "Writer", 1)], grade="GA")
-        self.enterContext(
-            patch.object(authorship_store, "load", return_value=evidence),
-        )
-        self.enterContext(
-            patch.object(
-                store.milestone_store,
-                "read_events",
-                return_value=events,
-            ),
-        )
-
-    def test_missing_current_data_differs_from_known_zero_eligible(
-        self,
-    ) -> None:
-        """Distinguish missing membership from known exclusions."""
-        assert store.read_quality_authors(self.runtime) == {
-            "available": False,
-            "observed_at": None,
-            "authors": [],
-        }
-        current_assessments.save(
-            self.current_path,
-            _assessments("乙"),
-            observed_at=_NOW,
-        )
-        assert store.read_quality_authors(self.runtime) == {
-            "available": True,
-            "observed_at": _NOW.isoformat(),
-            "authors": [],
-        }
-
-    def test_damaged_current_state_does_not_restore_historical_credits(
-        self,
-    ) -> None:
-        """Reject broken current state without restoring old credits."""
-        self.current_path.write_bytes(b"invalid")
-        with self.assertRaises(ValueError):
-            store.read_quality_authors(self.runtime)
-
-
 class QualityActivityStorageTests(TestCase):
     """Distinguish known, unknown and failed activity observations."""
 
@@ -609,42 +508,6 @@ class QualityActivityStorageTests(TestCase):
         self.path.write_bytes(b"broken")
         with self.assertRaises(ValueError):
             store.load_activity(self.path)
-
-    @staticmethod
-    def test_directory_missing_evidence_is_unavailable() -> None:
-        """Distinguish missing attribution from an empty directory."""
-        with TemporaryDirectory() as temporary:
-            assert store.read_quality_authors(Path(temporary)) == {
-                "available": False,
-                "observed_at": None,
-                "authors": [],
-            }
-
-    @staticmethod
-    def test_old_contract_alone_is_unavailable() -> None:
-        """Do not relabel earlier raw-token evidence as byte scoring."""
-        _, evidence = _quality_frames([("1", "Yumeto", 1)])
-        evidence = evidence.with_columns(
-            pl.lit("wikiwho-zh:editor-token-count").alias("contract"),
-        )
-        with TemporaryDirectory() as temporary:
-            runtime = Path(temporary)
-            for relative in (AUTHORSHIP_PATH, MILESTONES_PATH):
-                path = runtime / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.touch()
-            current_assessments.save(
-                runtime / current_assessments.DEFAULT_PATH,
-                _assessments(),
-                observed_at=_NOW,
-            )
-            with patch.object(authorship_store, "load", return_value=evidence):
-                result = store.read_quality_authors(runtime)
-        assert result == {
-            "available": False,
-            "observed_at": None,
-            "authors": [],
-        }
 
 
 class QualityActivitySourceTests(TestCase):

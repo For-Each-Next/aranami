@@ -6,8 +6,8 @@ Readers expose saved comparisons without deciding which source is right.
 
 from __future__ import annotations
 
-import datetime as dt
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import polars as pl
@@ -17,6 +17,10 @@ from data.reports import ReportResult, ReportStore
 from shared.assessment_profiles import assessment_profile
 from shared.config import ARTICLE_GRADE_CATEGORIES
 
+if TYPE_CHECKING:
+    import datetime as dt
+
+_MAX_ROWS = 1_000_000
 _KEY = "articles/assessment-comparison/zhwiki-video-games"
 SCHEMA = {
     "page_id": pl.Int64,
@@ -33,7 +37,7 @@ def compare(members: pl.DataFrame, categories: pl.DataFrame) -> pl.DataFrame:
 
     Args:
         members: Complete project membership with raw PageAssessments.
-        categories: Global grade-category members plus project categories.
+        categories: Global grade members and project categories.
 
     Returns:
         Only disagreements; multiple category grades remain visible.
@@ -41,7 +45,7 @@ def compare(members: pl.DataFrame, categories: pl.DataFrame) -> pl.DataFrame:
         category members map to their subject IDs, never their talk IDs.
 
     Raises:
-        ValueError: The project source contains conflicting page identities.
+        ValueError: The project source has conflicting page identities.
     """
     profile = assessment_profile("zhwiki", "电子游戏")
     pa = (
@@ -54,7 +58,8 @@ def compare(members: pl.DataFrame, categories: pl.DataFrame) -> pl.DataFrame:
             "page_id",
             pl.col("page_title").str.replace_all("_", " ").alias("title"),
             profile.expression(
-                pl.col("pa_class").fill_null(""), "class"
+                pl.col("pa_class").fill_null(""),
+                "class",
             ).alias("pageassessments_grade"),
         )
         .unique()
@@ -123,7 +128,7 @@ def save(
     pageassessments_observed_at: dt.datetime | None,
     runtime: Path = Path(),
 ) -> None:
-    """Atomically retain a completed comparison and its source clocks."""
+    """Atomically retain a comparison and its source clocks."""
     frame = compare(members, categories)
     store = ReportStore(runtime / DEFAULT_ROOT)
     store.write(
@@ -150,11 +155,11 @@ def save(
 def read(runtime: Path = Path()) -> dict:
     """Read a saved comparison; absent evidence remains unavailable.
 
-    Raises:
-        ValueError: A saved comparison violates its schema or identity.
-
     Returns:
         Independent source timestamps and all saved disagreements.
+
+    Raises:
+        ValueError: A saved comparison violates its schema or identity.
     """
     bundle = ReportStore(runtime / DEFAULT_ROOT).read(_KEY)
     if bundle is None:
@@ -163,7 +168,7 @@ def read(runtime: Path = Path()) -> dict:
     if (
         frame is None
         or frame.schema != pl.Schema(SCHEMA)
-        or frame.height > 1_000_000
+        or frame.height > _MAX_ROWS
         or frame["page_id"].n_unique() != frame.height
         or frame.filter(
             pl.any_horizontal(pl.exclude("pageassessments_grade").is_null())

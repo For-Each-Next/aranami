@@ -104,7 +104,7 @@ def category_cache(
             contract=(
                 f"hourly-categories:3:{wiki}:{now:%Y%m%d%H}:"
                 + hashlib.sha256(
-                    repr(ASSESSMENT_CATEGORIES).encode()
+                    repr(ASSESSMENT_CATEGORIES).encode(),
                 ).hexdigest()
             ),
             max_rows=2_000_000,

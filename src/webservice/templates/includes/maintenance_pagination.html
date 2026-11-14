@@ -1,4 +1,4 @@
-<nav class="ui-table-pager ui-table__pagination--bottom" aria-label="{{ t.nav.backlog }}">
+<nav class="ui-table-pager ui-table__pagination--bottom" aria-label="{{ t.nav.checks }}">
   <form class="page-size ui-table-pager__start" action="{{ worklist_path }}" method="get">
     {% for name, value in selection.items() if name not in ['page', 'limit'] %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
     <label class="visually-hidden" for="maintenance-limit">{{ t.backlog.rows }}</label>

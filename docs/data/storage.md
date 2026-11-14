@@ -36,7 +36,7 @@ data/
 │   ├── 2026111323.parquet                     previous wpvg hourly page list
 │   ├── 2026111400.parquet                     current wpvg hourly page list
 │   ├── categories-2026111323.parquet
-│   ├── categories-2026111400.parquet          maintenance/review source categories
+│   ├── categories-2026111400.parquet          assessment/review source categories
 │   ├── enwiki-talks.parquet                   exact English talk text by revision
 │   ├── pageviews-<id>--latest.json            selects two complete generations
 │   ├── pageviews-<id>--<generation>--daily.parquet
@@ -54,20 +54,19 @@ data/
 │   ├── article-milestones.parquet            canonical recognition events
 │   ├── current-assessments.parquet           current class and revision keys
 │   ├── scope.parquet                         retained current/previous membership
-│   ├── pageviews.parquet                     prepared website traffic report
-│   ├── newsletter.parquet                    prepared collection envelope
+│   ├── pageviews.json                        prepared website traffic report
+│   ├── newsletter.json                       prepared collection envelope
 │   ├── newsletter-traffic.parquet             totals prepared after 19:00 UTC
 │   ├── newsletter--observations--current.parquet
 │   ├── newsletter--observations--<day>--observation-<time>.parquet
 │   ├── newsletter-drafts--<issue>--catalog.parquet
 │   ├── newsletter-drafts--<issue>--<day>--observation.parquet
 │   ├── newsletter-drafts--<issue>--annual-feature--<day>--metadata.parquet
-│   ├── dashboard.parquet                     prepared homepage
-│   ├── reviews.parquet                       Chinese review/discussion report
-│   ├── recognized.parquet                    recognition report
-│   ├── dyk.parquet                           DYK report
-│   ├── news_history.parquet                  news and anniversary report
-│   ├── backlog.parquet                       maintenance worklists
+│   ├── dashboard.json                        prepared frontend pages
+│   ├── reviews.json                          Chinese review/discussion report
+│   ├── recognized.json                       recognition report
+│   ├── dyk.json                              DYK report
+│   ├── news_history.json                     news and anniversary report
 │   ├── consistency.parquet                   checked consistency findings
 │   ├── consistency-repairs.parquet           prepared repair proposals
 │   ├── game-title-conversions.parquet        regional title labels
@@ -80,11 +79,11 @@ data/
 │   │   └── 257.json
 │   ├── …
 │   └── FF/                                   revision_id % 256 == 255
-└── webservice/                               background-prepared HTML in Parquet
-    ├── quality-page-zh-hans-0-current.parquet  default high-quality article list
-    ├── quality-page-zh-hans-all-current.parquet all article grades
-    ├── quality-page-zh-hans-0-listed.parquet   listing-version contribution basis
-    └── quality-page-<locale>-<mode>-<basis>.parquet
+└── webservice/                               prepared frontend JSON documents
+    ├── quality-page-zh-hans-0-current.json  default high-quality article list
+    ├── quality-page-zh-hans-all-current.json all article grades
+    ├── quality-page-zh-hans-0-listed.json   listing-version contribution basis
+    └── quality-page-<locale>-<mode>-<basis>.json
 ```
 
 This is a naming example, not a claim that every date or optional fileset exists.
@@ -187,13 +186,18 @@ unique historical events remain retained.
 
 ## Fileset consumers and table schemas
 
+Frontend presentation snapshots use JSON directly. Background facts retain
+native Parquet columns, including the current consistency findings table.
+Readers accept older presentation Parquet envelopes during deployment; new
+presentation writes use JSON and omit the retired category-maintenance data.
+
 | Fileset | Main schema/identity | Used by |
 |---|---|---|
 | `archive/<day>.parquet` | Page-list schema above | Daily comparisons, assessment logs, Pageviews populations, historical scope and raw revision retention |
 | `raw/enwiki-<day>.parquet` | Same page-list schema | English quality/importance comparisons; supplemental SQL provides item IDs and current review categories |
 | `raw/<project>-<day>.parquet` | Same page-list schema | Independent cross-project membership, when configured |
 | `raw/<hour>.parquet`, `<project>-<hour>.parquet` | Same page-list schema | Incremental subject/talk collection and current project analyses |
-| `raw/categories-<hour>.parquet` | `page_id`, `page_namespace`, `page_title`, `page_latest`, `article_page_id`, `name`, `categories_complete` | Current maintenance and assessment consistency collection |
+| `raw/categories-<hour>.parquet` | `page_id`, `page_namespace`, `page_title`, `page_latest`, `article_page_id`, `name`, `categories_complete` | Current review and assessment consistency collection |
 | `revisions/<shard>/<rev>.*` | Exact text and metadata described above | Collectors/parsers only; never report or HTTP rendering |
 | `parsed/article-history.parquet` | Talk identity/revision, parser contract and nested parsed history | Newsletter recognition/history and listing dates |
 | `parsed/article-authorship.parquet` | Page/listing date, grade, action, revision ranges, contributors and contract | Quality author statistics and newsletter credits |
@@ -370,7 +374,7 @@ for presentation. Older evidence is preserved under its original contract and
 recollected in bounded passes before entering current statistics. Missing
 current evidence differs from a confirmed empty selection.
 
-Optional B/BL credits use a separate
+Universal selection obtains B/BL listing evidence from a separate
 `current-authorship/b-class` bundle under flat `data/parsed/`. It retains current
 membership, the first talk revision of the latest continuous B/BL banner range,
 its exact UTC assessment timestamp, the article cutoff revision and timestamp,
@@ -547,33 +551,32 @@ repair files or create source clients.
 
 ### Article statistics selection metadata
 
-The `current-quality` report includes a one-row `selection.parquet` table
-with a validated JSON payload. It retains all current article-grade rows,
-both listing-time and current-revision contributor projections, default
-views and additive `(grade, importance, year)` cells. Each cell stores page
-and measured counts, an exact counted length histogram and Gaussian density
-sums on a shared 129-point grid. Null years remain unknown. Article rows
-retain `(page_id, article_revision_id, talk_page_id, talk_revision_id)` and
-ranked contributor names. The browser combines these prepared cells only.
+`data/parsed/current-quality.json` is a bounded prepared frontend document,
+not a factual Parquet table. It retains the universal article catalog, listing
+and current-revision contributor projections, two default views and additive
+`(grade, importance, year)` cells. Each cell retains counts, a counted length
+histogram and Gaussian density sums on a shared 129-point grid. Null years remain
+unknown. Article rows retain their source revision identities and one contributor
+list with shares of at least 10%, ordered by bytes descending. Main-contributor
+membership is derived from shares greater than 33%; no rank map is stored.
 
 The `current-authorship` report now also retains a `targets` table with
 `page_id: Int64`, `revision_id: Int64`, `title: String`, `grade: String` and
 `observed_at: Datetime(us, UTC)`. Listing and current collectors share immutable
 `(page_id, revision_id)` evidence and persist fair retry order. Unchanged
 revisions reuse saved attribution. Older reports receive an empty targets
-table and empty contributor ranks until the hourly collector prepares them.
+table until the hourly collector prepares them.
 
 ### Background-prepared website presets
 
-`data/webservice/quality-page-<locale>-<mode>-<basis>.parquet` stores a validated
-`payload: String` containing schema, source-generation identity and escaped HTML.
-Two main presets select high-quality articles (`0`) or all grades (`all`); mode
-`1` preserves older B/BL-inclusive links. With three languages and current/listing
-contribution bases, background updates prepare eighteen pages. First requests
-read these files without statistical analysis or rendering a cohort. The browser
-keeps prepared default charts, and creates only visible/adjacent article rows.
-A failed replacement preserves the preceding complete page. Service health
-remains in `state`, separately from website pages and source facts.
+`data/webservice/quality-page-<locale>-<mode>-<basis>.json` stores schema,
+source-generation identity, escaped HTML and independently requested resources.
+The normal (`0`) and all-class (`all`) presets cover three languages and two
+contribution bases, for twelve pages. First requests read these documents without
+analysis or rendering. Filtered chart requests select the saved catalog and
+render Matplotlib SVGs in memory; they never collect or save source data. Failed
+replacement preserves the last complete file.
+Service health remains in `state`, separately from frontend documents and facts.
 
 ### English comparison and review metadata
 

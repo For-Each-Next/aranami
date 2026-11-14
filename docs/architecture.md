@@ -261,7 +261,7 @@ periods through the same interface as other issues. Frozen published/cancelled
 issues retain facts; delayed drafts can improve. [Newsletter data](tasks/newsletter.md)
 defines source coverage, archives and editorial contracts.
 
-## Saved website and maintenance
+## Saved website and consistency checks
 
 HTTP reads saved data only; it cannot create source clients, collect, publish or
 write files. Background collection saves each dashboard report independently.
@@ -297,8 +297,8 @@ Consistency worklists compare verified nomination banners, article award tags,
 recorded homepage dates, manual certified lists and quarterly challenge rows.
 They retain source/checked revisions and actual observation times. Source failure
 is unknown coverage, not confirmed disagreement. Quarterly suggestions require
-exact historical boundaries. [Maintenance](webservice/maintenance.md) defines
-the checks and their limits. These pages suggest manual work and never edit it.
+exact historical boundaries. The [consistency-check guide](webservice/maintenance.md)
+defines the checks and their limits. These pages suggest manual work and never edit it.
 
 Django serves authored templates and bounded GET/HEAD responses; the ASGI
 adapter retains read-only WebSocket subscriptions. Use

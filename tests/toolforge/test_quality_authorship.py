@@ -79,7 +79,7 @@ class BClassAuthorshipPresentationTests(unittest.TestCase):
             (0, 0, "47条目"),
         ):
             source = _directory()
-            source["include_b"] = True
+            source["all_grades"] = True
             author = source["authors"][0]
             author.update(
                 credit=47,
@@ -99,12 +99,11 @@ class BClassAuthorshipPresentationTests(unittest.TestCase):
             assert "0典范" not in text
 
     @staticmethod
-    def test_b_toggle_has_developed_and_high_quality_subsets() -> None:
-        """Keep all three dialogs and current revision provenance."""
+    def test_all_grades_have_article_and_high_quality_subsets() -> None:
+        """Keep subset dialogs and current revision provenance."""
         source = _directory()
         source.update(
-            include_b=True,
-            b_coverage={"collected": 1, "total": 420},
+            all_grades=True,
         )
         author = source["authors"][0]
         author.update(credit=3, high_quality_credit=2)
@@ -155,8 +154,6 @@ class BClassAuthorshipPresentationTests(unittest.TestCase):
                 locale,
                 _NOW,
             )
-            assert 'name="count_b" value="1" checked' in output
-            assert "1/420" in output
             assert high_quality in output
             assert 'href="#quality-author-1-quality"' in output
             assert 'href="#quality-author-1-featured"' in output
@@ -164,15 +161,14 @@ class BClassAuthorshipPresentationTests(unittest.TestCase):
             assert "untrusted.invalid" not in output
 
     @staticmethod
-    def test_b_is_off_by_default_and_keeps_the_original_summary() -> None:
-        """Require an explicit GET choice before including B credits."""
+    def test_default_has_no_redundant_cohort_switch() -> None:
+        """Use the universal matrix for cohort choices."""
         context = quality_authorship_context(
             _directory(),
             Interface("en"),
             _NOW,
         )
         data = context["quality_authorship"]
-        assert not data["include_b"]
         assert data["authors"][0]["summary"] == "2 articles"
         assert data["authors"][0]["quality_summary"] is None
         output = render_quality_authorship(
@@ -182,10 +178,9 @@ class BClassAuthorshipPresentationTests(unittest.TestCase):
             "en",
             _NOW,
         )
-        assert 'name="count_b" value="1" checked' not in output
-        assert 'method="get" data-quality-authorship-filter' in output
+        assert "data-quality-authorship-filter" not in output
         assert 'type="submit"' not in output
-        assert "<noscript><p><a href=" in output
+        assert "<noscript><p><a href=" not in output
 
 
 class QualityAuthorshipPresentationTests(unittest.TestCase):
@@ -207,9 +202,7 @@ class QualityAuthorshipPresentationTests(unittest.TestCase):
             assert not row["featured_summary"]
 
     @staticmethod
-    def test_grade_labels_use_explicit_short_names_without_changing_codes() -> (
-        None
-    ):
+    def test_short_grade_labels_preserve_codes() -> None:
         """Keep compact labels and preserve grouping identities."""
         for locale in ("en", "zh-hans", "zh-hant"):
             interface = Interface(locale)

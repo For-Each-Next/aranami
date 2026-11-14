@@ -119,7 +119,7 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
 
     @staticmethod
     def test_coverage_cards_keep_zeroes_and_independent_clocks() -> None:
-        """Never present award dates or render times as collection times."""
+        """Keep award and render dates distinct from collection."""
         source = analysis_fixture()
         source["prepared_at"] = "2026-11-14T00:00:00Z"
         source["articles"][0]["authorship_available"] = True
@@ -284,8 +284,7 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
         ]
         assert [row["year"] for row in context["years"]] == [2025, 2026]
         for row in context["years"]:
-            assert row["segments"][0]["height"] > 0
-            assert row["segments"][0]["y"] < 248
+            assert row["segments"][0]["count"] > 0
         assert [row["grade"] for row in context["grade_lengths"]] == [
             "FA",
             "GA",
@@ -302,13 +301,15 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
         output = render_quality_analysis(source, None, None, "en", _NOW)
         assert 'class="analysis-year-columns"' in output
         assert output.count("data-analysis-year=") == 2
-        assert output.count('class="analysis-mini-violin"') == 4
+        assert output.count('class="analysis-mini-violin"') == 5
         assert 'id="analysis-lengths"' not in output
         assert "PlayStation 5" not in output
         assert 'data-analysis-violin="FL"' not in output
         source.update(lengths=[], lengths_available=False)
+        for article in source["articles"]:
+            article["prose_characters"] = None
         pending = render_quality_analysis(source, None, None, "en", _NOW)
-        assert 'class="analysis-mini-violin"' not in pending
+        assert "data-statistic=" not in pending
         assert pending.count("data-analysis-row ") == 3
         assert 'class="analysis-year-columns"' in pending
 
@@ -357,7 +358,7 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
                 full = interface.text(f"assessment.class.{article['grade']}")
                 expected = (
                     interface.text(
-                        f"assessment.short_class.{article['grade']}"
+                        f"assessment.short_class.{article['grade']}",
                     )
                     if locale.startswith("zh")
                     else full
@@ -380,7 +381,7 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
         ]
         profile = assessment_profile("zhwiki", "电子游戏")
         assert context["grades"][0]["share_label"] == "66.7%"
-        assert context["grades"][0]["path"].startswith("M 130 130 L ")
+        assert context["grades"][0]["pages"] == 2
         assert context["grades"][0]["color"] == profile.color("FA", "class")
         assert context["grades"][0]["color"] != profile.color(
             "FA",
@@ -404,18 +405,14 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
         full = quality_analysis_context(source, Interface("en"))[
             "quality_analysis"
         ]["grades"][0]
-        assert full["whole"]
-        assert full["path"] is None
+        assert full["share_label"] == "100.0%"
         source.update(importance_totals=[], importance_available=False)
         output = render_quality_analysis(source, None, None, "en", _NOW)
         assert (
             Interface("en").text("quality_analysis.importance_pending")
             in output
         )
-        assert (
-            '<circle cx="130" cy="130" r="112" class="analysis-pie-slice"'
-            in output
-        )
+        assert 'data-chart-renderer="matplotlib"' in output
         assert output.count("data-analysis-row ") == 3
 
     @staticmethod

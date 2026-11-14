@@ -1,11 +1,11 @@
 # Aranami
 
-Aranami v0.9.15 separates dataset update evidence from service status and
-adds responsive article filters, coverage details and assessment comparisons. The [CHANGELOG](CHANGELOG.md) records completed work.
+Aranami v0.9.16 retires the category-maintenance catalogue, unifies article-class
+selection and stores prepared frontend documents as JSON. The [CHANGELOG](CHANGELOG.md) records completed work.
 The original v0.9.8 release remains available in its Git tag.
 
 Aranami (荒波, “rough waves”) maintains Wikipedia project reports and provides
-article-maintenance tools and newsletter drafts. It serves
+consistency checks and newsletter drafts. It serves
 [WikiProject Video games on Chinese Wikipedia](https://zh.wikipedia.org/wiki/WikiProject:电子游戏)
 from Toolforge.
 
@@ -19,15 +19,13 @@ and daily Pageviews support later reports and newsletter drafts.
   upcoming recognized content and popular articles.
 - [Discussions](https://aranami.toolforge.org/discussions/): active project-talk
   topics from the past 30 days, grouped by project, article and other pages.
-- [Maintenance](https://aranami.toolforge.org/maintenance/): searchable, sortable
-  saved article worklists from maintenance categories.
 - [Maintenance checks](https://aranami.toolforge.org/checks/):
   metadata inconsistencies and quarterly update hints, grouped by issue type.
   The linked Tampermonkey script fills prepared talk-header repairs for a
   manual diff review.
 - [Current quality articles and contributors](https://aranami.toolforge.org/quality-analysis/):
   one current-cohort overview, article directory and author statistics page,
-  with a global B/BL switch, listing revisions and saved contribution details.
+  with universal class filters, listing revisions and saved contribution details.
 - [Newsletter drafts](https://aranami.toolforge.org/newsletter/): copyable
   quarterly wikitext and a separate January annual review for manual publication.
 - [Reports](https://aranami.toolforge.org/reports/): recorded attempts, confirmed

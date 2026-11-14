@@ -60,7 +60,6 @@ class NavigationTests(unittest.TestCase):
                     "/",
                     "/discussions/",
                     "/quality-analysis/",
-                    "/maintenance/",
                 ]
                 assert 'href="/reports/"' in details[1]
                 assert 'href="/discussions/"' not in details[1]
@@ -74,7 +73,6 @@ class NavigationTests(unittest.TestCase):
         for locale in ("en", "zh-hans", "zh-hant"):
             for path in (
                 "/",
-                "/maintenance/",
                 "/reports/",
                 "/discussions/",
                 "/quality-analysis/",

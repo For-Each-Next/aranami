@@ -2,8 +2,7 @@
 
 The `/quality-analysis/` page combines the current Chinese Wikipedia Video
 games quality cohort and its contributor statistics. Former
-`/quality-authorship/` links redirect here while preserving language and the
-B/BL selection. Only currently selected articles and lists count; historical
+`/quality-authorship/` links redirect here while preserving language. Only currently selected articles and lists count; historical
 promotions and departed project members do not add author credits.
 
 A leading quality-by-importance checkbox matrix selects any current article
@@ -47,8 +46,8 @@ values last, and reset pagination when the sort changes. Reopening a chart
 restores newest-listing-first order. Annual
 segments select both year and grade, independently of directory filters. No
 source requests occur. The annual data table labels and bolds its total column.
-The B/BL coverage notice lists every article whose attribution is still missing,
-with article and talk links so those cases can be inspected.
+Coverage dialogs list articles whose attribution is still missing, with article
+links so those cases can be inspected.
 
 Listing dates link to an explicit retained article oldid when available. Missing
 oldids are resolved from the listing date through Wiki Replica revision
@@ -75,10 +74,11 @@ not change it. With no lengths above 25,000, the final 10% stays unused.
 Zero sits at the left endpoint; tooltips retain the actual character counts.
 The mirrored upper and lower contours show density in the original character
 units. Two dots mark P25 and P75; vertical bars mark the observed minimum,
-median P50 and maximum. A plus marks the arithmetic mean of measured lengths,
-weighted by their observed counts and excluding unknown measurements. Each
-marker has a localized tooltip naming its statistic and character count. The
-whole chart has no hover tooltip; its accessible label retains the counts and
+median P50 and maximum. A red diagonal cross marks the arithmetic mean of
+measured lengths, weighted by their observed counts and excluding unknown
+measurements. Each marker has a localized tooltip naming its statistic and
+character count. The whole chart has no hover tooltip; its accessible label
+retains the counts and
 length summary. Percentiles
 use linear interpolation over known length observations. Displayed lengths
 use two significant digits, rounded to integers with thousands separators;
@@ -89,8 +89,8 @@ current count is zero. Central
 68% and 95% intervals are linear empirical 16th–84th and 2.5th–97.5th
 percentiles. They describe the measured current cohort rather than minimum
 assessment requirements. Measured zero differs from an unknown measurement.
-Density uses the normal-reference bandwidth over 129 positions between the
-observed minimum and maximum. Constant samples remain a vertical mark; unknown
+Matplotlib `Axes.violinplot` renders the measured samples with Scott bandwidth
+and 129 evaluation positions between the observed minimum and maximum. Constant samples remain a vertical mark; unknown
 measurements add no density. These values are saved before HTTP rendering.
 Page size uses known current SQL byte length even while prose is pending.
 
@@ -138,17 +138,23 @@ importance colors are excluded from the existing B-history parser identity.
 ## Saved reports and lifecycle
 
 The raw quality-analysis Parquet retains current membership and measurements.
-`data.articles.current_quality` projects it with saved attribution into one
-atomic ReportStore generation containing both B/BL variants, precomputed charts,
-article details and author summaries. Startup prepares this projection from
-saved facts before ordinary source dispatch. Bounded analysis and authorship
-passes refresh it after their checkpoints. After each update, background
-presentation renders every default preset into
-`data/webservice/quality-page-*.parquet`. Each preset contains a small initial
-page, a separate article catalog, and individual contributor detail pages.
-HTTP readers deliver these saved responses without reading analysis tables or
-rendering a cohort. They never join, aggregate, acquire sources or write.
-The browser keeps the prepared default charts until the user changes a filter.
+`data.articles.current_quality` projects it with saved attribution into the
+atomic frontend document `data/parsed/current-quality.json`, with one universal
+catalog, normal/all-class default charts, article details and author summaries.
+Startup prepares this projection from saved facts before source dispatch.
+Bounded analysis and authorship passes refresh it after their checkpoints.
+Background presentation then renders twelve localized presets into
+`data/webservice/quality-page-*.json`. Each preset contains a small initial
+page, a separate article catalog and individual contributor detail pages.
+HTTP readers deliver the prepared initial responses. Filtered chart requests
+select rows from the same bounded saved frontend catalog and render them through
+Matplotlib without source requests or persistent writes. Generation tokens reject
+stale requests and responses. Tables update locally while the new figures load.
+The browser keeps the prepared default charts until a filtered Matplotlib
+response is ready. A failed request retains the last successful figures. Figure
+controls support zoom, pan and reset; focused figures also accept arrow keys,
+plus/minus and Home. Miniature violins retain statistic tooltips and article-list
+clicks. Matplotlib creates the geometry; browser controls manipulate its SVG.
 
 Analysis and all-grade authorship keep separate short-lived workers scheduled hourly
 at :02 UTC while ordinary work is idle. The parent retains no article bodies or
@@ -162,7 +168,7 @@ up to forty article attempts afterward. Existing successful evidence is skipped.
 A completed history batch processes at most fifty selected revision bodies at a
 time. Native Polars pools default to two threads unless explicitly configured.
 Rendered HTML is bounded to eight MiB per entry and cached by saved generation,
-locale, the compatibility B/BL mode and attribution basis.
+locale, class preset and attribution basis.
 
 ## Browser pagination
 
@@ -201,11 +207,12 @@ All site table footers share typography, spacing, record counts and navigation
 button styling. Contributor tables display one total article count without
 quality-subset parentheses. Three-column article-contribution dialogs use a
 narrower width. Article, author and chart-dialog ordinal columns use about
-four em, with enough space for three-digit ranks. Page-size values are plain
+four em in directories and five em in dialogs, with room for three-digit ordinals. Page-size values are plain
 text. Column headings are centered; ordinal values remain right-aligned.
 Chinese grade labels use their first two characters in every table, and
 unassessed articles share the unknown-importance gray. Compact assessment,
 prose and size columns leave more room for dates and review links. The author
-directory spans the full content width. Missing rating dates are labeled as not obtained,
+directory spans the full content width, with an 18em activity column that keeps
+the date and relative age on one line. Missing rating dates are labeled as not obtained,
 including contributor details. Detail downloads keep the count link and show
 a compact spinner with accessible loading status and visible failure feedback.

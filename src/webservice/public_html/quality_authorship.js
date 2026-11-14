@@ -156,83 +156,9 @@ export function compareValues(left, right, descending, locale) {
     return descending ? -comparison : comparison;
 }
 
-/** Update only the saved author results, keeping the toggle focused. */
-function initializeQualityFilter(form) {
-    const input = form.querySelector('[name="count_b"]');
-    const results = document.querySelector("[data-quality-authorship-results]");
-    if (!input || !results) return;
-    form.dataset.autoSubmit = "";
-    if (typeof fetch !== "function" || typeof DOMParser !== "function") {
-        input.addEventListener("change", () => form.requestSubmit());
-        return;
-    }
-    const status = form.querySelector("[data-quality-authorship-status]");
-    let applied = input.checked;
-    let requestNumber = 0;
-    let controller;
-
-    /** Reject stale responses and retain the last successful list on failure. */
-    async function update(push) {
-        const request = ++requestNumber;
-        controller?.abort();
-        controller = new AbortController();
-        const selected = input.checked;
-        const url = new URL(form.action, location.href);
-        url.search = new URLSearchParams(new FormData(form)).toString();
-        results.setAttribute("aria-busy", "true");
-        status.textContent = form.dataset.updating;
-        try {
-            const response = await fetch(url, {
-                credentials: "same-origin",
-                headers: { Accept: "text/html" },
-                redirect: "error",
-                signal: controller.signal,
-            });
-            if (!response.ok || !response.headers.get("content-type")?.includes("text/html"))
-                throw new Error("Author results unavailable");
-            const page = new DOMParser().parseFromString(await response.text(), "text/html");
-            if (request !== requestNumber) return;
-            const incoming = page.querySelector("[data-quality-authorship-results]");
-            if (!incoming || incoming.querySelector("script, iframe, object, embed") ||
-                incoming.dataset.countB !== (selected ? "1" : "0"))
-                throw new Error("Invalid author results");
-            results.replaceChildren(...incoming.childNodes);
-            results.dataset.countB = incoming.dataset.countB;
-            applied = selected;
-            initializeQualityAuthorship();
-            if (push && url.href !== location.href) window.history.pushState(null, "", url);
-            for (const link of document.querySelectorAll(".language-switcher a[hreflang]")) {
-                const destination = new URL(link.href, location.href);
-                if (selected) destination.searchParams.set("count_b", "1");
-                else destination.searchParams.delete("count_b");
-                link.href = destination.href;
-            }
-            status.textContent = "";
-        } catch (error) {
-            if (request !== requestNumber || error.name === "AbortError") return;
-            input.checked = applied;
-            status.textContent = form.dataset.updateFailed;
-        } finally {
-            if (request === requestNumber) results.removeAttribute("aria-busy");
-        }
-    }
-    input.addEventListener("change", () => update(true));
-    form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        update(true);
-    });
-    window.addEventListener("popstate", () => {
-        input.checked = new URL(location.href).searchParams.get("count_b") === "1";
-        update(false);
-    });
-}
-
 /** Add accessible sorting and pagination to each server-rendered directory. */
 export function initializeQualityAuthorship(root = document) {
     initializeQualityDetails();
-    for (const form of document.querySelectorAll(
-        "[data-quality-authorship-filter]:not([data-auto-submit])",
-    )) initializeQualityFilter(form);
     for (const host of root.querySelectorAll("[data-quality-authorship-table]")) {
         const dialog = host.closest("dialog");
         if (root === document && dialog && !dialog.open) continue;

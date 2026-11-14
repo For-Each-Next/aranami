@@ -121,7 +121,6 @@ def _historical_destination(relative: PurePosixPath) -> PurePosixPath:  # ruff: 
                 "dyk",
                 "pageviews",
                 "news_history",
-                "backlog",
                 "newsletter",
             )
         }:

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import re
 from hashlib import sha256
 from pathlib import Path
 from unittest import TestCase
-from urllib.parse import quote
 
 from webservice.pages import render_attribution
 from webservice.presentation import Interface
@@ -54,33 +52,6 @@ class TestAttributionPresentation(TestCase):
             assert "LGPL-2.1-or-later" in output
             assert 'src="/assets/icons/' in output
             assert 'class="credit-table"' not in output
-
-    @staticmethod
-    def test_maintenance_categories_match_configured_task_rules() -> None:
-        """Link the configured categories for every template task."""
-        output = render_attribution(_PATHS["maintenance"], "en")
-        config = json.loads(
-            (_ROOT / "src/tasks/website/maintenance.json").read_text(),
-        )
-        tasks = {
-            task["key"]: task
-            for section in config["sections"]
-            for task in section["tasks"]
-        }
-        rows = re.findall(
-            r'<tr><th scope="row"><code>([^<]+)</code></th>(.*?)</tr>',
-            output,
-            re.DOTALL,
-        )
-        assert rows
-        for key, row in rows:
-            for rule in tasks[key]["rules"]:
-                if rule["kind"] == "category":
-                    category = quote(
-                        "Category:" + rule["name"].replace(" ", "_"),
-                        safe=":",
-                    )
-                    assert f'/wiki/{category}"' in row
 
     @staticmethod
     def test_original_license_bodies_remain_unchanged() -> None:

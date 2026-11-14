@@ -1,7 +1,0 @@
-{% extends "base.html" %}
-{% block contents_links %}
-{% if backlog and backlog.sections %}<ul>{% for section in backlog.sections %}<li><a href="#backlog-section-{{ section.key }}">{{ section.label }}</a></li>{% endfor %}</ul>{% else %}{{ super() }}{% endif %}
-{% endblock %}
-{% block content %}
-{% if backlog %}{% include "includes/backlog.html" %}{% else %}<div class="ui-message ui-message--notice" aria-live="polite"><svg class="ui-icon ui-message__icon" viewBox="0 0 20 20" aria-hidden="true"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg><div class="ui-message__content">{{ t.backlog.overview_empty }}</div></div>{% include "includes/source_updated.html" %}{% endif %}
-{% endblock %}

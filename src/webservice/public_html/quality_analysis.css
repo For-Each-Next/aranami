@@ -9,8 +9,9 @@
 .analysis-coverage-card dt { display: flex; align-items: center; gap: .4rem; }
 .analysis-coverage-card dd { font-variant-numeric: tabular-nums; }
 .analysis-coverage-updated { display: block; margin-block-start: .4rem; color: #536b70; font-size: .8rem; overflow-wrap: anywhere; }
-#analysis-coverage-dialog th:first-child, #analysis-coverage-dialog td:first-child { width: 4em; }
-#analysis-coverage-dialog th:nth-child(2), #analysis-coverage-dialog td:nth-child(2) { width: 40%; }
+#analysis-coverage-dialog table { table-layout: fixed; }
+#analysis-coverage-dialog th:first-child, #analysis-coverage-dialog td:first-child { width: 5em; box-sizing: border-box; white-space: nowrap; }
+#analysis-coverage-dialog td:first-child { text-align: right; }
 @media (max-width: 1000px) { .analysis-summary.analysis-coverage { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .analysis-summary.analysis-coverage { grid-template-columns: 1fr; } }
 .analysis-number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -108,3 +109,9 @@
 @media (prefers-reduced-motion: reduce) { .quality-detail-loading { animation: none; } }
 
 .analysis-year-data thead th, .analysis-editor-table thead th, .analysis-pie-key thead th, .analysis-chart-article-table thead th, .analysis-matrix thead th { text-align: center; }
+
+.analysis-chart-controls { display: flex; flex-wrap: wrap; gap: .3rem; margin-block: .3rem; }
+.analysis-chart-controls .ui-button { font-size: .8rem; min-block-size: 2rem; }
+.analysis-chart-controls [aria-pressed="true"] { background: #dcebed; border-color: #176c73; }
+[data-quality-chart] { min-width: 0; }
+[data-quality-chart] > svg:focus-visible { outline: 2px solid #36c; outline-offset: 2px; }

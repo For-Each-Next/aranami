@@ -11,3 +11,6 @@ export PYTHONPATH="$app_dir/src"
 export PYTHONPYCACHEPREFIX="$tool_dir/cache/pycache"
 # Bound native worker pools on hosts larger than the tool's allocation.
 export POLARS_MAX_THREADS="${POLARS_MAX_THREADS:-2}"
+
+# Keep Matplotlib font/config caches outside immutable source generations.
+export MPLCONFIGDIR="$tool_dir/cache/matplotlib"

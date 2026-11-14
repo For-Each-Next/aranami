@@ -7,14 +7,15 @@ statistics when filters change; the webservice never parses source text.
 
 from __future__ import annotations
 
-import json
 import math
 
 import polars as pl
 
+from shared.support.files import encode_json
+
 KEY = ["grade", "importance", "year"]
 _POINTS = 129
-_DEFAULT_VARIANTS = 3
+_DEFAULT_VARIANTS = 2
 _MIN_YEAR = 2002
 _MAX_YEAR = 9999
 _MAX_ARTICLES = 30_000
@@ -183,26 +184,20 @@ def _weighted_quantile(share: float) -> pl.Expr:
     return lower + (upper - lower) * fraction
 
 
-def validate(frame: pl.DataFrame) -> None:
-    """Reject an incomplete or oversized prepared selection payload.
+def validate(value: dict) -> None:
+    """Reject an incomplete or oversized prepared selection document.
 
     Raises:
         ValueError: The saved catalog cannot be safely served.
     """
-    if (
-        frame.schema != pl.Schema({"payload": pl.String})
-        or frame.height != 1
-        or frame.estimated_size() > 64 * 1024 * 1024
-    ):
-        message = "Invalid quality selection schema or size."
+    if len(encode_json(value)) > 64 * 1024 * 1024:
+        message = "Quality selection exceeds its size limit."
         raise ValueError(message)
-    value = json.loads(frame["payload"].item())
     if not isinstance(value, dict) or set(value) != {
         "articles",
         "authors",
         "current_articles",
         "current_authors",
-        "current_coverage",
         "cells",
         "defaults",
         "last_year",
@@ -210,7 +205,7 @@ def validate(frame: pl.DataFrame) -> None:
         message = "Invalid quality selection fields."
         raise ValueError(message)
     if (
-        len(value["defaults"]) not in {2, _DEFAULT_VARIANTS}
+        len(value["defaults"]) != _DEFAULT_VARIANTS
         or not _MIN_YEAR <= value["last_year"] <= _MAX_YEAR
     ):
         message = "Invalid quality selection defaults."

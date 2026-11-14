@@ -22,7 +22,6 @@
         <a href="/"{% if navigation and navigation.path == '/' %} aria-current="page"{% endif %}>{{ t.nav.dashboard }}</a>
         <a href="/discussions/"{% if navigation and navigation.path == '/discussions/' %} aria-current="page"{% endif %}>{{ t.discussions.heading }}</a>
         <a href="/quality-analysis/"{% if navigation and navigation.path == '/quality-analysis/' %} aria-current="page"{% endif %}>{{ t.quality_analysis.heading }}</a>
-        <a href="/maintenance/"{% if navigation and navigation.path == '/maintenance/' %} aria-current="page"{% endif %}>{{ t.nav.backlog }}</a>
         <details class="navigation-tools">
           <summary>{{ t.nav.tools }}</summary>
           <ul class="navigation-tools-list">

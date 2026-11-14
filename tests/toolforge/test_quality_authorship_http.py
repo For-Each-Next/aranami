@@ -34,7 +34,7 @@ class QualityAuthorshipHTTPTests(TestCase):
             client = TestClient(create_app(runtime))
             for locale in ("en", "zh-hans", "zh-hant"):
                 response = client.get(
-                    f"/quality-authorship/?lang={locale}&count_b=1",
+                    f"/quality-authorship/?lang={locale}&all_grades=1",
                     follow_redirects=False,
                 )
                 assert response.status_code == HTTPStatus.MOVED_PERMANENTLY
@@ -42,7 +42,7 @@ class QualityAuthorshipHTTPTests(TestCase):
                 assert target.path == "/quality-analysis/"
                 assert parse_qs(target.query) == {
                     "lang": [locale],
-                    "count_b": ["1"],
+                    "all_grades": ["1"],
                 }
             read.assert_not_called()
             assert not runtime.exists()
@@ -58,22 +58,21 @@ class QualityAuthorshipHTTPTests(TestCase):
             for route in ("quality-authorship", "quality-analysis"):
                 for query in (
                     "user=Someone",
-                    "count_b=",
-                    "count_b=yes",
-                    "count_b=1&count_b=0",
+                    "all_grades=",
+                    "all_grades=yes",
+                    "all_grades=1&all_grades=0",
                 ):
                     response = client.get(f"/{route}/?{query}")
                     assert response.status_code == HTTPStatus.BAD_REQUEST
             read.assert_not_called()
 
     @staticmethod
-    def test_global_toggle_selects_a_saved_cohort() -> None:
-        """Use one saved variant for all three sections."""
+    def test_default_and_all_grades_use_saved_json_presets() -> None:
+        """Keep two saved presets per locale and authorship basis."""
 
         def saved(
             _runtime: Path,
             *,
-            include_b: bool,
             authorship_basis: str,
             all_grades: bool = False,
         ) -> dict:
@@ -84,16 +83,13 @@ class QualityAuthorshipHTTPTests(TestCase):
             """
             assert authorship_basis in {"current", "listed"}
             return {
-                "include_b": include_b,
                 "analysis": {
                     **analysis_fixture(),
-                    "include_b": include_b,
                     "all_grades": all_grades,
                 },
                 "authorship": {
                     "available": True,
                     "authors": [],
-                    "include_b": include_b,
                 },
             }
 
@@ -111,27 +107,22 @@ class QualityAuthorshipHTTPTests(TestCase):
             runtime = Path(directory)
             prepare_quality_pages(runtime)
             client = TestClient(create_app(runtime))
-            for query, included in (
-                ("", False),
-                ("?count_b=0", False),
-                ("?count_b=1", True),
-            ):
+            for query in ("", "?all_grades=1"):
                 response = client.get("/quality-analysis/" + query)
                 assert response.status_code == HTTPStatus.OK
-                assert (
-                    'name="count_b" value="1" checked' in response.text
-                ) == included
                 assert 'id="analysis-overview"' in response.text
                 assert 'id="analysis-articles"' in response.text
                 assert 'id="quality-authors"' in response.text
-                if included:
-                    assert "count_b=1&amp;lang=zh-hans" in response.text
-            assert quality_pages.path_for(
-                runtime,
-                "zh-hans",
-                include_b=True,
-                basis="current",
-            ).is_file()
+            presets = list((runtime / "data/webservice").glob("*.json"))
+            assert len(presets) == 12  # ruff: ignore[magic-value-comparison]
+            assert not list((runtime / "data/webservice").glob("*.parquet"))
+            for all_grades in (False, True):
+                assert quality_pages.path_for(
+                    runtime,
+                    "zh-hans",
+                    basis="current",
+                    all_grades=all_grades,
+                ).is_file()
 
     @staticmethod
     def test_corrupt_saved_variant_is_unavailable() -> None:

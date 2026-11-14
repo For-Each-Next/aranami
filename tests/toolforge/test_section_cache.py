@@ -27,6 +27,7 @@ from data.website import (
 )
 from shared.newsletter import Issue
 from tasks.website.collect import collect_dashboard, report_intervals
+from tasks.zhwiki.homepage import collect_upcoming
 
 
 class DashboardFixture(TestCase):
@@ -111,14 +112,6 @@ class DashboardFixture(TestCase):
         self.popularity = self._patch(
             "tasks.website.collect.pageviews.collect_pageviews",
             return_value=self._pageviews(),
-        )
-        self.backlog = self._patch(
-            "tasks.website.collect.backlog.collect_backlog",
-            return_value={
-                "observed_at": self.clock.isoformat(timespec="seconds"),
-                "total": 0,
-                "groups": [],
-            },
         )
 
     def _patch(self, name: str, **kwargs: object) -> Mock:
@@ -260,7 +253,6 @@ class TestDashboardReportCache(DashboardFixture):
             (("reports", "recognized", "last_success_at"), "not a date"),
             (("homepage", "upcoming"), [{}]),
             (("pageviews", "date"), "2026-10-18"),
-            (("backlog", "total"), 1),
             (("sources",), [{"label": "bad", "url": "javascript:bad"}]),
             (("errors",), [{}]),
             (("collection", "attempted"), True),
@@ -307,54 +299,6 @@ class TestDashboardReportCache(DashboardFixture):
             fallback = self._collect(dt.timedelta(days=30))
         assert validate_dashboard_snapshot(fallback)
         assert fallback["pageviews"] == current["pageviews"]
-
-    def test_maintenance_month_source_survives_cache_and_bad_refresh(
-        self,
-    ) -> None:
-        """Retain dated categories and reject invalid replacements."""
-        self.backlog.return_value = {
-            "observed_at": self.clock.isoformat(timespec="seconds"),
-            "total": 1,
-            "groups": [
-                {
-                    "key": "sources",
-                    "category": "缺少可靠来源的条目",
-                    "source_url": (
-                        "https://zh.wikipedia.org/wiki/Category:Sources"
-                    ),
-                    "label": "Sources",
-                    "section_key": "sources",
-                    "section_label": "Sources",
-                    "count": 1,
-                    "items": [
-                        {
-                            "page_id": 1,
-                            "title": "Game",
-                            "url": "https://zh.wikipedia.org/wiki/Game",
-                            "issues": ["sources"],
-                            "oldest_issue_month": "2009-04",
-                            "oldest_issue_category": (
-                                "自2009年04月缺少可靠来源的条目"
-                            ),
-                        },
-                    ],
-                },
-            ],
-        }
-        saved = json.loads(json.dumps(self._collect()["backlog"]))
-        self.backlog.reset_mock()
-        assert self._collect()["backlog"] == saved
-        self.backlog.assert_not_called()
-        for hour, value in enumerate((42, "", "Bad\nCategory"), start=24):
-            with self.subTest(value=value):
-                invalid = json.loads(json.dumps(saved))
-                invalid["groups"][0]["items"][0]["oldest_issue_category"] = (
-                    value
-                )
-                self.backlog.return_value = invalid
-                snapshot = self._collect(dt.timedelta(hours=hour))
-                assert snapshot["backlog"] == saved
-                assert snapshot["reports"]["backlog"]["failed"]
 
     def test_introductions_are_shared_across_all_homepage_reports(
         self,
@@ -451,7 +395,14 @@ class TestDashboardReportCache(DashboardFixture):
         assert repeated["reports"] == first["reports"]
         assert repeated["pageviews"] == first["pageviews"]
         assert all(
-            (self.cache / f"{name}.parquet").is_file()
+            (
+                self.cache
+                / (
+                    f"{name}.parquet"
+                    if name == "consistency"
+                    else f"{name}.json"
+                )
+            ).is_file()
             for name in REPORT_KEYS
             if name != "consistency"
         )
@@ -565,7 +516,6 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         assert self.collectors["dyk"].call_count == 1
         assert self.collectors["news"].call_count == 2
         assert self.collectors["history"].call_count == 2
-        assert self.backlog.call_count == 1
         for key in REPORT_KEYS:
             if key not in {
                 "pageviews",
@@ -747,7 +697,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     def test_deadline_contract_refreshes_only_reviews(self) -> None:
         """Refresh older facts for nomination deadlines and outcomes."""
         first = self._collect()
-        path = self.cache / "reviews.parquet"
+        path = self.cache / "reviews.json"
         record = read_snapshot(path)
         previous_id = hashlib.sha256(
             b"dashboard:reviews:"
@@ -761,13 +711,13 @@ class TestDashboardRefreshIntervals(DashboardFixture):
             if name != "reviews":
                 assert second["reports"][name] == first["reports"][name]
 
-    def test_empty_schedule_contract_retries_only_recognized(self) -> None:
-        """Retry the corrected parser without invalidating peers."""
+    def test_two_day_schedule_contract_retries_only_recognized(self) -> None:
+        """Expire broad future windows without invalidating peers."""
         first = self._collect()
-        path = self.cache / "recognized.parquet"
+        path = self.cache / "recognized.json"
         record = read_snapshot(path)
         previous_source = (
-            "days:100:script-extracts:draft:"
+            "days:100:complete-extracts:showcase-window:draft:"
             + Issue.upcoming(self.clock.date()).value
         )
         interval = first["reports"]["recognized"]["refresh_interval_seconds"]
@@ -810,7 +760,6 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         assert self.membership.call_count == 3
         assert self.popularity.call_count == 3
         assert self.collectors["dyk"].call_count == 2
-        assert self.backlog.call_count == 1
 
     def test_failed_new_configuration_preserves_last_success(self) -> None:
         """Keep old data while retrying a changed configuration."""
@@ -863,7 +812,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
             != first["reports"]["dyk"]["last_success_at"]
         )
         assert second["homepage"]["dyk"][0]["title"] == "Game"
-        persisted = read_snapshot(self.cache / "recognized.parquet")
+        persisted = read_snapshot(self.cache / "recognized.json")
         assert (
             persisted["observed_at"]
             == first["reports"]["recognized"]["last_success_at"]
@@ -894,7 +843,6 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         assert logs.records[0].exc_info is not None
         self.reviews.assert_not_called()
         self.popularity.assert_not_called()
-        self.backlog.assert_not_called()
         self.newsletter.assert_not_called()
         assert len(failed["errors"]) == len(REPORT_KEYS)
         assert all(
@@ -913,17 +861,16 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     def test_malformed_report_recollects_only_that_report(self) -> None:
         """Keep healthy reports when one envelope is corrupt."""
         self._collect()
-        (self.cache / "dyk.parquet").write_text('{"schema":2,"data":[]}')
+        (self.cache / "dyk.json").write_text('{"schema":2,"data":[]}')
         self._collect(dt.timedelta(minutes=1))
         assert self.collectors["dyk"].call_count == 2
         assert self.collectors["featured"].call_count == 1
         assert self.popularity.call_count == 1
-        assert self.backlog.call_count == 1
 
     def test_incomplete_failed_envelope_requires_revalidation(self) -> None:
         """Revalidate retry envelopes with missing data."""
         self._collect()
-        path = self.cache / "dyk.parquet"
+        path = self.cache / "dyk.json"
         record = read_snapshot(path)
         record.update(failed=True, observed_at=None)
         del record["data"]
@@ -939,7 +886,6 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         self.membership.side_effect = RuntimeError("offline")
         stale = self._collect(dt.timedelta(days=8))
         assert stale["pageviews"] == first["pageviews"]
-        assert stale["backlog"] == first["backlog"]
         for key in REPORT_KEYS:
             assert (
                 stale["reports"][key]["last_success_at"]
@@ -960,7 +906,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
             assert collector.call_args.args[2] == {"Game"}
         assert self.collectors["upcoming"].call_args.args[:2] == (
             dt.date(2026, 10, 19),
-            dt.date(2026, 11, 18),
+            dt.date(2026, 10, 21),
         )
         assert "read_at" not in self.collectors["upcoming"].call_args.kwargs
         assert self.collectors["history"].call_args.args[:2] == (
@@ -1001,3 +947,28 @@ class TestDashboardRefreshIntervals(DashboardFixture):
         assert metadata["source_config_id"] is not None
         assert metadata["failed"] is False
         assert self._newsletter_facts() == self.newsletter.return_value
+
+
+class TestDashboardFutureWindow(DashboardFixture):
+    """Bound future reads and preserve independent daily results."""
+
+    def test_upcoming_reads_only_two_days_across_year_boundary(self) -> None:
+        """Read only the displayed future FA/GA sources."""
+        self.clock = dt.datetime(2026, 12, 31, 19, tzinfo=dt.UTC)
+        self.collectors["upcoming"].side_effect = collect_upcoming
+        self.reader.return_value = ""
+        self._collect()
+        assert self.reader.call_args_list == [
+            call("Wikipedia:典范条目/2027年1月1日"),
+            call("Wikipedia:典范条目/2027年1月2日"),
+            call("Wikipedia:优良条目/2027年1月1日"),
+            call("Wikipedia:优良条目/2027年1月2日"),
+        ]
+        assert self.collectors["featured"].call_args.args[:2] == (
+            dt.date(2026, 11, 30),
+            dt.date(2027, 1, 1),
+        )
+        assert self.collectors["good"].call_args.args[:2] == (
+            dt.date(2026, 12, 25),
+            dt.date(2027, 1, 1),
+        )

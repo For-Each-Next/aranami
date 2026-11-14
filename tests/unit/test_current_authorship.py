@@ -18,10 +18,8 @@ from data.articles import (
     b_listings as assessment_inference,
     current_assessments,
     current_authorship as store,
-    quality_authors as directory,
 )
 from data.articles.quality_authors import prepare_current_b_articles
-from data.articles.storage import AUTHORSHIP_PATH, MILESTONES_PATH
 from shared.sources import wikiwho
 from tasks.articles import current_authorship as collector
 
@@ -440,92 +438,6 @@ class CurrentAuthorshipStoreTests(TestCase):
                     ),
                 )
             assert store.load(runtime)["evidence"].equals(_evidence())
-
-
-class CurrentBDirectoryTests(TestCase):
-    """Keep default totals independent from optional B coverage."""
-
-    @staticmethod
-    def test_default_and_b_totals_keep_current_evidence_separate() -> None:
-        """Add B credits and preserve historical quality totals."""
-        with TemporaryDirectory() as temporary:
-            runtime = Path(temporary)
-            for relative in (AUTHORSHIP_PATH, MILESTONES_PATH):
-                path = runtime / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.touch()
-            membership = _membership(((1, 10, "优良"), (2, 20, "乙")))
-            current_assessments.save(
-                runtime / current_assessments.DEFAULT_PATH,
-                _assessments(membership),
-                observed_at=_NOW,
-            )
-            store.checkpoint(
-                runtime,
-                members=_members(membership, _NOW),
-                evidence=_evidence(2, 20),
-            )
-            day = dt.date(2022, 12, 1)
-            events = pl.DataFrame([
-                {
-                    "page_id": 1,
-                    "title": "Quality game",
-                    "kind": "quality",
-                    "date": day,
-                    "grade": "GA",
-                    "action": "added",
-                    "updated_at": _NOW,
-                },
-            ])
-            evidence = _evidence().with_columns(
-                pl.lit(day).alias("date"),
-                pl.lit("GA").alias("grade"),
-                pl.lit("added").alias("action"),
-                pl.lit(directory.authorship_store.CONTRACT).alias("contract"),
-            )
-            with (
-                patch.object(
-                    directory.authorship_store,
-                    "load",
-                    return_value=evidence,
-                ),
-                patch.object(
-                    directory.milestone_store,
-                    "read_events",
-                    return_value=events,
-                ),
-            ):
-                default = directory.read_quality_authors(runtime)
-                included = directory.read_quality_authors(
-                    runtime,
-                    include_b=True,
-                )
-                assert default["authors"][0]["credit"] == 1
-                assert included["authors"][0]["credit"] == 2
-                assert included["authors"][0]["high_quality_credit"] == 1
-                assert included["b_coverage"] == {"collected": 1, "total": 1}
-                assert {
-                    article["grade"]
-                    for article in included["authors"][0]["articles"]
-                } == {"GA", "B"}
-                with patch.object(
-                    store,
-                    "load",
-                    side_effect=ValueError("corrupt B data"),
-                ):
-                    assert (
-                        directory.read_quality_authors(runtime)["authors"][0][
-                            "credit"
-                        ]
-                        == 1
-                    )
-                    unavailable = directory.read_quality_authors(
-                        runtime,
-                        include_b=True,
-                    )
-                    assert unavailable["authors"][0]["credit"] == 1
-                    assert unavailable["b_unavailable"]
-                    assert unavailable["b_coverage"] is None
 
 
 class CurrentAuthorshipCollectionTests(TestCase):

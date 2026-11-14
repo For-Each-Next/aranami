@@ -117,7 +117,6 @@ def quality_authorship_context(
         separately from an observed empty directory.
     """
     today = now.astimezone(dt.UTC).date()
-    include_b = bool(data.get("include_b"))
     authors = []
     for index, source in enumerate(data.get("authors", []), 1):
         articles = []
@@ -200,7 +199,7 @@ def quality_authorship_context(
                 "quality_authorship.high_quality",
                 count=source.get("high_quality_credit", total),
             )
-            if include_b and source.get("high_quality_credit", total)
+            if 0 < source.get("high_quality_credit", total) < total
             else None,
             "quality_dialog_title": interface.text(
                 "quality_authorship.author_articles",
@@ -257,23 +256,6 @@ def quality_authorship_context(
                 "WikiProject:電子遊戲/簡訊/2021-01/專題",
             ),
             "available": bool(data.get("available")),
-            "include_b": include_b,
-            "b_unavailable": bool(data.get("b_unavailable")),
-            "b_coverage": data.get("b_coverage"),
-            "b_missing_articles": [
-                {
-                    "title": display_title(row["title"], interface.locale),
-                    "url": title_url(row["title"]),
-                    "talk_url": title_url(f"Talk:{row['title']}"),
-                }
-                for row in data.get("b_missing_articles", [])
-            ],
-            "b_coverage_label": interface.text(
-                "quality_authorship.b_coverage",
-                **data["b_coverage"],
-            )
-            if data.get("b_coverage") is not None
-            else None,
             "authors": authors,
             "observed_at": (
                 {

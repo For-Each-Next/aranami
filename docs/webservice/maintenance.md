@@ -1,32 +1,13 @@
-# Maintenance worklists
+# Consistency checks
 
-Use `/maintenance/` for saved category worklists and `/checks/` for
-disagreements between wiki sources. The header's Tools menu links to the checks.
-The website lists evidence for an editor to review. It
-does not correct articles, templates or project pages automatically. Background
-collection supplies the results; opening or filtering a page makes no wiki
-source requests.
+Use `/checks/` to review disagreements between saved wiki sources. The header's
+Tools menu links to this page. The website lists evidence for an editor to
+review; it does not correct articles, templates or project pages automatically.
+Background collection supplies the results. Opening or filtering a page makes
+no wiki source requests.
 
-## Article tasks
-
-The overview groups configured maintenance categories and templates. Select a
-task, search titles, filter assessments or importance, and sort the complete
-saved selection before pagination. Counts describe distinct project pages;
-one page can belong to several tasks. Missing or failed observations remain
-unavailable rather than becoming a zero count.
-
-Task imagery follows verified wiki templates. The maintenance credits page
-uses semantic cards with thumbnails, original author/source links and license
-attribution. Its template correspondence table includes the configured main
-category links, including multiple categories for composite tasks. Text-only
-templates use the literal `{{...}}` symbol.
-
-## Consistency findings
-
-The independent checks page groups findings by issue type in cards, with an
-issue list and evidence links in each group. Its update time and coverage remain
-separate from category maintenance. These findings never enter the category
-worklist's totals or table.
+The checks page groups findings by issue type in cards, with issue lists,
+evidence links, update times and independently known coverage.
 
 | Worklist | What the evidence establishes |
 |---|---|

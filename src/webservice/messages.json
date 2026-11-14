@@ -25,9 +25,9 @@
     "zh-hant": "條目維護圖示來源與授權"
   },
   "page.description": {
-    "en": "Chinese Wikipedia video game content reviews, highlights, pageviews, maintenance tasks, and report updates.",
-    "zh-hans": "中文维基百科电子游戏专题看板：内容评审、佳作展示、浏览量排行、条目维护与报告更新。",
-    "zh-hant": "中文維基百科電子遊戲專題看板：內容評審、佳作展示、瀏覽量排行、條目維護與報告更新。"
+    "en": "Chinese Wikipedia video game content reviews, highlights, pageviews, consistency checks, and report updates.",
+    "zh-hans": "中文维基百科电子游戏专题看板：内容评审、佳作展示、浏览量排行、一致性检查与报告更新。",
+    "zh-hant": "中文維基百科電子遊戲專題看板：內容評審、佳作展示、瀏覽量排行、一致性檢查與報告更新。"
   },
   "page.heading": {
     "en": "Video games dashboard",
@@ -38,11 +38,6 @@
     "en": "Skip to main content",
     "zh-hans": "跳至主要内容",
     "zh-hant": "跳至主要內容"
-  },
-  "nav.backlog": {
-    "en": "Maintenance",
-    "zh-hans": "条目维护",
-    "zh-hant": "條目維護"
   },
   "nav.project": {
     "en": "Visit the Video games WikiProject",
@@ -604,40 +599,20 @@
     "zh-hans": "历史上的今天·新闻动态",
     "zh-hant": "歷史上的今天·新聞動態"
   },
-  "backlog.heading": {
-    "en": "Article maintenance",
-    "zh-hans": "条目维护",
-    "zh-hant": "條目維護"
-  },
-  "backlog.count": {
-    "en": "{count} articles",
-    "zh-hans": "{count}篇",
-    "zh-hant": "{count}篇"
-  },
   "backlog.empty": {
     "en": "No articles currently match this task.",
     "zh-hans": "目前没有这类待维护条目。",
     "zh-hant": "目前沒有這類待維護條目。"
   },
   "backlog.unavailable": {
-    "en": "The maintenance lists are temporarily unavailable.",
+    "en": "Saved observations are temporarily unavailable.",
     "zh-hans": "维护列表暂时无法获取。",
     "zh-hant": "維護列表暫時無法取得。"
-  },
-  "backlog.source": {
-    "en": "Maintenance tag",
-    "zh-hans": "维护标签",
-    "zh-hant": "維護標籤"
   },
   "backlog.column.importance": {
     "en": "Importance",
     "zh-hans": "重要度",
     "zh-hant": "重要度"
-  },
-  "backlog.column.issues": {
-    "en": "Other tags",
-    "zh-hans": "其他标记",
-    "zh-hant": "其他標記"
   },
   "backlog.sort": {
     "en": "Sort by",
@@ -664,16 +639,6 @@
     "zh-hans": "随机",
     "zh-hant": "隨機"
   },
-  "backlog.back": {
-    "en": "Back to maintenance",
-    "zh-hans": "返回条目维护",
-    "zh-hant": "返回條目維護"
-  },
-  "backlog.overview_empty": {
-    "en": "No articles currently need maintenance.",
-    "zh-hans": "目前没有待维护条目。",
-    "zh-hant": "目前沒有待維護條目。"
-  },
   "backlog.first": {
     "en": "First page",
     "zh-hans": "第一页",
@@ -695,7 +660,7 @@
     "zh-hant": "最後一頁"
   },
   "backlog.not_found": {
-    "en": "This maintenance list or page could not be found.",
+    "en": "This saved list or page could not be found.",
     "zh-hans": "未找到这个维护列表或分页。",
     "zh-hant": "未找到這個維護列表或分頁。"
   },
@@ -2153,11 +2118,6 @@
     "en": "({count}mo from now)",
     "zh-hans": "（{count}月后）",
     "zh-hant": "（{count}月後）"
-  },
-  "backlog.count_one": {
-    "en": "1 article",
-    "zh-hans": "1篇",
-    "zh-hant": "1篇"
   },
   "backlog.from": {
     "en": "From",
@@ -3685,11 +3645,6 @@
     "zh-hans": "更新首页新闻及历史上的今天",
     "zh-hant": "更新首頁新聞及歷史上的今天"
   },
-  "server.work.website-backlog": {
-    "en": "Refreshing maintenance worklists",
-    "zh-hans": "更新维护清单",
-    "zh-hant": "更新維護清單"
-  },
   "server.work.website-newsletter": {
     "en": "Refreshing saved newsletter data",
     "zh-hans": "更新已保存的简讯数据",
@@ -3975,36 +3930,6 @@
     "zh-hans": "编辑",
     "zh-hant": "編輯"
   },
-  "quality_authorship.count_b": {
-    "en": "Count B-Class",
-    "zh-hans": "计入乙级",
-    "zh-hant": "計入乙級"
-  },
-  "quality_authorship.count_b_description": {
-    "en": "For B-Class articles and lists, authors are inferred from the article revision at or before the start of the latest continuous B-Class range on the talk page. That article revision supplies the listing date.",
-    "zh-hans": "乙级条目及列表按讨论页最近一段连续乙级评级开始时或之前的最近条目版本推定作者，并以该条目版本的时间为品质评级日期。",
-    "zh-hant": "乙級條目及列表按討論頁最近一段連續乙級評級開始時或之前的最近條目版本推定作者，並以該條目版本的時間為品質評級日期。"
-  },
-  "quality_authorship.b_coverage": {
-    "en": "B/BL listing-revision attribution coverage: {collected}/{total} pages. Missing listing history, article revisions or attribution evidence remain unknown.",
-    "zh-hans": "乙级作者证据覆盖：{collected}/{total}条目及列表。入选历史、条目版本或作者证据尚未取得的项目显示为未知。",
-    "zh-hant": "乙級作者證據覆蓋：{collected}/{total}條目及列表。入選歷史、條目版本或作者證據尚未取得的項目顯示為未知。"
-  },
-  "quality_authorship.b_unavailable": {
-    "en": "B-Class attribution is unavailable; retained high-quality article totals are shown.",
-    "zh-hans": "乙级作者资料暂不可用；当前显示已保存的高品质条目统计。",
-    "zh-hant": "乙級作者資料暫不可用；目前顯示已儲存的高品質條目統計。"
-  },
-  "quality_authorship.author_developed": {
-    "en": "Developed articles by {name}",
-    "zh-hans": "{name}的成型条目",
-    "zh-hant": "{name}的成型條目"
-  },
-  "quality_authorship.developed": {
-    "en": "Developed articles",
-    "zh-hans": "成型条目",
-    "zh-hant": "成型條目"
-  },
   "quality_authorship.high_quality": {
     "en": "{count} high-quality",
     "zh-hans": "{count}高品质",
@@ -4255,6 +4180,10 @@
     "zh-hans": "仅高品质条目",
     "zh-hant": "僅高品質條目"
   },
+  "quality_analysis.chart_zoom_in": {"en": "Zoom in", "zh-hans": "放大", "zh-hant": "放大"},
+  "quality_analysis.chart_zoom_out": {"en": "Zoom out", "zh-hans": "缩小", "zh-hant": "縮小"},
+  "quality_analysis.chart_pan": {"en": "Pan / scroll zoom", "zh-hans": "平移／滚动缩放", "zh-hant": "平移／捲動縮放"},
+  "quality_analysis.chart_reset": {"en": "Reset view", "zh-hans": "重置视图", "zh-hant": "重設檢視"},
   "quality_analysis.heading": {
     "en": "Article statistics",
     "zh-hans": "条目统计",

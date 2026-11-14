@@ -259,7 +259,6 @@ def source_payload(root: Path = ROOT) -> dict[str, bytes]:
     for name in (
         "src/webservice/pages.py",
         "src/webservice/server.py",
-        "src/tasks/website/maintenance.json",
         "src/shared/config.py",
     ):
         if name not in payload:

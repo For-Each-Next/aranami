@@ -14,7 +14,6 @@ from webservice.consistency import consistency_groups, finding_details
 from webservice.pages import (
     render_consistency_checks,
     render_maintenance,
-    render_maintenance_overview,
 )
 from webservice.presentation import Interface
 
@@ -243,24 +242,11 @@ class TestConsistencyPresentation(TestCase):
         assert 'name="q"' in output
 
     @staticmethod
-    def test_overview_findings_keep_maintenance_counts_separate() -> None:
+    def test_overview_groups_independent_consistency_findings() -> None:
         """List issues without inserting consistency category cards."""
         snapshot = consistency_snapshot()
-        snapshot["backlog"] = {
-            "observed_at": "2026-11-02T17:33:00Z",
-            "total": 0,
-            "groups": [],
-        }
         for locale in ("en", "zh-hans", "zh-hant"):
             interface = Interface(locale)
-            output = render_maintenance_overview(snapshot, None, None, locale)
-            assert interface.text("backlog.overview_empty") in output
-            assert 'class="consistency-findings' not in output
-            assert 'id="backlog-section-consistency"' not in output
-            assert "task=consistency_" not in output
-            assert 'class="backlog-card"' not in output
-            assert interface.text("consistency.heading") not in output
-            assert 'datetime="2026-11-02T17:33:00Z"' in output
             output = render_consistency_checks(snapshot, None, None, locale)
             assert output.count('class="consistency-group"') == 6  # ruff: ignore[magic-value-comparison]
             assert 'class="ui-card consistency-card' in output

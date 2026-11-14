@@ -1,6 +1,6 @@
 [project]
 name = "aranami"
-version = "0.9.15"
+version = "0.9.16"
 description = "Wikipedia reports and a read-only dashboard with Django."
 readme = "README.md"
 authors = [
@@ -34,7 +34,9 @@ dependencies = [
     "jieba",
     "jinja2",
     "markupsafe",
+    "matplotlib>=3.11.2",
     "mwparserfromhell",
+    "numpy",
     "opencc-python-reimplemented",
     "polars",
     "pymysql",

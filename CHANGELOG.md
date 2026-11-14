@@ -5,6 +5,26 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.16 (2026-11-14 12:53 UTC)
+
+Overview: Retired category-maintenance collection and legacy quality variants,
+kept frontend documents in JSON and rendered interactive statistics through
+Matplotlib.
+
+- Removed the category-maintenance page, APIs, collector, SQL hooks and data
+  dependencies, preserving the independent consistency checks.
+- Limited future featured/good homepage queries to the next two UTC days.
+- Saved dashboard documents, report sections, universal selection and presets
+  as JSON; fixed dataset viewer initialization and retained factual Parquet.
+- Replaced B-only variants and duplicated year aggregates with universal class
+  selection; removed redundant contributor ranks from saved frontend data.
+- Retained contributor shares of at least 10%, ordered by attributed bytes,
+  with the existing greater-than-33% main-contributor threshold.
+- Drew interactive violin, pie and annual charts with Matplotlib, including
+  browser zoom, pan, reset and article-list controls.
+- Fixed dialog ordinals at 5em, widened activity dates and labeled the author
+  directory Main contributors, preserving red mean crosses and tooltips.
+
 ### 0.9.15 (2026-11-14 12:16 UTC)
 
 Overview: Exposed saved dataset updates and article information coverage while

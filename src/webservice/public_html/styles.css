@@ -277,9 +277,6 @@ th[aria-sort=descending] .ui-table__table__sort-button::after {
     content: " ↓";
 }
 
-.maintenance-table .ui-table__table__sort-button::after {
-    content: none;
-}
 
 .ui-table__table__sort-icon {
     inline-size: 1rem;
@@ -759,7 +756,7 @@ main {
     scroll-margin-block-start: 1.5rem;
 }
 
-.report-section, .backlog-section {
+.report-section {
     min-inline-size: 0;
     margin-block: 1.5rem 2rem;
     scroll-margin-block-start: 1.5rem;
@@ -998,39 +995,11 @@ main {
     text-decoration: none;
 }
 
-.backlog-card {
-    display: flex;
-    min-inline-size: 0;
-}
 
-.backlog-task {
-    flex: 1;
-    min-inline-size: 0;
-}
 
-.backlog-task .ui-card__text {
-    min-inline-size: 0;
-    inline-size: 100%;
-}
 
-.maintenance-icon {
-    flex: none;
-    inline-size: 1.375rem;
-    block-size: 1.375rem;
-    object-fit: contain;
-}
 
-.backlog-label {
-    min-inline-size: 0;
-    margin: 0;
-    font-size: var(--font-size-medium);
-}
 
-.backlog-count {
-    color: var(--color-subtle);
-    font-size: var(--font-size-small);
-    font-variant-numeric: tabular-nums;
-}
 
 .logs-table .status-link {
     padding-inline: 0;
@@ -1299,30 +1268,10 @@ caption {
     font-weight: 700;
 }
 
-.maintenance-table {
-    min-inline-size: 40rem;
-}
 
-.maintenance-table th[scope="col"], .maintenance-table td {
-    overflow-wrap: normal;
-}
 
-.maintenance-table th[scope="col"] {
-    white-space: nowrap;
-}
 
-.maintenance-table th[scope="row"] {
-    font-weight: 400;
-}
 
-.issues {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .25rem .75rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
 
 .consistency-groups {
     display: grid;
@@ -1682,7 +1631,11 @@ table.quality-author-directory {
 }
 
 .quality-data-table .quality-column-active {
-    inline-size: 12em;
+    inline-size: 18em;
+}
+
+.quality-author-directory td:last-child {
+    white-space: nowrap;
 }
 
 .quality-data-table th:first-child {
@@ -1701,6 +1654,11 @@ table.quality-author-directory {
 .quality-data-table th,
 .quality-data-table td {
     overflow-wrap: anywhere;
+}
+
+.page-updates .quality-column-ordinal,
+.page-updates .quality-data-table th:first-child {
+    inline-size: 5em;
 }
 
 .quality-data-table thead th,
@@ -1946,26 +1904,14 @@ footer nav {
     font-size: .85em;
 }
 
-/* Category navigation precedes the table; title search stays in its header. */
+/* Check navigation precedes the findings; title search stays in its header. */
 .maintenance-navigation {
     display: flex;
     margin-block-start: 1rem;
 }
 
-.maintenance-worklist {
-    margin-block-start: 1rem;
-}
 
-.maintenance-table-actions, .maintenance-search, .page-size {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: .5rem;
-}
 
-.maintenance-table-actions {
-    min-inline-size: 0;
-}
 
 .maintenance-search {
     flex: 1 1 15rem;

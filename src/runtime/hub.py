@@ -115,7 +115,7 @@ class HubConfig:
 
     dry: bool = False
     run_immediately: bool = True
-    output: Path = Path("data/parsed/dashboard.parquet")
+    output: Path = Path("data/parsed/dashboard.json")
     log_dir: Path = Path("logs")
     interval: float = _WEBSITE_CHECK_SECONDS
     days: int = 100
@@ -619,7 +619,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("data/parsed/dashboard.parquet"),
+        default=Path("data/parsed/dashboard.json"),
     )
     parser.add_argument("--log-dir", type=Path, default=Path("logs"))
     parser.add_argument(

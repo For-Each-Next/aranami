@@ -10,7 +10,7 @@ presentation values without acquiring sources or recalculating metrics.
 from __future__ import annotations
 
 from ipaddress import ip_address
-from math import ceil, cos, floor, log, log10, pi, sin
+from math import floor, log, log10
 from operator import itemgetter
 from urllib.parse import quote
 
@@ -19,6 +19,7 @@ from shared.assessment_profiles import assessment_profile
 from webservice.presentation import (
     Interface,
     display_title,
+    local_url,
     title_url,
     utc_time,
 )
@@ -52,7 +53,6 @@ _IMPORTANCE = tuple(
     for label in _PROFILE.importance
     if label.code not in {"NA", "Bottom"}
 )
-_HALF_CIRCLE = 0.5
 _FIRST_FILTER_YEAR = 2002
 _DETAIL_SHARE_THRESHOLD = 0.1
 _MAIN_SHARE_THRESHOLD = 0.33
@@ -92,24 +92,6 @@ def _range(row: dict, prefix: str) -> str:
     return "—" if low is None or high is None else f"{low:,.0f}–{high:,.0f}"
 
 
-def _pie_path(start: float, fraction: float) -> str | None:
-    """Draw one proportional circular sector from saved counts.
-
-    Returns:
-        An SVG path, or none for a zero or complete-circle segment.
-    """
-    if not 0 < fraction < 1:
-        return None
-    end = start + fraction * 2 * pi
-    start_x, start_y = 130 + 112 * cos(start), 130 + 112 * sin(start)
-    end_x, end_y = 130 + 112 * cos(end), 130 + 112 * sin(end)
-    return (
-        f"M 130 130 L {start_x:.3f} {start_y:.3f} "
-        f"A 112 112 0 {int(fraction > _HALF_CIRCLE)} 1 "
-        f"{end_x:.3f} {end_y:.3f} Z"
-    )
-
-
 def _pie(
     rows: list[dict],
     dimension: str,
@@ -121,7 +103,6 @@ def _pie(
     Returns:
         Sector geometry and accessible labels without regrouping data.
     """
-    angle = -pi / 2
     categories = []
     for row in rows:
         code = row["grade" if dimension == "class" else "importance"]
@@ -141,53 +122,33 @@ def _pie(
             else len(_IMPORTANCE),
             "count_label": _number(row["pages"]),
             "share_label": f"{fraction * 100:.1f}%",
-            "path": _pie_path(angle, fraction),
-            "whole": fraction == 1,
         })
-        angle += fraction * 2 * pi
     return categories
 
 
 def _years(data: dict, interface: Interface) -> dict:
-    """Lay out saved annual counts as vertical stacked columns.
+    """Keep exact annual rows and legends beside Matplotlib charts.
 
     Returns:
-        Scaled columns, an integer count axis and exact source rows.
+        Annual table values and the selected nonempty legend categories.
     """
-    saved = data.get("years", [])
-    maximum = max((row["pages"] for row in saved), default=1)
-    step = max(1, ceil(maximum / 4))
-    axis_maximum = step * 4
-    chart_width = max(600, 72 + len(saved) * 46)
-    plot_width = chart_width - 64
-    slot_width = plot_width / max(len(saved), 1)
-    years = []
-    for index, row in enumerate(sorted(saved, key=itemgetter("year"))):
-        center = 48 + (index + 0.5) * slot_width
-        offset = 0.0
-        segments = []
-        for code in _GRADES:
-            count = row.get("grades", {}).get(code, 0)
-            height = count / axis_maximum * 220
-            if count:
-                segments.append({
+    years = [
+        {
+            **row,
+            "count_label": _number(row["pages"]),
+            "segments": [
+                {
                     "grade": code,
+                    "count": row.get("grades", {}).get(code, 0),
                     "color": _assessment_color(code, "class"),
                     "label": grade_label(code, interface),
-                    "count": count,
-                    "x": round(center - 16, 2),
-                    "y": round(248 - offset - height, 2),
-                    "width": 32,
-                    "height": round(height, 2),
-                })
-            offset += height
-        years.append({
-            **row,
-            "segments": segments,
-            "x": round(center, 2),
-            "label_y": round(242 - offset, 2),
-            "count_label": _number(row["pages"]),
-        })
+                }
+                for code in _GRADES
+                if row.get("grades", {}).get(code, 0)
+            ],
+        }
+        for row in sorted(data.get("years", []), key=itemgetter("year"))
+    ]
     return {
         "years": years,
         "year_legend": [
@@ -202,11 +163,6 @@ def _years(data: dict, interface: Interface) -> dict:
                 for year in years
                 for segment in year["segments"]
             )
-        ],
-        "year_chart_width": chart_width,
-        "year_axis": [
-            {"label": _number(index * step), "y": 248 - index * 55}
-            for index in range(5)
         ],
     }
 
@@ -255,27 +211,6 @@ def prose_length_position(characters: float, maximum: float) -> float:
         * log(characters / _PROSE_LENGTH_LINEAR)
         / log(maximum / _PROSE_LENGTH_LINEAR),
     )
-
-
-def _violin_path(points: list[dict], maximum: float) -> str | None:
-    """Map saved density points into a mirrored horizontal SVG shape.
-
-    Returns:
-        A closed path, or none before density metadata is available.
-    """
-    if not points:
-        return None
-    upper = [
-        f"{prose_length_position(point['position'], maximum):.2f} "
-        f"{30 - point['density'] * 24:.2f}"
-        for point in points
-    ]
-    lower = [
-        f"{prose_length_position(point['position'], maximum):.2f} "
-        f"{30 + point['density'] * 24:.2f}"
-        for point in reversed(points)
-    ]
-    return "M " + " L ".join([*upper, *lower]) + " Z"
 
 
 def _lengths(
@@ -392,7 +327,6 @@ def _lengths(
                 p75=_percentile_label(points.get("p75")),
                 maximum=_percentile_label(points.get("maximum")),
             ),
-            "violin_path": _violin_path(row.get("density", []), maximum),
             "color": _assessment_color(
                 row["grade"] or row["importance"],
                 "class" if row["group"] == "grade" else "importance",
@@ -451,7 +385,6 @@ def _articles(data: dict, interface: Interface) -> list[dict]:
                         "Unassessed",
                     }
                     or data.get("all_grades")
-                    or (data.get("include_b") and row["grade"] in {"B", "BL"})
                 ),
             ),
             "title_label": display_title(
@@ -641,7 +574,6 @@ def _catalog_article(row: dict, interface: Interface) -> list:
             )
         ),
         [editor["name"] for editor in main],
-        None,
         display_title(row["title"].replace("_", " "), interface.locale),
         interface.date(row["listed_date"]) if row["listed_date"] else None,
         proof if proof["available"] else None,
@@ -712,9 +644,7 @@ def _coverage_cards(data: dict, interface: Interface) -> list[dict]:
     rows = data.get("articles", [])
     selection = data.get("selection")
     if selection:
-        variant = (
-            2 if data.get("all_grades") else int(bool(data.get("include_b")))
-        )
+        variant = int(bool(data.get("all_grades")))
         identities = {
             row["page_id"]
             for row in selection["defaults"][variant]["articles"]
@@ -790,9 +720,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
         default_ids = {
             row["page_id"]
             for row in selection["defaults"][
-                2
-                if data.get("all_grades")
-                else int(bool(data.get("include_b")))
+                int(bool(data.get("all_grades")))
             ]["articles"][:20]
         }
         shown = [row for row in shown if row["page_id"] in default_ids]
@@ -851,6 +779,13 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                 ),
             },
             "last_year": selection["last_year"],
+            "chart_generation": data.get("chart_generation"),
+            "chart_url": local_url(
+                "/quality-analysis/charts/",
+                lang=interface.message_locale,
+            ),
+            "authorship_basis": data.get("authorship_basis", "current"),
+            "chart_failed": interface.text("quality_authorship.update_failed"),
             "grades": [
                 {
                     "value": code,
@@ -870,8 +805,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                         "SL",
                         "Unassessed",
                     }
-                    or data.get("all_grades")
-                    or (data.get("include_b") and code in {"B", "BL"}),
+                    or data.get("all_grades"),
                 }
                 for code in codes
             ],
@@ -924,9 +858,13 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             "dated": _number(coverage.get("dated", 0)),
             "unknown_dates": _number(total - coverage.get("dated", 0)),
             "median": _number(coverage.get("median_characters")),
-            "include_b": bool(data.get("include_b")),
             "all_grades": bool(data.get("all_grades")),
             "locale": interface.locale,
+            "length_scale_maximum": length_maximum,
+            "chart_controls": {
+                key: interface.text(f"quality_analysis.chart_{key}")
+                for key in ("zoom_in", "zoom_out", "pan", "reset")
+            },
             "grades": grades,
             "importance_totals": importance,
             "importance_available": data.get("importance_available", True),
@@ -960,9 +898,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                     "label": grade_label(code, interface),
                 }
                 for code in _GRADES
-                if data.get("all_grades")
-                or data.get("include_b")
-                or code not in {"B", "BL"}
+                if data.get("all_grades") or code not in {"B", "BL"}
                 if code not in {"A", "AL"}
                 or any(row["grade"] == code for row in grades)
             ],

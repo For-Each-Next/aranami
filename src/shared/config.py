@@ -122,8 +122,8 @@ class CollectionDefinition:
     idle: bool = False
 
 
-# Article/list grades explicitly verified against the project's category tree.
-# Category membership is independent evidence, never a replacement for PA.
+# Article/list grades verified against the project's category tree.
+# Category membership remains independent evidence alongside PA.
 ARTICLE_GRADE_CATEGORIES = {
     "典范级电子游戏条目": "FA",
     "特色列表级电子游戏条目": "FL",
@@ -210,7 +210,6 @@ WEBSITE_REFRESH_INTERVALS: dict[str, float] = {
     "dyk": 86400,
     "pageviews": 86400,
     "news_history": 3600,
-    "backlog": 86400,
     "newsletter": 86400,
 }
 

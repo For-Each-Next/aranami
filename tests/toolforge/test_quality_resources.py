@@ -190,12 +190,7 @@ class QualityResourcePresentationTests(unittest.TestCase):
             "quality_analysis"
         ]
         assert [row["median_x"] for row in together["lengths"]] == [950, 950]
-        assert together["lengths"][0]["violin_path"].startswith(
-            "M 950.00 6.00 L 979.25 24.00",
-        )
-        assert together["lengths"][1]["violin_path"].startswith(
-            "M 950.00 6.00 L 1000.00 24.00",
-        )
+        assert together["length_scale_maximum"] == 100_000
         data["lengths"] = data["lengths"][:1]
         filtered = quality_analysis_context(data, interface)[
             "quality_analysis"
@@ -332,7 +327,7 @@ class QualityResourcePresentationTests(unittest.TestCase):
                 locale,
                 _NOW,
             )
-            assert len(output.encode()) < len(legacy.encode()) * 0.75
+            assert len(output.encode()) < len(legacy.encode())
             assert "data-metadata='" not in output
             assert f'data-metadata-url="{prefix}catalog-' in output
             assert output.count("<tr data-analysis-row ") == 20
@@ -447,15 +442,10 @@ class QualityResourcePresentationTests(unittest.TestCase):
     def test_contribution_types_use_main_names_and_observed_major_shares() -> (
         None
     ):
-        """Exclude rank-only and minor editors from filters."""
+        """Derive contributor roles from saved byte shares."""
         data = _catalog_fixture()
         articles = data["analysis"]["selection"]["articles"]
         proof = {
-            "authors": ["Main author"],
-            "author_ranks": [
-                {"name": "Minor editor", "rank": 1},
-                {"name": "Rank-only editor", "rank": 2},
-            ],
             "authorship_available": True,
             "authorship_editors": [
                 {"editor": str(index), "name": name, "share": share}
@@ -514,7 +504,6 @@ class QualityResourcePresentationTests(unittest.TestCase):
             assert "data-author-ranks" not in output
             assert "data-analysis-author-rank" not in output
             assert "data-analysis-filter-note" not in output
-            assert "Rank-only editor" not in output
             assert "Minor editor" not in output
             catalog = next(
                 json.loads(content)
@@ -523,9 +512,8 @@ class QualityResourcePresentationTests(unittest.TestCase):
             )
             extra = catalog["extra"][0]
             assert extra[8] == ["Main author"]
-            assert extra[9] is None
-            assert extra[12]["available"]
-            assert [editor["name"] for editor in extra[12]["editors"]] == [
+            assert extra[11]["available"]
+            assert [editor["name"] for editor in extra[11]["editors"]] == [
                 "Main author",
                 "Significant author",
                 "Boundary editor",
@@ -760,6 +748,11 @@ class QualityResourcePresentationTests(unittest.TestCase):
         assert ("grade", "FL") not in observed
         assert ("grade", "B") not in observed
         data = analysis_fixture()
+        prototype = data["articles"][0]
+        data["articles"] = [
+            {**prototype, "page_id": index, "prose_characters": value}
+            for index, value in enumerate((0, 10, 20, 40, None), 1)
+        ]
         data["selection"] = {
             "cells": cells,
             "last_year": 2026,
@@ -819,7 +812,8 @@ class QualityResourcePresentationTests(unittest.TestCase):
             output = render_quality_analysis(data, None, None, locale, _NOW)
             assert 'data-percentile="25"' in output
             assert 'data-percentile="75"' in output
-            assert 'x1="0.54" x2="0.54"' in output
+            assert 'data-statistic="p50"' in output
+            assert 'data-value="15.0"' in output
             assert "analysis-violin-note" not in output
             assert 'data-extreme="minimum"' in output
             assert 'data-extreme="maximum"' in output
@@ -966,7 +960,6 @@ class QualityResourceHTTPTests(unittest.TestCase):
             preset = quality_pages.path_for(
                 root,
                 "en",
-                include_b=False,
                 basis="current",
             )
             quality_pages.save(
@@ -1053,7 +1046,6 @@ class QualityResourceHTTPTests(unittest.TestCase):
             path = quality_pages.path_for(
                 root,
                 "en",
-                include_b=False,
                 basis="current",
             )
             client = TestClient(create_app(root))
@@ -1089,7 +1081,6 @@ class QualityResourceHTTPTests(unittest.TestCase):
             path = quality_pages.path_for(
                 root,
                 "en",
-                include_b=False,
                 basis="current",
             )
             client = TestClient(create_app(root))

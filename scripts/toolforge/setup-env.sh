@@ -53,6 +53,7 @@ case "$managed_python" in
     *) printf '%s\n' 'Expected the managed Python 3.15.0 interpreter.' >&2; exit 1 ;;
 esac
 "$bootstrap/bin/uv" sync --locked --no-dev --python "$managed_python" --project "$app_dir"
+export MPLCONFIGDIR="$tool_dir/cache/matplotlib"
 "$environment/bin/python" - <<'PY'
 import importlib
 import json
@@ -75,6 +76,7 @@ import webservice.server
 import runtime.dashboard
 import tasks.website.collect
 import webservice.pages
+import matplotlib.font_manager
 print(f"Validated Aranami {project_version()} on Python {sys.version.split()[0]}; publication was not started.")
 PY
 # This unique proof is emitted only after hashes, dependencies, and imports pass.

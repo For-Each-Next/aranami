@@ -20,7 +20,7 @@ from runtime.project_observations import (
     collect_project_membership,
     project_cycle,
 )
-from shared.sources.cycle import read_membership, source_cycle
+from shared.sources.cycle import read_categories, read_membership, source_cycle
 from shared.sources.quarry import projects
 from shared.support.activity import activity_observer
 
@@ -276,7 +276,11 @@ class HourlyObservationTests(TestCase):
                 "Empty category",
                 namespace=1,
             ).is_empty()
-            assert projects.page_categories(site, [3]).is_empty()
+            fallback = Mock(
+                side_effect=AssertionError("Unexpected category SQL"),
+            )
+            assert read_categories(site.dbName(), [3], fallback).is_empty()
+            fallback.assert_not_called()
             assert projects.latest_revisions(site, [2])[
                 "page_latest"
             ].to_list() == [201]

@@ -45,7 +45,6 @@ from webservice.presentation import (
     maintenance_filter,
     maintenance_items,
     maintenance_page,
-    maintenance_sections,
     maintenance_selection,
     pageviews_url,
     readable_size,
@@ -61,6 +60,7 @@ from webservice.quality_analysis import (
     quality_analysis_context,
 )
 from webservice.quality_authorship import quality_authorship_context
+from webservice.quality_charts import render_charts
 from webservice.status_view import report_context, status_context
 
 if TYPE_CHECKING:
@@ -1231,57 +1231,6 @@ class _Page:
             })
         return sections
 
-    def backlog(self, backlog: Record | None) -> Record | None:
-        """Prepare nonempty maintenance tasks in their configured order.
-
-        Returns:
-            Ordered sections, unavailable state, or none when empty.
-        """
-        if backlog is not None and backlog["total"] == 0:
-            return None
-        if backlog is None:
-            return {"unavailable": True}
-        groups = [group for group in backlog["groups"] if group["count"] > 0]
-        return {
-            "sections": [
-                {
-                    "key": key,
-                    "label": self.interface.label(
-                        tasks[0].get("section_label"),
-                        self.text("backlog.heading"),
-                    ),
-                    "tasks": [
-                        {
-                            "label": self.interface.label(
-                                group.get("label"),
-                                group["category"],
-                            ),
-                            "count": self.text(
-                                "backlog.count_one"
-                                if group["count"] == 1
-                                else "backlog.count",
-                                count=f"{group['count']:,}",
-                            ),
-                            "image": (
-                                "assets/icons/maintenance/"
-                                + _MAINTENANCE_ICONS[group["key"]]
-                                if group["key"] in _MAINTENANCE_ICONS
-                                else None
-                            ),
-                            "url": local_url(
-                                "/maintenance/",
-                                task=group["key"],
-                                page=1,
-                            ),
-                        }
-                        for group in tasks
-                    ],
-                }
-                for key, tasks in maintenance_sections(groups).items()
-            ],
-            "updated": self.source_updated(backlog["observed_at"]),
-        }
-
     def live_status(
         self,
         status: Record,
@@ -1326,47 +1275,16 @@ class _Page:
         )
         return context
 
-    def worklist_card(
-        self,
-        item: Record,
-        groups: Record,
-        task: str = "",
-    ) -> Record:
-        """Prepare exact issue sources and the earliest observed month.
+    def worklist_card(self, item: Record) -> Record:
+        """Prepare an article card with its saved check evidence.
 
         Returns:
-            An article summary with localized issue links and dates.
+            A localized article card with exact source findings.
         """
-        card = self.article(item)
-        if item.get("consistency"):
-            card.update(
-                consistency=finding_details(item, self.interface),
-            )
-            return card
-        month = item.get("oldest_issue_month")
-        card.update(
-            issues=[
-                wiki_link(
-                    groups[key]["source_url"],
-                    self.interface.label(
-                        groups[key].get("label"),
-                        groups[key]["category"],
-                    ),
-                )
-                for key in item.get("issues", [])
-                if key in groups and key != task
-            ],
-            month={
-                "value": month,
-                "label": self.interface.date(month, month_only=True),
-                "url": title_url("Category:" + item["oldest_issue_category"])
-                if item.get("oldest_issue_category")
-                else None,
-            }
-            if month
-            else None,
-        )
-        return card
+        return {
+            **self.article(item),
+            "consistency": finding_details(item, self.interface),
+        }
 
 
 def render_dashboard(  # ruff: ignore[too-many-arguments]
@@ -1529,19 +1447,10 @@ def render_quality_analysis(  # ruff: ignore[too-many-arguments] - Shared page-r
     context = page.context(page.text("quality_analysis.heading"), live=True)
     context.update(page.live_status(status or {}, config or {}, now))
     analysis = data.get("analysis", data)
-    analysis = {
-        **analysis,
-        "include_b": bool(data.get("include_b", analysis.get("include_b"))),
-    }
-    authorship = {
-        **data.get("authorship", {}),
-        "include_b": bool(analysis.get("include_b")),
-    }
+    authorship = dict(data.get("authorship", {}))
     selection = analysis.get("selection")
     if selection:
-        defaults = selection["defaults"][
-            2 if analysis.get("all_grades") else int(analysis["include_b"])
-        ]
+        defaults = selection["defaults"][int(bool(analysis.get("all_grades")))]
         analysis = {
             **analysis,
             **defaults,
@@ -1561,6 +1470,28 @@ def render_quality_analysis(  # ruff: ignore[too-many-arguments] - Shared page-r
         authorship.get("authors", []),
     )
     context.update(quality_analysis_context(analysis, page.interface))
+    chart_rows = (
+        defaults["articles"] if selection else analysis.get("articles", [])
+    )
+    chart_data = render_charts(
+        {
+            "articles": chart_rows,
+            "length_scale_maximum": context["quality_analysis"][
+                "length_scale_maximum"
+            ],
+            "grade_codes": [
+                row["value"]
+                for row in context["quality_analysis"]["year_table_grades"]
+            ],
+        },
+        page.interface,
+    )
+    context["quality_analysis"]["charts"] = {
+        key: {name: Markup(svg) for name, svg in value.items()}  # ruff: ignore[unsafe-markup-use] - Trusted Matplotlib SVG.
+        if key == "lengths"
+        else Markup(value)  # ruff: ignore[unsafe-markup-use] - Trusted Matplotlib SVG.
+        for key, value in chart_data.items()
+    }
     if selection:
         context["quality_analysis"]["selected_page_ids"] = [
             row["page_id"] for row in defaults["articles"]
@@ -1600,7 +1531,6 @@ def _quality_resources(
     return_url = local_url(
         "/quality-analysis/",
         lang=analysis["locale"],
-        **({"count_b": "1"} if analysis["include_b"] else {}),
         **({"all_grades": "1"} if analysis["all_grades"] else {}),
         **({"listing_authors": "1"} if analysis["listing_authors"] else {}),
     )
@@ -1699,49 +1629,6 @@ def render_live_status(
         ),
     )
     return _render("live.html", context)
-
-
-def render_maintenance_overview(  # ruff: ignore[too-many-arguments]
-    snapshot: Record | None,
-    status: Record | None,
-    config: Record | None,
-    locale: str,
-    now: dt.datetime | None = None,
-    *,
-    navigation: Record | None = None,
-) -> str:
-    """Render saved maintenance categories on their own overview page.
-
-    Args:
-        snapshot: Validated website snapshot containing the catalogue.
-        status: Validated routine, schedule, and page observations.
-        config: Current source version and routine definitions.
-        locale: Negotiated interface language.
-        now: Optional aware clock for deterministic elapsed time.
-        navigation: Request route and language choices, when available.
-
-    Returns:
-        Complete escaped HTML with category links and source timestamps,
-        preserving unavailable and confirmed-empty observations.
-    """
-    page = _Page(locale)
-    context = page.context(page.text("backlog.heading"), live=True)
-    context.update(
-        page.live_status(
-            status or {},
-            config or {},
-            now or dt.datetime.now(dt.UTC),
-        ),
-    )
-    backlog = (snapshot or {}).get("backlog")
-    context.update(
-        navigation=navigation,
-        backlog=page.backlog(backlog),
-        updated=page.source_updated(backlog["observed_at"])
-        if backlog is not None
-        else None,
-    )
-    return _render("backlog.html", context)
 
 
 def render_consistency_checks(  # ruff: ignore[too-many-arguments]
@@ -1859,10 +1746,10 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
     config: Record | None = None,
     now: dt.datetime | None = None,
 ) -> str:
-    """Render a maintenance list after sorting all saved observations.
+    """Render a saved consistency-check list with stable pagination.
 
     Args:
-        snapshot: Validated website snapshot containing the catalogue.
+        snapshot: Validated website snapshot containing check findings.
         params: Parsed controls with repeated values retained.
         locale: Negotiated interface language.
         navigation: Request-specific language links and active location.
@@ -1874,29 +1761,27 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
         Complete escaped HTML with stable sorting and pagination links.
 
     Raises:
-        LookupError: The selected maintenance task does not exist.
-        RuntimeError: Maintenance observations are unavailable.
+        LookupError: The selected check task does not exist.
+        RuntimeError: Check observations are unavailable.
 
     Invalid controls propagate ValueError from maintenance_selection.
     """
     selection = maintenance_selection(params)
     page = _Page(locale)
-    consistency = selection["task"].startswith("consistency_")
-    worklist_path = "/checks/" if consistency else "/maintenance/"
-    backlog = (snapshot or {}).get("consistency" if consistency else "backlog")
-    if backlog is None:
-        message = "Maintenance data is unavailable."
+    if not selection["task"].startswith("consistency_"):
+        message = "Check task not found."
+        raise LookupError(message)
+    worklist_path = "/checks/"
+    checks = (snapshot or {}).get("consistency")
+    if checks is None:
+        message = "Check data is unavailable."
         raise RuntimeError(message)
     groups = {
         group["key"]: group
-        for group in (
-            consistency_groups(snapshot, page.interface)
-            if consistency
-            else backlog["groups"]
-        )
+        for group in consistency_groups(snapshot, page.interface)
     }
     if selection["task"] not in groups:
-        message = "Maintenance task not found."
+        message = "Check task not found."
         raise LookupError(message)
     if selection["sort"] == "random" and "seed" not in selection:
         selection["seed"] = secrets.token_hex(8)
@@ -1931,7 +1816,7 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
         }
     heading = page.interface.label(selected.get("label"), selected["category"])
     context = page.context(
-        page.text("nav.checks" if consistency else "nav.backlog"),
+        page.text("nav.checks"),
         live=True,
     )
     context.update(
@@ -1976,7 +1861,7 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
             count=f"{len(items):,}",
         ),
         updated=page.source_updated(
-            selected.get("observed_at") or backlog.get("observed_at"),
+            selected.get("observed_at") or checks.get("observed_at"),
         ),
         sort_choices=[
             {
@@ -2007,10 +1892,7 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
             if selected.get("target_type") != "project"
             or sort not in {"class", "importance"}
         ],
-        cards=[
-            page.worklist_card(item, groups, selection["task"])
-            for item in portion["items"]
-        ],
+        cards=[page.worklist_card(item) for item in portion["items"]],
         start=portion["offset"] + 1,
         first=local_url(
             worklist_path,
@@ -2038,13 +1920,10 @@ def render_maintenance(  # ruff: ignore[too-many-arguments]
         else None,
         source_link=wiki_link(selected["source_url"], selected["category"]),
     )
-    if consistency:
-        context["consistency_findings"] = [
-            finding
-            for card in context["cards"]
-            for finding in card["consistency"]
-        ]
-        context["consistency_status"]["updated"] = context["updated"]
+    context["consistency_findings"] = [
+        finding for card in context["cards"] for finding in card["consistency"]
+    ]
+    context["consistency_status"]["updated"] = context["updated"]
     return _render("maintenance.html", context)
 
 

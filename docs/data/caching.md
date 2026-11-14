@@ -18,6 +18,8 @@ Name internal cache and configuration identities for their source semantics.
 Keep schema revisions in explicit fields rather than arbitrary name suffixes;
 actual external API versions and verified wiki revision IDs remain intact.
 
+Frontend-ready presentation documents use JSON directly. Background tables
+retain native typed Parquet columns rather than a JSON payload column.
 Parquet remains the default for temporary tables. Consider Arrow IPC only
 after benchmarking representative consumers on Toolforge NFS; a change must
 preserve exact schemas, extraction contracts, bounds and atomic generations.

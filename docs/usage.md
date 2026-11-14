@@ -44,8 +44,7 @@ grade. [Recent discussions](https://aranami.toolforge.org/discussions/) shows
 twenty-eight days with the same types, splitting articles into four week groups.
 Recognized content reviews appear only in the review section. Discussion cards omit
 assessment chips.
-[Maintenance](https://aranami.toolforge.org/maintenance/) provides
-saved category worklists. The header's Tools menu links to separate
+The header's Tools menu links to
 [maintenance checks](https://aranami.toolforge.org/checks/), grouped
 by issue type; [their guide](webservice/maintenance.md) explains the evidence.
 [Reports](https://aranami.toolforge.org/reports/) lists the on-wiki reports,

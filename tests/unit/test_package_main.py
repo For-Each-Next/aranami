@@ -25,7 +25,7 @@ class TestPackageMain(TestCase):
         config = run.call_args.args[0]
         assert not config.dry
         assert config.run_immediately
-        assert config.output == Path("data/parsed/dashboard.parquet")
+        assert config.output == Path("data/parsed/dashboard.json")
         assert config.interval == 3600  # ruff: ignore[magic-value-comparison]
 
     def test_cli_options_select_output_mode_and_startup_timing(self) -> None:
@@ -71,8 +71,6 @@ class TestPackageMain(TestCase):
                 "2",
                 "--news-history-interval-hours",
                 "3",
-                "--backlog-interval-hours",
-                "4",
             ])
         config = run.call_args.args[0]
         assert config.output == Path("cache/custom.json")
@@ -87,7 +85,6 @@ class TestPackageMain(TestCase):
             "dyk": 6 * 3600,
             "pageviews": 2 * 3600,
             "news_history": 3 * 3600,
-            "backlog": 4 * 3600,
             "newsletter": 24 * 3600,
         }
 
@@ -98,6 +95,7 @@ class TestPackageMain(TestCase):
             ["--days", "366"],
             ["--port", "65536"],
             ["--recognized-interval-hours", "-1"],
+            ["--backlog-interval-hours", "4"],
         ):
             with (
                 self.subTest(options=options),

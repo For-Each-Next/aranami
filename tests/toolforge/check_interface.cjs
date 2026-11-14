@@ -10,6 +10,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { once } = require("node:events");
+const { createInterface } = require("node:readline");
 
 const fixtureRoot = path.resolve(process.argv[2]);
 const outputRoot = path.resolve(process.argv[3]);
@@ -19,7 +20,7 @@ const chromium = process.env.ARANAMI_CHROMIUM || "/Applications/Chromium.app/Con
 const widths = [320, 390, 600, 601, 639, 640, 641, 768, 943, 944, 1120, 1440, 1680, 1920];
 const locales = ["en", "zh-hans", "zh-hant"];
 const selectedSurfaces = process.env.ARANAMI_CHECK_SURFACES?.split(",");
-const surfaces = ["home", "discussions", "quality-authorship", "quality-analysis", "backlog", "checks", "maintenance", "consistency", "quarterly", "reports", "reports2", "logs", "dataset", "about", "contentcredits", "maintenancecredits", "codex", "gpl", "lgpl", "error", "newsletter"].filter(surface => !selectedSurfaces || selectedSurfaces.includes(surface));
+const surfaces = ["home", "discussions", "quality-authorship", "quality-analysis", "checks", "consistency", "quarterly", "reports", "reports2", "logs", "dataset", "about", "contentcredits", "maintenancecredits", "codex", "gpl", "lgpl", "error", "newsletter"].filter(surface => !selectedSurfaces || selectedSurfaces.includes(surface));
 const failures = [];
 fs.mkdirSync(outputRoot, { recursive: true });
 
@@ -48,6 +49,24 @@ async function main() {
 }
 
 async function checkInterface(assetRoot) {
+    const chartRequests = new Map();
+    let chartSequence = 0;
+    const chartWorker = spawn(path.resolve(__dirname, '../../.venv/bin/python'), ['-u', path.join(__dirname, 'chart_fixture_server.py'), fixtureRoot], {
+        cwd: path.resolve(__dirname, '../..'),
+        env: {...process.env, PYTHONPATH:'src:tests/toolforge', PYWIKIBOT_NO_USER_CONFIG:'2', MPLCONFIGDIR:path.join(outputRoot,'matplotlib-cache')},
+        stdio:['pipe', 'pipe', 'pipe'],
+    });
+    let chartErrors = '';
+    chartWorker.stderr.on('data', chunk => chartErrors += chunk.toString());
+    createInterface({input:chartWorker.stdout}).on('line', line => {
+        const result = JSON.parse(line), operation = chartRequests.get(result.id);
+        chartRequests.delete(result.id);
+        operation?.resolve(result);
+    });
+    chartWorker.on('exit', code => {
+        for (const operation of chartRequests.values()) operation.reject(new Error('Chart renderer exited ' + code + ': ' + chartErrors.slice(-1000)));
+        chartRequests.clear();
+    });
     let pendingStartupScripts;
     let pendingQualityCatalogs;
     let pendingQualityDetails;
@@ -58,11 +77,22 @@ async function checkInterface(assetRoot) {
     const server = http.createServer((request, response) => {
         const requestURL = new URL(request.url, "http://localhost");
         const locale = locales.includes(requestURL.searchParams.get('lang')) ? requestURL.searchParams.get('lang') : 'en';
+        if (requestURL.pathname === '/quality-analysis/charts/') {
+            const id = ++chartSequence;
+            bounded(new Promise((resolve, reject) => {
+                chartRequests.set(id, {resolve, reject});
+                chartWorker.stdin.write(JSON.stringify({id, query:requestURL.searchParams.toString()}) + '\n');
+            }), 'Matplotlib chart render', 30000).then(result => {
+                response.setHeader('Content-Type', 'application/json; charset=utf-8');
+                response.writeHead(result.status).end(JSON.stringify(result.body));
+            }).catch(error => response.writeHead(500).end(JSON.stringify({error:error.message})));
+            return;
+        }
         const attribution = {
             '/checks/': 'checks',
             '/discussions/': 'discussions',
-            '/quality-analysis/': requestURL.searchParams.get('count_b') === '1' ? 'quality-analysis-b' : 'quality-analysis',
-            '/quality-authorship/': requestURL.searchParams.get('count_b') === '1' ? 'quality-authorship-b' : 'quality-authorship',
+            '/quality-analysis/': 'quality-analysis',
+            '/quality-authorship/': 'quality-authorship',
             '/reports/': requestURL.searchParams.get('page') === '2' ? 'reports2' : 'reports',
             '/data/': requestURL.searchParams.get('page') === '2' ? 'dataset2' : 'dataset',
             '/assets/icons/credits.html': 'contentcredits',
@@ -71,7 +101,7 @@ async function checkInterface(assetRoot) {
             '/assets/icons/gpl-2.0.html': 'gpl',
             '/assets/icons/lgpl-2.1.html': 'lgpl',
         }[requestURL.pathname];
-        const pathname = attribution ? `/${locale}/${attribution}.html` : requestURL.pathname === '/maintenance/' ? `/${locale}/maintenance.html` : requestURL.pathname;
+        const pathname = attribution ? `/${locale}/${attribution}.html` : requestURL.pathname;
         if (qualityDetailScriptsUnavailable && pathname.endsWith('.js')) {
             response.writeHead(503).end(); return;
         }
@@ -205,19 +235,19 @@ async function checkInterface(assetRoot) {
                     const heading = table.tHead.rows[0].cells[0];
                     const cell = [...table.tBodies[0].rows].find(row => !row.hidden)?.cells[0];
                     const fontSize = parseFloat(getComputedStyle(heading).fontSize);
-                    const width = heading.getBoundingClientRect().width;
-                    if (!cell) return {width, target: fontSize * 4, fits: true};
+                    const width = heading.getBoundingClientRect().width, target = fontSize * (table.closest("dialog") ? 5 : 4);
+                    if (!cell) return {width, target, fits: true};
                     const original = cell.textContent;
                     cell.textContent = '999';
                     const range = document.createRange(); range.selectNodeContents(cell);
                     const text = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
                     const fits = text.left >= box.left && text.right <= box.right && getComputedStyle(cell).whiteSpace === 'nowrap';
                     cell.textContent = original;
-                    return {width, target: fontSize * 4, fits, aligned: getComputedStyle(heading).textAlign === 'center' && ['right', 'end'].includes(getComputedStyle(cell).textAlign)};
+                    return {width, target, fits, aligned: getComputedStyle(heading).textAlign === 'center' && ['right', 'end'].includes(getComputedStyle(cell).textAlign)};
                 });
             })()`);
             assert.ok(columns.length > 0 && columns.every(column => Math.abs(column.width - column.target) <= 1 && column.fits && column.aligned !== false),
-                'quality ordinal columns must stay four em wide with centered headings and right-aligned three-digit values: ' + JSON.stringify(columns));
+                'quality ordinal columns must stay four em wide, or five in dialogs, with centered headings and right-aligned three-digit values: ' + JSON.stringify(columns));
         };
         const checkQualityTableLayout = async locale => {
             const tables = await evaluate(`(() => [...document.querySelectorAll('.quality-data-table')].filter(table => table.getBoundingClientRect().width > 0).map(table => {
@@ -241,6 +271,12 @@ async function checkInterface(assetRoot) {
                     }
                     authorDirectory = {width:originalWidth, target:Math.max(scroller.clientWidth, parseFloat(getComputedStyle(table).minInlineSize)),
                         countWidth:widths[columns.findIndex(column => column.classList.contains('quality-column-count'))], countTarget:font * 8,
+                        activeWidth:widths[columns.findIndex(column => column.classList.contains('quality-column-active'))], activeTarget:font * 18,
+                        activeSingleLine:[...table.tBodies[0].rows].filter(row => !row.hidden && row.cells[3].querySelector('time')).every(row => {
+                            const range = document.createRange(); range.selectNodeContents(row.cells[3]);
+                            return [...range.getClientRects()].every(rect => Math.abs(rect.top - range.getBoundingClientRect().top) < font);
+                        }),
+                        nameHeading:headings[title].textContent.trim(),
                         wraps, stable:Math.abs(table.getBoundingClientRect().width - originalWidth) <= 1};
                 }
                 return {kind:table.className, widths, centered: headings.every(cell => getComputedStyle(cell).textAlign === 'center' && (!cell.querySelector('button') || getComputedStyle(cell.querySelector('button')).justifyContent === 'center')), widerTitle: compact.every(width => widths[title] > width * 1.2),
@@ -251,7 +287,7 @@ async function checkInterface(assetRoot) {
             assert.ok(tables.length > 0 && tables.every(table => table.centered && table.widerTitle && table.localScroll && table.fits), 'article/user names need more room than compact columns and overflow must stay in table scrollers: ' + JSON.stringify(tables));
             assert.ok(tables.every(table => table.missing.every(text => text.includes(table.missingLabel) && !text.includes(table.misleadingLabel))), 'missing listing dates must use the localized unavailable date label: ' + JSON.stringify(tables));
             const directories = tables.flatMap(table => table.authorDirectory ? [table.authorDirectory] : []);
-            assert.ok(directories.every(table => Math.abs(table.width - table.target) <= 1 && Math.abs(table.countWidth - table.countTarget) <= 1 && table.wraps && table.stable), 'author directories must fill the available width, wrap long names and preserve count width: ' + JSON.stringify(directories));
+            assert.ok(directories.every(table => Math.abs(table.width - table.target) <= 1 && Math.abs(table.countWidth - table.countTarget) <= 1 && Math.abs(table.activeWidth - table.activeTarget) <= 1 && table.activeSingleLine && table.nameHeading === interfaceMessages['quality_analysis.contributors'][locale] && table.wraps && table.stable), 'author directories must fill the available width, wrap long names and preserve count width: ' + JSON.stringify(directories));
         };
         const checkQualityText = async phase => {
             const unresolved = await evaluate(`(() => {
@@ -330,54 +366,32 @@ async function checkInterface(assetRoot) {
             assert.ok(states.every(state => state.actual === state.expected), 'author detail ranges must match visible ordinals and eligible totals: ' + JSON.stringify(states));
         };
         const checkQualityDistributions = async phase => {
-            const state = await evaluate(`(() => {
-                const counts = [...document.querySelectorAll('.analysis-count')].map(label => {
-                    const number = label.querySelector('span'), percent = label.querySelector('small');
-                    const saved = [number.textContent, percent.textContent];
-                    number.textContent = '13,074'; percent.textContent = '100.0%';
-                    const countRange = document.createRange(); countRange.selectNodeContents(number);
-                    const shareRange = document.createRange(); shareRange.selectNodeContents(percent);
-                    const countBox = countRange.getBoundingClientRect(), shareBox = shareRange.getBoundingClientRect(), cell = label.closest('td').getBoundingClientRect();
-                    const fits = countBox.right <= shareBox.left && countBox.left >= cell.left && shareBox.right <= cell.right;
-                    [number.textContent, percent.textContent] = saved;
-                    return fits;
-                });
-                const violins = [...document.querySelectorAll('.analysis-mini-violin')].map(svg => {
-                    const median = svg.querySelector('.analysis-violin-median');
-                    const dots = [...svg.querySelectorAll('.analysis-violin-quartile')];
-                    const extrema = [...svg.querySelectorAll('.analysis-violin-extreme')];
-                    const wholeTitle = svg.querySelector(':scope > title');
-                    const mean = svg.querySelector('.analysis-violin-mean');
-                    const label = svg.getAttribute('aria-label') || '';
-                    const markers = median ? dots.length === 2 && dots.map(dot => dot.dataset.percentile).join(',') === '25,75' && dots.every(dot => dot.getAttribute('x1') === dot.getAttribute('x2') && dot.getAttribute('y1') === dot.getAttribute('y2') && getComputedStyle(dot).strokeLinecap === 'round') && Number(dots[0].getAttribute('x1')) <= Number(median.getAttribute('x1')) && Number(median.getAttribute('x1')) <= Number(dots[1].getAttribute('x1')) : dots.length === 0;
-                    const form = document.querySelector('[data-quality-matrix]'), metadata = form.qualityMetadata;
-                    let values = true, coordinates = true;
-                    if (metadata) {
-                        const checked = new Set([...form.querySelectorAll('[data-matrix-cell]:checked')].map(input => input.dataset.grade + '/' + input.dataset.importance));
-                        const group = svg.closest('a').dataset.chartGroup, code = svg.dataset.analysisViolin;
-                        const from = Number(form.querySelector('[data-matrix-from]').value), to = Number(form.querySelector('[data-matrix-to]').value), unknown = form.querySelector('[data-matrix-unknown]').checked;
-                        const cells = metadata.cells.filter(cell => checked.has(cell.grade + '/' + cell.importance) && cell[group] === code && (cell.year === null ? unknown : cell.year >= from && cell.year <= to));
-                        const sample = cells.flatMap(cell => cell.histogram.flatMap(item => Array(item.count).fill(item.value))).sort((a, b) => a - b);
-                        const number = value => { if (value === null) return '—'; const scale = 10 ** Math.max(0, Math.floor(Math.log10(value)) - 1); return (Math.round(value / scale) * scale).toLocaleString('en-US'); };
-                        const count = value => value.toLocaleString('en-US');
-                        const percentile = p => { if (!sample.length) return null; const position = (sample.length - 1) * p; return sample[Math.floor(position)] + (sample[Math.ceil(position)] - sample[Math.floor(position)]) * (position % 1); };
-                        const expected = metadata.labels.violin_summary.replace('{pages}', count(cells.reduce((total, cell) => total + cell.pages, 0))).replace('{measured}', count(cells.reduce((total, cell) => total + cell.measured, 0))).replace('{minimum}', number(sample.length ? sample[0] : null)).replace('{p25}', number(percentile(.25))).replace('{p50}', number(percentile(.5))).replace('{p75}', number(percentile(.75))).replace('{maximum}', number(sample.length ? sample.at(-1) : null));
-                        values = label.endsWith(expected);
-                        const markerTitle = (kind, value) => metadata.labels['violin_' + kind].replace('{value}', number(value));
-                        const meanValue = sample.length ? sample.reduce((sum, value) => sum + value, 0) / sample.length : null;
-                        const titles = sample.length ? median?.querySelector('title')?.textContent === markerTitle('p50', percentile(.5)) && dots.every(dot => dot.querySelector('title')?.textContent === markerTitle('p' + dot.dataset.percentile, percentile(Number(dot.dataset.percentile) / 100))) && extrema.every(mark => mark.querySelector('title')?.textContent === markerTitle(mark.dataset.extreme, mark.dataset.extreme === 'minimum' ? sample[0] : sample.at(-1))) && mean?.querySelector('title')?.textContent === markerTitle('mean', meanValue) : !svg.querySelector('title');
-                        values = values && titles;
-                        const maximum = Math.max(25000, ...metadata.cells.flatMap(cell => cell.histogram.filter(item => item.count > 0).map(item => item.value)));
-                        const coordinate = value => value <= 25000 ? Math.max(0, value / 25000 * 900) : maximum <= 25000 ? 900 : Math.min(1000, 900 + 100 * Math.log(value / 25000) / Math.log(maximum / 25000));
-                        coordinates = metadata.length_scale_maximum === maximum && (sample.length ? median && Math.abs(Number(median.getAttribute('x1')) - coordinate(percentile(.5))) <= .011 && dots.every(dot => Math.abs(Number(dot.getAttribute('x1')) - coordinate(percentile(Number(dot.dataset.percentile) / 100))) <= .011) : !median && !dots.length);
-                        coordinates = coordinates && (sample.length ? extrema.length === 2 && extrema.every((mark, index) => mark.dataset.extreme === (index ? 'maximum' : 'minimum') && Math.abs(Number(mark.getAttribute('x1')) - coordinate(index ? sample.at(-1) : sample[0])) <= .011 && mark.getAttribute('x1') === mark.getAttribute('x2') && mark.getAttribute('y1') === '17' && mark.getAttribute('y2') === '43' && getComputedStyle(mark).strokeWidth === getComputedStyle(median).strokeWidth) : extrema.length === 0);
-                        coordinates = coordinates && (sample.length ? mean && Math.abs(Number(mean.dataset.meanX) - coordinate(meanValue)) <= .011 && mean.querySelectorAll('line').length === 2 : !mean);
-                    }
-                    return {markers: markers && coordinates, caption: values && Boolean(label) && !wholeTitle && !svg.closest('a').getAttribute('title') && !document.querySelector('#analysis-violin-note')};
-                });
-                return {counts: counts.length > 0 && counts.every(Boolean), violins: violins.length > 0 && violins.every(item => item.markers && item.caption), fits: document.documentElement.scrollWidth <= innerWidth + 1};
+            await evaluate(`(async () => {
+                const deadline = performance.now() + 30000;
+                while (document.querySelector('[data-quality-charts-loading="1"]')) {
+                    if (performance.now() > deadline) throw new Error('Filtered Matplotlib charts did not finish');
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                }
             })()`);
-            assert.deepEqual(state, {counts: true, violins: true, fits: true}, phase + ': distribution counts, quartile markers and captions must fit without page overflow');
+            const state = await evaluate(`(() => {
+                const form = document.querySelector('[data-quality-matrix]'), metadata = form.qualityMetadata;
+                const checked = new Set([...form.querySelectorAll('[data-matrix-cell]:checked')].map(input => input.dataset.grade + '/' + input.dataset.importance));
+                const from = Number(form.querySelector('[data-matrix-from]').value), to = Number(form.querySelector('[data-matrix-to]').value), unknown = form.querySelector('[data-matrix-unknown]').checked;
+                const violins = [...document.querySelectorAll('.analysis-mini-violin')].map(svg => {
+                    const anchor = svg.querySelector('a[data-chart-group]'), group = anchor?.dataset.chartGroup, code = svg.dataset.analysisViolin;
+                    const cells = metadata.cells.filter(cell => checked.has(cell.grade + '/' + cell.importance) && cell[group] === code && (cell.year === null ? unknown : cell.year >= from && cell.year <= to));
+                    const sample = cells.flatMap(cell => cell.histogram.flatMap(item => Array(item.count).fill(item.value))).sort((a,b) => a-b);
+                    const percentile = p => { const position = (sample.length - 1) * p; return sample[Math.floor(position)] + (sample[Math.ceil(position)] - sample[Math.floor(position)]) * (position % 1); };
+                    const values = sample.length ? {minimum:sample[0], p25:percentile(.25), p50:percentile(.5), p75:percentile(.75), maximum:sample.at(-1), mean:sample.reduce((sum,value) => sum+value,0)/sample.length} : {};
+                    const marks = [...svg.querySelectorAll('[data-statistic]')];
+                    return svg.dataset.chartRenderer === 'matplotlib' && Boolean(svg.getAttribute('aria-label'))
+                        && marks.length === Object.keys(values).length && marks.every(mark => Math.abs(Number(mark.dataset.value) - values[mark.dataset.statistic]) < .001 && Boolean(mark.querySelector('title')?.textContent));
+                });
+                const plots = [...document.querySelectorAll('[data-quality-chart] > svg')];
+                return {matplotlib:plots.length === 3 && plots.every(svg => svg.dataset.chartRenderer === 'matplotlib'),
+                    violins:violins.length > 0 && violins.every(Boolean), fits:document.documentElement.scrollWidth <= innerWidth + 1};
+            })()`);
+            assert.deepEqual(state, {matplotlib:true, violins:true, fits:true}, phase + ': actual Matplotlib plots must preserve saved statistic values and fit the page');
             await checkQualityText(phase);
         };
         const inputCapabilities = await evaluate(`({
@@ -453,194 +467,6 @@ async function checkInterface(assetRoot) {
                 assert.ok(form.action?.startsWith("/"), "form needs a local action");
                 assert.ok(form.submit || form.issueSelection || form.dateSelection || form.pageSize || form.qualityFilter, "form needs a native submit control or enhanced selection navigation");
             }
-        };
-        const checkMaintenancePaginationStatus = async () => {
-            const visible = await evaluate(`(() => [...document.querySelectorAll('.ui-table-pager__center > div')]
-                .filter(status => status.getBoundingClientRect().height > 0 && getComputedStyle(status).display !== 'none')
-                .map(status => ({text: status.textContent.trim(), fits: status.scrollWidth <= status.clientWidth + 1})))()`);
-            assert.equal(visible.length, 1, 'exactly one responsive article-count label must be visible');
-            assert.ok(visible[0].text && visible[0].fits, 'article count must remain readable within the pager');
-        };
-        const checkMaintenanceControls = async (scriptsEnabled = true) => {
-            const controls = await evaluate(`(() => {
-                const table = document.querySelector('.maintenance-table');
-                const navigation = document.querySelector('.maintenance-navigation');
-                const worklist = document.querySelector('.maintenance-worklist');
-                const caption = document.querySelector('.ui-table__header__caption');
-                const search = document.querySelector('.maintenance-search');
-                const initial = Object.fromEntries(new FormData(search));
-                const originalUrl = location.href;
-                const submit = (form, button) => {
-                    if (!${scriptsEnabled}) {
-                        const data = new FormData(form, button);
-                        return {values: Object.fromEntries(data), unique: [...data.keys()].length === new Set(data.keys()).size};
-                    }
-                    let result;
-                    form.addEventListener('submit', event => {
-                        event.preventDefault();
-                        const data = new FormData(form, event.submitter);
-                        result = {values: Object.fromEntries(data), unique: [...data.keys()].length === new Set(data.keys()).size};
-                    }, {once: true});
-                    button.click();
-                    return result;
-                };
-                const sorts = [...table.querySelectorAll('.ui-table__table__sort-button')].map(button => {
-                    const form = button.form;
-                    const submitted = submit(form, button);
-                    return { ...submitted, method: form.method, action: form.getAttribute('action'),
-                        state: button.closest('th').getAttribute('aria-sort'),
-                        icon: button.querySelector('use').getAttribute('href'),
-                        native: button.tagName === 'BUTTON' && button.type === 'submit' && !button.disabled,
-                        visible: button.getBoundingClientRect().height > 0 };
-                });
-                const query = search.querySelector('input[type=search]');
-                const previousQuery = query.value;
-                query.value = 'Game 0 & <title>';
-                const searched = submit(search, search.querySelector('button[type=submit]'));
-                query.value = previousQuery;
-                const pager = document.querySelector('.ui-table-pager');
-                const limit = pager.querySelector('select[name=limit]');
-                const sizeForm = limit.form;
-                const sizeButton = sizeForm.querySelector('button[type=submit]');
-                const previousLimit = limit.value;
-                let sizeSubmission;
-                limit.value = '20';
-                let automatic = false;
-                if (${scriptsEnabled}) {
-                    sizeForm.addEventListener('submit', event => {
-                        event.preventDefault();
-                        sizeSubmission = Object.fromEntries(new FormData(sizeForm, event.submitter));
-                    }, {once: true});
-                    limit.dispatchEvent(new Event('change', {bubbles: true}));
-                    automatic = Boolean(sizeSubmission);
-                    if (!automatic) sizeButton?.click();
-                } else sizeSubmission = Object.fromEntries(new FormData(sizeForm, sizeButton));
-                limit.value = previousLimit;
-                const paged = {
-                    regions: ['start', 'center', 'end'].every(region => pager.querySelector('.ui-table-pager__' + region)),
-                    sizes: [...limit.options].map(option => option.value),
-                    size: limit.value,
-                    sizeSubmission, automatic, submitVisible: Boolean(sizeButton?.getBoundingClientRect().height > 0),
-                    status: pager.querySelector('.ui-table-pager__center').textContent.trim(),
-                    controls: [...pager.querySelectorAll('.ui-table-pager__end [data-page]')].map(control => ({
-                        direction: control.dataset.page, disabled: control.disabled === true,
-                        label: control.getAttribute('aria-label'), href: control.getAttribute('href'),
-                        icon: Boolean(control.querySelector('svg use')), visible: control.getBoundingClientRect().height > 0,
-                    })),
-                };
-                return {initial, sorts, searched, paged, unchangedUrl: location.href === originalUrl,
-                    menuOutside: !worklist.contains(navigation) && navigation.contains(document.querySelector('.maintenance-menu')),
-                    menuAbove: navigation.getBoundingClientRect().bottom <= worklist.getBoundingClientRect().top,
-                    caption: caption.textContent.trim(), nativeCaption: table.caption.textContent.trim(),
-                    visibleCaption: caption.getBoundingClientRect().height > 0,
-                    searchInHeader: Boolean(search.closest('.ui-table__header')),
-                    oldControls: Boolean(document.querySelector('.maintenance-controls, .assessment-filter, .genre-filter, select[name=sort], input[name=order][type=radio]'))};
-            })()`);
-            assert.equal(controls.oldControls, false, 'removed maintenance panel controls returned');
-            assert.ok(controls.menuOutside && controls.menuAbove, 'category menu must sit outside and above the table');
-            assert.ok(controls.visibleCaption && controls.caption, 'current category needs a visible table caption');
-            assert.equal(controls.caption, controls.nativeCaption, 'visible category differs from accessible table caption');
-            assert.equal(controls.searchInHeader, true, 'title search must sit in the table header');
-            assert.deepEqual(controls.sorts.map(sort => sort.values.sort), ['title', 'class', 'importance', 'oldest']);
-            for (const sort of controls.sorts) {
-                const active = sort.values.sort === controls.initial.sort;
-                const expectedOrder = active ? (controls.initial.order === 'asc' ? 'desc' : 'asc')
-                    : ['class', 'importance'].includes(sort.values.sort) ? 'desc' : 'asc';
-                assert.equal(sort.values.order, expectedOrder, 'clicked sort submitter did not send its next direction');
-                assert.equal(sort.values.task, controls.initial.task, 'sorting changed the category');
-                assert.equal(sort.values.page, undefined, 'changing sort must reset pagination');
-                assert.equal(sort.unique, true, 'sorting submitted duplicate query fields');
-                assert.equal(sort.method, 'get');
-                assert.equal(sort.action, '/maintenance/');
-                assert.ok(sort.native && sort.visible, 'sort control must remain a visible native submit button');
-                assert.equal(sort.state, active ? (controls.initial.order === 'asc' ? 'ascending' : 'descending') : 'none');
-                assert.ok(sort.icon.endsWith('#sort-' + (active ? controls.initial.order : 'none')), 'sort arrow differs from active ordering');
-            }
-            assert.equal(controls.searched.values.q, 'Game 0 & <title>');
-            assert.equal(controls.searched.values.task, controls.initial.task);
-            assert.equal(controls.searched.values.sort, controls.initial.sort);
-            assert.equal(controls.searched.values.order, controls.initial.order);
-            assert.equal(controls.searched.values.page, undefined, 'title search must reset pagination');
-            assert.equal(controls.searched.values.regex, undefined, 'header search must submit a literal title query');
-            assert.equal(controls.searched.unique, true);
-            assert.equal(controls.unchangedUrl, true, 'intercepted native forms unexpectedly navigated');
-            assert.ok(controls.paged.regions && controls.paged.status, 'native pager needs size, status, and navigation regions');
-            assert.deepEqual(controls.paged.sizes, ['10', '20', '50']);
-            assert.equal(controls.paged.size, '10');
-            assert.equal(controls.paged.automatic, scriptsEnabled, 'page size changes should auto-submit only after enhancement');
-            assert.equal(controls.paged.submitVisible, !scriptsEnabled, 'page size submit button must remain available without JavaScript');
-            assert.equal(controls.paged.sizeSubmission.limit, '20');
-            assert.equal(controls.paged.sizeSubmission.page, undefined, 'changing page size must reset pagination');
-            assert.equal(controls.paged.sizeSubmission.task, controls.initial.task);
-            assert.equal(controls.paged.sizeSubmission.sort, controls.initial.sort);
-            assert.equal(controls.paged.sizeSubmission.order, controls.initial.order);
-            assert.deepEqual(controls.paged.controls.map(control => control.direction), ['first', 'previous', 'next', 'last']);
-            for (const control of controls.paged.controls) {
-                assert.ok(control.label && control.icon && control.visible, 'pager control needs a visible icon and localized name');
-                if (['first', 'previous'].includes(control.direction)) {
-                    assert.equal(control.disabled, true, 'first and previous must be disabled on the first page');
-                    assert.equal(control.href, null);
-                } else {
-                    assert.equal(control.disabled, false);
-                    const url = new URL(control.href, 'https://aranami.example');
-                    assert.equal(url.pathname, '/maintenance/');
-                    assert.equal(url.searchParams.get('task'), controls.initial.task);
-                    assert.equal(url.searchParams.get('sort'), controls.initial.sort);
-                    assert.equal(url.searchParams.get('order'), controls.initial.order);
-                    assert.equal(url.searchParams.get('page'), control.direction === 'next' ? '2' : '11');
-                }
-            }
-            await evaluate(`(() => {
-                const menu = document.querySelector('.maintenance-menu');
-                menu.open = false;
-                menu.querySelector('summary').focus();
-            })()`);
-            await press('Enter', 13);
-            assert.equal(await evaluate("document.querySelector('.maintenance-menu').open"), true, 'category menu must open from the keyboard');
-            await press('Tab', 9);
-            assert.equal(await evaluate("document.activeElement === document.querySelector('.maintenance-menu a')"), true, 'category links must follow the menu trigger in keyboard order');
-            if (scriptsEnabled) {
-                const menuLabel = await evaluate("document.documentElement.lang.toLowerCase() + '-maintenance-menu-' + innerWidth");
-                const shot = await call('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false}, sessionId);
-                fs.writeFileSync(path.join(outputRoot, menuLabel + '.png'), Buffer.from(shot.data, 'base64'));
-            }
-            const menu = await evaluate(`(() => {
-                const menu = document.querySelector('.maintenance-menu');
-                const list = menu.querySelector('ul');
-                const links = [...list.querySelectorAll('a')];
-                const current = links.filter(link => link.getAttribute('aria-current') === 'page');
-                const urls = links.map(link => new URL(link.href));
-                const added = [];
-                // Exercise a full catalogue even when the saved fixture has only two categories.
-                while (list.children.length < 40) {
-                    const item = list.firstElementChild.cloneNode(true);
-                    item.querySelector('a').textContent = 'Articles needing cleanup and additional reliable references';
-                    list.append(item);
-                    added.push(item);
-                }
-                const last = list.lastElementChild.querySelector('a');
-                last.focus();
-                const box = list.getBoundingClientRect();
-                const labelStyle = getComputedStyle(last);
-                const result = {current: current.length, label: current[0]?.textContent.trim(),
-                    links: urls.every(url => url.pathname === '/maintenance/' && url.searchParams.has('task') && url.searchParams.get('page') === '1'),
-                    contained: box.left >= 0 && box.right <= innerWidth + 1 && box.bottom <= innerHeight + 1,
-                    width: box.width, minimumWidth: Math.min(256, innerWidth - 64),
-                    readable: last.getBoundingClientRect().height <= parseFloat(labelStyle.lineHeight) * 4
-                        + parseFloat(labelStyle.paddingTop) + parseFloat(labelStyle.paddingBottom),
-                    scrollable: list.scrollHeight > list.clientHeight && list.scrollTop > 0};
-                added.forEach(item => item.remove());
-                list.scrollTop = 0;
-                menu.querySelector('summary').focus();
-                return result;
-            })()`);
-            assert.equal(menu.current, 1, 'category menu must identify one current category');
-            assert.equal(menu.label, controls.caption);
-            assert.ok(menu.links, 'category links must reset pagination');
-            assert.ok(menu.contained && menu.scrollable, 'long category menu must scroll within the viewport');
-            assert.ok(menu.width >= menu.minimumWidth - 1 && menu.readable, 'category menu must retain enough width for readable long labels');
-            await press('Enter', 13);
-            assert.equal(await evaluate("document.querySelector('.maintenance-menu').open"), false, 'category menu must close from the keyboard');
         };
         const checkContents = async () => {
             const checkVertical = async selector => {
@@ -1262,24 +1088,6 @@ async function checkInterface(assetRoot) {
                     assert.equal(metrics.unknown, 1, 'unknown evidence stays explicitly unknown');
                     assert.ok(metrics.zero, 'observed zero must remain a numeric zero');
                 }
-                if (surface === "maintenance") {
-                    await checkMaintenancePaginationStatus();
-                    const table = await evaluate(`(() => {
-                        const table = document.querySelector('.maintenance-table');
-                        const scroll = table.closest('.table-scroll');
-                        const headers = [...table.querySelectorAll('thead th')];
-                        const cells = [...table.querySelector('tbody tr:not([hidden])').children];
-                        const aligned = headers.length === cells.length && headers.every((header, index) => Math.abs(header.getBoundingClientRect().left - cells[index].getBoundingClientRect().left) < 1);
-                        const before = scroll.scrollLeft;
-                        scroll.scrollLeft = 60;
-                        const scrollable = scroll.scrollWidth <= scroll.clientWidth || scroll.scrollLeft > before;
-                        scroll.scrollLeft = 0;
-                        return {display: getComputedStyle(table).display, headers: headers.every(header => header.getBoundingClientRect().height > 0), aligned, scrollable, contained: scroll.getBoundingClientRect().right <= innerWidth};
-                    })()`);
-                    assert.equal(table.display, "table", "worklist must retain table layout below 640 pixels");
-                    assert.ok(table.headers && table.aligned, "worklist headers and cells lost column alignment");
-                    assert.ok(table.scrollable && table.contained, "wide worklist must scroll locally within the viewport");
-                }
                 if (surface === "logs") {
                     assert.ok(layout.archives.length >= 1, "segment reading links missing");
                     assert.ok(layout.archives.every(link => link.visible && link.inline), "archive filenames must open inline without forced downloads");
@@ -1456,7 +1264,7 @@ async function checkInterface(assetRoot) {
                             assert.equal(card.article, true, "article title link missing");
                         }
                     }
-                    assert.equal(await evaluate("document.querySelectorAll('#tool-status, #backlog').length"), 0, "dashboard must keep report monitoring and maintenance on their own pages");
+                    assert.equal(await evaluate("document.querySelectorAll('#tool-status, #backlog').length"), 0, "dashboard must omit report monitoring and retired maintenance sections");
                     const cards = await evaluate(`(() => [...document.querySelectorAll('.article-card-body')].map(card => ({
                         tag: card.tagName,
                         heading: card.querySelector('h3')?.id,
@@ -1669,23 +1477,6 @@ async function checkInterface(assetRoot) {
                     const checks = await evaluate(`(() => ({groups: document.querySelectorAll('.consistency-group').length, findings: document.querySelectorAll('.consistency-findings article.consistency-card').length, tables: document.querySelectorAll('.maintenance-table').length, timestamp: Boolean(document.querySelector('.consistency-section > .source-updated time[datetime]')), navigation: Boolean(document.querySelector('.global-navigation .navigation-tools a[href="/checks/"]'))}))()`);
                     assert.deepEqual(checks, {groups: 2, findings: 2, tables: 0, timestamp: true, navigation: true}, 'the separate check tool groups issue lists and retains its own update time');
                 }
-                if (surface === "backlog") {
-                    assert.equal(await evaluate("document.querySelectorAll('#backlog-section-consistency').length"), 0, "consistency must not become a maintenance count card");
-                    assert.equal(await evaluate("document.querySelectorAll('.consistency-section').length"), 0, "maintenance categories do not duplicate the check tool");
-                    assert.ok(await evaluate("document.querySelectorAll('.backlog-section h2').length > 0"), "maintenance groups should use h2 headings");
-                    assert.equal(await evaluate("document.querySelectorAll('.backlog-task .ui-thumbnail').length"), 0, "maintenance cards must not force thumbnails");
-                    const icons = await evaluate(`(async () => {
-                        const images = [...document.querySelectorAll('.backlog-task img.maintenance-icon')];
-                        await Promise.all(images.map(image => { image.loading = 'eager'; return image.decode(); }));
-                        return images.map(image => ({loaded: image.naturalWidth > 0,
-                            leading: image.classList.contains('ui-card__icon'),
-                            width: image.getBoundingClientRect().width}));
-                    })()`);
-                    assert.ok(icons.length > 0 && icons.every(image => image.loaded && image.leading && image.width === 22), "maintenance template images must load as compact credited icons");
-                }
-                if (surface === "maintenance" && (width === 320 || width === 1440)) {
-                    await checkMaintenanceControls();
-                }
                 if (surface === "quality-analysis") {
                     const metrics = await evaluate(`(() => {
                         const host = document.querySelector('[data-quality-analysis]');
@@ -1704,7 +1495,33 @@ async function checkInterface(assetRoot) {
                     assert.deepEqual(metrics, {rows: 20, records: 48, enhanced: true, unknown: true, countsHidden: true, from: '2002', firstYear: 2009, pies: 2, footer: true, sizesUnlinked: true, fits: true});
                     await checkQualityOrdinals();
                     await checkQualityTableLayout(locale);
+                    const coverage = await evaluate(`(() => {
+                        const dialog = document.getElementById('analysis-coverage-dialog');
+                        return [...document.querySelectorAll('[data-coverage-open]')].map(opener => {
+                            opener.click();
+                            const table = dialog.querySelector('table'), heading = table.tHead.rows[0].cells[0];
+                            const font = parseFloat(getComputedStyle(heading).fontSize);
+                            const result = {kind:opener.dataset.coverageOpen, open:dialog.open, empty:table.hidden,
+                                ordinal:heading.getBoundingClientRect().width, target:font * 5,
+                                fits:dialog.scrollWidth <= dialog.clientWidth + 1};
+                            dialog.close();
+                            return result;
+                        });
+                    })()`);
+                    assert.ok(coverage.length === 4 && coverage.every(state => state.open && state.fits && (state.empty || Math.abs(state.ordinal - state.target) <= 1)), 'coverage and missing-page dialogs must keep five-em ordinal columns: ' + JSON.stringify(coverage));
                     await checkQualityDistributions('initial');
+                    const chartControls = await evaluate(`(() => [...document.querySelectorAll('[data-quality-chart]')].map(host => {
+                        const svg = host.querySelector('svg'), original = svg.getAttribute('viewBox');
+                        host.querySelector('[data-chart-action="in"]').click();
+                        const zoomed = Number(svg.getAttribute('viewBox').split(' ')[2]) < Number(original.split(' ')[2]);
+                        const before = svg.getAttribute('viewBox');
+                        svg.focus(); svg.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
+                        const panned = svg.getAttribute('viewBox') !== before;
+                        host.querySelector('[data-chart-action="reset"]').click();
+                        return zoomed && panned && svg.getAttribute('viewBox') === original;
+                    })))()`);
+                    assert.ok(chartControls.length === 3 && chartControls.every(Boolean), 'Matplotlib browser controls must zoom, pan with the keyboard and reset each figure');
+
                     const initialYears = await evaluate(`(() => {
                         const data = document.querySelector('[data-quality-matrix]').qualityMetadata;
                         const expected = data.grades.filter(grade => grade.checked).map(grade => grade.label);
@@ -1949,7 +1766,7 @@ async function checkInterface(assetRoot) {
                                 rows: table.querySelectorAll('tbody tr:not([hidden])').length,
                                 shared: Boolean(dialog.querySelector('.quality-authorship-coauthors')?.getAttribute('title').includes('Author B')),
                                 firstDate: table.querySelector('tbody tr time')?.getAttribute('datetime'),
-                                featuredOnly: [...table.querySelectorAll('tbody tr:not([hidden])')].every(row => /^(FA|FL)$/.test(row.children[2].textContent.trim())),
+                                featuredOnly: [...table.querySelectorAll('tbody tr:not([hidden])')].every(row => [${JSON.stringify(locale.startsWith('zh') ? interfaceMessages['assessment.short_class.FA'][locale] : 'FA')}, ${JSON.stringify(locale.startsWith('zh') ? interfaceMessages['assessment.short_class.FL'][locale] : 'FL')}].includes(row.children[2].textContent.trim())),
                                 sortable: table.querySelectorAll('thead th button').length,
                                 dates: [...table.querySelectorAll('tbody tr:not([hidden])')].every(row => /^\\d{4}-\\d{2}-\\d{2}$/.test(row.children[3].querySelector('time')?.getAttribute('datetime'))),
                                 viewport: bounds.left >= -1 && bounds.right <= innerWidth + 1,
@@ -1980,7 +1797,7 @@ async function checkInterface(assetRoot) {
                                     });
                                 });
                             })`);
-                            assert.deepEqual(remaining, {count: 2, first: '11', sortedCount: 10, sortedGrade: 'FA'}, 'sorting a later article page must reset the pager and sort grades by rank');
+                            assert.deepEqual(remaining, {count: 2, first: '11', sortedCount: 10, sortedGrade: locale.startsWith('zh') ? interfaceMessages['assessment.short_class.FA'][locale] : 'FA'}, 'sorting a later article page must reset the pager and sort grades by rank');
                             await checkQualityAuthorPagers(locale);
                         }
                         if (id === directory.sharedTarget) assert.ok(opened.shared, 'shared articles need a tooltip identifying other qualifying authors');
@@ -1998,45 +1815,6 @@ async function checkInterface(assetRoot) {
                             requestAnimationFrame(() => resolve(!document.querySelector('dialog[open]') && document.activeElement?.getAttribute('aria-controls') === ${JSON.stringify(id)}));
                         })`), true, 'quality-author Close must restore contribution-link focus');
                     }
-                }
-                if (surface === "quality-authorship" && [320, 1440].includes(width)) {
-                    const toggle = await evaluate(`(async () => {
-                        const input = document.querySelector('[name=count_b]');
-                        const form = input.form;
-                        const results = document.querySelector('[data-quality-authorship-results]');
-                        window.__qualityToggleMarker = {};
-                        const marker = window.__qualityToggleMarker;
-                        const settle = async () => {
-                            const end = performance.now() + 6000;
-                            while (results.hasAttribute('aria-busy')) {
-                                if (performance.now() > end) throw new Error('Toggle update timed out');
-                                await new Promise(resolve => setTimeout(resolve, 20));
-                            }
-                        };
-                        input.focus(); input.click(); await settle();
-                        const included = results.dataset.countB === '1' && input.checked &&
-                            new URL(location.href).searchParams.get('count_b') === '1' &&
-                            document.querySelectorAll('[data-table-enhanced]').length > 0;
-                        const focusRetained = document.activeElement === input;
-                        const languages = [...document.querySelectorAll('.language-switcher a[hreflang]')]
-                            .every(link => new URL(link.href).searchParams.get('count_b') === '1');
-                        input.click(); await settle();
-                        const excluded = results.dataset.countB === '0' && !input.checked;
-                        input.click(); input.click(); await settle();
-                        const latestWins = results.dataset.countB === '0' && !input.checked;
-                        const originalFetch = window.fetch;
-                        window.fetch = async () => new Response('', {status: 503, headers: {'content-type': 'text/html'}});
-                        try { input.click(); await settle(); }
-                        finally { window.fetch = originalFetch; }
-                        const failedSafely = !input.checked && results.dataset.countB === '0' &&
-                            Boolean(form.querySelector('[data-quality-authorship-status]').textContent);
-                        return {included, excluded, latestWins, languages, focusRetained, failedSafely,
-                            noReload: marker === window.__qualityToggleMarker,
-                            switchRole: input.getAttribute('role'), noApplyButton: !form.querySelector('[type=submit]')};
-                    })()`);
-                    assert.deepEqual(toggle, {included: true, excluded: true, latestWins: true, languages: true,
-                        focusRetained: true, failedSafely: true, noReload: true, switchRole: 'switch', noApplyButton: true},
-                        'B-Class toggle must update instantly, preserve focus, reject stale responses and retain results on failure');
                 }
                 if (surface === "reports" || surface === "reports2") {
                     assert.equal(await evaluate("document.querySelectorAll('.page-content h2').length"), 2, "reports shows on-wiki updates and report history");
@@ -2131,14 +1909,6 @@ async function checkInterface(assetRoot) {
                         await evaluate("document.querySelector('#discussions').scrollIntoView()");
                         const discussionShot = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
                         fs.writeFileSync(path.join(outputRoot, `${locale}-discussion-${width}.png`), Buffer.from(discussionShot.data, "base64"));
-                    }
-                    if (surface === "maintenance") {
-                        await evaluate("document.querySelector('.maintenance-table').scrollIntoView()");
-                        const rows = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
-                        fs.writeFileSync(path.join(outputRoot, `${locale}-maintenance-rows-${width}.png`), Buffer.from(rows.data, "base64"));
-                        await evaluate("document.querySelector('.ui-table-pager').scrollIntoView({block: 'center'})");
-                        const pager = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
-                        fs.writeFileSync(path.join(outputRoot, `${locale}-maintenance-pager-${width}.png`), Buffer.from(pager.data, "base64"));
                     }
                 }
 
@@ -2515,173 +2285,6 @@ async function checkInterface(assetRoot) {
                 console.error(label + ': ' + error.message);
             }
         }
-        let asynchronousMaintenance = 0;
-        for (const [locale, width] of [['en', 1440], ['zh-hant', 320]]) {
-            const label = `${locale}/maintenance/${width}/asynchronous`;
-            try {
-                await call('Emulation.setDeviceMetricsOverride', {width, height: 936, deviceScaleFactor: 1, mobile: false}, sessionId);
-                const loaded = wait('Page.loadEventFired', sessionId);
-                await Promise.all([call('Page.navigate', {url: `${base}/maintenance/?task=references&sort=oldest&order=asc&lang=${locale}`}, sessionId), loaded]);
-                const behavior = await evaluate(`(async () => {
-                    const originalFetch = window.fetch;
-                    const source = await (await originalFetch(location.href)).text();
-                    const page = document.documentElement;
-                    const outside = document.querySelector('.footer-uptime');
-                    const outsideValue = outside.textContent;
-                    const menu = document.querySelector('.maintenance-menu');
-                    const originalPushState = history.pushState;
-                    let pushes = 0;
-                    history.pushState = function(...args) { pushes++; return originalPushState.apply(this, args); };
-                    const requests = [];
-                    const snapshots = [];
-                    let delayed;
-                    let delayNext = false;
-                    let sequence = 0;
-                    const responseFor = (value, marker) => {
-                        const url = new URL(value, location.href);
-                        const state = Object.fromEntries(url.searchParams);
-                        const response = new DOMParser().parseFromString(source, 'text/html');
-                        const root = response.querySelector('#maintenance-browser');
-                        const table = root.querySelector('.maintenance-worklist');
-                        table.dataset.testResponse = marker;
-                        table.querySelector('.ui-table__header__caption').textContent = 'Category ' + state.task;
-                        table.querySelector('caption').textContent = 'Category ' + state.task;
-                        table.querySelector('tbody th a').textContent = 'Fetched row ' + marker;
-                        for (const form of root.querySelectorAll('form')) {
-                            const sort = form.querySelector('.ui-table__table__sort-button');
-                            for (const input of [...form.querySelectorAll('input[type=hidden]')]) {
-                                if (!sort || input.name !== 'sort') input.remove();
-                            }
-                            for (const [name, value] of Object.entries(state)) {
-                                if (name === 'page' || sort && ['sort', 'order'].includes(name) || form.querySelector('[name="' + name + '"]')) continue;
-                                const input = response.createElement('input');
-                                input.type = 'hidden'; input.name = name; input.value = value; form.append(input);
-                            }
-                            if (sort) {
-                                const column = form.querySelector('input[name=sort]').value;
-                                const current = column === state.sort;
-                                sort.value = current ? (state.order === 'asc' ? 'desc' : 'asc') : ['class', 'importance'].includes(column) ? 'desc' : 'asc';
-                                form.closest('th').setAttribute('aria-sort', current ? (state.order === 'asc' ? 'ascending' : 'descending') : 'none');
-                            }
-                        }
-                        root.querySelector('#maintenance-query').setAttribute('value', state.q || '');
-                        for (const option of root.querySelectorAll('#maintenance-limit option')) option.toggleAttribute('selected', option.value === (state.limit || '10'));
-                        for (const link of root.querySelectorAll('.maintenance-menu a')) {
-                            const target = new URL(link.href, location.href).searchParams.get('task');
-                            const destination = new URL(url); destination.searchParams.set('task', target); destination.searchParams.set('page', '1');
-                            link.setAttribute('href', destination.href);
-                            if (target === state.task) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
-                        }
-                        for (const link of root.querySelectorAll('.ui-table-pager a')) {
-                            const destination = new URL(url);
-                            destination.searchParams.set('page', link.dataset.page === 'next' ? String(Number(state.page || 1) + 1) : '11');
-                            link.setAttribute('href', destination.href);
-                        }
-                        root.querySelector('.maintenance-source').dataset.testResponse = marker;
-                        return new Response(response.documentElement.outerHTML, {headers: {'Content-Type': 'text/html; charset=utf-8'}});
-                    };
-                    window.fetch = (url, options) => {
-                        const request = {url: String(url), method: options?.method || 'GET', signal: options?.signal, marker: String(++sequence)};
-                        requests.push(request);
-                        if (delayNext) {
-                            delayNext = false;
-                            return new Promise(resolve => { delayed = () => resolve(responseFor(url, request.marker)); });
-                        }
-                        return Promise.resolve(responseFor(url, request.marker));
-                    };
-                    const settle = async marker => {
-                        const deadline = performance.now() + 5000;
-                        while (document.querySelector('.maintenance-worklist')?.dataset.testResponse !== marker
-                            || document.querySelector('.maintenance-worklist').hasAttribute('aria-busy')) {
-                            if (performance.now() > deadline) throw new Error('Maintenance async response did not settle: ' + marker);
-                            await new Promise(resolve => requestAnimationFrame(resolve));
-                        }
-                    };
-                    const act = async (name, action) => {
-                        const next = String(sequence + 1); action(); await settle(next);
-                        snapshots.push({name, url: location.href, focus: document.activeElement.id || document.activeElement.dataset.page
-                            || (document.activeElement.matches('.maintenance-menu summary') ? 'menu' : document.activeElement.closest('form')?.querySelector('input[name=sort]')?.value),
-                            source: document.querySelector('.maintenance-source').dataset.testResponse === next});
-                    };
-                    try {
-                        await act('sort', () => { const button = [...document.querySelectorAll('.ui-table__table__sort-button')].find(button => button.form.querySelector('input[name=sort]').value === 'class'); button.focus(); button.click(); });
-                        const sortedURL = location.href;
-                        await act('task', () => { menu.open = true; const link = menu.querySelector('a:not([aria-current])'); link.focus(); link.click(); });
-                        const taskURL = location.href;
-                        await act('page', () => { const link = document.querySelector('[data-page=next]'); link.focus(); link.click(); });
-                        await act('search', () => { const input = document.querySelector('#maintenance-query'); input.focus(); input.value = 'Game <&>'; input.form.requestSubmit(); });
-                        await act('size', () => { const select = document.querySelector('#maintenance-limit'); select.focus(); select.value = '20'; select.dispatchEvent(new Event('change', {bubbles: true})); });
-                        const historyAfterActions = pushes;
-                        await act('back', () => history.back());
-                        await act('forward', () => history.forward());
-                        const historyAfterTraversal = pushes;
-                        delayNext = true;
-                        const slow = [...document.querySelectorAll('.ui-table__table__sort-button')].find(button => button.form.querySelector('input[name=sort]').value === 'title');
-                        slow.focus(); slow.click();
-                        const stale = requests.at(-1);
-                        await act('race', () => { const button = [...document.querySelectorAll('.ui-table__table__sort-button')].find(button => button.form.querySelector('input[name=sort]').value === 'importance'); button.focus(); button.click(); });
-                        const latest = document.querySelector('.maintenance-worklist');
-                        delayed(); await new Promise(resolve => setTimeout(resolve, 50));
-                        return {snapshots, sameDocument: document.documentElement === page, outsidePreserved: document.querySelector('.footer-uptime') === outside && outside.textContent === outsideValue,
-                            menuPreserved: document.querySelector('.maintenance-menu') === menu, caption: document.querySelector('.ui-table__header__caption').textContent,
-                            readOnly: requests.every(request => request.method === 'GET'), pushed: historyAfterActions,
-                            historyStable: historyAfterTraversal === historyAfterActions, sortedURL, taskURL,
-                            staleIgnored: document.querySelector('.maintenance-worklist') === latest && stale.signal.aborted,
-                            controlsReady: document.querySelector('.page-size').hasAttribute('data-auto-submit') && !document.querySelector('[data-v-app]'),
-                            noErrors: window.aranamiStartupErrors.length === 0 && window.aranamiCspViolations.length === 0};
-                    } finally { window.fetch = originalFetch; history.pushState = originalPushState; }
-                })()`);
-                assert.ok(behavior.sameDocument && behavior.outsidePreserved && behavior.menuPreserved, 'async maintenance navigation replaced the surrounding page');
-                assert.ok(behavior.readOnly && behavior.controlsReady && behavior.noErrors, 'replacement maintenance controls did not initialize cleanly');
-                assert.equal(behavior.pushed, 5, 'successful maintenance actions must each add one history entry');
-                assert.ok(behavior.historyStable && behavior.staleIgnored, 'history traversal or a stale response overwrote the current list');
-                assert.ok(behavior.snapshots.every(snapshot => snapshot.source), 'table and source metadata must update together');
-                const states = Object.fromEntries(behavior.snapshots.map(snapshot => [snapshot.name, snapshot]));
-                assert.equal(new URL(states.sort.url).searchParams.get('sort'), 'class');
-                assert.equal(new URL(states.sort.url).searchParams.get('order'), 'desc');
-                assert.equal(states.sort.focus, 'class');
-                assert.equal(new URL(states.task.url).searchParams.get('task'), 'cleanup');
-                assert.equal(states.task.focus, 'menu');
-                assert.equal(behavior.caption, 'Category cleanup');
-                assert.equal(new URL(states.page.url).searchParams.get('page'), '2');
-                assert.equal(states.page.focus, 'next');
-                assert.equal(new URL(states.search.url).searchParams.get('q'), 'Game <&>');
-                assert.equal(states.search.focus, 'maintenance-query');
-                assert.equal(new URL(states.size.url).searchParams.get('limit'), '20');
-                assert.equal(states.size.focus, 'maintenance-limit');
-                assert.equal(states.back.url, states.search.url);
-                assert.equal(states.forward.url, states.size.url);
-                assert.equal(new URL(states.race.url).searchParams.get('sort'), 'importance');
-                asynchronousMaintenance++;
-            } catch (error) {
-                failures.push({label, error: error.message});
-                console.error(`${label}: ${error.message}`);
-            }
-        }
-        let maintenanceFallbacks = 0;
-        for (const mode of ['http-error', 'empty', 'malformed']) {
-            const label = 'en/maintenance/fallback/' + mode;
-            try {
-                const loaded = wait('Page.loadEventFired', sessionId);
-                await Promise.all([call('Page.navigate', {url: `${base}/maintenance/?task=references&lang=en`}, sessionId), loaded]);
-                await evaluate(`(() => {
-                    window.maintenanceFallbackMarker = true;
-                    window.fetch = async () => new Response(${JSON.stringify(mode === 'malformed' ? '<div id="maintenance-browser">invalid maintenance content</div>' : '')}, {
-                        status: ${mode === 'http-error' ? 503 : 200}, headers: {'Content-Type': 'text/html'}
-                    });
-                })()`);
-                const fallback = wait('Page.loadEventFired', sessionId);
-                await evaluate("[...document.querySelectorAll('.ui-table__table__sort-button')].find(button => button.form.querySelector('input[name=sort]').value === 'class').click()");
-                await fallback;
-                const native = await evaluate("({reloaded: !window.maintenanceFallbackMarker, sort: new URL(location.href).searchParams.get('sort'), available: Boolean(document.querySelector('#maintenance-browser .maintenance-table'))})");
-                assert.ok(native.reloaded && native.available, 'failed async response must fall back to a usable native page');
-                assert.equal(native.sort, 'class', 'native fallback lost the requested sort');
-                maintenanceFallbacks++;
-            } catch (error) {
-                failures.push({label, error: error.message});
-                console.error(`${label}: ${error.message}`);
-            }
-        }
         await call("Emulation.setScriptExecutionDisabled", { value: true }, sessionId);
         for (const locale of locales) for (const surface of surfaces) for (const width of surface === "newsletter" ? [320, 390, 640, 1440] : [390]) {
             const label = `${locale}/${surface}/${width}/no-javascript`;
@@ -2752,10 +2355,6 @@ async function checkInterface(assetRoot) {
                     assert.equal(metrics.unknown, 1, 'unknown evidence stays explicitly unknown');
                     assert.ok(metrics.zero, 'observed zero must remain a numeric zero');
                 }
-                if (surface === "maintenance") {
-                    await checkMaintenancePaginationStatus();
-                    await checkMaintenanceControls(false);
-                }
                 if (surface === "quality-analysis") {
                     const native = await evaluate(`(() => {
                         const host = document.querySelector('[data-quality-analysis]');
@@ -2787,7 +2386,7 @@ async function checkInterface(assetRoot) {
                 }
                 if (surface === "reports" || surface === "reports2" || surface === "quality-authorship" || surface === "quality-analysis") {
                     const fallback = await evaluate(`(() => {
-                        const link = document.querySelector('a[aria-haspopup="dialog"]');
+                        const link = document.querySelector('a[aria-haspopup="dialog"][href^="#"][aria-controls]:not([data-coverage-open])');
                         const dialog = document.getElementById(link.getAttribute('aria-controls'));
                         link.click();
                         const visible = getComputedStyle(dialog).display !== 'none' && dialog.getBoundingClientRect().height > 0;
@@ -2843,11 +2442,12 @@ async function checkInterface(assetRoot) {
                 console.error(`${label}: ${error.message}`);
             }
         }
-        const result = { browser: browserVersion, inputCapabilities, stableInitializations, checked, qualityDeferredLoads, qualityResourceRetries, qualityLazyDetails, qualityDetailFallbacks, reportHistoryRaces, reportHistoryFallbacks, asynchronousMaintenance, maintenanceFallbacks, withoutJavaScript, widths, locales, surfaces, failures };
+        const result = { browser: browserVersion, inputCapabilities, stableInitializations, checked, qualityDeferredLoads, qualityResourceRetries, qualityLazyDetails, qualityDetailFallbacks, reportHistoryRaces, reportHistoryFallbacks, withoutJavaScript, widths, locales, surfaces, failures };
         fs.writeFileSync(path.join(outputRoot, "results.json"), JSON.stringify(result, null, 2));
         console.log(JSON.stringify(result, null, 2));
         assert.equal(failures.length, 0, "responsive interface checks failed");
     } finally {
+        chartWorker.kill("SIGTERM");
         socket?.close();
         browser.kill("SIGTERM");
         if (browser.exitCode === null) {

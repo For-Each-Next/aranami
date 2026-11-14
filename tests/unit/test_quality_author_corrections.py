@@ -1,7 +1,7 @@
 """Verify saved proofs reach author counts and activity readers."""
 
 # Retain explicit contributor thresholds and unittest exception style.
-# ruff: file-ignore[magic-value-comparison, private-member-access]
+# ruff: file-ignore[private-member-access]
 
 from __future__ import annotations
 
@@ -213,11 +213,12 @@ class SavedQualityAuthorCorrectionTests(TestCase):
             for path in (self.runtime / "data/parsed").rglob("*.parquet")
         }
 
-    def _save_proofs(self, *, include_b: bool = True) -> None:
+    def _save_proofs(self) -> None:
         """Retain synthetic exact-source corrections."""
-        rows = [_proof_record(1, 200, authorship_store.CONTRACT)]
-        if include_b:
-            rows.append(_proof_record(2, 300, current_authorship.CONTRACT))
+        rows = [
+            _proof_record(1, 200, authorship_store.CONTRACT),
+            _proof_record(2, 300, current_authorship.CONTRACT),
+        ]
         proofs.merge_save(self.runtime / proofs.DEFAULT_PATH, pl.concat(rows))
 
     def _assert_raw_files_unchanged(self) -> None:
@@ -226,85 +227,6 @@ class SavedQualityAuthorCorrectionTests(TestCase):
             path.read_bytes() == original
             for path, original in self.raw_files.items()
         )
-
-    def test_saved_proofs_change_hq_and_b_whole_credits_without_writes(
-        self,
-    ) -> None:
-        """Restore predecessors and retain exact 33% coauthors."""
-        before = quality_authors.read_quality_authors(self.runtime)
-        assert {row["name"] for row in before["authors"]} == {
-            "Cleanup",
-            "Exact",
-        }
-        self._save_proofs()
-        proof_bytes = (self.runtime / proofs.DEFAULT_PATH).read_bytes()
-        real_load = proofs.load
-        with (
-            patch.object(proofs, "load", wraps=real_load) as load,
-            patch.object(
-                authorship_store,
-                "save",
-                side_effect=AssertionError("raw rewrite"),
-            ),
-            patch(
-                "pywikibot.Site",
-                side_effect=AssertionError("source client"),
-            ),
-        ):
-            default = quality_authors.read_quality_authors(self.runtime)
-            load.assert_called_once_with(self.runtime / proofs.DEFAULT_PATH)
-        assert {row["name"] for row in default["authors"]} == {
-            "Original",
-            "Exact",
-        }
-        assert all(row["credit"] == 1 for row in default["authors"])
-        included = quality_authors.read_quality_authors(
-            self.runtime,
-            include_b=True,
-        )
-        assert included["b_coverage"] == {"collected": 1, "total": 1}
-        assert {row["name"] for row in included["authors"]} == {
-            "Original",
-            "Exact",
-        }
-        for row in included["authors"]:
-            assert row["credit"] == 2
-            assert row["high_quality_credit"] == 1
-            assert row["grades"]["GA"] == row["grades"]["BL"] == 1
-        self._assert_raw_files_unchanged()
-        assert (self.runtime / proofs.DEFAULT_PATH).read_bytes() == proof_bytes
-
-    def test_b_revision_and_fetched_time_mismatches_remain_pending(
-        self,
-    ) -> None:
-        """Leave unmatched B evidence raw and correct HQ."""
-        self._save_proofs(include_b=False)
-        variants = (
-            _proof_record(2, 301, current_authorship.CONTRACT),
-            _proof_record(
-                2,
-                300,
-                current_authorship.CONTRACT,
-                fetched_at=_NOW - dt.timedelta(seconds=1),
-            ),
-        )
-        for mismatched in variants:
-            saved = proofs.merge_save(
-                self.runtime / proofs.DEFAULT_PATH,
-                mismatched,
-            )
-            raw_b = current_authorship.load(self.runtime)["evidence"]
-            derived = proofs.apply(raw_b, saved, revision_column="revision_id")
-            assert derived["correction_status"].to_list() == ["pending"]
-            included = quality_authors.read_quality_authors(
-                self.runtime,
-                include_b=True,
-            )
-            totals = {
-                row["name"]: row["credit"] for row in included["authors"]
-            }
-            assert totals == {"Original": 1, "Exact": 2, "Cleanup": 1}
-        self._assert_raw_files_unchanged()
 
     def test_activity_uses_the_same_corrected_hq_and_b_names(self) -> None:
         """Refresh activity for corrected names once per pass."""

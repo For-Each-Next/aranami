@@ -1,7 +1,7 @@
 """Pre-render saved article-statistics presets after each data update.
 
 Runtime calls this background output step after metadata is committed.
-HTTP handlers only read the resulting Parquet pages.
+HTTP handlers only read the resulting frontend JSON documents.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from shared.config import routine_configuration
 from shared.deployment import project_version
 from webservice import pages
 from webservice.presentation import local_url
+from webservice.quality_chart_requests import chart_generation
 
 _LANGUAGES = {"en": "English", "zh-hans": "简体中文", "zh-hant": "繁體中文"}
 
@@ -40,18 +41,14 @@ def prepare_quality_pages(runtime: Path) -> None:
         "routines": routine_configuration(),
     }
     for basis in ("current", "listed"):
-        for include_b, all_grades in (
-            (False, False),
-            (True, False),
-            (False, True),
-        ):
+        for all_grades in (False, True):
             data = read_current_quality(
                 runtime,
-                include_b=include_b,
                 authorship_basis=basis,
                 all_grades=all_grades,
             )
-            query = {"count_b": "1"} if include_b else {}
+            data["analysis"]["chart_generation"] = chart_generation(source)
+            query = {}
             if all_grades:
                 query["all_grades"] = "1"
             if basis == "listed":
@@ -77,7 +74,7 @@ def prepare_quality_pages(runtime: Path) -> None:
                     ],
                 }
                 resources = {}
-                cohort = "all" if all_grades else str(int(include_b))
+                cohort = "all" if all_grades else "0"
                 content = pages.render_quality_analysis(
                     data,
                     status,
@@ -96,7 +93,6 @@ def prepare_quality_pages(runtime: Path) -> None:
                     quality_pages.path_for(
                         runtime,
                         locale,
-                        include_b=include_b,
                         basis=basis,
                         all_grades=all_grades,
                     ),

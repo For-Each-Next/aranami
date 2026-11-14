@@ -17,11 +17,9 @@ import polars as pl
 from data.articles import (
     authorship_corrections,
     authorship_store,
-    current_assessments,
     current_authorship,
-    milestone_store,
 )
-from data.articles.storage import AUTHORSHIP_PATH, MILESTONES_PATH
+from data.articles.storage import MILESTONES_PATH
 from shared.assessment_profiles import assessment_profile
 from shared.support.files import staging_directory
 from shared.support.parquet import parquet_metadata, validate_parquet_metadata
@@ -397,73 +395,6 @@ def save_activity(path: Path, refreshed: pl.DataFrame) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def _summaries(
-    articles: pl.DataFrame,
-    activity: pl.DataFrame,
-    *,
-    include_b: bool,
-) -> list[dict]:
-    """Aggregate saved whole credits and optional B-class details.
-
-    Returns:
-        Ordered editor summaries with nullable activity and dates.
-    """
-    directory_grades = (
-        (*GRADES, *current_authorship.GRADES) if include_b else GRADES
-    )
-    summaries = (
-        articles
-        .group_by("name", maintain_order=True)
-        .agg(
-            pl.col("credit").sum(),
-            pl
-            .col("credit")
-            .filter(pl.col("grade").is_in(GRADES))
-            .sum()
-            .alias("high_quality_credit"),
-            *(
-                pl
-                .col("credit")
-                .filter(pl.col("grade") == grade)
-                .sum()
-                .alias(grade)
-                for grade in directory_grades
-            ),
-            pl.struct(
-                "page_id",
-                "title",
-                "grade",
-                "date",
-                "nomination_link",
-                "coauthors",
-                "coauthor_count",
-                "credit",
-                "revision_id",
-                "source_url",
-            ).alias("articles"),
-        )
-        .join(activity, on="name", how="left", validate="1:1")
-        .sort(
-            ["credit", "last_active", "name"],
-            descending=[True, True, False],
-            nulls_last=True,
-        )
-    )
-    authors = []
-    for row in summaries.to_dicts():
-        row["grades"] = {grade: row.pop(grade) for grade in directory_grades}
-        row.pop("observed_at")
-        row["last_active"] = (
-            row["last_active"].isoformat() if row["last_active"] else None
-        )
-        for article in row["articles"]:
-            article["date"] = (
-                article["date"].isoformat() if article["date"] else None
-            )
-        authors.append(row)
-    return authors
-
-
 def apply_b_proofs(
     tables: dict[str, pl.DataFrame],
     proofs: pl.DataFrame,
@@ -486,97 +417,5 @@ def apply_b_proofs(
             tables["evidence"],
             proofs,
             revision_column="revision_id",
-        ),
-    }
-
-
-def read_quality_authors(runtime: Path, *, include_b: bool = False) -> dict:
-    """Read the quality-author directory without collecting sources.
-
-    Args:
-        runtime: Runtime root containing saved article evidence.
-        include_b: Include B/BL listing-time credits when requested.
-
-    Returns:
-        Availability, actual latest source observation time, and authors
-        with whole article totals, per-grade totals, article details and
-        nullable latest public edit timestamps. Missing authorship or
-        recognition or current assessment datasets remain unavailable.
-
-    Raises:
-        OSError: Existing storage is unsafe or unreadable.
-        ValueError: Saved evidence violates its storage contract.
-    """  # ruff: ignore[docstring-extraneous-exception]
-    authorship_path = runtime / AUTHORSHIP_PATH
-    milestones_path = runtime / MILESTONES_PATH
-    assessments_path = runtime / current_assessments.DEFAULT_PATH
-    if any(
-        path.is_symlink() or path.parent.is_symlink()
-        for path in (authorship_path, milestones_path, assessments_path)
-    ):
-        message = "Quality-author evidence requires regular paths."
-        raise OSError(message)
-    if any(
-        not path.exists()
-        for path in (authorship_path, milestones_path, assessments_path)
-    ):
-        return {"available": False, "observed_at": None, "authors": []}
-    assessments = current_assessments.load(assessments_path)
-    if assessments.is_empty():
-        return {"available": False, "observed_at": None, "authors": []}
-    saved = authorship_store.load(authorship_path)
-    evidence = saved.filter(
-        pl.col("contract").is_in(authorship_store.CURRENT_CONTRACTS),
-    )
-    if saved.height and evidence.is_empty():
-        return {"available": False, "observed_at": None, "authors": []}
-    events = milestone_store.read_events(milestones_path, required=True)
-    proofs = authorship_corrections.load(
-        runtime / authorship_corrections.DEFAULT_PATH,
-    )
-    if not proofs.is_empty():
-        evidence = authorship_corrections.apply(evidence, proofs)
-    articles = prepare_current_quality_articles(events, evidence, assessments)
-    b_coverage = None
-    try:
-        b_tables = current_authorship.load(runtime) if include_b else None
-        if b_tables is not None:
-            b_tables = apply_b_proofs(b_tables, proofs)
-            b_articles, b_coverage = prepare_current_b_articles(
-                b_tables,
-                assessments,
-            )
-            articles = pl.concat([articles, b_articles])
-    except OSError, ValueError, pl.exceptions.PolarsError:
-        b_tables = None
-    activity = load_activity(runtime / ACTIVITY_PATH)
-    observations = [
-        value
-        for value in (
-            evidence["fetched_at"].max(),
-            assessments["observed_at"].max(),
-            activity["observed_at"].max(),
-            proofs["observed_at"].max(),
-            b_tables["members"]["observed_at"].max()
-            if b_tables is not None
-            else None,
-            b_tables["evidence"]["fetched_at"].max()
-            if b_tables is not None
-            else None,
-        )
-        if value is not None
-    ]
-    return {
-        "available": True,
-        "observed_at": max(observations).isoformat() if observations else None,
-        "authors": _summaries(articles, activity, include_b=include_b),
-        **(
-            {
-                "include_b": True,
-                "b_coverage": b_coverage,
-                "b_unavailable": b_tables is None,
-            }
-            if include_b
-            else {}
         ),
     }

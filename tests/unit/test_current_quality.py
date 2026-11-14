@@ -206,6 +206,22 @@ def _activity() -> pl.DataFrame:
     )
 
 
+def _selected_tables(
+    payload: dict,
+    *,
+    all_grades: bool = False,
+) -> dict[str, pl.DataFrame]:
+    """Decode one prepared default for focused projection assertions.
+
+    Returns:
+        Tables selected from the shared catalog payload.
+    """
+    return {
+        name: pl.DataFrame(rows)
+        for name, rows in payload["defaults"][int(all_grades)].items()
+    }
+
+
 class CurrentQualityTests(TestCase):
     """Keep every section bound to the same selected current pages."""
 
@@ -218,10 +234,10 @@ class CurrentQualityTests(TestCase):
             .then(
                 pl.lit(
                     _contributors((
-                        ("1", "Alice", 50),
-                        ("2", "Bob", 35),
                         ("3", "Boundary", 10),
+                        ("1", "Alice", 50),
                         ("4", "Minor", 5),
+                        ("2", "Bob", 35),
                     )),
                     dtype=_evidence().schema["contributors"],
                 ),
@@ -256,6 +272,10 @@ class CurrentQualityTests(TestCase):
             assert [
                 editor["name"] for editor in article["authorship_editors"]
             ] == ["Alice", "Bob", "Boundary"]
+            assert [
+                editor["bytes"] for editor in article["authorship_editors"]
+            ] == [50, 35, 10]
+            assert set(article) == set(store.ARTICLE_SCHEMA)
             authors = main_author_directory(
                 selection["articles"],
                 selection["authors"],
@@ -296,19 +316,21 @@ class CurrentQualityTests(TestCase):
             _activity(),
             observed_at=_NOW,
         )
-        defaults = json.loads(tables["selection"]["payload"].item())[
-            "defaults"
-        ]
-        assert [row["coverage"][0]["total"] for row in defaults] == [3, 4, 5]
-        assert {row["grade"] for row in defaults[2]["articles"]} == {
+        defaults = tables["defaults"]
+        assert [row["coverage"][0]["total"] for row in defaults] == [3, 5]
+        assert {row["grade"] for row in defaults[1]["articles"]} == {
             "FA",
             "FL",
             "GA",
             "B",
             "C",
         }
-        assert defaults[2]["coverage"][0]["dated"] == 4
+        assert defaults[1]["coverage"][0]["dated"] == 4
         store._validate(tables)
+        assert all(
+            set(article) == set(store.ARTICLE_SCHEMA)
+            for article in tables["articles"]
+        )
 
     @staticmethod
     def test_density_preserves_zero_unknown_and_constant_samples() -> None:
@@ -332,8 +354,8 @@ class CurrentQualityTests(TestCase):
         ).is_empty()
 
     @staticmethod
-    def test_toggle_changes_every_section_and_uses_current_grades() -> None:
-        """Count optional B pages and reject stronger former badges."""
+    def test_presets_share_catalog_and_use_current_grades() -> None:
+        """Count selected pages and reject stronger former badges."""
         tables = store.prepare_current_quality(
             _articles(),
             _evidence(),
@@ -342,15 +364,11 @@ class CurrentQualityTests(TestCase):
             observed_at=_NOW,
         )
         store._validate(tables)
-        for include_b, expected_total, alice_credit in (
+        for all_grades, expected_total, alice_credit in (
             (False, 3, 2),
             (True, 4, 3),
         ):
-            selected = {
-                name: frame.filter(pl.col("include_b") == include_b)
-                for name, frame in tables.items()
-                if name != "selection"
-            }
+            selected = _selected_tables(tables, all_grades=all_grades)
             assert selected["coverage"]["total"].item() == expected_total
             assert selected["grade_totals"]["pages"].sum() == expected_total
             assert (
@@ -365,9 +383,10 @@ class CurrentQualityTests(TestCase):
             )
             assert (
                 selected["authors"]
-                .filter(pl.col("name") == "Bob")["credit"]
-                .item()
-                == 1
+                .filter(
+                    pl.col("name") == "Bob",
+                )
+                .is_empty()
             )
             game = (
                 selected["articles"]
@@ -375,7 +394,7 @@ class CurrentQualityTests(TestCase):
                 .row(0, named=True)
             )
             assert game["grade"] == "GA"
-            assert game["authors"] == ["Alice"]
+            assert game["authorship_editors"][0]["name"] == "Alice"
             assert [
                 editor["name"] for editor in game["authorship_editors"]
             ] == ["Alice", "Bob", None]
@@ -394,19 +413,16 @@ class CurrentQualityTests(TestCase):
             _activity(),
             observed_at=_NOW,
         )
-        years = tables["years"].filter(~pl.col("include_b"))
+        selected = _selected_tables(tables)
+        years = selected["years"]
         assert years["year"].to_list() == list(range(2009, 2027))
         assert years.filter(pl.col("year").is_in([2010, 2011]))[
             "pages"
         ].to_list() == [0, 0]
-        coverage = (
-            tables["coverage"].filter(~pl.col("include_b")).row(0, named=True)
-        )
+        coverage = selected["coverage"].row(0, named=True)
         assert coverage["measured"] == 2
         assert coverage["median_characters"] == 50
-        lengths = tables["lengths"].filter(
-            ~pl.col("include_b") & (pl.col("group") == "grade"),
-        )
+        lengths = selected["lengths"].filter(pl.col("group") == "grade")
         assert lengths["pages"].sum() == 3
         assert (
             lengths.filter(pl.col("grade") == "FL")["median_characters"].item()
@@ -437,11 +453,11 @@ class CurrentQualityTests(TestCase):
             _activity(),
             observed_at=_NOW,
         )
-        rows = tables["articles"].filter(
-            pl.col("include_b") & pl.col("page_id").is_in([1, 2]),
+        rows = _selected_tables(tables, all_grades=True)["articles"].filter(
+            pl.col("page_id").is_in([1, 2]),
         )
         assert rows["authorship_available"].to_list() == [False, False]
-        assert rows["authors"].to_list() == [[], []]
+        assert rows["authorship_editors"].to_list() == [[], []]
 
     @staticmethod
     def test_successful_cutoff_metadata_survives_unchanged_membership() -> (
@@ -502,8 +518,12 @@ class CurrentQualityTests(TestCase):
             _activity(),
             observed_at=_NOW,
         )
-        assert tables["coverage"]["measured"].to_list() == [0, 0]
-        assert tables["coverage"]["median_characters"].null_count() == 2
+        for all_grades in (False, True):
+            coverage = _selected_tables(tables, all_grades=all_grades)[
+                "coverage"
+            ]
+            assert coverage["measured"].item() == 0
+            assert coverage["median_characters"].null_count() == 1
 
     @staticmethod
     def test_a_list_reuses_source_a_and_keeps_current_al_credit() -> None:
@@ -525,14 +545,11 @@ class CurrentQualityTests(TestCase):
             _activity(),
             observed_at=_NOW,
         )
-        current = (
-            tables["articles"].filter(~pl.col("include_b")).row(0, named=True)
-        )
+        selected = _selected_tables(tables)
+        current = selected["articles"].row(0, named=True)
         assert current["grade"] == "AL"
-        assert current["authors"] == ["Alice"]
-        authors = (
-            tables["authors"].filter(~pl.col("include_b")).row(0, named=True)
-        )
+        assert current["authorship_editors"][0]["name"] == "Alice"
+        authors = selected["authors"].row(0, named=True)
         assert authors["grades"]["AL"] == 1
         assert authors["grades"]["A"] == 0
 
@@ -596,7 +613,7 @@ class CurrentQualityTests(TestCase):
 
     @staticmethod
     def test_saved_reader_never_joins_groups_or_writes() -> None:
-        """Read both complete variants from one immutable generation."""
+        """Read both presets from one immutable universal catalog."""
         with TemporaryDirectory() as directory:
             runtime = Path(directory)
             assert not store.read_current_quality(runtime)["available"]
@@ -632,24 +649,36 @@ class CurrentQualityTests(TestCase):
                 ),
             ):
                 default = store.read_current_quality(runtime)
-                expanded = store.read_current_quality(runtime, include_b=True)
+                expanded = store.read_current_quality(runtime, all_grades=True)
             assert default["analysis"]["coverage"]["total"] == 3
             assert expanded["analysis"]["coverage"]["total"] == 4
-            assert expanded["authorship"]["b_coverage"] == {
-                "total": 1,
-                "collected": 1,
+            assert set(expanded["authorship"]) == {
+                "available",
+                "observed_at",
+                "prepared_at",
+                "authors",
+                "all_grades",
             }
             assert (
                 default["observed_at"]
                 == expanded["observed_at"]
                 == _NOW.isoformat()
             )
-            saved = ReportStore(runtime / "data/parsed").read(
-                store._KEY,
-                locked=True,
+            saved = json.loads((runtime / store._PATH).read_text())
+            assert saved["schema"] == 1
+            assert set(saved["selection"]) == {
+                "articles",
+                "current_articles",
+                "authors",
+                "current_authors",
+                "cells",
+                "defaults",
+                "last_year",
+            }
+            assert not list(
+                (runtime / "data/parsed").glob("current-quality-*parquet"),
             )
-            assert saved is not None
-            prepared = saved.manifest["generated_at"]
+            prepared = saved["prepared_at"]
             assert (
                 default["prepared_at"] == expanded["prepared_at"] == prepared
             )

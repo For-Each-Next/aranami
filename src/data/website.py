@@ -13,7 +13,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from data import consistency as consistency_records
 from data.caching import consistency as consistency_cache
@@ -26,17 +26,50 @@ MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
 
 
 def read_snapshot(path: Path) -> dict[str, object]:
-    """Read a precomputed Parquet view without source requests.
-
-    Legacy JSON is accepted only for existing migrated observations.
+    """Read a prepared JSON document or a retained legacy Parquet view.
 
     Returns:
-        Complete precomputed presentation values and source identities.
-
+        Complete frontend values with retired maintenance data removed.
     """
-    if path.suffix != ".parquet":
-        return read_json_object(path, MAX_SNAPSHOT_BYTES)
-    return read_values(path, MAX_SNAPSHOT_BYTES)
+    value = (
+        read_values(path, MAX_SNAPSHOT_BYTES)
+        if path.suffix == ".parquet"
+        else read_json_object(path, MAX_SNAPSHOT_BYTES)
+    )
+    return _current_dashboard(value)
+
+
+def _current_dashboard(value: dict[str, object]) -> dict[str, object]:
+    """Remove retired maintenance observations from a frontend document.
+
+    Aggregate collection counters cannot separate the retired task from
+    its peers, so legacy snapshots omit those optional counters.
+
+    Returns:
+        A detached current document, or unchanged non-dashboard values.
+    """
+    reports = value.get("reports")
+    if value.get("schema") != SNAPSHOT_SCHEMA or not (
+        "backlog" in value
+        or (isinstance(reports, dict) and "backlog" in reports)
+    ):
+        return value
+    result = {
+        name: item
+        for name, item in value.items()
+        if name not in {"backlog", "collection"}
+    }
+    if isinstance(reports, dict):
+        result["reports"] = {
+            name: item for name, item in reports.items() if name != "backlog"
+        }
+    if isinstance(result.get("errors"), list):
+        result["errors"] = [
+            item
+            for item in result["errors"]
+            if not isinstance(item, dict) or item.get("section") != "backlog"
+        ]
+    return result
 
 
 SNAPSHOT_SCHEMA = 2
@@ -47,7 +80,6 @@ REPORT_KEYS = (
     "dyk",
     "pageviews",
     "news_history",
-    "backlog",
     "newsletter",
 )
 APPEARANCE_SECTIONS = {
@@ -56,10 +88,6 @@ APPEARANCE_SECTIONS = {
     "news_history": ("news", "history"),
 }
 _SECTION_RECORD_LIMIT = 10_000
-_SECTION_GROUP_LIMIT = 64
-_SECTION_HEADING_LIMIT = 12
-_SECTION_LABEL_MAX_BYTES = 800
-_CATEGORY_MAX_BYTES = 800
 _ASSESSMENT_MAX_BYTES = 192
 _ACCOUNT_MAX_BYTES = 1000
 _SUBJECT_TITLE_MAX_BYTES = 1000
@@ -173,146 +201,6 @@ def _cache_article(value: object) -> bool:
                     and re.search(r"[\x00-\x1f\x7f]", value[field]) is None
                 )
                 for field in ("assessment_class", "assessment_importance")
-            )
-        )
-    )
-
-
-def _valid_backlog_cache(value: object) -> bool:  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches]
-    """Validate complete maintenance groups and distinct article counts.
-
-    Args:
-        value: Untrusted cached backlog observation.
-
-    Returns:
-        Whether every group and referenced issue is consistent.
-    """
-    if (
-        not isinstance(value, dict)
-        or read_timestamp(value.get("observed_at")) is None
-        or type(value.get("total")) is not int
-        or value["total"] < 0
-    ):
-        return False
-    groups = value.get("groups")
-    if not isinstance(groups, list) or len(groups) > _SECTION_GROUP_LIMIT:
-        return False
-    keys, articles, references = set(), set(), set()
-    sections = {}
-    issues = 0
-    try:  # ruff: ignore[too-many-statements-in-try-clause] - Validate the complete bounded nested contract together.
-        for group in groups:
-            key = group["key"]
-            if (
-                not isinstance(key, str)
-                or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", key) is None
-                or key in keys
-            ):
-                return False
-            if (
-                not isinstance(group["category"], str)
-                or not group["category"].strip()
-                or not _cache_wiki_url(group["source_url"])
-                or re.fullmatch(
-                    r"/wiki/(?:Category|Template):.+",
-                    unquote(urlsplit(group["source_url"]).path),
-                )
-                is None
-            ):
-                return False
-            rows = group["items"]
-            if (
-                not isinstance(rows, list)
-                or len(rows) > _SECTION_RECORD_LIMIT
-                or type(group["count"]) is not int
-                or group["count"] != len(rows)
-            ):
-                return False
-            for field in ("label", "section_label"):
-                label = group.get(field)
-                labels = (
-                    label.values()
-                    if isinstance(label, dict)
-                    and label
-                    and set(label) <= {"en", "zh-hans", "zh-hant"}
-                    else [label]
-                )
-                if not all(
-                    isinstance(text, str)
-                    and text.strip()
-                    and len(text.encode()) <= _SECTION_LABEL_MAX_BYTES
-                    for text in labels
-                ):
-                    return False
-            if (
-                not isinstance(group.get("section_key"), str)
-                or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", group["section_key"])
-                is None
-            ):
-                return False
-            section = group["section_key"]
-            if (
-                section in sections
-                and sections[section] != group["section_label"]
-            ):
-                return False
-            sections[section] = group["section_label"]
-            if len(sections) > _SECTION_HEADING_LIMIT:
-                return False
-            seen = set()
-            for row in rows:
-                if (
-                    not _cache_article(row)
-                    or type(row.get("page_id")) is not int
-                    or row["page_id"] <= 0
-                    or row["page_id"] in seen
-                ):
-                    return False
-                month = row.get("oldest_issue_month")
-                if row.get("page_length") is not None and (
-                    type(row["page_length"]) is not int
-                    or row["page_length"] < 0
-                ):
-                    return False
-                if month is not None and (
-                    dt.date.fromisoformat(month + "-01").isoformat()[:-3]
-                    != month
-                ):
-                    return False
-                category = row.get("oldest_issue_category")
-                if category is not None:
-                    if month is None or not isinstance(category, str):
-                        return False
-                    if (
-                        not category.strip()
-                        or len(category.encode()) > _CATEGORY_MAX_BYTES
-                        or re.search(r"[\x00-\x1f\x7f]", category) is not None
-                    ):
-                        return False
-                tags = row["issues"]
-                if (
-                    not isinstance(tags, list)
-                    or len(tags) > _SECTION_GROUP_LIMIT
-                    or key not in tags
-                    or any(not isinstance(tag, str) for tag in tags)
-                    or len(set(tags)) != len(tags)
-                ):
-                    return False
-                seen.add(row["page_id"])
-                references.update(tags)
-            keys.add(key)
-            articles.update(seen)
-            issues += len(rows)
-    except KeyError, TypeError, ValueError, AttributeError:
-        return False
-    return (
-        value["total"] == len(articles)
-        and references <= keys
-        and (
-            "issue_total" not in value
-            or (
-                type(value["issue_total"]) is int
-                and value["issue_total"] == issues
             )
         )
     )
@@ -626,8 +514,6 @@ def valid_report_data(  # ruff: ignore[too-many-return-statements]
             return _valid_reviews_cache(value)
         if name == "consistency":
             return consistency_records.valid_result(value)
-        if name == "backlog":
-            return _valid_backlog_cache(value)
         if name == "pageviews":
             return _valid_popularity_cache(value)
         return _valid_appearance_cache(name, value, days)
@@ -750,7 +636,7 @@ def validate_dashboard_snapshot(value: object) -> bool:
     """Validate the public saved dashboard without creating clients.
 
     Public readers and private cache readers share the article, ranking,
-    maintenance, and date contracts. Missing observations remain null;
+    and date contracts. Missing observations remain null;
     successful empty collections remain valid and distinguishable.
 
     Args:
@@ -846,6 +732,8 @@ def read_report_cache(
     """
     if path is None:
         return None
+    if path.suffix == ".json" and not path.exists() and not path.is_symlink():
+        path = path.with_suffix(".parquet")
     try:  # ruff: ignore[too-many-statements-in-try-clause]
         record = (
             consistency_cache.read(path)
@@ -935,8 +823,10 @@ def save_snapshot(path: Path, snapshot: dict[str, object]) -> None:
         snapshot: Collected JSON-compatible presentation values.
 
     Raises:
+        OSError: The destination is linked or cannot be replaced.
         ValueError: The snapshot exceeds the reader's size limit.
     """
+    snapshot = _current_dashboard(snapshot)
     content = json.dumps(
         snapshot,
         ensure_ascii=False,
@@ -949,6 +839,9 @@ def save_snapshot(path: Path, snapshot: dict[str, object]) -> None:
     if path.suffix == ".parquet":
         write_values(path, snapshot, max_bytes=MAX_SNAPSHOT_BYTES)
         return
+    if path.is_symlink() or path.parent.is_symlink():
+        message = "Dashboard snapshots require regular paths."
+        raise OSError(message)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
         temporary = Path(stream.name)
@@ -959,5 +852,10 @@ def save_snapshot(path: Path, snapshot: dict[str, object]) -> None:
             stream.close()
             temporary.chmod(0o640)
             temporary.replace(path)
+            descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
         finally:
             temporary.unlink(missing_ok=True)

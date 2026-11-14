@@ -520,20 +520,6 @@ def assessment_rank(value: object, dimension: str) -> int | None:
     return _RANKS.get(dimension, {}).get(assessment_code(value, dimension))
 
 
-def maintenance_sections(groups: list[Record]) -> dict[str, list[Record]]:
-    """Group maintenance tasks in their configured section order.
-
-    Returns:
-        Sections and their tasks in first-appearance order.
-    """
-    sections = {}
-    for group in groups:
-        sections.setdefault(group.get("section_key", "other"), []).append(
-            group,
-        )
-    return sections
-
-
 def maintenance_selection(
     parameters: Mapping[str, list[str]],
 ) -> dict[str, str]:

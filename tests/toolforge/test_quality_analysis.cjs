@@ -153,7 +153,7 @@ test("delayed catalog initialization preserves the latest native selection", asy
 test("catalog preparation yields between bounded batches and reuses completed light records", async () => {
     const queued = [], context = loaderContext({setTimeout: callback => queued.push(callback)});
     const data = catalog();
-    data.extra = Array.from({length: 600}, (_, index) => [index, "Article " + index, "FA", "High", null, null, 100, 1000, [], [], "Article " + index, "—", null, null, []]);
+    data.extra = Array.from({length: 600}, (_, index) => [index, "Article " + index, "FA", "High", null, null, 100, 1000, [], "Article " + index, "—", null, null, []]);
     const form = {qualityMetadata: data, isConnected: true};
     context.document.querySelector = () => form;
     const first = context.prepareCatalogRows(form), second = context.prepareCatalogRows(form);
@@ -518,7 +518,7 @@ test("contribution types match only explicit main or proven significant names, n
     const context = loaderContext();
     const form = {dataset: {}, qualityMetadata: {
         grades: [{value: "GA", order: 4}], importance: [{value: "High", order: 1}],
-        extra: [[12, "Article", "GA", "High", null, null, 50, 100, ["Main Contributor"], [{name: "Mere Editor", rank: 1}], "Article", null,
+        extra: [[12, "Article", "GA", "High", null, null, 50, 100, ["Main Contributor"], "Article", null,
             {available: true, editors: [{name: "Significant Contributor"}]}, null,
             [{name: "Main Contributor", label: "Main Contributor", url: "/wiki/User:Main_Contributor"}]]],
     }};
@@ -531,7 +531,7 @@ test("contribution types match only explicit main or proven significant names, n
     assert.equal(context.contributorMatches(roles, "Mere Editor", "main", "en"), false);
     assert.equal(context.contributorMatches(roles, "Mere Editor", "significant", "en"), false);
     assert.equal(context.contributorMatches(roles, "Mere Editor", "all", "en"), false);
-    form.qualityMetadata.extra[0][12].available = false;
+    form.qualityMetadata.extra[0][11].available = false;
     const unavailable = context.articleContributorRoles(context.catalogRows()[0]);
     assert.equal(context.contributorMatches(unavailable, "Significant Contributor", "significant", "en"), false);
     assert.equal(context.contributorMatches(unavailable, "Main Contributor", "main", "en"), false);
@@ -560,7 +560,7 @@ test("qualified anonymous main labels remain searchable while exact ten and thir
     const context = loaderContext();
     const form = {dataset: {}, qualityMetadata: {
         grades: [], importance: [], extra: [[1, "Article", "GA", "High", null, null, 1, 2,
-            ["192.0.2.1"], null, "Article", null,
+            ["192.0.2.1"], "Article", null,
             {available: true, editors: [{name: "192.0.2.1", share_label: "40.0%"}, {name: "Exactly ten", share_label: "10.0%"}, {name: "Exactly thirty-three", share_label: "33.0%"}]},
             null, [{name: "192.0.2.1", label: "匿名用户", url: null}]]],
     }};

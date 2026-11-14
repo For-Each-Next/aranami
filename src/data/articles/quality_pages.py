@@ -1,6 +1,6 @@
 """Retain prepared article-statistics pages for direct HTTP delivery.
 
-Background presentation writes one bounded Parquet payload per preset.
+Background presentation writes one bounded JSON document per preset.
 Readers never calculate statistics or invoke a renderer.
 """
 
@@ -15,8 +15,8 @@ from polars.exceptions import PolarsError
 if TYPE_CHECKING:
     from pathlib import Path
 
-from data.prepared import read_values, write_values
-from shared.support.files import encode_json
+from data.prepared import read_values
+from shared.support.files import atomic_json, encode_json, read_json_object
 
 MAX_BYTES = 16 * 1024 * 1024
 _RESOURCE_NAME = re.compile(
@@ -29,7 +29,6 @@ def path_for(
     runtime: Path,
     locale: str,
     *,
-    include_b: bool,
     basis: str,
     all_grades: bool = False,
 ) -> Path:
@@ -47,11 +46,11 @@ def path_for(
     }:
         message = "Unsupported quality-page preset."
         raise ValueError(message)
-    cohort = "all" if all_grades else str(int(include_b))
+    cohort = "all" if all_grades else "0"
     return (
         runtime
         / "data/webservice"
-        / f"quality-page-{locale}-{cohort}-{basis}.parquet"
+        / f"quality-page-{locale}-{cohort}-{basis}.json"
     )
 
 
@@ -95,7 +94,11 @@ def _read_bundle(path: Path) -> dict | None:
     """
     if not path.exists():
         return None
-    value = read_values(path, MAX_BYTES)
+    value = (
+        read_values(path, MAX_BYTES)
+        if path.suffix == ".parquet"
+        else read_json_object(path, MAX_BYTES)
+    )
     if value.get("schema") not in {1, 2} or not isinstance(
         value.get("html"),
         str,
@@ -166,4 +169,5 @@ def save(
             )
             if len(encode_json(value)) > MAX_BYTES:
                 value.pop("previous_resources")
-    write_values(path, value, max_bytes=MAX_BYTES)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_json(path, value, max_bytes=MAX_BYTES)

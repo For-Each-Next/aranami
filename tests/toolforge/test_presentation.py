@@ -5,7 +5,7 @@ with a destination directory to write localized browser-check pages.
 """
 
 # Keep unittest exceptions and expected fixture counts.
-# ruff: file-ignore[pytest-unittest-raises-assertion, magic-value-comparison]
+# ruff: file-ignore[magic-value-comparison]
 
 from __future__ import annotations
 
@@ -31,10 +31,8 @@ from status_fixtures import (
 )
 from test_consistency_presentation import consistency_snapshot
 from test_dataset_viewer import dataset_fixture
-from test_maintenance_controls import (
-    _snapshot as maintenance_snapshot,  # ruff: ignore[import-private-name]
-)
 
+from data.articles.current_quality import current_quality_identity
 from shared.config import routine_configuration
 from shared.deployment import resource_root
 from webservice.pages import (
@@ -47,7 +45,6 @@ from webservice.pages import (
     render_error,
     render_logs,
     render_maintenance,
-    render_maintenance_overview,
     render_newsletter,
     render_quality_analysis,
     render_quality_authorship,
@@ -64,8 +61,6 @@ from webservice.presentation import (
     local_url,
     maintenance_items,
     maintenance_page,
-    maintenance_sections,
-    maintenance_selection,
     merged_items,
     pageviews_url,
     readable_size,
@@ -77,6 +72,7 @@ from webservice.presentation import (
     wiki_link,
     wiki_url,
 )
+from webservice.quality_chart_requests import chart_generation
 
 
 def _fixtures() -> dict[str, object]:
@@ -105,34 +101,6 @@ def _fixtures() -> dict[str, object]:
         "date": "2026-10-17",
         "kind": "fa",
     }
-    maintenance = {
-        "page_id": 17,
-        "title": "Maintenance <&> article",
-        "url": "https://zh.wikipedia.org/wiki/Maintenance",
-        "assessment_class": "B",
-        "assessment_importance": "High",
-        "issues": ["references"],
-        "oldest_issue_month": "2020-03",
-        "oldest_issue_category": "自2020年03月需补充来源的条目",
-    }
-    group = {
-        "key": "references",
-        "category": "缺少来源的条目",
-        "source_url": "https://zh.wikipedia.org/wiki/Category:References",
-        "section_key": "sources",
-        "section_label": {
-            "en": "References",
-            "zh-hans": "参考来源",
-            "zh-hant": "參考來源",
-        },
-        "label": {
-            "en": "Add citations",
-            "zh-hans": "补充来源",
-            "zh-hant": "補充來源",
-        },
-        "count": 1,
-        "items": [maintenance],
-    }
     snapshot = {
         "schema": 2,
         "updated_at": stamp,
@@ -143,7 +111,6 @@ def _fixtures() -> dict[str, object]:
                 "dyk",
                 "pageviews",
                 "news_history",
-                "backlog",
             )
         },
         "homepage": {
@@ -175,7 +142,6 @@ def _fixtures() -> dict[str, object]:
             "scope": "site_top_1000",
             "items": [article],
         },
-        "backlog": {"observed_at": stamp, "total": 1, "groups": [group]},
         "errors": [],
     }
     return {
@@ -244,32 +210,6 @@ def _quality_authorship_fixture() -> dict:
     }
 
 
-def _b_quality_authorship_fixture() -> dict:
-    """Build the saved B-Class response for asynchronous switch checks.
-
-    Returns:
-        A directory with an additional B article and quality subset.
-    """
-    b_directory = _quality_authorship_fixture()
-    b_directory["include_b"] = True
-    b_directory["b_coverage"] = {"collected": 1, "total": 1}
-    author = b_directory["authors"][0]
-    author["high_quality_credit"] = author["credit"]
-    author["credit"] += 1
-    author["grades"]["B"] = 1
-    author["articles"].append({
-        "page_id": 500,
-        "title": "B listing fixture",
-        "grade": "B",
-        "date": "2026-10-01",
-        "nomination_link": "#B_listing",
-        "revision_id": 100,
-        "coauthor_count": 1,
-        "credit": 1,
-    })
-    return b_directory
-
-
 def _quality_documents(
     destination: Path,
     fixture: dict,
@@ -280,30 +220,24 @@ def _quality_documents(
     """Write deferred resources beside the localized quality fixtures.
 
     Returns:
-        Default and B-inclusive pages with production resource links.
+        Quality-analysis pages with production resource links.
     """
     documents = {}
-    for include_b in (False, True):
-        resources = {}
-        prefix = (
-            f"/quality-analysis/resources/{locale}/{int(include_b)}/current/"
-        )
-        surface = "quality-analysis-b" if include_b else "quality-analysis"
-        documents[surface] = render_quality_analysis(
-            saved_analysis_fixture(now, include_b=True)
-            if include_b
-            else analysis,
-            fixture["status"],
-            fixture["config"],
-            locale,
-            now,
-            resources=resources,
-            resource_prefix=prefix,
-        )
-        resource_directory = destination / prefix.lstrip("/")
-        resource_directory.mkdir(parents=True, exist_ok=True)
-        for name, content in resources.items():
-            (resource_directory / name).write_text(content)
+    resources = {}
+    prefix = f"/quality-analysis/resources/{locale}/0/current/"
+    documents["quality-analysis"] = render_quality_analysis(
+        analysis,
+        fixture["status"],
+        fixture["config"],
+        locale,
+        now,
+        resources=resources,
+        resource_prefix=prefix,
+    )
+    resource_directory = destination / prefix.lstrip("/")
+    resource_directory.mkdir(parents=True, exist_ok=True)
+    for name, content in resources.items():
+        (resource_directory / name).write_text(content)
     return documents
 
 
@@ -348,7 +282,6 @@ def write_interface_fixtures(destination: Path) -> None:
     snapshot = fixture["snapshot"]
     snapshot["consistency"] = consistency_snapshot()["consistency"]
     snapshot["consistency"]["items"] = snapshot["consistency"]["items"][:2]
-    maintenance = maintenance_snapshot()
     article = snapshot["pageviews"]["items"][0]
     article["title"] = "LongUnbrokenArticleIdentifier" * 7
     article["assessment_class"] = None
@@ -464,10 +397,6 @@ def write_interface_fixtures(destination: Path) -> None:
             "extract_zh": "已觀察到的開場留言。",
             "extract_hant": "已觀察到的開場留言。",
         })
-    maintenance_rows = maintenance["backlog"]["groups"][0]["items"]
-    maintenance_rows[0]["title"] = "LongUnbrokenArticleIdentifier" * 7
-    maintenance_rows[1]["title"] = "含有較長中文名稱的遊戲條目" * 5
-    maintenance_rows[1]["oldest_issue_month"] = "2019-01"
     fixture["status"]["publications"]["target"]["title"] = (
         "WikiProject:电子游戏/" + "LongReportIdentifier" * 9
     )
@@ -555,7 +484,11 @@ def write_interface_fixtures(destination: Path) -> None:
         "pa_class": ["GA"],
         "pa_importance": ["Mid"],
     }).write_parquet(stored / "assessments-20260808.parquet")
-    analysis = saved_analysis_fixture(now)
+    chart_runtime = destination / ".quality-chart-runtime"
+    analysis = saved_analysis_fixture(now, runtime=chart_runtime)
+    analysis["analysis"]["chart_generation"] = chart_generation(
+        current_quality_identity(chart_runtime),
+    )
     for locale in ("en", "zh-hans", "zh-hant"):
         directory = destination / locale
         directory.mkdir(parents=True, exist_ok=True)
@@ -575,22 +508,8 @@ def write_interface_fixtures(destination: Path) -> None:
                 locale,
                 now,
             ),
-            "quality-authorship-b": render_quality_authorship(
-                _b_quality_authorship_fixture(),
-                fixture["status"],
-                fixture["config"],
-                locale,
-                now,
-            ),
             "quality-authorship": render_quality_authorship(
                 _quality_authorship_fixture(),
-                fixture["status"],
-                fixture["config"],
-                locale,
-                now,
-            ),
-            "backlog": render_maintenance_overview(
-                snapshot,
                 fixture["status"],
                 fixture["config"],
                 locale,
@@ -600,11 +519,6 @@ def write_interface_fixtures(destination: Path) -> None:
                 snapshot,
                 fixture["status"],
                 fixture["config"],
-                locale,
-            ),
-            "maintenance": render_maintenance(
-                maintenance,
-                {"task": ["references"]},
                 locale,
             ),
             "consistency": render_maintenance(
@@ -1234,54 +1148,6 @@ class ReviewPresentationTests(unittest.TestCase):
         assert self.en.text("empty.section") in section
 
 
-class MaintenanceOverviewTests(unittest.TestCase):
-    """Keep saved maintenance tasks on a dedicated localized page."""
-
-    @staticmethod
-    def test_overview_uses_top_level_category_headings() -> None:
-        """Link grouped tasks and retain the actual observation time."""
-        data = _fixtures()
-        for locale in ("en", "zh-hans", "zh-hant"):
-            interface = Interface(locale)
-            output = render_maintenance_overview(
-                data["snapshot"],
-                data["status"],
-                data["config"],
-                locale,
-                dt.datetime(2026, 10, 18, 12, tzinfo=dt.UTC),
-            )
-            assert f"<h1>{interface.text('backlog.heading')}</h1>" in output
-            assert '<h2 id="backlog-section-sources">' in output
-            assert '<h3 id="backlog-section-sources">' not in output
-            assert 'href="#backlog-section-sources"' in output
-            assert 'href="/maintenance/?task=references&amp;page=1"' in output
-            assert "2026-10-18 12:00" in output
-            assert 'id="tool-status"' not in output
-            assert 'id="homepage-pageviews"' not in output
-            assert 'id="live-uptime"' in output
-
-    @staticmethod
-    def test_empty_and_unavailable_catalogues_remain_distinct() -> None:
-        """Distinguish empty observations from unavailable data."""
-        data = _fixtures()
-        backlog = data["snapshot"]["backlog"]
-        backlog.update(total=0, groups=[])
-        for locale in ("en", "zh-hans", "zh-hant"):
-            interface = Interface(locale)
-            output = render_maintenance_overview(
-                data["snapshot"],
-                None,
-                None,
-                locale,
-            )
-            assert interface.text("backlog.overview_empty") in output
-            assert interface.text("backlog.unavailable") not in output
-            assert "2026-10-18 12:00" in output
-            missing = render_maintenance_overview(None, None, None, locale)
-            assert interface.text("backlog.unavailable") in missing
-            assert interface.text("backlog.overview_empty") not in missing
-
-
 class ContentsNavigationTests(unittest.TestCase):
     """Keep every full page on the shared contents layout."""
 
@@ -1357,7 +1223,10 @@ class PresentationTests(unittest.TestCase):
                 assert select_locale(header) == expected
         assert Interface("zh-hant").language_tag == "zh-Hant"
         assert Interface("zh").text("column.article") == "条目"
-        assert self.en.text("backlog.count", count=12) == "12 articles"
+        assert (
+            self.en.text("quality_analysis.chart_article_count", count=12)
+            == "12 articles and lists"
+        )
         for translations in catalog().values():
             assert list(translations) == ["en", "zh-hans", "zh-hant"]
             parameters = sorted(
@@ -1775,45 +1644,6 @@ class PresentationTests(unittest.TestCase):
         assert maintenance_page(ordered, "2")["items"][0]["page_id"] == 10
         assert maintenance_page(ordered, "9" * 1000)["page"] == 11
         assert maintenance_page([])["pages"] == 1
-        assert list(
-            maintenance_sections([
-                {"section_key": "a"},
-                {"section_key": "b"},
-                {"section_key": "a"},
-            ]),
-        ) == ["a", "b"]
-
-    def test_maintenance_queries_and_rendering(self) -> None:
-        """Reject bad controls and retain categories and seeds."""
-        for query in (
-            "",
-            "task=../escape",
-            "task=references&page=0",
-            "task=references&sort=invalid",
-            "task=references&order=invalid",
-            "task=references&seed=abc",
-            "task=references&task=other",
-            "task=references&extra=1",
-        ):
-            with self.subTest(query=query), self.assertRaises(ValueError):
-                maintenance_selection(parse_qs(query))
-        selection = parse_qs(
-            "task=references&sort=random&seed=0123456789abcdef",
-        )
-        output = render_maintenance(self.data["snapshot"], selection, "en")
-        assert "March 2020" in output
-        assert "Category%3A%E8%87%AA2020" in output
-        assert "Maintenance &lt;&amp;&gt; article" in output
-        assert 'type="hidden" name="seed" value="0123456789abcdef"' in output
-        assert 'name="order" value="desc"' in output
-        with self.assertRaises(LookupError):
-            render_maintenance(
-                self.data["snapshot"],
-                {"task": ["missing"]},
-                "en",
-            )
-        with self.assertRaises(RuntimeError):
-            render_maintenance(None, {"task": ["references"]}, "en")
 
     def test_highlight_semantics(self) -> None:
         """Keep dates, scripts, and unavailable sections distinct."""
@@ -2196,7 +2026,7 @@ class PresentationTests(unittest.TestCase):
                 'commandfor="report-details-pageviews"',
             ):
                 assert removed not in output
-            assert 'href="/maintenance/"' in output
+            assert 'href="/maintenance/"' not in output
             assert 'href="/reports/"' in output
             assert 'href="/about/"' in output
         generic = render_dashboard(
@@ -2216,7 +2046,6 @@ class PresentationTests(unittest.TestCase):
         empty = self.data["snapshot"]
         empty["homepage"] = {key: [] for key in empty["homepage"]}
         empty["pageviews"]["items"] = []
-        empty["backlog"]["total"] = 0
         output = render_dashboard(empty, None, None, "en", self.now)
         assert 'id="homepage"' not in output
         assert 'id="backlog"' not in output
@@ -2278,7 +2107,6 @@ class PresentationTests(unittest.TestCase):
         for output in (
             render_dashboard(None, None, None, "en"),
             render_reports({"files": []}, "en"),
-            render_maintenance_overview(None, None, None, "en"),
             render_logs({"files": []}, "en"),
             render_about(None, "en"),
         ):
@@ -2290,7 +2118,9 @@ class PresentationTests(unittest.TestCase):
             assert (
                 "/components.js" in {urlsplit(asset).path for asset in assets}
             ) == (
-                'id="log-activity"' in output or 'id="recent-events"' in output
+                'id="log-activity"' in output
+                or 'id="recent-events"' in output
+                or 'id="dataset-updates-previous"' in output
             )
             assert all(asset.startswith("/") for asset in assets)
             for asset in assets:
@@ -2302,8 +2132,8 @@ class PresentationTests(unittest.TestCase):
                 }
         for output in (
             render_maintenance(
-                maintenance_snapshot(),
-                {"task": ["references"]},
+                consistency_snapshot(),
+                {"task": ["consistency_history"]},
                 "en",
             ),
             render_newsletter(
@@ -2329,9 +2159,10 @@ class PresentationTests(unittest.TestCase):
                     "datasets",
                     "heading_links",
                     "history",
-                    "maintenance",
                     "quality_authorship",
                     "quality_analysis",
+                    "quality_chart_controls",
+                    "quality_coverage",
                     "quality_matrix",
                 )
             ),

@@ -13,7 +13,7 @@ website data. All guides describe the alpha source tree and Toolforge runtime.
 Data and task references are [data storage](data/storage.md),
 [assessments](data/assessments.md), [newsletters](tasks/newsletter.md)
 and [caches](data/caching.md). Website references cover
-[newsletter use](webservice/newsletter.md), [maintenance](webservice/maintenance.md),
+[newsletter use](webservice/newsletter.md), [consistency checks](webservice/maintenance.md),
 [frontend development](webservice/frontend.md)
 and [branding](webservice/branding.md).
 

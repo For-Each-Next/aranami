@@ -47,7 +47,7 @@ from shared.sources.quarry.projects import query_pages_by_wikiproject
 from shared.sources.revisions import RevisionTextCache
 from shared.sources.wiki import WikiReader
 from shared.support.titles import page_url
-from tasks.website import backlog, pageviews
+from tasks.website import pageviews
 from tasks.zhwiki import consistency, discussions, homepage, reviews
 from tasks.zhwiki.game_titles import refresh_game_titles
 from tasks.zhwiki.newsletter.refresh import collect_newsletter
@@ -65,10 +65,10 @@ _REPORT_LABELS = {
     "dyk": "DYK highlights",
     "pageviews": "popular articles",
     "news_history": "news and history",
-    "backlog": "maintenance catalogue",
     "newsletter": "quarterly newsletter drafts",
 }
 _RETRY_INTERVAL = 3600
+_UPCOMING_DAYS = 2
 
 
 def _display_titles(value: object) -> list[str]:
@@ -194,23 +194,6 @@ def _assessed_section(
     return observation
 
 
-def _maintenance_cache_key() -> str | None:
-    """Fingerprint the maintenance catalogue for cache invalidation.
-
-    Returns:
-        Catalogue hash, or none when the source must be read directly.
-    """
-    try:
-        return hashlib.sha256(
-            b"maintenance:page-length:"
-            + Path(backlog.__file__)
-            .with_name("maintenance.json")
-            .read_bytes(),
-        ).hexdigest()
-    except OSError:
-        return None
-
-
 def report_intervals(
     values: Mapping[str, float] | None = None,
 ) -> dict[str, float]:
@@ -287,9 +270,7 @@ def _report_plan(
     due = []
     for name in REPORT_KEYS:
         source_id = (
-            _maintenance_cache_key()
-            if name == "backlog"
-            else "nomination-sources:discussions:deadlines-outcomes:12"
+            "nomination-sources:discussions:deadlines-outcomes:12"
             if name == "reviews"
             else (
                 "zhwiki-video-games-consistency:article-history-projection:"
@@ -304,7 +285,10 @@ def _report_plan(
                 "shared-homepage:1:exact-project-spellings:2"
             )
             if name == "newsletter"
-            else f"days:{days}:complete-extracts:showcase-window"
+            else (
+                f"days:{days}:complete-extracts:showcase-window:"
+                f"upcoming-days:{_UPCOMING_DAYS}"
+            )
             if name == "recognized"
             else f"days:{days}:complete-extracts:future-anniversaries:2"
             if name == "news_history"
@@ -321,7 +305,9 @@ def _report_plan(
         identity = hashlib.sha256(
             f"dashboard:{name}:{source_id}:{intervals[name]}".encode(),
         ).hexdigest()
-        filename = f"{name}.parquet"
+        filename = (
+            f"{name}.parquet" if name == "consistency" else f"{name}.json"
+        )
         directory = cache_directory
         path = directory / filename if directory else None
         record = read_report_cache(path, name, days, clock)
@@ -389,7 +375,7 @@ def _dashboard_snapshot(
         "history",
     ))
     reports, sources, errors = {}, [], []
-    popular = maintenance = current_reviews = current_consistency = None
+    popular = current_reviews = current_consistency = None
     for name in REPORT_KEYS:
         record = caches[name]
         data = record["data"] if record else None
@@ -414,8 +400,6 @@ def _dashboard_snapshot(
                     "label": "Wikimedia daily top pageviews",
                     "url": data["source_url"],
                 })
-            elif name == "backlog":
-                maintenance = data
             else:
                 displays.update(data["homepage"])
                 reports[name]["period"] = data["period"]
@@ -443,7 +427,6 @@ def _dashboard_snapshot(
         "reviews": current_reviews,
         "consistency": current_consistency,
         "pageviews": popular,
-        "backlog": maintenance,
         "newsletter": None,
         "sources": sources,
         "errors": errors,
@@ -533,7 +516,7 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
     """Collect and validate one complete independent source result.
 
     Returns:
-        Measured article lists or maintenance data with source dates.
+        Article lists and consistency findings with their source dates.
 
     Raises:
         ValueError: A collected result violates its source contract.
@@ -611,13 +594,11 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
             pageviews.collect_pageviews(today, members, site=read.site),
             membership,
         )
-    elif name == "backlog":
-        data = backlog.collect_backlog(read.site, membership)
     else:
         displays = {}
         for section in APPEARANCE_SECTIONS[name]:
             bounds = (
-                (end, end + dt.timedelta(days=30))
+                (end, end + dt.timedelta(days=_UPCOMING_DAYS))
                 if section == "upcoming"
                 else (max(start, today - dt.timedelta(days=31)), end)
                 if section == "featured"
@@ -676,8 +657,6 @@ def _report_record_count(name: str, data: dict[str, object]) -> int:
     Returns:
         Record count without parsing output or querying sources.
     """
-    if name == "backlog":
-        return data["total"]
     if name == "newsletter":
         return len(data["issues"])
     if name in {"pageviews", "reviews", "consistency"}:
@@ -695,7 +674,7 @@ def _with_extracts(
     Returns:
         Enriched records with all original source dates and counts.
     """
-    if name in {"backlog", "newsletter", "consistency"}:
+    if name in {"newsletter", "consistency"}:
         return data
     if name in {"pageviews", "reviews"}:
         return {**data, "items": extracts.enrich(data["items"])}

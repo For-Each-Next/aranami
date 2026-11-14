@@ -2,7 +2,6 @@
 import { initializeCopyControls } from "./copy.js";
 import { initializeDatasets } from "./datasets.js";
 import { initializeHistory } from "./history.js";
-import { initializeMaintenance } from "./maintenance.js";
 import { initializeQualityAuthorship } from "./quality_authorship.js";
 
 /** Enable native page-size forms once in each new fragment. */
@@ -22,5 +21,4 @@ enhance(document);
 initializeCopyControls();
 initializeDatasets();
 initializeHistory();
-initializeMaintenance({ enhance });
 initializeQualityAuthorship();
