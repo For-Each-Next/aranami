@@ -218,7 +218,7 @@ class PopularitySource:
         self.store = ReportStore(
             runtime
             / ("dry-run" if dry else "")
-            / "data/daily/newsletter/popularity-history",
+            / "data/parsed/newsletter/popularity-history",
             dry=dry,
         )
 
@@ -232,7 +232,7 @@ class PopularitySource:
             Saved typed rows, or an empty schema before first import.
         """
         key = str(year)
-        if not (self.store.root / key).exists():
+        if not self.store.has_data(key):
             return pl.DataFrame(schema=SCHEMA)
         descriptor = os.open(
             self.store.lock_root / key / ".lock",

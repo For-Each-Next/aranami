@@ -110,9 +110,7 @@ class TestProjectData(_ProjectDataFixture):
     ) -> None:
         """Capture November 2's closing state at November 3 midnight."""
         bundle = self._capture()
-        assert bundle.path == (
-            self.root / "data/daily/enwiki-20261102.parquet"
-        )
+        assert bundle.path == (self.root / "data/raw/enwiki-20261102.parquet")
         assert bundle.manifest["metadata"]["snapshot_date"] == "2026-11-02"
         assert bundle.manifest["metadata"]["boundary_date"] == "2026-11-03"
         assert bundle.manifest["metadata"]["scheduled_for"] == _NOW.isoformat()
@@ -280,7 +278,7 @@ class TestProjectData(_ProjectDataFixture):
         )
         assert latest is not None
         assert latest.path.name == "enwiki-20261231.parquet"
-        assert latest.path.parent.name == "daily"
+        assert latest.path.parent.name == "raw"
 
     def test_malformed_source_fails_without_publishing_a_file(self) -> None:
         """Reject incomplete, duplicate, or incoherent identities."""
@@ -375,7 +373,7 @@ class TestProjectData(_ProjectDataFixture):
             _DAY,
             runtime=self.root,
         )
-        assert path.is_relative_to(self.root / "data/daily")
+        assert path.is_relative_to(self.root / "data/raw")
         target = self.root / "target"
         target.mkdir()
         (self.root / "data").symlink_to(target, target_is_directory=True)
@@ -447,13 +445,16 @@ class TestProjectData(_ProjectDataFixture):
             is not None
         )
 
-    def test_parent_flags_come_from_complete_child_snapshots(self) -> None:
-        """Save multiple memberships and confirmed nonmembership."""
+    def test_parent_flags_are_saved_without_child_snapshots(self) -> None:
+        """Reuse membership flags without another capture."""
         projects = ("Games/A", "Games/B")
-        parent = _members()
-        child = _members().head(1)
-        frames = {_PROJECT: parent, **dict.fromkeys(projects, child)}
-        self.query.side_effect = lambda _site, project: frames[project]
+        self.query.return_value = _members().with_columns(
+            pl.Series(
+                "taskforces",
+                [list(projects), []],
+                dtype=pl.List(pl.String),
+            ),
+        )
         with patch.dict(
             snapshots.PROJECT_DATA_TASKFORCES,
             {("enwiki", _PROJECT): projects},
@@ -464,59 +465,27 @@ class TestProjectData(_ProjectDataFixture):
             [],
             list(projects),
         ]
-        assert saved.manifest["metadata"]["taskforce_projects"] == list(
-            projects,
-        )
-        assert [call.args[1] for call in self.query.call_args_list] == [
-            *projects,
-            _PROJECT,
-        ]
+        self.query.assert_called_once_with(self.site, _PROJECT)
         for project in projects:
-            retained = snapshots.read_snapshot(
-                "enwiki",
-                project,
-                _DAY,
-                runtime=self.root,
+            assert (
+                snapshots.read_snapshot(
+                    "enwiki",
+                    project,
+                    _DAY,
+                    runtime=self.root,
+                )
+                is None
             )
-            assert retained is not None
-            assert retained.tables["members"]["taskforces"].to_list() == [[]]
-            assert retained.manifest["metadata"]["taskforce_projects"] == []
 
-    def test_failed_child_never_commits_partial_parent(self) -> None:
-        """Preserve successful children while deferring the parent."""
-        first, second = "Games/A", "Games/B"
-        self.query.side_effect = [_members(), ConnectionError("replica")]
-        with (
-            patch.dict(
-                snapshots.PROJECT_DATA_TASKFORCES,
-                {("enwiki", _PROJECT): (first, second)},
-                clear=True,
-            ),
-            self.assertRaises(ConnectionError),
-        ):
+    def test_failed_parent_query_leaves_no_partial_snapshot(self) -> None:
+        """Never commit membership when the complete query fails."""
+        self.query.side_effect = ConnectionError("replica")
+        with self.assertRaises(ConnectionError):
             self._capture()
         assert (
             snapshots.read_snapshot(
                 "enwiki",
                 _PROJECT,
-                _DAY,
-                runtime=self.root,
-            )
-            is None
-        )
-        assert (
-            snapshots.read_snapshot(
-                "enwiki",
-                first,
-                _DAY,
-                runtime=self.root,
-            )
-            is not None
-        )
-        assert (
-            snapshots.read_snapshot(
-                "enwiki",
-                second,
                 _DAY,
                 runtime=self.root,
             )
@@ -613,7 +582,7 @@ class TestUnicodeProjectData(_ProjectDataFixture):
                 logical = f"projects/enwiki/{project}/2026/20261102"
                 assert saved.path == (
                     self.root
-                    / "data/daily"
+                    / "data/raw"
                     / (
                         snapshots.project_stem("enwiki", project)
                         + "-20261102.parquet"
@@ -700,7 +669,7 @@ class TestSavedProjectActivity(_ProjectDataFixture):
                 "target": _PROJECT,
                 "date": "2026-11-02",
                 "metadata": {
-                    "file": ("data/daily/enwiki-20261102.parquet"),
+                    "file": ("data/raw/enwiki-20261102.parquet"),
                     "observed_at": bundle.manifest["calculated_at"],
                     "finished_at": bundle.manifest["finished_at"],
                     "written_at": storage["written_at"],

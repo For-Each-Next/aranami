@@ -31,13 +31,15 @@ process lifetime, including manual jobs.
 | `deployment-backups/source-<id>/` | Validation receipt, former selection and saved job settings |
 | `deployment.lock/` | Promotion serialization; do not remove while setup/promotion is active |
 | `python/`, `uv-bootstrap/` | Managed interpreter and setup tooling |
-| `data/archive/<day>.parquet`, `data/daily/<project>-<day>.parquet` | Immutable full daily project observations |
-| `data/daily/pageviews/` | Latest/previous detailed traffic generations and coverage |
-| `data/hourly/` | Durable history, authorship, milestones and scope evidence |
-| `data/daily/redirects/zhwiki.parquet` | Incremental redirect evidence and resumable scan checkpoint |
-| `data/daily/newsletter/` | Current and original prepared newsletter facts |
-| `data/daily/` | Prepared report bundles and independent dated newsletter archives |
-| `data/daily/assessments/`, `backups/report-layout/` | Retained legacy observations and recovery originals |
+| `data/archive/<day>.parquet`, `data/raw/<project>-<day>.parquet` | Immutable full daily project observations |
+| `data/raw/pageviews-*--*` | Latest/previous detailed traffic generations and coverage |
+| `data/parsed/` | Durable history, authorship, milestones and scope evidence |
+| `data/parsed/redirects-zhwiki.parquet` | Incremental redirect evidence and resumable scan checkpoint |
+| `data/parsed/newsletter--*` | Current and original prepared newsletter facts |
+| `data/parsed/` | Prepared report bundles and independent dated newsletter archives |
+| `data/parsed/assessments--*`, `backups/report-layout/` | Retained legacy observations and recovery originals |
+| `data/revisions/00/` through `FF/` | Revision text and metadata, sharded by revision ID |
+| `data/webservice/` | Pre-rendered quality-analysis presets for direct HTTP delivery |
 | `state/observability/status.json` | Versioned service, execution, dataset and publication observations |
 | `state/` | Completion checkpoints, publication membership and active execution locks |
 | `cache/` | Disposable source and presentation optimizations |
@@ -45,7 +47,7 @@ process lifetime, including manual jobs.
 | `logs/diagnostics/` | Readable UTC diagnostic segments with bounded tracebacks |
 | `dry-run/` | Isolated preview source data, results and proposed edits |
 
-Daily captures write the preceding completed UTC date under its year. New dates
+Daily captures use the preceding completed UTC date in their filenames. New dates
 require fresh complete queries. The [retirement checklist](transition.md)
 tracks historical-source dependencies and verification before removal.
 The scheduling boundary and actual query time remain separately recorded.

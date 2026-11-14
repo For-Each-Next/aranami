@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
+from data.paths import artifact_path
 from data.reports import ReportBundle, ReportResult, ReportStore, report_key
 from data.runtime.status import read_status, target_key
 from runtime.execution import RuntimeContext, routine_run
@@ -179,17 +180,20 @@ class TestReportLifecycle(TestCase):
                     Explicit saved or unchanged publication evidence.
                 """
                 assert self._status(edit.title)["outcome"] == "running"
-                directory = ReportStore(self.root / "data/daily").data_path(
+                directory = ReportStore(self.root / "data/parsed").data_path(
                     edit.report_key,
                 )
-                selected = json.loads((directory / "latest.json").read_text())
+                selected = json.loads(
+                    (artifact_path(directory, "latest.json")).read_text(),
+                )
                 generation = directory / selected["latest"]
                 manifest = json.loads(
-                    (generation / "manifest.json").read_text(),
+                    (artifact_path(generation, "manifest.json")).read_text(),
                 )
                 assert (
-                    generation / "report.wikitext"
-                ).read_text() == edit.text
+                    artifact_path(generation, "report.wikitext").read_text()
+                    == edit.text
+                )
                 assert manifest["publication"]["state"] == "unconfirmed"
                 return expected
 

@@ -1,7 +1,6 @@
 """Verify the merged quality page and former author-page redirect."""
 
 # Query counts are explicit cache-identity fixtures.
-# ruff: file-ignore[magic-value-comparison]
 
 from __future__ import annotations
 
@@ -15,7 +14,9 @@ from urllib.parse import parse_qs, urlsplit
 from starlette.testclient import TestClient
 from test_quality_analysis import analysis_fixture
 
+from data.articles import quality_pages
 from webservice.presentation import Interface
+from webservice.quality_pages import prepare_quality_pages
 from webservice.server import create_app
 
 
@@ -27,7 +28,7 @@ class QualityAuthorshipHTTPTests(TestCase):
         """Redirect old links before loading or calculating evidence."""
         with (
             TemporaryDirectory() as directory,
-            patch("webservice.server.read_current_quality") as read,
+            patch("webservice.server.quality_pages.read") as read,
         ):
             runtime = Path(directory) / "absent"
             client = TestClient(create_app(runtime))
@@ -51,7 +52,7 @@ class QualityAuthorshipHTTPTests(TestCase):
         """Reject invalid controls before loading saved evidence."""
         with (
             TemporaryDirectory() as directory,
-            patch("webservice.server.read_current_quality") as read,
+            patch("webservice.server.quality_pages.read") as read,
         ):
             client = TestClient(create_app(Path(directory)))
             for route in ("quality-authorship", "quality-analysis"):
@@ -74,16 +75,21 @@ class QualityAuthorshipHTTPTests(TestCase):
             *,
             include_b: bool,
             authorship_basis: str,
+            all_grades: bool = False,
         ) -> dict:
             """Provide a prepared cohort.
 
             Returns:
                 Saved analysis and an observed empty author directory.
             """
-            assert authorship_basis == "current"
+            assert authorship_basis in {"current", "listed"}
             return {
                 "include_b": include_b,
-                "analysis": {**analysis_fixture(), "include_b": include_b},
+                "analysis": {
+                    **analysis_fixture(),
+                    "include_b": include_b,
+                    "all_grades": all_grades,
+                },
                 "authorship": {
                     "available": True,
                     "authors": [],
@@ -94,11 +100,16 @@ class QualityAuthorshipHTTPTests(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "webservice.server.read_current_quality",
+                "webservice.quality_pages.read_current_quality",
                 side_effect=saved,
-            ) as read,
+            ),
+            patch(
+                "webservice.quality_pages.current_quality_identity",
+                return_value=(1,),
+            ),
         ):
             runtime = Path(directory)
+            prepare_quality_pages(runtime)
             client = TestClient(create_app(runtime))
             for query, included in (
                 ("", False),
@@ -115,12 +126,12 @@ class QualityAuthorshipHTTPTests(TestCase):
                 assert 'id="quality-authors"' in response.text
                 if included:
                     assert "count_b=1&amp;lang=zh-hans" in response.text
-            assert read.call_count == 2
-            read.assert_called_with(
+            assert quality_pages.path_for(
                 runtime,
+                "zh-hans",
                 include_b=True,
-                authorship_basis="current",
-            )
+                basis="current",
+            ).is_file()
 
     @staticmethod
     def test_corrupt_saved_variant_is_unavailable() -> None:
@@ -128,7 +139,7 @@ class QualityAuthorshipHTTPTests(TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "webservice.server.read_current_quality",
+                "webservice.server.quality_pages.read",
                 side_effect=ValueError("damaged"),
             ),
         ):

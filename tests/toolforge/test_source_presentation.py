@@ -475,7 +475,7 @@ class TestSourcePresentation(TestCase):
             target="电子游戏/宝可梦工作组",
             metadata={
                 "file": (
-                    "data/daily/projects/zhwiki/Games/2026/20261102.parquet"
+                    "data/parsed/projects/zhwiki/Games/2026/20261102.parquet"
                 ),
                 "observed_at": "2026-11-03T00:00:04Z",
                 "finished_at": "2026-11-03T00:00:19Z",
@@ -534,7 +534,7 @@ class TestSourcePresentation(TestCase):
             )
             == 'Loaded project member pages from "20261102.parquet".'
         )
-        self.source["metadata"]["file"] = "data/daily/legacy.parquet"
+        self.source["metadata"]["file"] = "data/parsed/legacy.parquet"
         assert "data-dataset-link" in source_description(
             self.source,
             Interface("zh-hant"),

@@ -24,7 +24,13 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from data import project_data
-from data.paths import read_storage_path, storage_candidates, storage_key
+from data.paths import (
+    artifact_files,
+    flat_path,
+    read_storage_path,
+    storage_candidates,
+    storage_key,
+)
 from data.reports import ReportBundle, report_key
 from shared.assessment_profiles import ZHWIKI_VIDEO_GAMES
 from shared.support.assessment_encoding import (
@@ -108,10 +114,10 @@ def snapshot_path(
     root = runtime if runtime is not None else Path.cwd()
     if dry:
         root /= "dry-run"
-    return (
+    return flat_path(
         root
-        / "data/daily"
-        / storage_key(snapshot_key(site_name, project, day) + ".parquet")
+        / "data/parsed"
+        / storage_key(snapshot_key(site_name, project, day) + ".parquet"),
     )
 
 
@@ -125,10 +131,11 @@ def _stored_path(
     Returns:
         Safe path without changing the embedded observation identity.
     """
-    return read_storage_path(
-        Path.cwd() / "data/daily",
+    path = read_storage_path(
+        Path.cwd() / "data/parsed",
         snapshot_key(site_name, project, day) + ".parquet",
     )
+    return path if path.is_file() else flat_path(path)
 
 
 def _validated(frame: pl.DataFrame) -> pl.DataFrame:
@@ -659,13 +666,15 @@ def _read_previous_legacy(
     """
     candidates = []
     for preview in (False, True) if dry else (False,):
-        base = Path.cwd() / ("dry-run/data/daily" if preview else "data/daily")
+        base = Path.cwd() / (
+            "dry-run/data/parsed" if preview else "data/parsed"
+        )
         for directory in storage_candidates(
             base,
             report_key("assessments", site_name, project),
         ):
-            for path in directory.glob("assessments-????????.parquet"):
-                value = path.stem.removeprefix("assessments-")
+            for path in artifact_files(directory):
+                value = path.stem.split("--")[-1].removeprefix("assessments-")
                 if re.fullmatch(r"\d{8}", value) is None:
                     continue
                 try:
@@ -681,13 +690,18 @@ def _read_previous_legacy(
                     raise ValueError(message)
     for day, production, _ in sorted(candidates, reverse=True):
         base = Path.cwd() / (
-            "data/daily" if production else "dry-run/data/daily"
+            "data/parsed" if production else "dry-run/data/parsed"
         )
         path = read_storage_path(
             base,
             snapshot_key(site_name, project, day) + ".parquet",
         )
-        bundle = _read(path, site_name, project, day)
+        bundle = _read(
+            path if path.is_file() else flat_path(path),
+            site_name,
+            project,
+            day,
+        )
         if bundle is not None:
             return bundle
     return None

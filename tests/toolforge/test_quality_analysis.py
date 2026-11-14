@@ -20,6 +20,7 @@ from shared.assessment_profiles import assessment_profile
 from webservice.pages import render_quality_analysis
 from webservice.presentation import Interface
 from webservice.quality_analysis import quality_analysis_context
+from webservice.quality_pages import prepare_quality_pages
 from webservice.server import create_app
 
 _NOW = dt.datetime(2026, 11, 13, 12, tzinfo=dt.UTC)
@@ -399,6 +400,7 @@ class QualityAnalysisHTTPTests(unittest.TestCase):
                 observed_at=_NOW,
             )
             assert current_quality.refresh_saved_quality(root)
+            prepare_quality_pages(root)
             client = TestClient(create_app(root))
             with patch(
                 "data.articles.quality_analysis._summaries",
@@ -427,6 +429,7 @@ class QualityAnalysisHTTPTests(unittest.TestCase):
                 observed_at=_NOW + dt.timedelta(minutes=1),
             )
             assert current_quality.refresh_saved_quality(root)
+            prepare_quality_pages(root)
             response = client.get("/quality-analysis/?lang=en")
             assert "Updated analysis title" in response.text
 
@@ -436,13 +439,25 @@ class QualityAnalysisHTTPTests(unittest.TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "webservice.server.current_quality_identity",
+                "webservice.server.quality_pages.identity",
                 return_value=(1,),
             ) as identity,
             patch(
-                "webservice.server.read_current_quality",
-                return_value=analysis_fixture(),
+                "webservice.server.quality_pages.read",
+                return_value=render_quality_analysis(
+                    analysis_fixture(),
+                    None,
+                    None,
+                    "en",
+                    _NOW,
+                ),
             ) as read,
+            patch(
+                "webservice.server.pages.render_quality_analysis",
+                side_effect=AssertionError(
+                    "HTTP must not render a prepared cohort",
+                ),
+            ),
         ):
             client = TestClient(create_app(Path(directory)))
             for _ in range(2):
@@ -467,7 +482,7 @@ class QualityAnalysisHTTPTests(unittest.TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "webservice.server.read_current_quality",
+                "webservice.server.quality_pages.read",
                 side_effect=ValueError("damaged"),
             ),
         ):

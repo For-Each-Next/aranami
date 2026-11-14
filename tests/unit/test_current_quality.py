@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -205,6 +206,39 @@ def _activity() -> pl.DataFrame:
 
 class CurrentQualityTests(TestCase):
     """Keep every section bound to the same selected current pages."""
+
+    @staticmethod
+    def test_default_and_all_grade_presets_are_precomputed() -> None:
+        """Prepare C and unknown dates in the complete-grade preset."""
+        extra = (
+            _articles()
+            .head(1)
+            .with_columns(
+                pl.lit(5, dtype=pl.Int64).alias("page_id"),
+                pl.lit("C").alias("grade"),
+                pl.lit(None, dtype=pl.Date).alias("listed_date"),
+            )
+        )
+        tables = store.prepare_current_quality(
+            pl.concat([_articles(), extra]),
+            _evidence(),
+            _b_tables(),
+            _activity(),
+            observed_at=_NOW,
+        )
+        defaults = json.loads(tables["selection"]["payload"].item())[
+            "defaults"
+        ]
+        assert [row["coverage"][0]["total"] for row in defaults] == [3, 4, 5]
+        assert {row["grade"] for row in defaults[2]["articles"]} == {
+            "FA",
+            "FL",
+            "GA",
+            "B",
+            "C",
+        }
+        assert defaults[2]["coverage"][0]["dated"] == 4
+        store._validate(tables)
 
     @staticmethod
     def test_density_preserves_zero_unknown_and_constant_samples() -> None:
@@ -452,7 +486,7 @@ class CurrentQualityTests(TestCase):
                 "listed_review_link",
             )
             tables["years"] = tables["years"].drop("B", "BL")
-            ReportStore(runtime / "data/hourly").write(
+            ReportStore(runtime / "data/parsed").write(
                 quality_analysis._KEY,
                 ReportResult(
                     family="quality-analysis",
@@ -473,7 +507,7 @@ class CurrentQualityTests(TestCase):
                 "creation_timestamp",
             )
             b["evidence"] = old_evidence
-            ReportStore(runtime / "data/hourly").write(
+            ReportStore(runtime / "data/parsed").write(
                 current_authorship._KEY,
                 ReportResult(family="current-authorship", tables=b),
                 "",
@@ -540,7 +574,7 @@ class CurrentQualityTests(TestCase):
                 == expanded["observed_at"]
                 == _NOW.isoformat()
             )
-            saved = ReportStore(runtime / "data/hourly").read(
+            saved = ReportStore(runtime / "data/parsed").read(
                 store._KEY,
                 locked=True,
             )

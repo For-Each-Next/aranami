@@ -19,6 +19,7 @@ import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from data.paths import artifact_path, owner_directory
 from data.prepared import read_values, write_values
 from shared.support.files import encode_json
 
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 DATA_VERSION = 2
-DEFAULT_ROOT = Path("data/daily/newsletter")
+DEFAULT_ROOT = Path("data/parsed/newsletter")
 OBSERVATIONS_PATH = DEFAULT_ROOT / "observations"
 
 _MAX_BYTES = 16 * 1024 * 1024
@@ -88,11 +89,11 @@ def _archive(directory: Path, generation: dict) -> None:
     if day.is_symlink():
         message = "Newsletter date folders must be regular directories."
         raise OSError(message)
-    day.mkdir(exist_ok=True)
+    owner_directory(day).mkdir(parents=True, exist_ok=True)
     stem = "observation-" + stamp.strftime("%H%M%S%f")
     for ordinal in range(_MAX_CAPTURES):
         suffix = f"-{ordinal + 1}" if ordinal else ""
-        path = day / f"{stem}{suffix}.parquet"
+        path = artifact_path(day, f"{stem}{suffix}.parquet")
         if path.exists() or path.is_symlink():
             if read_values(path, _MAX_BYTES) == generation:
                 return
@@ -120,7 +121,7 @@ def load_observation(
         OSError: A persisted path is unsafe or unreadable.
         ValueError: Saved metadata, digest, or facts are invalid.
     """
-    current = directory / "current.parquet"
+    current = artifact_path(directory, "current.parquet")
     if current.exists() or current.is_symlink():
         return _validate_generation(
             read_values(current, _MAX_BYTES),
@@ -168,9 +169,9 @@ def save_observation(
     if directory.is_symlink():
         message = "Newsletter observations require a regular directory."
         raise OSError(message)
-    directory.mkdir(parents=True, exist_ok=True)
+    owner_directory(directory).mkdir(parents=True, exist_ok=True)
     descriptor = os.open(
-        directory / ".lock",
+        artifact_path(directory, ".lock"),
         os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
         0o600,
     )
@@ -193,7 +194,7 @@ def save_observation(
             if latest > captured:
                 return
         write_values(
-            directory / "current.parquet",
+            artifact_path(directory, "current.parquet"),
             generation,
             max_bytes=_MAX_BYTES,
         )

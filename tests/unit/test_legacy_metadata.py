@@ -27,7 +27,7 @@ class LegacyMetadataTests(TestCase):
     def setUp(self) -> None:
         """Allocate isolated canonical and staging destinations."""
         self.root = Path(self.enterContext(TemporaryDirectory()))
-        self.path = self.root / "data/daily/articles/milestones.parquet"
+        self.path = self.root / "data/parsed/articles/milestones.parquet"
         self.temporary = temporary_register_path(self.path)
         self.events = pl.DataFrame({
             "page_id": [1],
@@ -133,11 +133,11 @@ class LegacyMetadataTests(TestCase):
 
     def test_preview_metadata_stays_within_preview_data(self) -> None:
         """Keep staged recovery facts isolated from production paths."""
-        preview = self.root / "dry-run/data/daily/articles/milestones.parquet"
+        preview = self.root / "dry-run/data/parsed/articles/milestones.parquet"
         temporary = temporary_register_path(preview)
         store.sync_events(self.events, temporary)
         assert import_milestone_metadata(temporary, preview).height == 1
-        assert temporary.parent == self.root / "dry-run/data/daily/legacy"
+        assert temporary.parent == self.root / "dry-run/data/parsed/legacy"
         assert not self.path.exists()
 
     def test_missing_staging_is_inert_and_self_import_is_rejected(

@@ -209,7 +209,7 @@ class NewsletterDraftArchiveTests(TestCase):
         """Select March's capture from current early annual facts."""
         runtime = self.path.parent
         archive = NewsletterDraftArchive(
-            runtime / "data/daily/newsletter-drafts",
+            runtime / "data/parsed/newsletter-drafts",
         )
         day = dt.date(2026, 3, 1)
         review = _annual_review(self.issue, day)

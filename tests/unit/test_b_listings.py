@@ -73,6 +73,57 @@ def _revision(identifier: int, grade: str) -> HistoricalRevision:
     )
 
 
+class LowerGradeListingTests(TestCase):
+    """Apply the history algorithm to all requested lower grades."""
+
+    @staticmethod
+    def test_lower_grades_use_the_same_contiguous_history_proof() -> None:
+        """Prove dates for C through unassessed grades."""
+        profile = assessment_profile("zhwiki", "电子游戏")
+        for label in profile.classes:
+            if label.code not in {
+                "C",
+                "CL",
+                "Start",
+                "List",
+                "Stub",
+                "SL",
+                "Unassessed",
+            }:
+                continue
+            with (
+                TemporaryDirectory() as directory,
+                patch.object(
+                    collector,
+                    "read_talk_revision_batches",
+                    side_effect=OSError("Replica unavailable"),
+                ),
+                patch.object(
+                    collector,
+                    "template_aliases",
+                    return_value=_ALIASES,
+                ),
+                patch.object(
+                    collector,
+                    "read_talk_revisions",
+                    return_value=[_revision(5, label.code), _revision(4, "B")],
+                ),
+            ):
+                runtime = Path(directory)
+                collector.refresh_b_listings(
+                    OfflineSite("zh", "wikipedia"),
+                    _membership().with_columns(
+                        pl.lit(label.raw_value).alias("pa_class"),
+                    ),
+                    runtime=runtime,
+                )
+                proof = store.load(runtime)["inference"].row(0, named=True)
+                assert proof["banner_transition_status"] == "proven", (
+                    label.code
+                )
+                assert proof["banner_entry_talk_rev_id"] == 5
+
+
 class BListingTests(TestCase):
     """Reuse proved talk ranges independently of subject edits."""
 

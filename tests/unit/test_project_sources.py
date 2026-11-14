@@ -650,6 +650,33 @@ class TestProjectStatements(TestCase):
         }
 
     @staticmethod
+    def test_replica_titles_cannot_trigger_interwiki_requests() -> None:
+        """Keep literal colon prefixes in their observed namespace."""
+        site = OfflineSite("en", "wikipedia")
+        frame = pl.DataFrame({
+            "page_namespace": [0, 0, 14],
+            "page_title": ["NG:_Dev.Team", "Talk:Literal_title", "NG:_Games"],
+            "talk_page_id": [10, 11, 12],
+        })
+        with patch.object(
+            site,
+            "interwiki",
+            side_effect=AssertionError("network"),
+            create=True,
+        ):
+            result = projects._with_titles(site, frame)  # ruff: ignore[private-member-access]
+        assert result["full_title"].to_list() == [
+            "NG: Dev.Team",
+            "Talk:Literal title",
+            "Category:NG: Games",
+        ]
+        assert result["talk_title"].to_list() == [
+            "Talk:NG: Dev.Team",
+            "Talk:Talk:Literal title",
+            "Category talk:NG: Games",
+        ]
+
+    @staticmethod
     def test_project_references_use_the_same_membership_observation() -> None:
         """Keep nullable revision references without extra reads."""
         site = OfflineSite("zh", "wikipedia")

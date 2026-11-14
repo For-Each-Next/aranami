@@ -19,6 +19,7 @@ from data.newsletter.archive import DEFAULT_PATH, NewsletterDraftArchive
 from data.newsletter.historical import import_historical_data
 from data.newsletter.observations import OBSERVATIONS_PATH, save_observation
 from data.newsletter.schema import valid_newsletter
+from data.paths import artifact_path
 from shared.newsletter import SUFFIXES, Issue
 from webservice.server import create_app
 
@@ -134,7 +135,9 @@ class HistoricalNewsletterRequests(TestCase):
         assert status == HTTPStatus.OK
         assert _UNKNOWN in text
         assert "| y1 = 2 " not in text
-        assert not (self.runtime / "data/daily/newsletter/historical").exists()
+        assert not (
+            self.runtime / "data/parsed/newsletter/historical"
+        ).exists()
 
     def test_import_invalidates_warm_page_and_uses_explicit_runtime(
         self,
@@ -161,7 +164,7 @@ class HistoricalNewsletterRequests(TestCase):
         self._save_feature()
         bundle = import_historical_data(self.runtime, seed=_seed())
         assert self._get()[0] == HTTPStatus.OK
-        (bundle.path / "figures.parquet").write_bytes(b"damaged")
+        (artifact_path(bundle.path, "figures.parquet")).write_bytes(b"damaged")
         status, text = self._get()
         assert status == HTTPStatus.SERVICE_UNAVAILABLE
         assert "data-newsletter-wikitext" not in text
@@ -172,7 +175,7 @@ class HistoricalNewsletterRequests(TestCase):
         review["dyk_series"] = [{"date": "2025-12-31", "count": 777}]
         self._save_feature(review)
         bundle = import_historical_data(self.runtime, seed=_seed())
-        (bundle.path / "figures.parquet").write_bytes(b"damaged")
+        (artifact_path(bundle.path, "figures.parquet")).write_bytes(b"damaged")
         status, text = self._get()
         assert status == HTTPStatus.OK
         assert "| y1 = 777 " in text

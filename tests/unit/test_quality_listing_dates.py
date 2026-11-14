@@ -203,7 +203,7 @@ class TestListingDates(TestCase):
             second = dates.listing_dates(_pages("GA"), site=site)
         assert saved["oldid"].to_list() == [201]
         assert second.equals(first)
-        reads.assert_called_once_with(site, [101])
+        reads.assert_called_once_with(site, [101], revisions={101: 200})
 
     @staticmethod
     def test_omitted_api_talk_page_remains_eligible_for_retry() -> None:
@@ -306,7 +306,7 @@ class TestQualityDatesCache(TestCase):
             with patch.object(cache.Path, "replace", side_effect=OSError):
                 cache.save(frame.with_columns(pl.lit(202).alias("oldid")))
             actual = cache.load()
-            files = list((Path(directory) / "cache").iterdir())
+            files = list((Path(directory) / "data/parsed").glob("*.parquet"))
         assert actual.equals(frame)
         expected_files = 1
         assert len(files) == expected_files

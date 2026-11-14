@@ -63,7 +63,7 @@ def preview_path(filename: str) -> PurePosixPath:
         or not (
             path.parts[0] == "cache"
             or path.parts[:2]
-            in {("data", "archive"), ("data", "daily"), ("data", "hourly")}
+            in {("data", "archive"), ("data", "raw"), ("data", "parsed")}
         )
     ):
         message = "Choose one canonical public Parquet file."
@@ -134,7 +134,7 @@ def _project_manifest(metadata: dict[str, str], path: PurePosixPath) -> dict:
         boundary,
         runtime=Path("/"),
     )
-    legacy = "data/daily/" + str(value.get("report_key")) + ".parquet"
+    legacy = "data/parsed/" + str(value.get("report_key")) + ".parquet"
     if (
         details.get("boundary_date") != boundary.isoformat()
         or path.as_posix()

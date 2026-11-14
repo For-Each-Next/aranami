@@ -6,7 +6,7 @@ import datetime as dt
 import logging
 from typing import TYPE_CHECKING
 
-from data import project_data
+from data import enwiki, project_data
 from data.observations import record_page_inputs
 from data.reports import report_key
 from runtime.jobs import ProposedEdit, job_run
@@ -119,12 +119,13 @@ def run(  # ruff: ignore[too-many-locals]
                 strict=True,
             )
         }
-        data = prepare_reports(
-            existing,
-            tuple(spec.definition for spec in REPORT_SPECS),
-            active.site,
-            **inputs,
-        )
+        with enwiki.source_scope(dry=active.dry):
+            data = prepare_reports(
+                existing,
+                tuple(spec.definition for spec in REPORT_SPECS),
+                active.site,
+                **inputs,
+            )
         texts = reports.build_reports(existing, data, REPORT_SPECS)
         failures: list[Exception] = []
         confirmed_all = True

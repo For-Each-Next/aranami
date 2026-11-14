@@ -25,7 +25,7 @@ class TestPackageMain(TestCase):
         config = run.call_args.args[0]
         assert not config.dry
         assert config.run_immediately
-        assert config.output == Path("data/hourly/dashboard.parquet")
+        assert config.output == Path("data/parsed/dashboard.parquet")
         assert config.interval == 3600  # ruff: ignore[magic-value-comparison]
 
     def test_cli_options_select_output_mode_and_startup_timing(self) -> None:

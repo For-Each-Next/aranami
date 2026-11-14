@@ -124,9 +124,7 @@ def _root(site_name: str, project: str, *, dry: bool = False) -> Path:
         Runtime-relative data root, isolated for previews.
     """
     kind = (
-        "archive"
-        if (site_name, project) == ("zhwiki", "电子游戏")
-        else "daily"
+        "archive" if (site_name, project) == ("zhwiki", "电子游戏") else "raw"
     )
     return Path("dry-run" if dry else ".") / "data" / kind
 
@@ -412,44 +410,6 @@ def _configured_taskforces(site_name: str, project: str) -> list[str]:
         )
         raise ValueError(message)
     return names
-
-
-def _with_taskforces(
-    source: pl.DataFrame,
-    children: dict[str, ReportBundle],
-) -> pl.DataFrame:
-    """Attach flags from the same boundary's complete child snapshots.
-
-    Returns:
-        Parent rows with sorted memberships or confirmed empty lists.
-    """
-    source = source.drop("taskforces", strict=False)
-    if not children:
-        return source.with_columns(
-            pl.lit([], dtype=pl.List(pl.String)).alias("taskforces"),
-        )
-    flags = (
-        pl
-        .concat(
-            snapshot.tables["members"].select(
-                "page_id",
-                pl.lit(project).alias("taskforce"),
-            )
-            for project, snapshot in children.items()
-        )
-        .group_by("page_id")
-        .agg(
-            pl.col("taskforce").unique().sort().alias("taskforces"),
-        )
-    )
-    return source.join(
-        flags,
-        on="page_id",
-        how="left",
-        validate="1:1",
-    ).with_columns(
-        pl.col("taskforces").fill_null(pl.lit([], dtype=pl.List(pl.String))),
-    )
 
 
 def _digest(frame: pl.DataFrame) -> str:
@@ -889,6 +849,23 @@ def _save(  # ruff: ignore[too-many-arguments]
     return saved
 
 
+def _prune_source_lists(path: Path, site_name: str, project: str) -> None:
+    """Keep the last two complete non-archival source page lists."""
+    if path.parent.name != "raw":
+        return
+    prefix = project_stem(site_name, project) + "-"
+    candidates = sorted(
+        (
+            item
+            for item in path.parent.glob(prefix + "????????.parquet")
+            if not item.is_symlink()
+        ),
+        reverse=True,
+    )
+    for item in candidates[2:]:
+        item.unlink()
+
+
 def ensure_snapshot(  # ruff: ignore[too-many-arguments]
     site_name: str,
     project: str,
@@ -901,9 +878,9 @@ def ensure_snapshot(  # ruff: ignore[too-many-arguments]
 ) -> ReportBundle:
     """Reuse or retain today's first complete supplied observation.
 
-    Configured task forces must supply captures for the same boundary
-    before their parent can be committed. A failed child leaves any
-    existing parent capture intact and never creates a partial parent.
+    The single source query supplies parent rows and taskforce flags.
+    Child populations are derived by consumers and are never captured
+    separately. A failed query leaves the previous complete file intact.
 
     Args:
         site_name: Wiki database identity without a source client.
@@ -962,30 +939,18 @@ def ensure_snapshot(  # ruff: ignore[too-many-arguments]
         )
         if existing is not None:
             return existing
-        children = {
-            child: ensure_snapshot(
-                site_name,
-                child,
-                boundary_date,
-                load_members=load_members,
-                runtime=root,
-                dry=dry,
-                observed_at=(
-                    clock_anchor + dt.timedelta(seconds=monotonic() - began)
-                    if observed_at is not None
-                    else None
-                ),
-            )
-            for child in taskforce_projects
-        }
         started = clock_anchor + dt.timedelta(seconds=monotonic() - began)
         if started.date() != boundary_date:
             message = "Daily project capture expired while waiting for a lock."
             raise ValueError(message)
         frame = load_members(project)
+        if "taskforces" not in frame.columns and not taskforce_projects:
+            frame = frame.with_columns(
+                pl.lit([], dtype=pl.List(pl.String)).alias("taskforces"),
+            )
         frame = _validated(
             normalize_members(
-                _with_taskforces(frame, children),
+                frame,
                 taskforce_projects,
             ),
         )
@@ -1029,7 +994,7 @@ def ensure_snapshot(  # ruff: ignore[too-many-arguments]
             runtime=root,
             dry=dry,
         )
-        return _save(
+        saved = _save(
             path,
             frame,
             manifest,
@@ -1037,3 +1002,5 @@ def ensure_snapshot(  # ruff: ignore[too-many-arguments]
             project=project,
             boundary_date=boundary_date,
         )
+        _prune_source_lists(path, site_name, project)
+        return saved

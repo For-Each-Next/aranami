@@ -28,7 +28,7 @@ class AssessmentSnapshotAdapterTests(TestCase):
         self.site.dbName.return_value = "zhwiki"
         self.bundle = Mock(
             path=Path(
-                "data/daily/projects/zhwiki/Game/2026/20261102.parquet",
+                "data/raw/projects/zhwiki/Game/2026/20261102.parquet",
             ),
             tables={
                 "members": pl.DataFrame({

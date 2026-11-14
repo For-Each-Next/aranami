@@ -54,6 +54,7 @@ lazy from tasks.articles.quality_analysis import (
     refresh_quality_analysis as collect,
 )
 lazy from tasks.articles.quality_authors import refresh_quality_author_activity
+lazy from webservice.quality_pages import prepare_quality_pages
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -134,7 +135,9 @@ def refresh_saved_quality(runtime: Path) -> bool:
         inputs are logged and leave the previous generation intact.
     """
     try:
-        return _refresh_saved_quality(runtime)
+        updated = _refresh_saved_quality(runtime)
+        if updated:
+            prepare_quality_pages(runtime)
     except (OSError, ValueError, PolarsError) as error:
         _LOG.warning(
             "Saved current-quality projection unavailable (%s).",
@@ -142,6 +145,8 @@ def refresh_saved_quality(runtime: Path) -> bool:
             exc_info=True,
         )
         return False
+    else:
+        return updated
 
 
 def _should_yield(

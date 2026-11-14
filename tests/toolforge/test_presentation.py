@@ -513,7 +513,7 @@ def write_interface_fixtures(destination: Path) -> None:
     logs["availability"] = "available"
     logs["files"][0]["stream"] = "diagnostics"
     logs["files"][0]["name"] = "20261018.000.log"
-    stored = destination / "data/daily/assessments/zhwiki/Video games"
+    stored = destination / "data/parsed/assessments/zhwiki/Video games"
     stored.mkdir(parents=True, exist_ok=True)
     pl.DataFrame({
         "page_id": [1],

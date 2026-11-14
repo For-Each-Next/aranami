@@ -138,7 +138,7 @@ def _save_legacy(
             )
             .cast(store._LEGACY_LENGTH_SCHEMA)
         )
-    ReportStore(root / "data/hourly").write(
+    ReportStore(root / "data/parsed").write(
         store._KEY,
         ReportResult(
             family="quality-analysis",
@@ -316,7 +316,7 @@ class QualityAnalysisStoreTests(TestCase):
             root = Path(directory)
             tables = store._summaries(_members())
             tables["coverage"] = pl.DataFrame({"total": [2]})
-            ReportStore(root / "data/hourly").write(
+            ReportStore(root / "data/parsed").write(
                 store._KEY,
                 ReportResult(family="quality-analysis", tables=tables),
                 "",

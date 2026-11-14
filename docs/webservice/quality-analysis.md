@@ -110,8 +110,11 @@ The raw quality-analysis Parquet retains current membership and measurements.
 atomic ReportStore generation containing both B/BL variants, precomputed charts,
 article details and author summaries. Startup prepares this projection from
 saved facts before ordinary source dispatch. Bounded analysis and authorship
-passes refresh it after their checkpoints. HTTP readers only validate, select
-and serialize a variant; they never join, aggregate, acquire sources or write.
+passes refresh it after their checkpoints. After each update, background presentation renders every default preset into
+`data/webservice/quality-page-*.parquet`. HTTP readers deliver those complete
+pages without reading analysis tables or rendering a cohort. They never join,
+aggregate, acquire sources or write. The browser keeps the prepared default
+charts until the user changes a filter.
 
 Analysis and all-grade authorship keep separate short-lived workers scheduled hourly
 at :02 UTC while ordinary work is idle. The parent retains no article bodies or

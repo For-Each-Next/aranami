@@ -18,6 +18,7 @@ from tempfile import NamedTemporaryFile
 import polars as pl
 
 from data import project_data
+from data.layout_migration import migrate_layout
 from data.paths import storage_key, storage_path
 from data.prepared import write_values
 from data.reports import report_storage_key
@@ -297,7 +298,13 @@ def migrate(runtime: Path) -> dict[str, object]:  # ruff: ignore[complex-structu
             }
             known[row["source"]] = row
             _receipt(receipt, known, complete=False)
-    return _receipt(receipt, known, complete=True)
+    original = _receipt(receipt, known, complete=True)
+    layout = migrate_layout(runtime, _copy)
+    return {
+        "schema": 3,
+        "complete": True,
+        "files": original["files"] + layout["files"],
+    }
 
 
 if __name__ == "__main__":

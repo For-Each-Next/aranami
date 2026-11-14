@@ -39,7 +39,8 @@
 .page-updates .analysis-editor-table { min-inline-size: 0; table-layout: auto; }
 .page-updates .analysis-editor-table th:first-child { inline-size: 42%; }
 .analysis-editor-table th, .analysis-editor-table td { padding: .5rem .4rem; border-bottom: 1px solid #dce6e7; text-align: left; }
-.analysis-editor-table td { white-space: nowrap; text-align: right; }
+.analysis-editor-table td { white-space: nowrap; text-align: center; }
+.analysis-editor-table thead th:not(:first-child) { text-align: center; }
 .analysis-editor-table th { overflow-wrap: anywhere; }
 #quality-authors { margin-top: 2.5rem; }
 #analysis-distribution, #analysis-years, #analysis-articles { margin-top: 2.5rem; }
@@ -84,9 +85,14 @@
 
 .ui-dialog.analysis-authorship-dialog { width: min(40rem, calc(100vw - 2rem)); max-width: 40rem; }
 
-.analysis-mini-cell { width: 38%; min-width: 5rem; }
+.analysis-mini-cell { min-width: 5rem; }
 .analysis-mini-violin { display: block; width: 100%; height: 2rem; }
 .analysis-mini-cell a { display: block; }
 .analysis-pie-key th, .analysis-pie-key td { padding: .45rem .35rem; }
 .analysis-pie-key thead th:last-child { text-align: center; }
 @media (max-width: 390px) { .analysis-pie-key { font-size: .85rem; } .analysis-assessment-label { gap: .25rem; } }
+
+.analysis-pie-key th:first-child, .analysis-pie-key td.analysis-number { width: 1%; white-space: nowrap; }
+.analysis-count { display: grid; grid-template-columns: minmax(3ch, 1fr) 4.6ch; gap: .3rem; align-items: baseline; justify-items: end; }
+.analysis-count small { color: #52696e; }
+[data-authorship-basis] { margin: -.5rem 0 1.5rem; }

@@ -97,7 +97,7 @@ def category_cache(
         with no category links, distinct from uncovered page IDs.
     """
     now = now.astimezone(dt.UTC) - dt.timedelta(hours=1)
-    root = Path("dry-run/data/hourly" if dry else "data/hourly")
+    root = Path("dry-run/data/raw" if dry else "data/raw")
     return (
         ParquetCache(
             schema=CATEGORY_SCHEMA,
@@ -123,7 +123,7 @@ def cache(
         remain separate from production observations.
     """
     now = now.astimezone(dt.UTC) - dt.timedelta(hours=1)
-    root = Path("dry-run/data/hourly" if dry else "data/hourly")
+    root = Path("dry-run/data/raw" if dry else "data/raw")
     mapping = hashlib.sha256(
         repr(
             sorted(PROJECT_DATA_TASKFORCES.get((wiki, project), ())),
@@ -163,7 +163,7 @@ def prune(now: dt.datetime) -> None:
     cutoff = (now.astimezone(dt.UTC) - dt.timedelta(hours=1)).strftime(
         "%Y%m%d%H",
     )
-    root = Path("data/hourly")
+    root = Path("data/raw")
     if root.is_symlink():
         return
     groups = {}

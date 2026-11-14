@@ -794,7 +794,7 @@ def quality_analysis_identity(runtime: Path = Path()) -> tuple:
     Returns:
         Bounded selector file metadata, or a missing first-use identity.
     """
-    path = ReportStore(runtime / _ROOT).data_path(_KEY) / "latest.json"
+    path = ReportStore(runtime / _ROOT).selection_path(_KEY)
     try:
         info = path.lstat()
     except FileNotFoundError:

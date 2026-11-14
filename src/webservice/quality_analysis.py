@@ -56,6 +56,33 @@ _FIRST_FILTER_YEAR = 2002
 _DETAIL_SHARE_THRESHOLD = 0.1
 
 
+def _grade_label(code: str, interface: Interface) -> str:
+    """Return compact Chinese labels for matrix and chart columns.
+
+    Returns:
+        Two-character Chinese labels or the normal English label.
+    """
+    if interface.locale.startswith("zh"):
+        return {
+            "FA": "典范" if interface.locale == "zh-hans" else "典範",
+            "FL": "特表",
+            "A": "甲级" if interface.locale == "zh-hans" else "甲級",
+            "AL": "甲表",
+            "GA": "优良" if interface.locale == "zh-hans" else "優良",
+            "Bplus": "乙上",
+            "B": "乙级" if interface.locale == "zh-hans" else "乙級",
+            "BL": "乙表",
+            "C": "丙级" if interface.locale == "zh-hans" else "丙級",
+            "CL": "丙表",
+            "Start": "初级" if interface.locale == "zh-hans" else "初級",
+            "List": "初表",
+            "Stub": "小级" if interface.locale == "zh-hans" else "小級",
+            "SL": "小表",
+            "Unassessed": "未评" if interface.locale == "zh-hans" else "未評",
+        }.get(code, interface.text(f"assessment.class.{code}"))
+    return interface.text(f"assessment.class.{code}")
+
+
 def _number(value: float | None) -> str:
     """Display a measured value without turning missing data into zero.
 
@@ -115,7 +142,9 @@ def _pie(
         fraction = row["pages"] / max(total, 1)
         categories.append({
             **row,
-            "label": interface.text(f"assessment.{dimension}.{code}"),
+            "label": _grade_label(code, interface)
+            if dimension == "class"
+            else interface.text(f"assessment.{dimension}.{code}"),
             "color": _PROFILE.color(code, dimension),
             "series": _IMPORTANCE.index(code)
             if code in _IMPORTANCE
@@ -154,7 +183,7 @@ def _years(data: dict, interface: Interface) -> dict:
                 segments.append({
                     "grade": code,
                     "color": _PROFILE.color(code, "class"),
-                    "label": interface.text(f"assessment.class.{code}"),
+                    "label": _grade_label(code, interface),
                     "count": count,
                     "x": round(center - 16, 2),
                     "y": round(248 - offset - height, 2),
@@ -305,6 +334,7 @@ def _articles(data: dict, interface: Interface) -> list[dict]:
                         "SL",
                         "Unassessed",
                     }
+                    or data.get("all_grades")
                     or (data.get("include_b") and row["grade"] in {"B", "BL"})
                 ),
             ),
@@ -480,9 +510,11 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
     if selection:
         default_ids = {
             row["page_id"]
-            for row in selection["defaults"][int(bool(data.get("include_b")))][
-                "articles"
-            ][:20]
+            for row in selection["defaults"][
+                2
+                if data.get("all_grades")
+                else int(bool(data.get("include_b")))
+            ]["articles"][:20]
         }
         shown = [row for row in shown if row["page_id"] in default_ids]
     if selection:
@@ -537,13 +569,14 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                     "editor_share",
                     "editor_bytes",
                     "words",
+                    "authorship_details",
                 )
             },
             "last_year": selection["last_year"],
             "grades": [
                 {
                     "value": code,
-                    "label": interface.text(f"assessment.class.{code}"),
+                    "label": _grade_label(code, interface),
                     "color": _PROFILE.color(code, "class"),
                     "checked": code
                     not in {
@@ -557,6 +590,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                         "SL",
                         "Unassessed",
                     }
+                    or data.get("all_grades")
                     or (data.get("include_b") and code in {"B", "BL"}),
                 }
                 for code in codes
@@ -589,6 +623,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             "unknown_dates": _number(total - coverage.get("dated", 0)),
             "median": _number(coverage.get("median_characters")),
             "include_b": bool(data.get("include_b")),
+            "all_grades": bool(data.get("all_grades")),
             "locale": interface.locale,
             "grades": grades,
             "importance_totals": importance,
@@ -609,10 +644,12 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             else [
                 {
                     "value": code,
-                    "label": interface.text(f"assessment.class.{code}"),
+                    "label": _grade_label(code, interface),
                 }
                 for code in _GRADES
-                if data.get("include_b") or code not in {"B", "BL"}
+                if data.get("all_grades")
+                or data.get("include_b")
+                or code not in {"B", "BL"}
                 if code not in {"A", "AL"}
                 or any(row["grade"] == code for row in grades)
             ],

@@ -210,7 +210,7 @@ class SavedQualityAuthorCorrectionTests(TestCase):
         )
         self.raw_files = {
             path: path.read_bytes()
-            for path in (self.runtime / "data/daily").rglob("*.parquet")
+            for path in (self.runtime / "data/parsed").rglob("*.parquet")
         }
 
     def _save_proofs(self, *, include_b: bool = True) -> None:

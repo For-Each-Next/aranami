@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     import datetime as dt
     from collections.abc import Mapping
 
-DEFAULT_PATH = Path("data/hourly/game-title-conversions")
+DEFAULT_PATH = Path("data/parsed/game-title-conversions.parquet")
 SCHEMA = {
     "title": pl.String,
     "label": pl.String,
@@ -134,7 +134,7 @@ def read_game_title_labels(
         Unavailable caches return no identity and an empty map.
     """
     try:
-        latest = latest_cache_path(path)
+        latest = path if path.suffix == ".parquet" else latest_cache_path(path)
         if latest is None:
             return None, MappingProxyType({})
         info = latest.lstat()

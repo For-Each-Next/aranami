@@ -544,16 +544,29 @@ def _with_titles(site: BaseSite, frame: pl.DataFrame) -> pl.DataFrame:
         "page_title",
         "talk_page_id",
     ).iter_rows():
-        page = pywikibot.Page(site, title, namespace)
-        titles.append(page.title())
+        # Replica rows already identify the namespace and wiki.
+        # A wikitext parser can mistake "NG:" for an interwiki link.
+        normalized_title = title.replace("_", " ")
+        page = pywikibot.page.BaseLink(
+            normalized_title,
+            namespace=namespace,
+            site=site,
+        )
+        titles.append(page.canonical_title())
         talk = (
-            page.toggleTalkPage()
+            pywikibot.page.BaseLink(
+                normalized_title,
+                namespace=namespace + 1,
+                site=site,
+            )
             if talk_id is not None
-            and not page.isTalkPage()
+            and namespace % 2 == 0
             and namespace + 1 in site.namespaces
             else None
         )
-        talk_titles.append(talk.title() if talk is not None else None)
+        talk_titles.append(
+            talk.canonical_title() if talk is not None else None,
+        )
     return frame.with_columns(
         pl.Series("full_title", titles, dtype=pl.String),
         pl.Series("talk_title", talk_titles, dtype=pl.String),

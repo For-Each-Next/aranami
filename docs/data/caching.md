@@ -76,7 +76,7 @@ reports. It asks Chinese Wikipedia's parser to apply
 and [`Module:CGroup/Games-zh`](https://zh.wikipedia.org/wiki/Module:CGroup/Games-zh)
 through `NoteTA` with `variant=zh-tw`. Labels
 and every transcluded dependency revision are checkpointed under the ASCII
-directory `data/hourly/game-title-conversions/`. Unchanged revisions
+file `data/parsed/game-title-conversions.parquet`. Unchanged revisions
 reuse covered titles; new titles and changed sources trigger bounded batches.
 Metadata-only origin revision checks before and after parsing reject
 mixed-source observations without replica-lag ambiguity.
@@ -86,7 +86,7 @@ titles. Canonical titles, page IDs, source URLs and anchors stay unchanged.
 
 Hourly page and category files name the completed UTC hour, such as
 `2026111400.parquet` written at 01:00, and retain the newest two periods.
-Chinese wpvg lists live directly under `data/hourly`, alongside named child
+Chinese wpvg lists live directly under `data/parsed`, alongside named child
 project lists and `categories-<hour>.parquet`. Daily Chinese page lists remain
 permanent under `data/archive`. Full revision text lives in the sharded
 `data/revisions` store; only acquisition and parsing use it. See

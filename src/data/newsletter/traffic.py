@@ -18,7 +18,7 @@ def _path(runtime: Path | None, *, dry: bool) -> Path:
         A validated flat daily path without creating it.
     """
     root = (runtime or Path.cwd()) / (
-        "dry-run/data/daily" if dry else "data/daily"
+        "dry-run/data/parsed" if dry else "data/parsed"
     )
     return storage_path(root, "newsletter-traffic.parquet")
 

@@ -253,7 +253,7 @@ class TestSourceActivity(TestCase):
             "target": "Games",
             "date": "2026-11-02",
             "metadata": {
-                "file": "data/daily/Games.parquet",
+                "file": "data/raw/Games.parquet",
                 "observed_at": "",
                 "finished_at": "",
             },

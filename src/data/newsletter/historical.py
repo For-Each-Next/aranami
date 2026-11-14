@@ -21,6 +21,7 @@ from uuid import uuid4
 
 import polars as pl
 
+from data.paths import artifact_path, owner_directory
 from data.reports import ReportBundle, ReportResult, ReportStore
 from shared.support.files import atomic_json, encode_json, read_json_object
 
@@ -177,9 +178,9 @@ def _store(runtime: Path | None, *, dry: bool) -> ReportStore:
     return ReportStore(
         root
         / (
-            "dry-run/data/daily/newsletter/historical"
+            "dry-run/data/parsed/newsletter/historical"
             if dry
-            else "data/daily/newsletter/historical"
+            else "data/parsed/newsletter/historical"
         ),
         dry=dry,
     )
@@ -200,7 +201,7 @@ def read_historical_data(
         Validated retained dataset, or none before its explicit import.
     """
     store = _store(runtime, dry=dry)
-    if not (store.root / _KEY).exists():
+    if not store.has_data(_KEY):
         return None
     descriptor = os.open(
         store.lock_root / _KEY / ".lock",
@@ -254,14 +255,14 @@ def import_historical_data(
     store = _store(runtime, dry=dry)
     with store.locked(_KEY):
         bundle = store.read(_KEY, locked=True)
-        staged = store.root / "temporary-import.json"
-        receipt = store.root / "import-receipt.json"
+        staged = artifact_path(store.root, "temporary-import.json")
+        receipt = artifact_path(store.root, "import-receipt.json")
         if bundle is None:
             if seed is None:
                 message = "Historical import requires supplied audit metadata."
                 raise ValueError(message)
             value, frame = decode_import(seed)
-            store.root.mkdir(parents=True, exist_ok=True)
+            owner_directory(store.root).mkdir(parents=True, exist_ok=True)
             if staged.exists() or staged.is_symlink():
                 if read_json_object(staged, _MAX_BYTES) != value:
                     message = (

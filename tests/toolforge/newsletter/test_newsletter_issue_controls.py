@@ -17,6 +17,7 @@ from data.newsletter.archive import DEFAULT_PATH, NewsletterDraftArchive
 from data.newsletter.observations import OBSERVATIONS_PATH, save_observation
 from data.newsletter.publication import PUBLICATION_PAGE
 from data.newsletter.schema import valid_newsletter
+from data.paths import artifact_path
 from newsletter.test_newsletter_data import Reader
 from tasks.zhwiki.newsletter.collection import collect_source_facts
 from webservice.server import create_app
@@ -193,7 +194,10 @@ class NewsletterIssueControlsTests(unittest.TestCase):
             for path in self.runtime.rglob("*")
             if path.is_file()
         } == files
-        (self.runtime / OBSERVATIONS_PATH / "current.parquet").write_text("{")
+        artifact_path(
+            self.runtime / OBSERVATIONS_PATH,
+            "current.parquet",
+        ).write_text("{")
         archived = self.client.get(url)
         assert archived.status_code == HTTPStatus.OK
         assert "data-newsletter-wikitext" in archived.text

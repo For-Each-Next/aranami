@@ -72,11 +72,34 @@ def _identity(
     )
     if (
         filename != expected.relative_to(runtime).as_posix()
-        and filename != "data/daily/" + logical + ".parquet"
+        and filename != "data/parsed/" + logical + ".parquet"
     ) or manifest.get("report_key") != logical:
         message = "Project-data selectors must use their canonical spelling."
         raise ValueError(message)
     return wiki, project, boundary
+
+
+def _flat_filename(filename: str, runtime: Path) -> str:
+    """Resolve an old cadence path using its verified migration receipt.
+
+    Returns:
+        The flat destination, or the original selector when unrecorded.
+    """
+    if not filename.startswith(("data/daily/", "data/hourly/")):
+        return filename
+    try:
+        records = json.loads(
+            read_regular(
+                runtime / "state/data-layout-v3.json",
+                8 * 1024 * 1024,
+            ),
+        )
+    except FileNotFoundError:
+        return filename
+    for row in records["files"]:
+        if "data/" + row["source"] == filename and row["destination"]:
+            return row["destination"]
+    return filename
 
 
 def _legacy_filename(filename: str, runtime: Path) -> str:
@@ -96,11 +119,15 @@ def _legacy_filename(filename: str, runtime: Path) -> str:
             records = {"files": []}
         for row in records["files"]:
             if row["source"] == filename and row["state"] == "complete":
-                return row["destination"]
-        filename = destination(PurePosixPath(filename)).as_posix()
+                filename = row["destination"]
+                break
+        if filename.startswith(("reports/", "cache/toolforge/")):
+            filename = destination(PurePosixPath(filename)).as_posix()
+    filename = _flat_filename(filename, runtime)
     parts = PurePosixPath(filename).parts
     if (
-        parts[:3] == ("data", "daily", "projects")
+        parts[:3]
+        in {("data", "daily", "projects"), ("data", "parsed", "projects")}
         and len(parts) == _PROJECT_PATH_PARTS
     ):
         wiki, project, year, leaf = parts[3:]
@@ -150,7 +177,7 @@ def read_dataset(
         message = "Preview pages must be positive integers."
         raise DatasetSelectionError(message)
     project_file = filename.startswith((
-        "data/daily/projects/",
+        "data/parsed/projects/",
         "data/archive/",
     ))
     try:

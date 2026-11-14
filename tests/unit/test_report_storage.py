@@ -12,19 +12,16 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
-from typing import TYPE_CHECKING
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
 import polars as pl
 
-from data.reports import ReportResult, ReportStore, report_key
+from data.paths import artifact_path
+from data.reports import ReportBundle, ReportResult, ReportStore, report_key
 from runtime.jobs import JobContext, ProposedEdit, job_run
 from shared.deployment import project_version
 from tasks.zhwiki.new_pages import build_result
-
-if TYPE_CHECKING:
-    from data.reports import ReportBundle
 
 _START = dt.datetime(2026, 10, 20, tzinfo=dt.UTC)
 _ARTICLE_COUNT = 75
@@ -196,7 +193,9 @@ class TestReportStore(TestCase):
                 started_at=_START,
                 target={"site": "zhwiki", "title": "Report"},
             )
-            schema = pl.read_parquet_schema(bundle.path / "members.parquet")
+            schema = pl.read_parquet_schema(
+                artifact_path(bundle.path, "members.parquet"),
+            )
             assert isinstance(schema["pa_class"], pl.Enum)
             assert isinstance(schema["pa_importance"], pl.Enum)
             assert bundle.tables["members"].equals(result.tables["members"])
@@ -369,7 +368,7 @@ class TestReportStore(TestCase):
         with TemporaryDirectory() as directory:
             store = ReportStore(Path(directory))
             bundle = _write(store, 1)
-            (bundle.path / "report.wikitext").write_text(
+            (artifact_path(bundle.path, "report.wikitext")).write_text(
                 "tampered",
                 encoding="utf-8",
             )
@@ -403,13 +402,13 @@ class TestReportStore(TestCase):
                 started_at=_START,
                 target={"site": "zhwiki", "title": "專題:電子遊戲/列表"},
             )
-            assert store.root == Path(directory) / "data/daily"
+            assert store.root == Path(directory) / "data/parsed"
             assert key == "assessment-lists/zhwiki/專題:電子遊戲%2F列表"
             generated = dt.datetime.fromisoformat(
                 str(bundle.manifest["generated_at"]),
             )
             assert bundle.path.name == f"test-report-{generated:%Y%m%d%H%M%S}"
-            assert (bundle.path / "members.parquet").exists()
+            assert artifact_path(bundle.path, "members.parquet").exists()
             assert bundle.path.relative_to(store.root).as_posix().isascii()
             assert bundle.manifest["report_key"] == key
             assert bundle.manifest["target"]["title"] == "專題:電子遊戲/列表"
@@ -420,7 +419,7 @@ class TestReportStore(TestCase):
     def test_daily_observation_installs_named_files_once() -> None:
         """Retain the first observation directly in its date folder."""
         with TemporaryDirectory() as directory:
-            store = ReportStore(Path(directory) / "data/daily", daily=True)
+            store = ReportStore(Path(directory) / "data/parsed", daily=True)
             key = report_key(
                 "project-assessments",
                 "zhwiki",
@@ -445,7 +444,7 @@ class TestReportStore(TestCase):
             )
             assert first.path == store.data_path(key)
             assert first.manifest["report_key"].endswith("20261020")
-            assert (first.path / "members.parquet").exists()
+            assert (artifact_path(first.path, "members.parquet")).exists()
             assert again.wikitext == "first"
             assert store.read(key).wikitext == "first"
             assert store.read(key, previous=True) is None

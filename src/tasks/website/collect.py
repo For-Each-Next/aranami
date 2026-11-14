@@ -321,17 +321,8 @@ def _report_plan(
         identity = hashlib.sha256(
             f"dashboard:{name}:{source_id}:{intervals[name]}".encode(),
         ).hexdigest()
-        filename = (
-            "consistency" if name == "consistency" else f"{name}.parquet"
-        )
+        filename = f"{name}.parquet"
         directory = cache_directory
-        if (
-            name in {"pageviews", "newsletter"}
-            and directory is not None
-            and directory.name == "hourly"
-            and directory.parent.name == "data"
-        ):
-            directory = directory.parent / "daily"
         path = directory / filename if directory else None
         record = read_report_cache(path, name, days, clock)
         paths[name], identities[name], caches[name] = path, identity, record
@@ -931,7 +922,7 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments, too-many-statements, 
                 refresh_game_titles(
                     read.site,
                     [*members, *_display_titles(plan["caches"])],
-                    path=cache_directory / "game-title-conversions",
+                    path=cache_directory / "game-title-conversions.parquet",
                 )
         except Exception:
             _LOGGER.exception(

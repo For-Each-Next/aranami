@@ -62,7 +62,15 @@ def staging_directory(path: Path) -> Path:
             for parent in path.parents
             if parent.name == "data"
             and path.relative_to(parent).parts[0]
-            in {"archive", "daily", "hourly"}
+            in {
+                "archive",
+                "daily",
+                "hourly",
+                "raw",
+                "parsed",
+                "revisions",
+                "webservice",
+            }
         ),
         None,
     )

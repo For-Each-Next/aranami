@@ -26,7 +26,6 @@ from data.website import (
     validate_dashboard_snapshot,
 )
 from shared.newsletter import Issue
-from shared.support.cache import latest_cache_path
 from tasks.website.collect import collect_dashboard, report_intervals
 
 
@@ -209,7 +208,7 @@ class TestDashboardReportCache(DashboardFixture):
             "火焰之纹章",
         }
         assert self.game_titles.call_args.kwargs["path"] == (
-            self.cache / "game-title-conversions"
+            self.cache / "game-title-conversions.parquet"
         )
         self.game_titles.reset_mock()
         self._collect(dt.timedelta(minutes=10))
@@ -456,7 +455,7 @@ class TestDashboardReportCache(DashboardFixture):
             for name in REPORT_KEYS
             if name != "consistency"
         )
-        generation = latest_cache_path(self.cache / "consistency")
+        generation = self.cache / "consistency.parquet"
         assert generation is not None
         assert generation.is_file()
 

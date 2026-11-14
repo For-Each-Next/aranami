@@ -7,6 +7,8 @@ dates stay unknown instead of borrowing an earlier promotion date.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from html import unescape
 from typing import TYPE_CHECKING
@@ -15,10 +17,12 @@ import mwparserfromhell
 import polars as pl
 import pywikibot
 
+from data import enwiki
 from shared.sources.quarry.projects import page_creation_metadata
-from shared.sources.wiki import read_pages, template_aliases
+from shared.sources.wiki import template_aliases
 from shared.support.dates import parse_complete_date
 from shared.support.templates import template_page
+from tasks.enwiki.talks import read_talk_pages, talk_revisions
 
 if TYPE_CHECKING:
     import datetime as dt
@@ -83,14 +87,22 @@ def extract_review_start(
     return None, None
 
 
-def review_dates(pages: pl.DataFrame) -> pl.DataFrame:
-    """Read current nomination dates without altering promotion history.
+def review_dates(  # ruff: ignore[too-many-locals]
+    pages: pl.DataFrame,
+    *,
+    talk_observations: pl.DataFrame | None = None,
+) -> pl.DataFrame:
+    """Reuse active-nomination facts until talk, kind or parser changes.
 
     Args:
-        pages: New candidate article IDs, titles and nomination kinds.
+        pages: Current SQL candidate identities, titles and review
+        kinds.
+        talk_observations: Captured page-list talk identities when
+        available.
 
     Returns:
-        Article IDs and nullable proven nomination start dates.
+        Article IDs and proven dates; unknown dates remain explicit
+        nulls.
     """
     schema = {"page_id": pl.Int64, "review_date": pl.Date}
     if pages.is_empty():
@@ -100,10 +112,46 @@ def review_dates(pages: pl.DataFrame) -> pl.DataFrame:
         kind: template_aliases(site, template)
         for kind, template in _TEMPLATES.items()
     }
-    selected = pages.select("page_id", "en_title", "en_reviews").to_dicts()
-    talks = read_pages(site, [f"Talk:{row['en_title']}" for row in selected])
+    alias_key = hashlib.sha256(
+        json.dumps(aliases, sort_keys=True).encode(),
+    ).hexdigest()
+    current = (
+        pages
+        .select("page_id", "en_reviews")
+        .join(
+            talk_revisions(
+                talk_observations if talk_observations is not None else pages,
+            ),
+            on="page_id",
+            how="left",
+            validate="1:1",
+        )
+        .with_columns(pl.lit(alias_key).alias("aliases"))
+    )
+    keys = ["page_id", "talk_page_id", "oldid", "en_reviews", "aliases"]
+    saved = enwiki.read(enwiki.REVIEWS, enwiki.review_path())
+    unchanged = saved.join(current, on=keys, how="inner", nulls_equal=True)
+    refresh = current.join(
+        unchanged.select("page_id"),
+        on="page_id",
+        how="anti",
+    )
+    readable = refresh.filter(
+        pl.col("en_reviews").str.contains(r"(?:^|,)(?:GAN|FAC|FLC)(?:,|$)"),
+    )
+    revisions = dict(
+        readable.select("talk_page_id", "oldid").drop_nulls().iter_rows(),
+    )
+    talks = (
+        {
+            row.page_id: row
+            for row in read_talk_pages(site, revisions, revisions=revisions)
+        }
+        if revisions
+        else {}
+    )
     rows = []
-    for row, talk in zip(selected, talks, strict=True):
+    for row in refresh.iter_rows(named=True):
         kind = next(
             (
                 kind
@@ -112,28 +160,32 @@ def review_dates(pages: pl.DataFrame) -> pl.DataFrame:
             ),
             "",
         )
-        day, source = extract_review_start(
-            talk.text,
-            kind,
-            site=site,
-            aliases=aliases,
+        talk = talks.get(row["talk_page_id"])
+        if kind and row["talk_page_id"] is not None and talk is None:
+            continue  # An unavailable fetch is not a parsed unknown date.
+        day, source = (
+            extract_review_start(talk.text, kind, site=site, aliases=aliases)
+            if talk is not None
+            else (None, None)
         )
-        rows.append({
-            "page_id": row["page_id"],
-            "review_date": day,
-            "source": source,
-        })
+        rows.append({**row, "review_date": day, "source": source})
     sources = sorted({row["source"] for row in rows if row["source"]})
     if sources:
         dates = page_creation_metadata(site, sources).select(
             "full_title",
-            pl.col("created_at").dt.date().alias("date"),
+            pl.col("created_at").dt.date(),
         )
         known = dict(dates.iter_rows())
         for row in rows:
             if row["source"] is not None:
                 row["review_date"] = known.get(row["source"])
-    return pl.DataFrame(
-        [{key: row[key] for key in schema} for row in rows],
-        schema=schema,
+    result = pl.concat([
+        unchanged.select(*enwiki.REVIEW_SCHEMA),
+        pl.DataFrame(rows, schema=enwiki.REVIEW_SCHEMA),
+    ])
+    enwiki.REVIEWS.write(enwiki.review_path(), result.sort("page_id"))
+    return pages.select("page_id").join(
+        result.select(*schema),
+        on="page_id",
+        how="left",
     )

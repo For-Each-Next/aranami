@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from data.newsletter.schema import _valid_year_review, valid_newsletter
+from data.paths import artifact_path, owner_directory
 from data.prepared import read_values, write_values
 from shared.newsletter import Issue
 from shared.support.files import encode_json
@@ -29,7 +30,7 @@ from shared.support.files import encode_json
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-DEFAULT_PATH = Path("data/daily/newsletter-drafts")
+DEFAULT_PATH = Path("data/parsed/newsletter-drafts")
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_INDEX_BYTES = 64 * 1024
 _MAX_DATES = 92
@@ -112,7 +113,7 @@ def _locked(directory: Path) -> Iterator[None]:
         OSError: The lock path is unsafe or unavailable.
     """
     descriptor = os.open(
-        directory / ".lock",
+        artifact_path(directory, ".lock"),
         os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
         0o600,
     )
@@ -164,8 +165,12 @@ def _write_record(directory: Path, filename: str, record: dict) -> None:
     if destination.is_symlink():
         message = "Newsletter date folders cannot be symlinks."
         raise OSError(message)
-    destination.mkdir(mode=0o700, exist_ok=True)
-    write_values(destination / filename, record, max_bytes=_MAX_BYTES)
+    owner_directory(destination).mkdir(mode=0o700, parents=True, exist_ok=True)
+    write_values(
+        artifact_path(destination, filename),
+        record,
+        max_bytes=_MAX_BYTES,
+    )
 
 
 def _calendar_entry(record: dict) -> dict:
@@ -177,7 +182,7 @@ def _select(directory: Path, issue: Issue, dates: dict, record: dict) -> None:
     """Atomically select a complete observation in its date catalog."""
     dates[record["date"]] = _calendar_entry(record)
     write_values(
-        directory / "catalog.parquet",
+        artifact_path(directory, "catalog.parquet"),
         {"schema": 1, "issue": issue.value, "dates": dates},
         max_bytes=_MAX_BYTES,
     )
@@ -193,7 +198,10 @@ def _catalog(directory: Path, issue: Issue, *, annual: bool = False) -> dict:
         ValueError: Calendar identities, dates, or hashes are invalid.
     """
     try:
-        value = read_values(directory / "catalog.parquet", _MAX_INDEX_BYTES)
+        value = read_values(
+            artifact_path(directory, "catalog.parquet"),
+            _MAX_INDEX_BYTES,
+        )
     except FileNotFoundError:
         return {}
     dates = value.get("dates")
@@ -250,8 +258,16 @@ class NewsletterDraftArchive:
                 message = "Daily newsletter folders must be real directories."
                 raise OSError(message)
         if create:
-            self.path.mkdir(mode=0o700, parents=True, exist_ok=True)
-            directory.mkdir(mode=0o700, exist_ok=True)
+            owner_directory(self.path).mkdir(
+                mode=0o700,
+                parents=True,
+                exist_ok=True,
+            )
+            owner_directory(directory).mkdir(
+                mode=0o700,
+                parents=True,
+                exist_ok=True,
+            )
         return directory
 
     def _feature_directory(
@@ -277,7 +293,11 @@ class NewsletterDraftArchive:
             message = "Annual feature folders must be real directories."
             raise OSError(message)
         if create:
-            path.mkdir(mode=0o700, exist_ok=True)
+            owner_directory(path).mkdir(
+                mode=0o700,
+                parents=True,
+                exist_ok=True,
+            )
         return path
 
     def _catalog(self, issue: Issue) -> dict:
@@ -332,7 +352,7 @@ class NewsletterDraftArchive:
         if destination.is_symlink():
             message = "Newsletter date folders cannot be symlinks."
             raise OSError(message)
-        path = destination / "observation.parquet"
+        path = artifact_path(destination, "observation.parquet")
         value = read_values(path, _MAX_BYTES)
         facts, generated = value.get("facts"), value.get("generated_at")
         if not isinstance(facts, dict) or not isinstance(generated, str):
@@ -391,7 +411,10 @@ class NewsletterDraftArchive:
         if self.path is None:
             return None
         try:
-            metadata = (self._directory(issue) / "catalog.parquet").stat(
+            metadata = artifact_path(
+                self._directory(issue),
+                "catalog.parquet",
+            ).stat(
                 follow_symlinks=False,
             )
         except FileNotFoundError:

@@ -177,6 +177,7 @@ for service in aranami-web aranami-hub; do
     fi
     kubectl rollout status "deployment/$service" --timeout=180s
 done
+python3 "$validator" retire-data "$stage"
 printf '%s\n' 'Validated code activated; existing services replaced. Missing or paused services were not started.' \
     "Backup: $backup" \
     "First website start: toolforge jobs run aranami-web --image python3.13 --continuous --mount=all --port 8000 --publish --command 'exec sh $tool_dir/app/scripts/toolforge/run-web.sh'" \

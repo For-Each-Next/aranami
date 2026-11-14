@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 import polars as pl
 
 from data import pageviews as pageview_data
+from data.paths import artifact_path
 from data.reports import ReportStore
 from runtime.jobs import JobContext, pageviews as job
 from tasks.zhwiki import pageviews
@@ -187,7 +188,7 @@ class PageviewDataTests(TestCase):
     def test_damaged_durable_data_does_not_fall_back_to_cache(self) -> None:
         """Surface corruption without substituting disposable data."""
         first = self._save()
-        (first.path / "daily.parquet").write_bytes(b"invalid")
+        (artifact_path(first.path, "daily.parquet")).write_bytes(b"invalid")
         with self.assertRaises(ValueError):
             pageviews.read_annual_popularity(
                 self.site,

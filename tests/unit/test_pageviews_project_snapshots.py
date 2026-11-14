@@ -119,7 +119,13 @@ class TestPageviewsMidnightCohort(TestCase):
             Returns:
                 Parent or task-force rows with independent assessments.
             """
-            return parent if project == "Games" else team
+            return (
+                parent.with_columns(
+                    pl.Series("taskforces", [["Games/Team"], []]),
+                )
+                if project == "Games"
+                else team
+            )
 
         with (
             TemporaryDirectory() as directory,
@@ -134,7 +140,7 @@ class TestPageviewsMidnightCohort(TestCase):
                 "_project_membership",
                 side_effect=source,
             ):
-                for project in ("Games", "Games/Team"):
+                for project in ("Games",):
                     acquisition.capture(
                         site,
                         project,
@@ -197,7 +203,7 @@ class TestPageviewsMidnightCohort(TestCase):
             "class",
             "importance",
         ).rows() == [
-            (1, "Midnight title", "C", "Low"),
+            (1, "Midnight title", "B", "High"),
         ]
         assert parent_rows["taskforces"].to_list() == [["Games/Team"], []]
         assert {value["snapshot_date"] for value in references} == {
@@ -208,7 +214,6 @@ class TestPageviewsMidnightCohort(TestCase):
         }
         assert {value["project"] for value in references} == {
             "Games",
-            "Games/Team",
         }
 
     @staticmethod
@@ -275,7 +280,18 @@ class TestPageviewsMidnightCohort(TestCase):
                 (_DAY, original, original.head(1)),
                 (_DAY + dt.timedelta(days=1), changed, changed.tail(1)),
             ):
-                sources = {"Games": parent, "Games/Team": team}
+                sources = {
+                    "Games": parent.with_columns(
+                        pl
+                        .when(
+                            pl.col("page_id").is_in(team["page_id"].to_list()),
+                        )
+                        .then(pl.lit(["Games/Team"]))
+                        .otherwise(pl.lit([]))
+                        .alias("taskforces"),
+                    ),
+                    "Games/Team": team,
+                }
                 with patch.object(
                     projects,
                     "_project_membership",

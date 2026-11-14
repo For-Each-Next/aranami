@@ -85,7 +85,7 @@ def _stored_articles(
         variant=definition.name,
     )
     store = ReportStore()
-    if not store.data_path(key).exists():
+    if not store.has_data(key):
         return None
     with store.locked(key):
         for previous in (False, True):
@@ -665,7 +665,10 @@ def prepare_reports(
     review_rows = None
     if any(spec.requires_listing_dates for spec in specs):
         rows = rows.join(
-            quality_listing_dates.listing_dates(articles),
+            quality_listing_dates.listing_dates(
+                articles,
+                talk_observations=english_members,
+            ),
             on="page_id",
             how="left",
         )
@@ -676,9 +679,13 @@ def prepare_reports(
             )
             & ~pl.col("en_class").is_in(("FA", "FL", "GA")),
         )
+        review_dates = review_sources.review_dates(
+            rows.filter(pl.col("en_reviews").is_not_null()),
+            talk_observations=english_members,
+        )
         if not review_rows.is_empty():
             review_rows = review_rows.join(
-                review_sources.review_dates(review_rows),
+                review_dates,
                 on="page_id",
                 how="left",
             )

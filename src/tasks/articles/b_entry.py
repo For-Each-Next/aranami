@@ -1,4 +1,4 @@
-"""Prove the latest requested B/BL entry from contiguous talk revisions.
+"""Prove the latest grade entry from contiguous talk revisions.
 
 Feed revisions in reverse chronological order through ``advance``. Stop
 at
@@ -13,7 +13,14 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass, replace
 
-TARGET_CLASSES = ("乙", "乙级列表")
+from shared.assessment_profiles import assessment_profile
+
+TARGET_CLASSES = tuple(
+    label.raw_value
+    for label in assessment_profile("zhwiki", "电子游戏").classes
+    if label.is_article
+    and label.code not in {"FA", "FL", "A", "AL", "GA", "Bplus"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +46,7 @@ class EntryProgress:
     """Carry one requested cohort's contiguous backward proof state.
 
     Attributes:
-        target: Requested raw B/BL class from the selected cohort.
+        target: Requested raw class from the selected cohort.
         selected_revision: Exact latest talk revision required by that
             cohort.
         entry_revision: Oldest known target-class revision in the latest
@@ -73,7 +80,7 @@ class EntryProgress:
 
 
 def begin(target: str, selected_revision: int) -> EntryProgress:
-    """Start proof only for an eligible requested B/BL talk state.
+    """Start proof for an eligible requested talk-page grade.
 
     Args:
         target: Raw class in the consumer's selected cohort.
@@ -83,15 +90,14 @@ def begin(target: str, selected_revision: int) -> EntryProgress:
         Empty proof state requiring the selected talk revision first.
 
     Raises:
-        ValueError: The cohort is not B/BL or its revision ID is
-            invalid.
+        ValueError: The requested grade or revision ID is invalid.
     """
     if (
         target not in TARGET_CLASSES
         or type(selected_revision) is not int
         or selected_revision <= 0
     ):
-        message = "B-entry inference requires a B/BL cohort and exact talk ID."
+        message = "Assessment inference requires a grade and exact talk ID."
         raise ValueError(message)
     return EntryProgress(
         target,

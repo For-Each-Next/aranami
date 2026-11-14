@@ -370,12 +370,64 @@ class TestDeploymentShell(TestCase):  # ruff: ignore[too-many-public-methods]
             in result.stdout
         )
 
+    def _legacy_data(self) -> Path:
+        """Retain a source artifact and completed copy receipt.
+
+        Returns:
+            The legacy artifact that remains readable until rollout.
+        """
+        source = self.root / "data/hourly/legacy.parquet"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"original data")
+        receipt = self.root / "state/data-layout-v3.json"
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(
+            json.dumps({"schema": 3, "complete": True, "files": []}),
+        )
+        return source
+
+    def test_successful_rollout_retires_legacy_data(self) -> None:
+        """Retire old folders only after services become available."""
+        source = self._legacy_data()
+        result = self._deploy(self._stage())
+        assert result.returncode == 0, result.stderr
+        assert not source.exists()
+        assert (
+            self.root
+            / "deployment-backups/data-layout-v3/hourly"
+            / "legacy.parquet"
+        ).read_bytes() == b"original data"
+        commands = self._commands()
+        retired = next(
+            i for i, command in enumerate(commands) if "retire-data" in command
+        )
+        rollouts = [
+            i
+            for i, command in enumerate(commands)
+            if command[:3] == ["kubectl", "rollout", "status"]
+        ]
+        assert rollouts
+        assert max(rollouts) < retired
+
+    def test_failed_rollout_keeps_legacy_data(self) -> None:
+        """Leave rollback originals in place when replacement fails."""
+        source = self._legacy_data()
+        result = self._deploy(self._stage(), FAKE_ROLLOUT_FAILURE="1")
+        assert result.returncode != 0
+        assert (
+            "Code activated, but service replacement failed" in result.stderr
+        )
+        assert source.read_bytes() == b"original data"
+        assert not (self.root / "deployment-backups/data-layout-v3").exists()
+
     def test_selection_failure_keeps_source_and_resumes_drained_hub(
         self,
     ) -> None:
         """Restore predecessors when activation has not occurred."""
+        source = self._legacy_data()
         result = self._deploy(self._stage(), FAKE_SELECTION_FAILURE="1")
         assert result.returncode != 0
+        assert source.read_bytes() == b"original data"
         assert (self.root / "app/src/shared/config.py").exists()
         assert not (self.root / "active-deployment.json").exists()
         assert json.loads((self.root / "fake-replicas.json").read_text()) == {

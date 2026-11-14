@@ -54,7 +54,7 @@ One immutable Parquet file represents each wiki, project and completed UTC day:
 
 ```text
 data/archive/<YYYYMMDD>.parquet  # Chinese wpvg, permanent
-data/daily/<project>-<YYYYMMDD>.parquet  # other projects
+data/raw/<project>-<YYYYMMDD>.parquet  # other projects
 ```
 
 The filename names the day ending at the following midnight. Every new file
@@ -66,9 +66,8 @@ establish “no changes.” One-time dates belong only to the
 
 Columns retain page identity, namespace/title, subject and talk revision IDs,
 project Enum class/importance, talk-page ID, byte length, Boolean redirect
-state and List[Enum] taskforces. [Storage](data/storage.md) defines exact types and metadata. Each project
-has its own population and assessments. Task-force membership joins on stable
-page ID; a parent title rename cannot lose a child membership.
+state and List[Enum] taskforces. [Storage](data/storage.md) defines exact types and metadata. Independent projects have their own populations. Taskforce membership stays in
+the parent table; Pageviews filters its saved flags without child snapshots.
 
 The scheduled boundary, actual query start and finish are separate facts.
 [Wiki Replicas](https://wikitech.wikimedia.org/wiki/Help:Wiki_Replicas) may lag;
@@ -161,7 +160,7 @@ does not undo a successful wiki result.
 ## Retention and publication
 
 `data.reports.ReportStore` retains complete reusable tables, manifests and
-wikitext beneath `data/daily/`. An atomic selector points to a complete
+wikitext beneath `data/parsed/`. An atomic selector points to a complete
 generation and its predecessor. Ordering and predecessor checks prevent stale
 work from replacing a newer result. Display limits never discard source rows.
 

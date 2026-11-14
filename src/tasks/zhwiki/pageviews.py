@@ -1299,30 +1299,23 @@ def _project_articles(site: BaseSite, project: str) -> pl.DataFrame:
 
 
 def _task_force_articles(
-    site: BaseSite,
+    _site: BaseSite,
     parent: pl.DataFrame,
     project: str,
 ) -> pl.DataFrame:
-    """Apply frozen parent membership and each task force's assessments.
-
-    Daily parent flags determine population and traffic titles. Child
-    snapshots supply project-specific grades, joined by stable page ID
-    so a rename between captures cannot replace the parent's title.
-    Legacy source frames retain their existing title intersection.
+    """Filter the frozen parent archive without another project query.
 
     Returns:
-        Task-force articles with parent titles and child assessments.
+        Taskforce traffic population with the parent's saved
+        assessments.
+
+    Raises:
+        ValueError: The parent observation has no taskforce membership.
     """
-    members = _project_articles(site, project)
     if "taskforces" not in parent.columns:
-        return members.join(parent.select("title"), on="title", how="semi")
-    cohort = parent.filter(pl.col("taskforces").list.contains(project))
-    return cohort.select("page_id", "title", "taskforces").join(
-        members.select("page_id", "class", "importance"),
-        on="page_id",
-        how="left",
-        validate="1:1",
-    )
+        message = "Pageviews requires taskforce flags in the parent page list."
+        raise ValueError(message)
+    return parent.filter(pl.col("taskforces").list.contains(project))
 
 
 def _retained_rankings(

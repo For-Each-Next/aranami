@@ -58,7 +58,7 @@ def _store(runtime: Path | None, *, dry: bool) -> ReportStore:
         Store using atomic generations and selectors.
     """
     root = (runtime or Path.cwd()) / (
-        "dry-run/data/daily" if dry else "data/daily"
+        "dry-run/data/raw" if dry else "data/raw"
     )
     return ReportStore(root, dry=dry)
 
@@ -165,7 +165,7 @@ def read_snapshot(
     """
     store = _store(runtime, dry=dry)
     key = report_key("pageviews", site_name, project)
-    if not store.data_path(key).exists():
+    if not store.has_data(key):
         return None
     # Writers create the lock before selecting data. Readers open it
     # read-only so HTTP consumers never create runtime directories.

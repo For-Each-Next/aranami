@@ -86,7 +86,7 @@ def dataset_fixture() -> dict:
     )
     schema = {name: str(dtype) for name, dtype in frame.schema.items()}
     return {
-        "file": "data/daily/projects/enwiki/Example & Project/"
+        "file": "data/parsed/projects/enwiki/Example & Project/"
         "2026/20261102.parquet",
         "name": "20261102.parquet",
         "wiki": "enwiki",
@@ -167,7 +167,7 @@ class TestDatasetViewer(TestCase):
             ] in note
             assert "page_id" in response.text
             assert "Enum(" in response.text
-            assert "file=data%2Fdaily%2Fproject-" in response.text
+            assert "file=data%2Fraw%2Fproject-" in response.text
             assert 'href="/data/?' in response.text
         head = self.client.head("/data/", params={"file": self.filename})
         assert head.status_code == 200
@@ -199,13 +199,13 @@ class TestDatasetViewer(TestCase):
         """Reject traversal and noncanonical file identities."""
         for filename in (
             "../.my.cnf",
-            "/data/daily/projects/enwiki/Example/2026/20261102.parquet",
+            "/data/parsed/projects/enwiki/Example/2026/20261102.parquet",
             "reports/private/history.parquet",
-            "data/daily/projects/enwiki/../2026/20261102.parquet",
-            self.filename.replace("data/daily/", "data/../daily/"),
-            self.filename.replace("data/daily/", "data/daily/\x00"),
+            "data/parsed/projects/enwiki/../2026/20261102.parquet",
+            self.filename.replace("data/raw/", "data/../raw/"),
+            self.filename.replace("data/raw/", "data/raw/\x00"),
             self.filename.replace(".parquet", ".json"),
-            self.filename.replace("/daily/", "//daily/"),
+            self.filename.replace("/raw/", "//raw/"),
         ):
             with self.subTest(filename=filename):
                 with self.assertRaises(DatasetSelectionError):
@@ -278,7 +278,7 @@ class TestDatasetViewer(TestCase):
         )
         current = saved.path.relative_to(self.runtime).as_posix()
         legacy = (
-            "data/daily/projects/enwiki/电子游戏 & Example/"
+            "data/parsed/projects/enwiki/电子游戏 & Example/"
             "2026/20261102.parquet"
         )
         assert (
@@ -326,7 +326,7 @@ class TestDatasetViewer(TestCase):
             runtime=self.runtime,
             observed_at=_NOW,
         )
-        filename = "data/daily/projects/enwiki/电子游戏/2026/20261102.parquet"
+        filename = "data/parsed/projects/enwiki/电子游戏/2026/20261102.parquet"
         legacy = self.runtime / filename
         legacy.parent.mkdir(parents=True)
         saved.path.rename(legacy)
@@ -473,7 +473,7 @@ class TestDatasetViewer(TestCase):
 
     def test_legacy_report_preview_keeps_write_metadata_unknown(self) -> None:
         """Inspect legacy rows without inventing write facts."""
-        filename = "data/daily/legacy/example.parquet"
+        filename = "data/parsed/legacy/example.parquet"
         path = self.runtime / filename
         path.parent.mkdir(parents=True)
         pl.DataFrame({"value": [0, None]}).write_parquet(path)
@@ -489,7 +489,7 @@ class TestDatasetViewer(TestCase):
 
     def test_retained_report_restores_saved_assessment_types(self) -> None:
         """Keep saved assessment types in generic report previews."""
-        filename = "data/daily/reports/example/generation/members.parquet"
+        filename = "data/parsed/reports/example/generation/members.parquet"
         path = self.runtime / filename
         frame = pl.DataFrame({"pa_class": ["C", "FA"]}).cast({
             "pa_class": pl.Enum(["C", "FA"]),

@@ -87,7 +87,7 @@ class TestHomepageHistory(TestCase):
     def setUp(self) -> None:
         """Use isolated canonical storage for every verification."""
         self.root = Path(self.enterContext(TemporaryDirectory()))
-        self.path = self.root / "data/daily/articles/history.parquet"
+        self.path = self.root / "data/parsed/articles/history.parquet"
 
     def test_repeated_appearances_and_proofs_survive_empty_refresh(
         self,
@@ -189,7 +189,7 @@ class TestHomepageConsistency(TestCase):
     def setUp(self) -> None:
         """Isolate canonical history and all source boundaries."""
         self.root = Path(self.enterContext(TemporaryDirectory()))
-        self.path = self.root / "data/daily/articles/history.parquet"
+        self.path = self.root / "data/parsed/articles/history.parquet"
         self.site = OfflineSite("zh", "wikipedia")
 
     def _collect(

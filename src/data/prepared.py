@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 import polars as pl
 
+from data.paths import flat_path
 from shared.support.cache import ParquetCache
 from shared.support.files import encode_json
 
@@ -42,7 +43,7 @@ def read_values(path: Path, max_bytes: int = MAX_BYTES) -> dict:
     Raises:
         ValueError: The payload is not exactly one complete object.
     """
-    frame = _cache(max_bytes).read_required(path)
+    frame = _cache(max_bytes).read_required(flat_path(path))
     if frame.height != 1 or frame["payload"].null_count():
         message = "Prepared data requires one complete payload."
         raise ValueError(message)
@@ -69,6 +70,6 @@ def write_values(
         message = "Prepared report exceeds its storage bound."
         raise ValueError(message)
     _cache(max_bytes).write(
-        path,
+        flat_path(path),
         pl.DataFrame({"payload": [payload.decode()]}),
     )

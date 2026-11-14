@@ -29,6 +29,7 @@ _RUNTIME_PARTS = set(_CONTRACT["runtime_parts"])
 _MAX_JSON = 4 * 1024 * 1024
 _MAX_FILE = 32 * 1024 * 1024
 _MAX_TOTAL = 128 * 1024 * 1024
+_DATA_LAYOUT_SCHEMA = 3
 
 
 def _canonical_below(home: Path, path: Path) -> bool:
@@ -460,6 +461,83 @@ def select_generation(root: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def retire_data(root: Path) -> None:
+    """Move verified legacy data aside after successful rollout.
+
+    Args:
+        root: Active source generation whose rollout has completed.
+
+    Raises:
+        ValueError: Selection, migration proof or paths are unsafe.
+    """
+    generation(root)
+    home = root.parent
+    selected = home / "app"
+    receipt_path = home / "state/data-layout-v3.json"
+    if not selected.is_symlink() or selected.resolve() != root.resolve():
+        msg = "Data retirement requires the selected source generation."
+        raise ValueError(msg)
+    if not _canonical_below(home, receipt_path):
+        msg = "Data retirement requires a canonical migration receipt."
+        raise ValueError(msg)
+    if not receipt_path.exists():
+        return
+    proof = json.loads(
+        _regular(
+            receipt_path.parent,
+            receipt_path.name,
+            bound=8 * 1024 * 1024,
+        ),
+    )
+    if (
+        proof.get("schema") != _DATA_LAYOUT_SCHEMA
+        or proof.get("complete") is not True
+    ):
+        msg = "Data retirement requires a complete verified migration."
+        raise ValueError(msg)
+    moves = _retirement_moves(home)
+    for source, target in moves:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.replace(target)
+
+
+def _retirement_moves(home: Path) -> list[tuple[Path, Path]]:
+    """Validate all legacy owners before moving any of them.
+
+    Args:
+        home: Tool home containing migration and rollback data.
+
+    Returns:
+        Regular source directories and unused backup destinations.
+
+    Raises:
+        ValueError: A source or destination path is unsafe.
+    """
+    backup = home / "deployment-backups/data-layout-v3"
+    if not _canonical_below(home, backup):
+        msg = "Data retirement requires a canonical backup directory."
+        raise ValueError(msg)
+    moves = []
+    for name in (
+        "daily",
+        "hourly",
+        "imports",
+        "conversion",
+        "wikitext",
+        ".wikitext-locks",
+    ):
+        source, target = home / "data" / name, backup / name
+        if not _canonical_below(home, source) or target.is_symlink():
+            msg = "Data retirement refuses symbolic source or backup paths."
+            raise ValueError(msg)
+        if source.exists():
+            if not source.is_dir() or target.exists():
+                msg = f"Conflicting legacy data retirement: {name}"
+                raise ValueError(msg)
+            moves.append((source, target))
+    return moves
+
+
 def _atomic_write(path: Path, text: str) -> None:
     """Atomically write one setup receipt with private permissions.
 
@@ -485,7 +563,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=("verify", "record", "receipt", "runtime", "select"),
+        choices=(
+            "verify",
+            "record",
+            "receipt",
+            "runtime",
+            "select",
+            "retire-data",
+        ),
     )
     parser.add_argument("root", type=Path)
     parser.add_argument("path", nargs="?", type=Path)
@@ -498,6 +583,8 @@ def main() -> None:
         print(f"{evidence['environment']}/bin/python")  # ruff: ignore[print]
     elif args.action == "select":
         select_generation(args.root)
+    elif args.action == "retire-data":
+        retire_data(args.root)
     elif args.path is None:
         parser.error("This action requires a transaction-specific path.")
     else:

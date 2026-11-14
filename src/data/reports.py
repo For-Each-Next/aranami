@@ -25,6 +25,11 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from data.paths import (
+    artifact_files,
+    artifact_path,
+    flat_path,
+    flat_root,
+    owner_directory,
     read_storage_path,
     storage_key,
     storage_path,
@@ -88,7 +93,7 @@ class ReportBundle:
     """Expose one validated generation and its reusable data.
 
     Attributes:
-        path: Complete generation directory.
+        path: Logical namespace; use artifact_path for its files.
         manifest: Generation, source, and publication metadata.
         tables: Validated named Parquet tables.
         wikitext: Exact text generated from these tables.
@@ -200,8 +205,18 @@ def _generation_name(directory: Path, family: str, now: dt.datetime) -> str:
     collision = re.compile(re.escape(prefix) + r"(?:-([1-9][0-9]*))?")
     sequences = [
         int(match[1] or 0)
-        for path in (directory.iterdir() if directory.exists() else ())
-        if (match := collision.fullmatch(path.name)) is not None
+        for path in artifact_files(directory)
+        if (
+            match := collision.fullmatch(
+                path.name.removeprefix(flat_path(directory).name + "--").split(
+                    "--",
+                    1,
+                )[0]
+                if flat_root(directory) is not None
+                else path.name,
+            )
+        )
+        is not None
     ]
     return f"{prefix}-{max(sequences) + 1}" if sequences else prefix
 
@@ -440,7 +455,7 @@ class ReportStore:
                 Disable for disposable latest-only result caches.
         """
         self.root = root or Path.cwd() / (
-            "dry-run/data/daily" if dry else "data/daily"
+            "dry-run/data/parsed" if dry else "data/parsed"
         )
         self.dry = dry
         self.daily = daily
@@ -461,10 +476,12 @@ class ReportStore:
         }:
             runtime = self.root.parents[2]
         elif (
-            self.root.name in {"archive", "daily", "hourly"}
+            self.root.name in {"archive", "raw", "parsed"}
             and self.root.parent.name == "data"
         ):
             runtime = self.root.parent.parent
+        if (owner := flat_root(self.root)) is not None:
+            runtime = owner.parent.parent
         self.cache = runtime / "cache" / "report-staging"
         self.lock_root = runtime / "state" / "report-locks"
 
@@ -479,8 +496,8 @@ class ReportStore:
             Current physical path or a read-only legacy fallback.
         """
         if self.root.parent.name == "data" and self.root.name in {
-            "daily",
-            "hourly",
+            "raw",
+            "parsed",
         }:
             key = report_storage_key(key)
         return (
@@ -488,6 +505,25 @@ class ReportStore:
             if writing
             else read_storage_path(self.root, key)
         )
+
+    def selection_path(self, key: str) -> Path:
+        """Locate the atomic selector or immutable daily manifest.
+
+        Returns:
+            The physical selection metadata path.
+        """
+        return artifact_path(
+            self.data_path(key),
+            "manifest.json" if self.daily else "latest.json",
+        )
+
+    def has_data(self, key: str) -> bool:
+        """Check for a selected observation without reading its data.
+
+        Returns:
+            Whether this report has selection metadata.
+        """
+        return self.selection_path(key).exists()
 
     def lock_path(self, key: str) -> Path:
         """Locate an ASCII lock independently of retained legacy data.
@@ -544,7 +580,7 @@ class ReportStore:
             ValueError: The selector has an invalid schema or identity.
         """
         try:
-            value = _read_json(self.data_path(key) / "latest.json")
+            value = _read_json(self.selection_path(key))
         except FileNotFoundError:
             return {"schema": 1, "latest": None, "previous": None}
         if (
@@ -678,7 +714,9 @@ class ReportStore:
         directory = self.data_path(key, writing=True)
         now = dt.datetime.now(dt.UTC)
         generation = _generation_name(directory, result.family, now)
-        if self.daily:
+        if flat_root(directory) is not None:
+            owner_directory(directory).mkdir(parents=True, exist_ok=True)
+        elif self.daily:
             directory.parent.mkdir(parents=True, exist_ok=True)
         else:
             directory.mkdir(parents=True, exist_ok=True)
@@ -733,20 +771,26 @@ class ReportStore:
             # Validate the generation before exposing its directory.
             self._read_bundle_path(temporary, key, generation)
             _sync_directory(temporary)
-            temporary.replace(final)
+            if flat_root(final) is not None:
+                # Install immutable artifacts before their selector.
+                # A failure leaves the old complete generation selected.
+                for artifact in sorted(temporary.iterdir()):
+                    artifact.replace(artifact_path(final, artifact.name))
+            else:
+                temporary.replace(final)
             if self.daily:
-                _sync_directory(directory.parent)
+                _sync_directory(owner_directory(directory.parent))
                 return self._read_bundle_path(final, key, generation)
-            _sync_directory(directory)
+            _sync_directory(owner_directory(directory))
             _atomic_json(
-                directory / "latest.json",
+                artifact_path(directory, "latest.json"),
                 {
                     "schema": 1,
                     "latest": generation,
                     "previous": latest if self.keep_previous else None,
                 },
             )
-            _sync_directory(directory)
+            _sync_directory(owner_directory(directory))
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
@@ -763,6 +807,18 @@ class ReportStore:
         """
         directory = self.data_path(key, writing=True)
         retained = {generation, latest if self.keep_previous else None}
+        if flat_root(directory) is not None:
+            for candidate in artifact_files(directory):
+                prefix = flat_path(directory).name + "--"
+                rest = candidate.name.removeprefix(prefix)
+                identity, separator, _name = rest.partition("--")
+                if (
+                    separator
+                    and _GENERATION.fullmatch(identity)
+                    and identity not in retained
+                ):
+                    candidate.unlink()
+            return
         for candidate in directory.iterdir():
             if (
                 _GENERATION.fullmatch(candidate.name)
@@ -808,7 +864,7 @@ class ReportStore:
             message = "Unsupported report publication outcome."
             raise ValueError(message)
         self.data_path(key, writing=True)
-        manifest = _read_json(bundle.path / "manifest.json")
+        manifest = _read_json(artifact_path(bundle.path, "manifest.json"))
         manifest["publication"] = {
             "state": state,
             "updated_at": _timestamp(dt.datetime.now(dt.UTC)),
@@ -820,8 +876,8 @@ class ReportStore:
             key,
             str(bundle.manifest["generation"]),
         )
-        _atomic_json(bundle.path / "manifest.json", manifest)
-        _sync_directory(bundle.path)
+        _atomic_json(artifact_path(bundle.path, "manifest.json"), manifest)
+        _sync_directory(owner_directory(bundle.path))
 
     def read(
         self,
@@ -841,14 +897,14 @@ class ReportStore:
             Validated report, or null without a selected generation.
         """
         _validate_report_key(key)
-        if not self.data_path(key).exists():
+        if not self.has_data(key):
             return None
         with nullcontext() if locked else self.locked(key):
             if self.daily:
                 if previous:
                     return None
                 path = self.data_path(key)
-                manifest = _read_json(path / "manifest.json")
+                manifest = _read_json(artifact_path(path, "manifest.json"))
                 return self._read_bundle_path(
                     path,
                     key,
@@ -897,10 +953,10 @@ class ReportStore:
         Raises:
             ValueError: Generation metadata or an artifact is invalid.
         """
-        if path.is_symlink() or not path.is_dir():
+        if path.is_symlink() or not owner_directory(path).is_dir():
             message = "Report generation must be a regular directory."
             raise ValueError(message)
-        manifest = _read_json(path / "manifest.json")
+        manifest = _read_json(artifact_path(path, "manifest.json"))
         _validate_generation_metadata(manifest, key, generation)
         tables = {}
         for name, metadata in manifest["tables"].items():
@@ -911,7 +967,7 @@ class ReportStore:
             ):
                 message = "Invalid report table artifact."
                 raise ValueError(message)
-            artifact = path / metadata["file"]
+            artifact = artifact_path(path, metadata["file"])
             if artifact.is_symlink() or _digest(artifact) != metadata.get(
                 "sha256",
             ):
@@ -945,7 +1001,7 @@ class ReportStore:
         ):
             message = "Invalid report wikitext artifact."
             raise ValueError(message)
-        text_path = path / "report.wikitext"
+        text_path = artifact_path(path, "report.wikitext")
         if text_path.is_symlink() or _digest(text_path) != text_meta.get(
             "sha256",
         ):

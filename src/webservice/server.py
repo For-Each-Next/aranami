@@ -32,10 +32,7 @@ from django.urls import path as url_path, re_path
 from polars.exceptions import PolarsError
 lazy import uvicorn
 
-from data.articles.current_quality import (
-    current_quality_identity,
-    read_current_quality,
-)
+from data.articles import quality_pages
 from data.caching import consistency as consistency_cache
 from data.caching.game_titles import (
     DEFAULT_PATH as GAME_TITLES_PATH,
@@ -43,6 +40,7 @@ from data.caching.game_titles import (
 )
 from data.consistency import review_repair
 from data.newsletter.observations import OBSERVATIONS_PATH
+from data.paths import artifact_path
 from data.redirects import (
     DEFAULT_PATH as REDIRECTS_PATH,
     read as read_redirects,
@@ -582,6 +580,8 @@ def _navigation(request: ASGIRequest, locale: str) -> dict[str, object]:
             "issue",
             "file",
             "count_b",
+            "listing_authors",
+            "all_grades",
         }
     }
     return {
@@ -858,7 +858,11 @@ class _PublicViews:
             A complete analysis page without source acquisition or
             request-time statistical calculations.
         """
-        if set(parameters) - {"count_b", "listing_authors"} or parameters.get(
+        if set(parameters) - {
+            "count_b",
+            "listing_authors",
+            "all_grades",
+        } or parameters.get(
             "count_b",
             ["0"],
         ) not in (["0"], ["1"]):
@@ -867,7 +871,10 @@ class _PublicViews:
                 locale,
                 HTTPStatus.BAD_REQUEST,
             )
-        if parameters.get("listing_authors", ["0"]) not in (["0"], ["1"]):
+        if any(
+            parameters.get(name, ["0"]) not in (["0"], ["1"])
+            for name in ("listing_authors", "all_grades")
+        ):
             return _page_error(
                 "backlog.not_found",
                 locale,
@@ -878,35 +885,42 @@ class _PublicViews:
             if parameters.get("listing_authors") == ["1"]
             else "current"
         )
-        try:
-            identity = current_quality_identity(self.runtime)
-        except OSError, ValueError:
-            identity = (None,)
         include_b = parameters.get("count_b") == ["1"]
-        key = ("/quality-analysis/", locale, include_b, basis)
-        content = self.pages.get(key, identity)
-        if content is not None:
-            return _html(content, locale)
-        try:
-            data = read_current_quality(
+        all_grades = parameters.get("all_grades") == ["1"]
+        key = ("/quality-analysis/", locale, include_b, basis, all_grades)
+        try:  # ruff: ignore[too-many-statements-in-try-clause] - One optional prepared-page read boundary.
+            preset = quality_pages.path_for(
                 self.runtime,
+                Interface(locale).message_locale,
                 include_b=include_b,
-                authorship_basis=basis,
+                basis=basis,
+                all_grades=all_grades,
             )
+            identity = quality_pages.identity(preset)
+            content = self.pages.get(key, identity)
+            if content is None:
+                content = quality_pages.read(preset)
+                if content is not None:
+                    self.pages.put(key, identity, content)
+            if content is not None:
+                return _html(content, locale)
         except OSError, ValueError, PolarsError:
-            data = {
-                "analysis": {"available": False, "include_b": include_b},
-                "authorship": {"available": False, "authors": []},
-            }
-        content = pages.render_quality_analysis(
-            data,
-            read_status(self.runtime),
-            _configuration(),
+            pass
+        # Missing preparation remains explicitly unavailable.
+        # Requests never render a cohort from underlying facts.
+        return _html(
+            pages.render_quality_analysis(
+                {
+                    "analysis": {"available": False, "include_b": include_b},
+                    "authorship": {"available": False, "authors": []},
+                },
+                read_status(self.runtime),
+                _configuration(),
+                locale,
+                navigation=navigation,
+            ),
             locale,
-            navigation=navigation,
         )
-        self.pages.put(key, identity, content)
-        return _html(content, locale)
 
     @staticmethod
     def _quality_authorship_page(
@@ -1062,7 +1076,10 @@ class _PublicViews:
             if figures is not None
             else None
         )
-        pointer = self.runtime / OBSERVATIONS_PATH / "current.parquet"
+        pointer = artifact_path(
+            self.runtime / OBSERVATIONS_PATH,
+            "current.parquet",
+        )
         try:
             info = pointer.lstat()
         except OSError:
@@ -1314,10 +1331,10 @@ class _PublicViews:
             self.runtime / relative
             for relative in (
                 "cache",
-                "data/hourly",
-                "data/hourly/dashboard.parquet",
-                "data/hourly/dashboard.json",
-                "data/hourly/consistency-repairs.parquet",
+                "data/parsed",
+                "data/parsed/dashboard.parquet",
+                "data/parsed/dashboard.json",
+                "data/parsed/consistency-repairs.parquet",
                 str(GAME_TITLES_PATH),
                 "state",
                 "state/observability",
@@ -1344,7 +1361,7 @@ class _PublicViews:
 
     def _dashboard(self) -> dict[str, object] | None:
         """Return saved dashboard data or None when unavailable."""
-        root = self.runtime / "data/hourly"
+        root = self.runtime / "data/parsed"
         if any(
             path.is_symlink()
             for path in (root, root.parent, root.parent.parent)
@@ -1394,7 +1411,7 @@ class _PublicViews:
             return snapshot
         try:
             record = consistency_cache.read(
-                self.runtime / "data/hourly/consistency-repairs.parquet",
+                self.runtime / "data/parsed/consistency-repairs.parquet",
             )
         except OSError, ValueError, TypeError, RecursionError, OverflowError:
             return snapshot

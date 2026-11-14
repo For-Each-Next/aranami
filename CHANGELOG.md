@@ -5,20 +5,22 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
-### 0.9.7 (2026-11-14 07:33 UTC)
+### 0.9.8 (2026-11-14 08:40 UTC)
 
 Overview: Moved report generation onto prepared metadata with incremental
 revision acquisition, permanent project page archives and a migrated flat
 Parquet layout, while unifying quality analysis and fixing newsletter grouping.
 
+- Pre-rendered high-quality and all-grade analysis presets after each background update into
+  data/webservice, removing first-request analysis and initial chart rebuilding.
 - Added all-grade quality/importance selection, inclusive date filtering and
   optional unknown dates to the promoted Article statistics navigation page.
 - Prepared hourly current and listing-version authorship, contribution-rank
   filtering, exact endpoint links and WikiWho visual-analysis links.
 - Limited article-table rendering to visible and adjacent pages, unified site
-  pagination footers, shortened column labels and simplified author dialogs.
+  pagination footers, compact filters and columns, and consistent SVG links.
 - Recognized explicit B and all six B criteria independently, with complete
-  criteria taking precedence over C and all article grades using talk history.
+  criteria taking precedence over C and lower grades sharing validated history.
 - Embedded miniature length violins in distribution tables, hid unsupported
   importance and empty A/AL groups, and emphasized annual chart totals.
 - Opened exact chart cohorts in article dialogs and listed missing B/BL
@@ -27,8 +29,12 @@ Parquet layout, while unifying quality analysis and fixing newsletter grouping.
   and sequential row ordinals; preserved existing links through redirects.
 - Collected subject/talk identities, revisions and assessments in one project
   SQL query, with Enum grades, List[Enum] taskforces and nullable redirects.
-- Archived Chinese wpvg page lists permanently and moved other daily lists,
-  hourly observations and prepared reports into documented flat data folders.
+- Kept five data owners: archive, raw, parsed, revisions and webservice, with
+  flat source/report files, two-generation selectors and verified migration.
+- Derived six taskforce traffic populations directly from the main archive,
+  eliminating duplicate project captures and page-list files.
+- Reused English page-list talk revisions for promotion and nomination caches,
+  retained raw text and avoided refetching bodies when parsing rules change.
 - Migrated historical records without inventing missing revisions, retained
   rollback copies and added resumable migration verification before activation.
 - Batched missing revision text into 256 hexadecimal shards, reused parsed
@@ -43,6 +49,8 @@ Parquet layout, while unifying quality analysis and fixing newsletter grouping.
   newsletter traffic summaries before either output reads saved values.
 - Recognized exact simplified and traditional PageAssessments names, including
   音樂 for 最终幻想合辑专辑列表, without treating unrelated subprojects as matches.
+- Preserved replica namespace identities for colon-prefixed English titles,
+  preventing accidental interwiki requests from blocking project capture.
 - Attached subject/talk revision identities and validated batched query scopes
   to prepared reports, keeping both renderers free of source reads and parsing.
 

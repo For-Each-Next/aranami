@@ -1533,7 +1533,9 @@ def render_quality_analysis(  # ruff: ignore[too-many-arguments] - Shared page-r
     }
     selection = analysis.get("selection")
     if selection:
-        defaults = selection["defaults"][int(analysis["include_b"])]
+        defaults = selection["defaults"][
+            2 if analysis.get("all_grades") else int(analysis["include_b"])
+        ]
         analysis = {
             **analysis,
             **defaults,

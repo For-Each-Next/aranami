@@ -74,6 +74,7 @@ from tasks.articles.history import (
 )
 from tasks.articles.milestones import enrich_milestones
 from tasks.articles.quality_authors import refresh_quality_author_activity
+from tasks.enwiki import talks as english_talks
 from tasks.website.collect import (
     add_refresh_arguments,
     collect_dashboard,
@@ -115,7 +116,7 @@ class HubConfig:
 
     dry: bool = False
     run_immediately: bool = True
-    output: Path = Path("data/hourly/dashboard.parquet")
+    output: Path = Path("data/parsed/dashboard.parquet")
     log_dir: Path = Path("logs")
     interval: float = _WEBSITE_CHECK_SECONDS
     days: int = 100
@@ -301,6 +302,8 @@ def refresh_project_data() -> None:  # ruff: ignore[complex-structure]
                     instant.date(),
                 )
                 if language != "zh":
+                    if instant.hour == 0 and language == "en":
+                        english_talks.prune_daily(instant.date())
                     continue
                 members = collect_project_membership(
                     pywikibot.Site(language, "wikipedia"),
@@ -650,7 +653,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("data/hourly/dashboard.parquet"),
+        default=Path("data/parsed/dashboard.parquet"),
     )
     parser.add_argument("--log-dir", type=Path, default=Path("logs"))
     parser.add_argument(

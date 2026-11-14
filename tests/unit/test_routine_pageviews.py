@@ -885,7 +885,12 @@ class TestSiteTopRanks(TestCase):
             patch.object(
                 pageviews,
                 "_project_articles",
-                side_effect=(articles, articles.tail(1)),
+                return_value=articles.with_columns(
+                    pl.Series(
+                        "taskforces",
+                        [[], ["电子游戏/" + job.TASK_FORCES[0].project]],
+                    ),
+                ),
             ),
             patch.object(pageviews, "aggregate_views", return_value=views),
             patch.object(pageviews.PageviewsCache, "load"),
@@ -984,7 +989,9 @@ class TestSiteTopRanks(TestCase):
             patch.object(
                 pageviews,
                 "_project_articles",
-                side_effect=(articles, articles.clear()),
+                return_value=articles.with_columns(
+                    pl.lit([], dtype=pl.List(pl.String)).alias("taskforces"),
+                ),
             ),
             patch.object(pageviews, "aggregate_views", return_value=views),
             patch.object(pageviews.PageviewsCache, "load"),
@@ -1201,8 +1208,15 @@ class TestReportState(TestCase):
             "pa_class": ["A", "B", "A"],
             "pa_importance": ["高", "低", "不适用"],
         })
-        task_force = main.head(1).with_columns(
-            pl.lit("不适用").alias("pa_importance"),
+        main = main.with_columns(
+            pl.Series(
+                "taskforces",
+                [
+                    ["电子游戏/" + force.project for force in job.TASK_FORCES],
+                    [],
+                    [],
+                ],
+            ),
         )
         views = pl.DataFrame(
             [
@@ -1216,7 +1230,7 @@ class TestReportState(TestCase):
             schema=pageviews._VIEWS_SCHEMA,
             orient="row",
         )
-        responses = [main, *[task_force for _ in job.TASK_FORCES]]
+        responses = [main]
         with (
             patch.object(
                 pageviews,
@@ -1261,7 +1275,7 @@ class TestReportState(TestCase):
         assert sections[0]["items"][0]["assessments"] == ["A", "高"]
         task_sections = sections[len(job.PROJECT_PERIODS) :]
         assert all(
-            section["items"][0]["assessments"] == ["A", "不适用"]
+            section["items"][0]["assessments"] == ["A", "高"]
             for section in task_sections
         )
         assert [
@@ -1296,7 +1310,6 @@ class TestReportState(TestCase):
         assert query.call_count == len(responses)
         assert [call.args[1] for call in query.call_args_list] == [
             job.PROJECT,
-            *(f"{job.PROJECT}/{force.project}" for force in job.TASK_FORCES),
         ]
         assert set(fetch.call_args.args[1]) == {"A", "B"}
         load_cache.return_value.save.assert_called_once()
@@ -1446,7 +1459,9 @@ class TestReportState(TestCase):
             patch.object(
                 pageviews,
                 "_project_articles",
-                return_value=articles,
+                return_value=articles.with_columns(
+                    pl.lit(["Fixture/Custom"]).alias("taskforces"),
+                ),
             ) as members,
             patch.object(pageviews, "aggregate_views", return_value=views),
             patch.object(pageviews.PageviewsCache, "load"),
@@ -1474,7 +1489,6 @@ class TestReportState(TestCase):
             )
         assert [call.args[1] for call in members.call_args_list] == [
             "Fixture",
-            "Fixture/Custom",
         ]
         sections = _sections(report.text)
         assert [len(section["items"]) for section in sections] == [1, 2]

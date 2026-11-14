@@ -66,8 +66,8 @@ tail -n 100 logs/diagnostics/YYYYMMDD.000.log
 
 Choose a UTC log date and segment. `state/observability/status.json` retains the
 four independent status domains; logs explain their activity. Project and traffic
-facts are under `data/daily/`; report results and newsletter archives are under
-`data/daily/`. Read these through data APIs rather than editing them.
+facts are under `data/parsed/`; report results and newsletter archives are under
+`data/parsed/`. Read these through data APIs rather than editing them.
 
 ## Routine names and UTC triggers
 

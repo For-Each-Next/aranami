@@ -127,7 +127,7 @@ class TestDataLayout(TestCase):
                 _NOW.date(),
                 runtime=root,
             )
-            assert child.tables["members"]["pa_class"].to_list() == ["C"]
+            assert child is None
             fetch.assert_called_once()
             ready.assert_called_once()
             assert fetch.call_args.args[1].is_select

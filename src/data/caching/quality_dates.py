@@ -11,6 +11,7 @@ from pathlib import Path
 
 import polars as pl
 
+from data import enwiki
 from shared.support.cache import ParquetCache
 
 SCHEMA = {
@@ -38,8 +39,10 @@ def load() -> pl.DataFrame:
         One cached result per article, including unresolved dates and
         absent talk pages.
     """
-    path = Path.cwd() / "cache" / _DIRECTORY
-    frame = _CACHE.read(path)
+    path = enwiki.data_path("parsed/enwiki-quality-dates.parquet")
+    frame = enwiki.read(_CACHE, path)
+    if not path.exists():
+        frame = _CACHE.read(Path.cwd() / "cache" / _DIRECTORY)
     invalid = frame.filter(
         pl.col("page_id").is_null()
         | (pl.col("page_id") <= 0)
@@ -67,7 +70,7 @@ def save(frame: pl.DataFrame) -> None:
     Args:
         frame: Valid results for the current selected articles.
     """
-    path = Path.cwd() / "cache" / _DIRECTORY
+    path = enwiki.data_path("parsed/enwiki-quality-dates.parquet")
     try:
         _CACHE.write(path, frame.select(list(SCHEMA)).sort("page_id"))
     except OSError, ValueError, pl.exceptions.PolarsError:

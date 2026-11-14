@@ -148,7 +148,7 @@ class TestPopularityHistory(TestCase):
             return_value=_facts(),
         ):
             self.collect()
-        parquet = next(self.source.store.root.rglob("periods.parquet"))
+        parquet = next((self.root / "data/parsed").glob("*--periods.parquet"))
         parquet.write_bytes(b"broken")
         with (
             patch.object(history, "collect_legacy_popularity") as legacy,
@@ -244,11 +244,11 @@ class TestPopularityHistory(TestCase):
         assert not receipt["wiki_edits"]
         assert (
             json.loads(
-                (self.root / "data/daily/historical-import.json").read_text(),
+                (self.root / "data/parsed/historical-import.json").read_text(),
             )
             == receipt
         )
         assert not (
             self.root
-            / "data/daily/newsletter/historical/temporary-import.json"
+            / "data/parsed/newsletter/historical/temporary-import.json"
         ).exists()

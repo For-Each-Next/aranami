@@ -505,6 +505,7 @@ def _summary_tables(
         .with_columns(pl.col("pages").fill_null(0))
         .cast(YEAR_SCHEMA)
     )
+    year_grades = GRADES if set(grades) <= set(GRADES) else grades
     years = (
         year_totals
         .group_by("year")
@@ -516,10 +517,14 @@ def _summary_tables(
                 .filter(pl.col("grade") == grade)
                 .sum()
                 .alias(grade)
-                for grade in GRADES
+                for grade in year_grades
             ],
         )
-        .cast(YEARS_SCHEMA)
+        .cast({
+            "year": pl.Int32,
+            "pages": pl.Int64,
+            **dict.fromkeys(year_grades, pl.Int64),
+        })
         .sort("year")
     )
     coverage = articles.select(
@@ -678,9 +683,9 @@ def prepare_current_quality(
         for name in _SCHEMAS
     }
     defaults = []
-    for include_b in (False, True):
+    for grades in (_QUALITY, GRADES, quality_analysis.GRADES):
         selected = joined.filter(
-            pl.col("grade").is_in(GRADES if include_b else _QUALITY)
+            pl.col("grade").is_in(grades)
             & (
                 pl.col("listed_date").is_null()
                 | pl.col("listed_date").is_between(
@@ -691,7 +696,7 @@ def prepare_current_quality(
         )
         tables = _summary_tables(
             selected,
-            GRADES if include_b else _QUALITY,
+            grades,
             observed_at,
         )
         defaults.append({
@@ -985,7 +990,7 @@ def current_quality_identity(runtime: Path = Path()) -> tuple:
     Returns:
         Bounded selector metadata, or an explicit missing identity.
     """
-    path = ReportStore(runtime / _ROOT).data_path(_KEY) / "latest.json"
+    path = ReportStore(runtime / _ROOT).selection_path(_KEY)
     try:
         info = path.lstat()
     except FileNotFoundError:
@@ -1019,6 +1024,7 @@ def read_current_quality(
     *,
     include_b: bool = False,
     authorship_basis: str = "listed",
+    all_grades: bool = False,
 ) -> dict:
     """Read one precomputed mode without network, locks or aggregation.
 
@@ -1026,6 +1032,7 @@ def read_current_quality(
         runtime: Toolforge runtime independent of uploaded source files.
         include_b: Select the globally B/BL-inclusive saved variant.
         authorship_basis: Saved listing or current-revision credits.
+        all_grades: Select the precomputed complete-grade preset.
 
     Returns:
         Analysis and author-directory dictionaries for the same cohort.
@@ -1049,10 +1056,12 @@ def read_current_quality(
             "observed_at": None,
             "prepared_at": None,
             "include_b": include_b,
+            "all_grades": all_grades,
             "analysis": {
                 "available": False,
                 "prepared_at": None,
                 "include_b": include_b,
+                "all_grades": all_grades,
                 "articles": [],
                 "years": [],
                 "coverage": {
@@ -1067,6 +1076,7 @@ def read_current_quality(
                 "prepared_at": None,
                 "authors": [],
                 "include_b": include_b,
+                "all_grades": all_grades,
             },
         }
     tables = dict(bundle.tables)
@@ -1109,6 +1119,7 @@ def read_current_quality(
     analysis = {
         "available": True,
         "include_b": include_b,
+        "all_grades": all_grades,
         "observed_at": observed,
         "prepared_at": prepared,
         "importance_available": True,
@@ -1141,6 +1152,7 @@ def read_current_quality(
         "prepared_at": prepared,
         "authors": _iso(selected["authors"].to_dicts()),
         "include_b": include_b,
+        "all_grades": all_grades,
         "b_unavailable": False,
         "b_missing_articles": matrix["current_coverage"]["missing"]
         if matrix and authorship_basis == "current"
@@ -1160,6 +1172,7 @@ def read_current_quality(
         "observed_at": observed,
         "prepared_at": prepared,
         "include_b": include_b,
+        "all_grades": all_grades,
         "analysis": analysis,
         "authorship": authorship,
     }

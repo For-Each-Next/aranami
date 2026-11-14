@@ -173,20 +173,17 @@ COLLECTION_DEFINITIONS: dict[str, CollectionDefinition] = {
 
 PROJECT_DATA_SCOPES: tuple[tuple[str, str], ...] = (
     ("zh", "电子游戏"),
-    ("zh", "电子游戏/宝可梦工作组"),
-    ("zh", "电子游戏/我的世界"),
-    ("zh", "电子游戏/史克威尔艾尼克斯工作组"),
-    ("zh", "电子游戏/世嘉工作组"),
-    ("zh", "电子游戏/任天堂工作组"),
-    ("zh", "电子游戏/米哈游工作组"),
     ("en", "Video games"),
 )
 
 PROJECT_DATA_TASKFORCES: dict[tuple[str, str], tuple[str, ...]] = {
-    ("zhwiki", "电子游戏"): tuple(
-        project
-        for language, project in PROJECT_DATA_SCOPES[1:]
-        if language == "zh"
+    ("zhwiki", "电子游戏"): (
+        "电子游戏/宝可梦工作组",
+        "电子游戏/我的世界",
+        "电子游戏/史克威尔艾尼克斯工作组",
+        "电子游戏/世嘉工作组",
+        "电子游戏/任天堂工作组",
+        "电子游戏/米哈游工作组",
     ),
 }
 

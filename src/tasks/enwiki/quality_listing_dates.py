@@ -16,10 +16,10 @@ import polars as pl
 import pywikibot
 
 from data.caching import quality_dates as quality_dates_cache
-from shared.sources.dyk import read_talk_pages
 from shared.sources.quarry.enwp import fetch_en_talk_revisions
 from shared.sources.wiki import template_aliases
 from tasks.enwiki.quality_dates import QUALITY_TARGETS, extract_milestone
+from tasks.enwiki.talks import read_talk_pages, talk_revisions
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -55,7 +55,20 @@ def _refresh_dates(
         .to_series()
         .to_list()
     )
-    snapshots = read_talk_pages(site, talk_ids) if talk_ids else []
+    snapshots = (
+        read_talk_pages(
+            site,
+            talk_ids,
+            revisions=dict(
+                refresh
+                .select("talk_page_id", "oldid")
+                .drop_nulls()
+                .iter_rows(),
+            ),
+        )
+        if talk_ids
+        else []
+    )
     talks = pl.DataFrame(
         [
             {
@@ -99,6 +112,7 @@ def listing_dates(
     pages: pl.DataFrame,
     *,
     site: BaseSite | None = None,
+    talk_observations: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Read the latest listing date for each selected quality article.
 
@@ -110,6 +124,8 @@ def listing_dates(
     Args:
         pages: English rows with ``page_id`` and ``en_class`` columns.
         site: English Wikipedia site, defaulting to the configured site.
+        talk_observations: Already captured page-list revision
+        identities.
 
     Returns:
         Unique article IDs and their complete quality listing dates.
@@ -144,7 +160,9 @@ def listing_dates(
         ).encode(),
     ).hexdigest()
     current = selected.join(
-        fetch_en_talk_revisions(selected["page_id"].to_list()),
+        talk_revisions(talk_observations)
+        if talk_observations is not None
+        else fetch_en_talk_revisions(selected["page_id"].to_list()),
         on="page_id",
         how="left",
     ).with_columns(pl.lit(alias_key).alias("aliases"))

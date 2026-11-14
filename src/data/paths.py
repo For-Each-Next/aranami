@@ -16,11 +16,75 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 _PREFIX = "target-"
 _MAX_COMPONENT_BYTES = 4096
 _MAX_FILENAME_BYTES = 255
+
+
+def flat_root(path: Path) -> Path | None:
+    """Return the raw/parsed owner of a logical artifact, if present."""
+    for parent in (path, *path.parents):
+        if parent.name in {"raw", "parsed"} and parent.parent.name == "data":
+            return parent
+    return None
+
+
+def flat_path(path: Path) -> Path:
+    """Map a logical raw/parsed artifact to one bounded flat filename.
+
+    Internal components use ``--`` separators. Logical identities remain
+    in manifests; filenames exceeding the filesystem bound use a digest.
+    Other owners, including revision shards, retain their own layout.
+
+    Returns:
+        The physical artifact path without creating directories.
+    """
+    root = flat_root(path)
+    if root is None or path == root:
+        return path
+    name = "--".join(path.relative_to(root).parts)
+    if len(name.encode()) > _MAX_FILENAME_BYTES:
+        name = (
+            "artifact-"
+            + hashlib.sha256(name.encode()).hexdigest()
+            + path.suffix
+        )
+    result = root / name
+    _safe_path(result, root)
+    return result
+
+
+def artifact_path(directory: Path, name: str) -> Path:
+    """Locate a logical artifact in a flat or legacy generation.
+
+    Returns:
+        The physical file path under its data owner.
+    """
+    return flat_path(directory / name)
+
+
+def owner_directory(directory: Path) -> Path:
+    """Return the physical directory for a logical data namespace."""
+    return flat_root(directory) or directory
+
+
+def artifact_files(directory: Path) -> Iterator[Path]:
+    """Enumerate physical files in one logical flat namespace.
+
+    Yields:
+        Existing artifacts belonging to the requested namespace.
+    """
+    root = flat_root(directory)
+    if root is None:
+        yield from directory.iterdir() if directory.exists() else ()
+        return
+    if directory.is_dir() and directory != root:
+        yield from directory.iterdir()
+    prefix = flat_path(directory).name + "--"
+    yield from (path for path in root.glob(prefix + "*") if path.is_file())
 
 
 def storage_key(key: str) -> str:

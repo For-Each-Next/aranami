@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
+from data.paths import artifact_path
 from data.reports import ReportBundle, ReportResult, ReportStore, report_key
 from tasks.enwiki import key_articles as service
 
@@ -137,6 +138,6 @@ class TestEnglishSnapshotBaseline(TestCase):
     def test_corrupt_snapshot_fails_explicitly(self) -> None:
         """Reject corrupted durable evidence explicitly."""
         bundle = self._write(1, "live")
-        (bundle.path / "members.parquet").write_bytes(b"broken")
+        (artifact_path(bundle.path, "members.parquet")).write_bytes(b"broken")
         with self.assertRaises(ValueError):
             self._prepare("live")

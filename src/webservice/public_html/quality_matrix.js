@@ -71,6 +71,7 @@ export function catalogRows() {
     const form = document.querySelector("[data-quality-matrix]");
     if (!form) return [];
     const data = JSON.parse(form.dataset.metadata);
+    data.authorshipIcon = form.dataset.authorshipIcon;
     return (data.extra || []).map(values => Object.fromEntries(["page_id", "title", "grade", "importance", "listed_date", "listed_oldid", "prose_characters", "source_bytes", "authors", "author_ranks", "title_label", "date_label", "authorship"].map((key, index) => [key, values[index]]))).map(article => ({
         article, metadata: data,
         dataset: {pageId: String(article.page_id), title: article.title, grade: article.grade, importance: article.importance, year: article.listed_date?.slice(0, 4) || "", measured: article.prose_characters === null ? "0" : "1", cohort: "0", authorRanks: JSON.stringify(article.author_ranks || [])},
@@ -93,12 +94,19 @@ export function articleElement(record) {
     if (article.listed_oldid && article.date_label) {const link = node("a", article.date_label); link.href = `https://zh.wikipedia.org/w/index.php?oldid=${article.listed_oldid}`; row.cells[4].replaceChildren(link);}
     row.cells[5].replaceChildren();
     for (const name of article.authors || []) {if (row.cells[5].childNodes.length) row.cells[5].append(document.createTextNode("、")); row.cells[5].append(wikiLink(`User:${name}`, name));}
-    const details = node("button", "ⓘ", "analysis-authorship-info"); details.type = "button"; details.setAttribute("aria-label", `${article.title_label} · ${metadata.labels.contributors}`); details.setAttribute("aria-haspopup", "dialog");
-    details.addEventListener("click", () => {
-        let dialog = document.getElementById("quality-catalog-authorship");
-        if (!dialog) {dialog = node("dialog", undefined, "ui-dialog page-updates analysis-authorship-dialog"); dialog.id = "quality-catalog-authorship"; dialog.setAttribute("aria-labelledby", "quality-catalog-authorship-heading"); document.body.append(dialog);}
+    const popupId = `quality-article-${article.page_id}-authorship`;
+    const details = node("a", undefined, "analysis-authorship-info");
+    details.href = `#${popupId}`; details.title = metadata.labels.authorship_details.replace("{title}", article.title_label);
+    details.setAttribute("aria-label", details.title); details.setAttribute("aria-haspopup", "dialog"); details.setAttribute("aria-controls", popupId);
+    const icon = svgNode("svg", {width:16,height:16,viewBox:"0 0 20 20","aria-hidden":"true",focusable:"false"});
+    icon.append(svgNode("use", {href: metadata.authorshipIcon})); details.append(icon);
+    details.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        let dialog = document.querySelector("[data-catalog-authorship]");
+        if (!dialog) {dialog = node("dialog", undefined, "ui-dialog page-updates analysis-authorship-dialog"); dialog.setAttribute("data-catalog-authorship", ""); document.body.append(dialog);}
+        dialog.id = popupId; dialog.setAttribute("aria-labelledby", `${popupId}-heading`);
         const header = node("header", undefined, "ui-dialog__header"), heading = node("h3", details.getAttribute("aria-label"), "ui-dialog__header__title"), close = node("button", "×", "ui-button ui-dialog__header__close-button"), body = node("div", undefined, "ui-dialog__body");
-        heading.id = "quality-catalog-authorship-heading"; close.type = "button"; close.addEventListener("click", () => dialog.close()); header.append(heading, close); body.append(node("p", metadata.labels.authorship_note));
+        heading.id = `${popupId}-heading`; close.type = "button"; close.addEventListener("click", () => dialog.close()); header.append(heading, close); body.append(node("p", metadata.labels.authorship_note));
         const proof = article.authorship || {available: false};
         if (!proof.available) body.append(node("p", metadata.labels.authorship_unavailable, "notice"));
         else {
@@ -185,8 +193,9 @@ export function initializeQualityMatrix() {
             }
             const miniCell = node("td", undefined, "analysis-mini-cell"), miniLink = chartLink(dimension, option.value, option.label);
             miniLink.dataset.chartMeasured = "1"; miniLink.append(mini); miniCell.append(miniLink);
-            const [open, close] = document.documentElement.lang.startsWith("zh") ? ["（", "）"] : [" (", ")"];
-            row.append(heading, node("td", `${format(count)}${open}${(share * 100).toFixed(1)}%${close}`, "analysis-number"), miniCell);
+            const countCell = node("td", undefined, "analysis-number"), countLabel = node("span", undefined, "analysis-count");
+            countLabel.append(node("span", format(count)), node("small", `${(share * 100).toFixed(1)}%`)); countCell.append(countLabel);
+            row.append(heading, countCell, miniCell);
             body.append(row);
         }
     }
@@ -227,7 +236,7 @@ export function initializeQualityMatrix() {
         }
     }
 
-    function render() {
+    function render(updateCharts = true) {
         if (!from.checkValidity() || !to.checkValidity() || Number(from.value) > Number(to.value)) return;
         const chosen = new Set(inputs.filter(input => input.checked).map(input => key(input.dataset.grade, input.dataset.importance)));
         const selected = data.cells.filter(cell => chosen.has(key(cell.grade, cell.importance)) && yearSelected(cell.year, Number(from.value), Number(to.value), unknown.checked));
@@ -251,11 +260,11 @@ export function initializeQualityMatrix() {
         }
         const total = selected.reduce((sum, cell) => sum + cell.pages, 0);
         const totalNode = document.querySelector("[data-matrix-total]"); if (totalNode) totalNode.textContent = format(total);
-        renderPie("grade", grades, selected, total); renderPie("importance", importance, selected, total); renderYears(selected);
+        if (updateCharts) {renderPie("grade", grades, selected, total); renderPie("importance", importance, selected, total); renderYears(selected);}
         document.dispatchEvent(new Event("quality-cohort-change"));
     }
     for (const [input, matches] of parents) input.addEventListener("change", () => {inputs.filter(matches).forEach(child => {child.checked = input.checked;}); render();});
     for (const input of [...inputs, from, to, unknown]) input.addEventListener("change", render);
     form.addEventListener("submit", event => event.preventDefault());
-    render();
+    render(false);
 }

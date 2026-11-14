@@ -215,7 +215,7 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments,too-many-locals]
         runtime = (
             path.parents[3]
             if path.parts[-4:]
-            == ("data", "daily", "newsletter", "observations")
+            == ("data", "parsed", "newsletter", "observations")
             else path.parent
         )
         dry = runtime.name == "dry-run"

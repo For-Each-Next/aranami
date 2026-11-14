@@ -112,7 +112,7 @@ class TestProjectAssessmentSnapshots(TestCase):
         assert saved.manifest["metadata"]["project"] == project
         legacy = (
             self.root
-            / "data/daily"
+            / "data/parsed"
             / (snapshots.snapshot_key("enwiki", project, _DAY) + ".parquet")
         )
         legacy.parent.mkdir(parents=True)
@@ -305,7 +305,8 @@ class TestProjectAssessmentSnapshots(TestCase):
         }
         assert len(paths) == _PATH_COUNT
         assert all(
-            path.is_relative_to(self.root / "data/daily/assessments")
+            path.parent == self.root / "data/parsed"
+            and path.name.startswith("assessments--")
             for path in paths
         )
         assert all(path.suffix == ".parquet" for path in paths)

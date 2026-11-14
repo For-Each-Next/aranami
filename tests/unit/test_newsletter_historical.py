@@ -20,6 +20,7 @@ from data.newsletter.historical import (
     using_source,
     using_sources,
 )
+from data.paths import artifact_path, flat_path
 from data.reports import ReportStore
 from tasks.zhwiki.legacy.newsletter_figures import (
     import_historical_data,
@@ -59,10 +60,12 @@ class HistoricalFiguresTests(TestCase):
     def test_import_is_idempotent_and_retires_only_valid_staging(self) -> None:
         """Retain an import receipt for all 109 source facts."""
         first = import_historical_data(self.root)
-        directory = self.root / "data/daily/newsletter/historical"
+        directory = self.root / "data/parsed/newsletter/historical"
         assert first.tables["figures"].height == 109
-        assert not (directory / "temporary-import.json").exists()
-        receipt = json.loads((directory / "import-receipt.json").read_text())
+        assert not (artifact_path(directory, "temporary-import.json")).exists()
+        receipt = json.loads(
+            artifact_path(directory, "import-receipt.json").read_text(),
+        )
         assert receipt["rows"] == 109
         assert receipt["coverage_start"] == "2006-06-30"
         assert receipt["coverage_end"] == "2025-12-31"
@@ -95,7 +98,7 @@ class HistoricalFiguresTests(TestCase):
     def test_corrupt_canonical_never_falls_back(self) -> None:
         """Keep damaged data visible without a seed fallback."""
         bundle = import_historical_data(self.root)
-        (bundle.path / "figures.parquet").write_bytes(b"damaged")
+        (artifact_path(bundle.path, "figures.parquet")).write_bytes(b"damaged")
         with self.assertRaises(ValueError):
             source_for_issue("2027-01")
         with self.assertRaises(ValueError):
@@ -103,9 +106,9 @@ class HistoricalFiguresTests(TestCase):
 
     def test_unknown_temporary_metadata_is_preserved(self) -> None:
         """Refuse to discard unrelated or corrupt migration evidence."""
-        directory = self.root / "data/daily/newsletter/historical"
+        directory = self.root / "data/parsed/newsletter/historical"
         directory.mkdir(parents=True)
-        staged = directory / "temporary-import.json"
+        staged = artifact_path(directory, "temporary-import.json")
         staged.write_text('{"schema": 999}')
         with self.assertRaises(ValueError):
             import_historical_data(self.root)
@@ -121,9 +124,9 @@ class HistoricalFiguresTests(TestCase):
             self.assertRaises(OSError),
         ):
             import_historical_data(self.root)
-        staged = (
+        staged = flat_path(
             self.root
-            / "data/daily/newsletter/historical/temporary-import.json"
+            / "data/parsed/newsletter/historical/temporary-import.json",
         )
         assert staged.is_file()
         assert read_historical_data(self.root) is None
@@ -193,7 +196,7 @@ class HistoricalFiguresTests(TestCase):
         """Read preview providers when production data is damaged."""
         bundle = import_historical_data(self.root)
         formal = FrameFigureSource("preview", bundle.tables["figures"])
-        (bundle.path / "figures.parquet").write_bytes(b"damaged")
+        (artifact_path(bundle.path, "figures.parquet")).write_bytes(b"damaged")
         with using_sources({"canonical": formal}):
             assert source_for_issue("2027-01").identity == "preview"
         with using_sources({}):

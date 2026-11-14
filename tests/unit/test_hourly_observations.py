@@ -208,7 +208,7 @@ class HourlyObservationTests(TestCase):
                     cache.encode_members(_members(), "zhwiki", "电子游戏"),
                 )
             cache.prune(_NOW)
-            assert len(list(Path("data/hourly").rglob("*.parquet"))) == 2
+            assert len(list(Path("data/raw").rglob("*.parquet"))) == 2
 
     @staticmethod
     def test_independent_consumers_share_one_hourly_query() -> None:

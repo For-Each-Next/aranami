@@ -14,7 +14,7 @@ import polars as pl
 
 KEY = ["grade", "importance", "year"]
 _POINTS = 129
-_DEFAULT_VARIANTS = 2
+_DEFAULT_VARIANTS = 3
 _MIN_YEAR = 2002
 _MAX_YEAR = 9999
 _MAX_ARTICLES = 30_000
@@ -131,7 +131,7 @@ def validate(frame: pl.DataFrame) -> None:
         message = "Invalid quality selection fields."
         raise ValueError(message)
     if (
-        len(value["defaults"]) != _DEFAULT_VARIANTS
+        len(value["defaults"]) not in {2, _DEFAULT_VARIANTS}
         or not _MIN_YEAR <= value["last_year"] <= _MAX_YEAR
     ):
         message = "Invalid quality selection defaults."

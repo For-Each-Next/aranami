@@ -419,4 +419,5 @@ def refresh_b_listings(  # ruff: ignore[too-many-arguments] - Explicit source, r
         _LOG.warning(
             "B listing collection unavailable (%s).",
             type(error).__name__,
+            exc_info=True,
         )
