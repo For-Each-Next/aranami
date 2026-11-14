@@ -34,6 +34,7 @@ from shared.support.assessment_encoding import (
     encode_assessments,
     restore_assessment_schema,
 )
+from shared.support.dataset_activity import dataset_activity
 from shared.support.files import read_regular, staging_directory
 from shared.support.parquet import (
     parquet_metadata,
@@ -898,6 +899,21 @@ def ensure_snapshot(  # ruff: ignore[too-many-arguments]
         if started.date() != boundary_date:
             message = "Daily project capture expired while waiting for a lock."
             raise ValueError(message)
+        path = snapshot_path(
+            site_name,
+            project,
+            boundary_date,
+            runtime=root,
+            dry=dry,
+        )
+        previous = snapshot_path(
+            site_name,
+            project,
+            boundary_date - dt.timedelta(days=1),
+            runtime=root,
+            dry=dry,
+        )
+        dataset_activity("begin", path, baseline=previous)
         frame = load_members(project)
         if "taskforces" not in frame.columns and not taskforce_projects:
             frame = frame.with_columns(

@@ -21,6 +21,7 @@ import polars as pl
 
 from data.articles.history_store import read_versions
 from data.articles.scope import retain_active
+from shared.support.dataset_activity import dataset_activity
 from shared.support.files import staging_directory
 from shared.support.parquet import (
     parquet_metadata,
@@ -551,6 +552,7 @@ def merge_save(path: Path, refreshed: pl.DataFrame) -> pl.DataFrame:
         if merged.equals(previous):
             report_parquet_activity(path, "source_unchanged")
             return previous
+        dataset_activity("begin", path)
         with NamedTemporaryFile(
             dir=staging_directory(path),
             delete=False,

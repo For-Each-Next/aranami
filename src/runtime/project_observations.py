@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from data import project_data
-from data.articles import current_assessments
+from data.articles import assessment_comparison, current_assessments
 from data.caching import project_observations as hourly_cache
 from data.observations import (
     observation_scope,
@@ -34,6 +34,7 @@ from shared.sources.quarry.projects import (
 )
 from shared.sources.revisions import RevisionTextCache, revision_text_cache
 from shared.support.cache import cache_key
+from shared.support.dataset_activity import dataset_activity
 from tasks import project_data as project_capture
 
 if TYPE_CHECKING:
@@ -56,6 +57,7 @@ def collect_project_categories(
     memberships: list[pl.DataFrame],
     *,
     now: dt.datetime,
+    assessment_members: pl.DataFrame | None = None,
 ) -> None:
     """Collect all category links and configured lists in one SQL query.
 
@@ -63,6 +65,8 @@ def collect_project_categories(
         site: Wiki supplying replica category and revision metadata.
         memberships: Completed project lists from the hourly phase.
         now: Actual UTC collection time selecting the cache contract.
+        assessment_members: Chinese Video games membership for a
+            bidirectional grade comparison, absent for other projects.
     """
     cache, path = hourly_cache.category_cache(site.dbName(), now)
     with _HOURLY_LOCK:
@@ -82,7 +86,21 @@ def collect_project_categories(
             .unique()["page_id"]
             .to_list()
         )
+        previous = hourly_cache.category_cache(
+            site.dbName(),
+            now - dt.timedelta(hours=1),
+        )[1]
+        dataset_activity("begin", path, baseline=previous)
         frame = category_observations(site, ASSESSMENT_CATEGORIES, ids)
+        if assessment_members is not None and site.dbName() == "zhwiki":
+            assessment_comparison.save(
+                assessment_members,
+                frame,
+                category_observed_at=dt.datetime.now(dt.UTC),
+                pageassessments_observed_at=current_assessments.load(
+                    current_assessments.DEFAULT_PATH,
+                )["observed_at"].max(),
+            )
         cache.write(path, frame.select(list(hourly_cache.CATEGORY_SCHEMA)))
 
 
@@ -145,6 +163,13 @@ def collect_project_membership(
             )
             record_page_inputs(site.dbName(), project, restored)
             return restored
+        previous = hourly_cache.cache(
+            site.dbName(),
+            project,
+            now - dt.timedelta(hours=1),
+            dry=dry,
+        )[1]
+        dataset_activity("begin", path, baseline=previous)
         reader = (
             partial(_daily_membership, now=now, dry=dry)
             if now.hour == 0 and now.date() >= project_data.ACTIVATION_DATE

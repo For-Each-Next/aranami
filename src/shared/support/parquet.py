@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from shared.support.activity import report_activity
+from shared.support.dataset_activity import dataset_activity
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -38,6 +39,11 @@ def report_parquet_activity(path: Path, kind: str) -> None:
         kind: Completed read, committed write or unchanged data.
             Call after the corresponding operation succeeds.
     """
+    if kind in {"source_written", "source_unchanged"}:
+        dataset_activity(
+            "completed" if kind == "source_written" else "unchanged",
+            path,
+        )
     try:
         filename = path.resolve().relative_to(Path.cwd().resolve()).as_posix()
     except ValueError:

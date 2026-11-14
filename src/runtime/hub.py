@@ -336,6 +336,9 @@ def refresh_project_data() -> None:  # ruff: ignore[complex-structure]
                     pywikibot.Site(language, "wikipedia"),
                     frames,
                     now=instant,
+                    assessment_members=chinese_members
+                    if language == "zh"
+                    else None,
                 )
             except Exception as error:
                 _LOGGER.exception("Central category collection failed.")

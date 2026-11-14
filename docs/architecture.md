@@ -392,3 +392,16 @@ coverage. Age alone cannot authorize deletion, and alpha suspends new automatic
 365-day evidence purges. Remaining historical-source dependencies and removal
 gates belong to the [retirement checklist](transition.md). Development uses
 `trunk` with `1.0.0aN` prereleases until formal release is selected.
+
+### Saved dataset updates and article comparisons
+
+Collection retains bounded file-level outcomes separately from service health.
+The About page reads those records and exposes retained Parquet baselines through
+the existing read-only, paginated dataset viewer. Missing historical clocks stay
+unknown; an expired heartbeat never claims that a collection is still active.
+
+Hourly category collection includes all fifteen article/list grade categories.
+It compares complete category membership with PageAssessments in both directions
+and retains disagreements without declaring either source authoritative. The
+article-statistics page and its dialogs read saved calculations only; opening
+them never invokes a wiki API or SQL query.

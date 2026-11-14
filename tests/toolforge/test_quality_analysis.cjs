@@ -92,6 +92,85 @@ function loaderContext(overrides = {}) {
     return context;
 }
 
+function selectionFixture() {
+    const control = (dataset = {}, checked = false) => ({
+        dataset, checked, disabled: false, indeterminate: false, listeners: {},
+        addEventListener(name, listener) { (this.listeners[name] ||= []).push(listener); },
+        change() { for (const listener of this.listeners.change || []) listener(new Event("change")); },
+    });
+    const cells = [control({grade: "FA", importance: "High"}, true), control({grade: "GA", importance: "High"}, false)];
+    const grades = [control({matrixGrade: "FA"}), control({matrixGrade: "GA"})];
+    const all = control(), importance = control({matrixImportance: "High"});
+    const from = control(), to = control(), unknown = control({}, true);
+    const attributes = new Set(), listeners = {};
+    const form = {
+        dataset: {metadataUrl: "/catalog.json"}, isConnected: true,
+        hasAttribute(name) { return attributes.has(name); },
+        setAttribute(name) { attributes.add(name); },
+        addEventListener(name, listener) { (listeners[name] ||= []).push(listener); },
+        dispatchEvent(event) { for (const listener of listeners[event.type] || []) listener(event); },
+        querySelector(selector) { return {"[data-matrix-all]": all, "[data-matrix-from]": from, "[data-matrix-to]": to, "[data-matrix-unknown]": unknown}[selector] || null; },
+        querySelectorAll(selector) { return {"[data-matrix-cell]": cells, "[data-matrix-grade]": grades, "[data-matrix-importance]": [importance], "[data-matrix-from], [data-matrix-to], [data-matrix-unknown]": [from, to, unknown]}[selector] || []; },
+    };
+    return {form, cells, grades, all, importance, from, to, unknown};
+}
+
+test("native matrix parent and child controls work before the catalog is available", () => {
+    const context = loaderContext(), view = selectionFixture();
+    context.initializeQualitySelection(view.form);
+    assert.equal(view.all.indeterminate, true);
+    view.grades[1].checked = true; view.grades[1].change();
+    assert.ok(view.cells.every(cell => cell.checked));
+    assert.equal(view.all.checked, true);
+    view.cells[0].checked = false; view.cells[0].change();
+    assert.equal(view.grades[0].checked, false);
+    assert.equal(view.importance.indeterminate, true);
+    assert.equal(view.form.dataset.qualitySelectionChanged, "1");
+    context.initializeQualitySelection(view.form);
+    assert.equal(view.cells[0].listeners.change.length, 1);
+    assert.ok([...view.cells, ...view.grades, view.all].every(control => !control.disabled));
+});
+
+test("delayed catalog initialization preserves the latest native selection", async () => {
+    const frames = [], context = loaderContext({requestAnimationFrame: callback => frames.push(callback)});
+    const view = selectionFixture();
+    context.document.querySelector = selector => selector === "[data-quality-matrix]" ? view.form : null;
+    let finish, completed = 0;
+    context.loadQualityMetadata = () => new Promise(resolve => { finish = () => {view.form.qualityMetadata = catalog(); resolve();}; });
+    context.initializeQualityAnalysis = () => {};
+    context.initializeQualityMatrix = () => { completed++; assert.ok(view.cells.every(cell => cell.checked)); };
+    context.initializeQualityPage();
+    view.all.checked = true; view.all.change();
+    assert.ok(view.cells.every(cell => cell.checked && !cell.disabled));
+    frames.shift()(); frames.shift()();
+    assert.equal(completed, 0);
+    finish();
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    assert.equal(completed, 1);
+    assert.equal(view.form.dataset.qualityReady, "1");
+});
+
+test("catalog preparation yields between bounded batches and reuses completed light records", async () => {
+    const queued = [], context = loaderContext({setTimeout: callback => queued.push(callback)});
+    const data = catalog();
+    data.extra = Array.from({length: 600}, (_, index) => [index, "Article " + index, "FA", "High", null, null, 100, 1000, [], [], "Article " + index, "—", null, null, []]);
+    const form = {qualityMetadata: data, isConnected: true};
+    context.document.querySelector = () => form;
+    const first = context.prepareCatalogRows(form), second = context.prepareCatalogRows(form);
+    assert.equal(first, second);
+    let batches = 0;
+    while (queued.length) {
+        batches++; queued.shift()();
+        await Promise.resolve();
+    }
+    const rows = await first;
+    assert.equal(batches, 3);
+    assert.equal(rows.length, 600);
+    assert.equal(rows[599].dataset.pageId, "599");
+    assert.equal(context.catalogRows(), rows);
+    assert.equal(await context.prepareCatalogRows(form), rows);
+});
+
 function catalog() {
     return {cells: [], extra: [], grades: [], importance: [], labels: {}};
 }

@@ -35,13 +35,13 @@ _DAY_SECONDS = 24 * 60 * 60
 
 
 def grade_label(code: str, interface: Interface) -> str:
-    """Keep Chinese quality labels to their first two characters.
+    """Use the explicit compact Chinese assessment vocabulary.
 
     Returns:
         A compact Chinese label or the complete English label.
     """
-    label = interface.text(f"assessment.class.{code}")
-    return label[:2] if interface.locale.startswith("zh") else label
+    group = "short_class" if interface.locale.startswith("zh") else "class"
+    return interface.text(f"assessment.{group}.{code}")
 
 
 def review_url(article: dict) -> str | None:

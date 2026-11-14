@@ -5,6 +5,14 @@
 .analysis-summary dd { margin: .4rem 0 0; font-size: 1.8rem; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .analysis-summary dd.analysis-report-time { font-size: 1.2rem; line-height: 1.5; }
 .analysis-summary dd small { font-weight: 400; font-size: .85rem; color: #536b70; }
+.analysis-summary.analysis-coverage { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.analysis-coverage-card dt { display: flex; align-items: center; gap: .4rem; }
+.analysis-coverage-card dd { font-variant-numeric: tabular-nums; }
+.analysis-coverage-updated { display: block; margin-block-start: .4rem; color: #536b70; font-size: .8rem; overflow-wrap: anywhere; }
+#analysis-coverage-dialog th:first-child, #analysis-coverage-dialog td:first-child { width: 4em; }
+#analysis-coverage-dialog th:nth-child(2), #analysis-coverage-dialog td:nth-child(2) { width: 40%; }
+@media (max-width: 1000px) { .analysis-summary.analysis-coverage { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .analysis-summary.analysis-coverage { grid-template-columns: 1fr; } }
 .analysis-number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .analysis-number small { color: #627577; }
 .analysis-year-scroll { max-width: 100%; overflow-x: auto; }

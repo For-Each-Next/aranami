@@ -28,6 +28,7 @@ lazy from polars.exceptions import PolarsError
 
 from data.runtime.status import get_boot_id, read_status
 from runtime.collection_status import collection_run
+from runtime.dataset_updates import resumed_dataset_updates
 from shared.config import COLLECTION_DEFINITIONS
 lazy from data.articles import (
     current_assessments,
@@ -256,7 +257,8 @@ def _run_worker(
         "--time-budget",
         str(time_budget),
     ]
-    with collection_run(task_id, trigger="scheduled"):
+    with collection_run(task_id, trigger="scheduled") as execution:
+        environment["ARANAMI_DATASET_RUN_ID"] = execution.run_id
         child = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] - Fixed interpreter/module and validated internal arguments.
             command,
             cwd=runtime,
@@ -298,7 +300,15 @@ def _collect(
         if not acquired:
             return
         configure_pywikibot()
-        with project_cycle(now=dt.datetime.now(dt.UTC)):
+        with (
+            resumed_dataset_updates(
+                runtime,
+                os.environ.get("ARANAMI_DATASET_RUN_ID"),
+                task_id,
+                owner,
+            ),
+            project_cycle(now=dt.datetime.now(dt.UTC)),
+        ):
             site = pywikibot.Site("zh", "wikipedia")
             membership = query_pages_by_wikiproject(site, "电子游戏")
             if task_id == _AUTHOR_TASK_ID:

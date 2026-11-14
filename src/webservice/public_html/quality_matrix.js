@@ -175,17 +175,52 @@ function chartLink(group, value, label, year, svg = false) {
 }
 const format = value => value === null ? "—" : Math.round(value).toLocaleString(document.documentElement.lang);
 
-/** Keep the large lower-grade catalog as light records until a row is shown. */
-export function catalogRows() {
-    const form = document.querySelector("[data-quality-matrix]");
-    if (!form) return [];
-    const data = qualityMetadata(form);
-    if (!data) return [];
-    return (data.extra || []).map(values => Object.fromEntries(["page_id", "title", "grade", "importance", "listed_date", "listed_oldid", "prose_characters", "source_bytes", "authors", "author_ranks", "title_label", "date_label", "authorship", "review_url", "main_contributors"].map((key, index) => [key, values[index]]))).map(article => ({
+const catalogRecords = new WeakMap();
+const catalogPreparation = new WeakMap();
+const catalogFields = ["page_id", "title", "grade", "importance", "listed_date", "listed_oldid", "prose_characters", "source_bytes", "authors", "author_ranks", "title_label", "date_label", "authorship", "review_url", "main_contributors"];
+
+/** Build one light sortable record without creating table elements. */
+function catalogRecord(values, data, gradeOrder, importanceOrder) {
+    const article = Object.fromEntries(catalogFields.map((key, index) => [key, values[index]]));
+    return {
         article, metadata: data,
         dataset: {pageId: String(article.page_id), title: article.title, grade: article.grade, importance: article.importance, year: article.listed_date?.slice(0, 4) || "", measured: article.prose_characters === null ? "0" : "1", cohort: "0", mainAuthors: JSON.stringify(article.authorship?.available === true ? article.authors || [] : []), mainAuthorLabels: JSON.stringify(article.authorship?.available === true ? (article.main_contributors || []).map(author => author.label) : []), significantAuthors: JSON.stringify(article.authorship?.available === true ? article.authorship.editors.map(editor => editor.name) : [])},
-        cells: [null, article.title_label, data.grades.find(item => item.value === article.grade)?.order ?? data.grades.findIndex(item => item.value === article.grade), data.importance.find(item => item.value === article.importance)?.order ?? data.importance.findIndex(item => item.value === article.importance), article.listed_date, (article.main_contributors || []).map(author => author.label).join(", "), article.prose_characters, article.source_bytes].map(value => ({dataset: {sort: value === null ? "" : String(value)}, textContent: value === null ? "" : String(value)})),
-    }));
+        cells: [null, article.title_label, gradeOrder.get(article.grade) ?? -1, importanceOrder.get(article.importance) ?? -1, article.listed_date, (article.main_contributors || []).map(author => author.label).join(", "), article.prose_characters, article.source_bytes].map(value => ({dataset: {sort: value === null ? "" : String(value)}, textContent: value === null ? "" : String(value)})),
+    };
+}
+
+/** Prepare catalog records in bounded batches while native controls remain responsive. */
+export function prepareCatalogRows(form) {
+    const data = qualityMetadata(form);
+    if (!data) return Promise.resolve([]);
+    if (catalogRecords.has(data)) return Promise.resolve(catalogRecords.get(data));
+    if (catalogPreparation.has(data)) return catalogPreparation.get(data);
+    const request = (async () => {
+        const rows = [], extra = data.extra || [];
+        const gradeOrder = new Map(data.grades.map((item, index) => [item.value, item.order ?? index]));
+        const importanceOrder = new Map(data.importance.map((item, index) => [item.value, item.order ?? index]));
+        for (let start = 0; start < extra.length; start += 256) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+            if (form.isConnected === false) return [];
+            for (const values of extra.slice(start, start + 256)) rows.push(catalogRecord(values, data, gradeOrder, importanceOrder));
+        }
+        catalogRecords.set(data, rows);
+        return rows;
+    })();
+    catalogPreparation.set(data, request);
+    request.finally(() => catalogPreparation.delete(data)).catch(() => {});
+    return request;
+}
+
+/** Reuse prepared light records; direct callers can still read small inline catalogs. */
+export function catalogRows() {
+    const form = document.querySelector("[data-quality-matrix]");
+    const data = form && qualityMetadata(form);
+    if (!data) return [];
+    if (catalogRecords.has(data)) return catalogRecords.get(data);
+    const gradeOrder = new Map(data.grades.map((item, index) => [item.value, item.order ?? index]));
+    const importanceOrder = new Map(data.importance.map((item, index) => [item.value, item.order ?? index]));
+    return (data.extra || []).map(values => catalogRecord(values, data, gradeOrder, importanceOrder));
 }
 
 /** Build a fresh visible row with the same markup as the prepared article table. */
@@ -320,9 +355,41 @@ export function renderAuthorshipDetails(body, proof, labels) {
 }
 
 /** Apply checkbox and date choices without any network requests. */
+export function initializeQualitySelection(form) {
+    if (!form || form.hasAttribute("data-selection-enhanced")) return;
+    form.setAttribute("data-selection-enhanced", "");
+    const cells = [...form.querySelectorAll("[data-matrix-cell]")];
+    const parents = [
+        [form.querySelector("[data-matrix-all]"), () => true],
+        ...[...form.querySelectorAll("[data-matrix-grade]")].map(input => [input, cell => cell.dataset.grade === input.dataset.matrixGrade]),
+        ...[...form.querySelectorAll("[data-matrix-importance]")].map(input => [input, cell => cell.dataset.importance === input.dataset.matrixImportance]),
+    ].filter(([input]) => input);
+    const sync = () => {
+        for (const [input, matches] of parents) {
+            const children = cells.filter(matches), checked = children.filter(child => child.checked).length;
+            input.checked = children.length > 0 && checked === children.length;
+            input.indeterminate = checked > 0 && checked < children.length;
+        }
+    };
+    const changed = () => {
+        sync();
+        form.dataset.qualitySelectionChanged = "1";
+        form.dispatchEvent(new Event("quality-selection-change"));
+    };
+    for (const [input, matches] of parents) input.addEventListener("change", () => {
+        for (const child of cells.filter(matches)) child.checked = input.checked;
+        changed();
+    });
+    for (const input of [...cells, ...form.querySelectorAll("[data-matrix-from], [data-matrix-to], [data-matrix-unknown]")]) input.addEventListener("change", changed);
+    form.addEventListener("submit", event => event.preventDefault());
+    sync();
+}
+
+/** Apply the latest native selection once its complete catalog is ready. */
 export function initializeQualityMatrix() {
     const form = document.querySelector("[data-quality-matrix]");
     if (!form || form.hasAttribute("data-matrix-enhanced")) return;
+    initializeQualitySelection(form);
     const data = qualityMetadata(form);
     if (!data) return;
     form.setAttribute("data-matrix-enhanced", "");
@@ -335,12 +402,6 @@ export function initializeQualityMatrix() {
     const grades = data.grades;
     const importance = data.importance;
     const key = (grade, level) => `${grade}:${level}`;
-    const global = form.querySelector("[data-matrix-all]");
-    const parents = [
-        [global, () => true],
-        ...[...form.querySelectorAll("[data-matrix-grade]")].map(input => [input, cell => cell.dataset.grade === input.dataset.matrixGrade]),
-        ...[...form.querySelectorAll("[data-matrix-importance]")].map(input => [input, cell => cell.dataset.importance === input.dataset.matrixImportance]),
-    ];
     const yearSvg = document.querySelector(".analysis-year-columns");
     const yearTable = document.querySelector(".analysis-year-data");
     const yearLabel = yearTable?.tHead.rows[0].cells[0].textContent;
@@ -479,17 +540,11 @@ export function initializeQualityMatrix() {
                 [...(dialog?.querySelectorAll("[data-matrix-page]") || [])].filter(item => item.dataset.cohort !== "0").length;
             row.dataset.cohort = count ? "1" : "0"; row.cells[2].dataset.sort = String(count); link.textContent = authorCounts.get(row).replace("{count}", String(count));
         }
-        for (const [input, matches] of parents) {
-            const children = inputs.filter(matches), checked = children.filter(item => item.checked).length;
-            input.checked = checked === children.length; input.indeterminate = checked > 0 && checked < children.length;
-        }
         const total = selected.reduce((sum, cell) => sum + cell.pages, 0);
         const totalNode = document.querySelector("[data-matrix-total]"); if (totalNode) totalNode.textContent = format(total);
         if (updateCharts) {renderPie("grade", grades, selected, total); renderPie("importance", importance, selected, total); renderYears(selected);}
         document.dispatchEvent(new Event("quality-cohort-change"));
     }
-    for (const [input, matches] of parents) input.addEventListener("change", () => {inputs.filter(matches).forEach(child => {child.checked = input.checked;}); render();});
-    for (const input of [...inputs, from, to, unknown]) input.addEventListener("change", render);
-    form.addEventListener("submit", event => event.preventDefault());
-    render(false);
+    form.addEventListener("quality-selection-change", () => render());
+    render(form.dataset.qualitySelectionChanged === "1");
 }

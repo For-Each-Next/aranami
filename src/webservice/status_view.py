@@ -10,6 +10,7 @@ import datetime as dt
 import operator
 from typing import TYPE_CHECKING
 
+from webservice.dataset_updates import dataset_updates_context
 from webservice.job_history import history_context, source_description
 from webservice.presentation import (
     catalog,
@@ -777,6 +778,7 @@ def status_context(  # ruff: ignore[too-many-arguments]
             "unknown": footer_unknown,
         },
         "server": {
+            "dataset_updates": dataset_updates_context(interface, status, now),
             "work": _current_work(interface, status),
             "state": _state(interface, "service", service["lifecycle"])
             if fresh

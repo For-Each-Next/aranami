@@ -93,6 +93,8 @@
         "live-uptime",
         "live-server-status",
         "server-runtime",
+        "dataset-updates-previous",
+        "dataset-updates-current",
     ].filter((id) => document.getElementById(id));
     const interval = document.getElementById("live-server-status")?.dataset.refreshInterval === "1000" ? 1000 : 5000;
     const verificationInterval = 3e4;
@@ -201,6 +203,8 @@
                 if (Number.isFinite(expires2) && now >= expires2) {
                     observation.textContent =
                         observation.dataset.staleText || "";
+                    if (observation.nodeName === "H2")
+                        observation.setAttribute("aria-label", observation.textContent);
                     observation.removeAttribute("data-observation-expires");
                 }
             }
@@ -237,7 +241,10 @@
                     if (!Number.isFinite(elapsed)) continue;
                     const seconds = Math.max(0, elapsed);
                     const whole = Math.floor(seconds);
-                    if (node.dataset.clock === "uptime") {
+                    if (node.dataset.clock === "dataset-elapsed") {
+                        const centiseconds = Math.floor(seconds * 100);
+                        text = `${Math.floor(centiseconds / 6000)}:${String(Math.floor(centiseconds / 100) % 60).padStart(2, "0")}.${String(centiseconds % 100).padStart(2, "0")}`;
+                    } else if (node.dataset.clock === "uptime") {
                         const values = {
                             days: Math.floor(whole / 86400),
                             hours: Math.floor(whole / 3600) % 24,
@@ -306,7 +313,8 @@
         if (!active || document.hidden) return;
         updateClocks();
         updateNotice();
-        clockTimer = setTimeout(tick, 1e3);
+        const datasetClocks = [...(document.getElementById("dataset-updates-current")?.querySelectorAll("[data-clock]") || [])].some(node => node.dataset.clock === "dataset-elapsed");
+        clockTimer = setTimeout(tick, datasetClocks ? 100 : 1000);
     }
     const key = (node) =>
         node.nodeType === Node.ELEMENT_NODE

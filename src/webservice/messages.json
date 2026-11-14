@@ -159,6 +159,81 @@
     "zh-hans": "优良内容展示",
     "zh-hant": "優良內容展示"
   },
+  "assessment.short_class.FA": {
+    "en": "FA",
+    "zh-hans": "典范",
+    "zh-hant": "典範"
+  },
+  "assessment.short_class.FL": {
+    "en": "FL",
+    "zh-hans": "特表",
+    "zh-hant": "特表"
+  },
+  "assessment.short_class.A": {
+    "en": "A",
+    "zh-hans": "甲级",
+    "zh-hant": "甲級"
+  },
+  "assessment.short_class.AL": {
+    "en": "AL",
+    "zh-hans": "甲表",
+    "zh-hant": "甲表"
+  },
+  "assessment.short_class.GA": {
+    "en": "GA",
+    "zh-hans": "优良",
+    "zh-hant": "優良"
+  },
+  "assessment.short_class.Bplus": {
+    "en": "B+",
+    "zh-hans": "乙上",
+    "zh-hant": "乙上"
+  },
+  "assessment.short_class.B": {
+    "en": "B",
+    "zh-hans": "乙级",
+    "zh-hant": "乙級"
+  },
+  "assessment.short_class.BL": {
+    "en": "BL",
+    "zh-hans": "乙表",
+    "zh-hant": "乙表"
+  },
+  "assessment.short_class.C": {
+    "en": "C",
+    "zh-hans": "丙级",
+    "zh-hant": "丙級"
+  },
+  "assessment.short_class.CL": {
+    "en": "CL",
+    "zh-hans": "丙表",
+    "zh-hant": "丙表"
+  },
+  "assessment.short_class.Start": {
+    "en": "Start",
+    "zh-hans": "初级",
+    "zh-hant": "初級"
+  },
+  "assessment.short_class.List": {
+    "en": "List",
+    "zh-hans": "初表",
+    "zh-hant": "初表"
+  },
+  "assessment.short_class.Stub": {
+    "en": "Stub",
+    "zh-hans": "小级",
+    "zh-hant": "小級"
+  },
+  "assessment.short_class.SL": {
+    "en": "SL",
+    "zh-hans": "小表",
+    "zh-hant": "小表"
+  },
+  "assessment.short_class.Unassessed": {
+    "en": "Unassessed",
+    "zh-hans": "未评",
+    "zh-hant": "未評"
+  },
   "assessment.class.FA": {
     "en": "FA",
     "zh-hans": "典范",
@@ -793,6 +868,86 @@
     "en": "Server status",
     "zh-hans": "服务器状态",
     "zh-hant": "伺服器狀態"
+  },
+  "dataset_updates.previous": {
+    "en": "Previous dataset updates",
+    "zh-hans": "上轮更新资料",
+    "zh-hant": "上輪更新資料"
+  },
+  "dataset_updates.planned": {
+    "en": "Planned dataset updates",
+    "zh-hans": "计划更新资料",
+    "zh-hant": "計劃更新資料"
+  },
+  "dataset_updates.running": {
+    "en": "Updating datasets",
+    "zh-hans": "正在更新资料",
+    "zh-hant": "正在更新資料"
+  },
+  "dataset_updates.baseline": {
+    "en": "Previous file:",
+    "zh-hans": "此前文件：",
+    "zh-hant": "此前檔案："
+  },
+  "dataset_updates.started": {
+    "en": "Started:",
+    "zh-hans": "开始：",
+    "zh-hant": "開始："
+  },
+  "dataset_updates.scheduled": {
+    "en": "Scheduled:",
+    "zh-hans": "计划开始：",
+    "zh-hant": "計劃開始："
+  },
+  "dataset_updates.succeeded": {
+    "en": "Completed successfully:",
+    "zh-hans": "成功结束：",
+    "zh-hant": "成功結束："
+  },
+  "dataset_updates.failed": {
+    "en": "Failed:",
+    "zh-hans": "失败结束：",
+    "zh-hant": "失敗結束："
+  },
+  "dataset_updates.finished": {
+    "en": "Finished:",
+    "zh-hans": "结束：",
+    "zh-hant": "結束："
+  },
+  "dataset_updates.new_shape": {
+    "en": "New rows × columns:",
+    "zh-hans": "新资料行数 × 列数：",
+    "zh-hant": "新資料列數 × 欄數："
+  },
+  "dataset_updates.used_by": {
+    "en": "Used by reports:",
+    "zh-hans": "用于报表：",
+    "zh-hant": "用於報表："
+  },
+  "dataset_updates.elapsed": {
+    "en": "Elapsed:",
+    "zh-hans": "已用时：",
+    "zh-hant": "已用時："
+  },
+  "dataset_updates.no_previous": {
+    "en": "No completed dataset update has been recorded.",
+    "zh-hans": "尚无已完成的资料更新记录。",
+    "zh-hant": "尚無已完成的資料更新紀錄。"
+  },
+  "dataset_updates.no_planned": {
+    "en": "No dataset update is currently planned.",
+    "zh-hans": "目前没有计划更新的资料。",
+    "zh-hant": "目前沒有計劃更新的資料。"
+  },
+  "dataset_updates.unavailable": {
+    "en": "Current dataset update plans are unavailable.",
+    "zh-hans": "暂时无法确认资料更新计划。",
+    "zh-hant": "暫時無法確認資料更新計劃。"
+  },
+  "dataset_updates.stale": {
+    "en": "The update observation has expired; current progress is unknown.",
+    "zh-hans": "更新状态记录已过期，当前进度未知。",
+    "zh-hant": "更新狀態紀錄已過期，目前進度未知。"
   },
   "server.running": {
     "en": "Running",
@@ -3179,6 +3334,27 @@
     "zh-hans": "移除{count}个DYK模板。",
     "zh-hant": "移除{count}個DYK模板。"
   },
+  "quality_coverage.total": {"en": "Total pages", "zh-hans": "总页面", "zh-hant": "總頁面"},
+  "quality_coverage.authorship": {"en": "Contributor information", "zh-hans": "获取贡献者信息", "zh-hant": "取得貢獻者資訊"},
+  "quality_coverage.dates": {"en": "Assessment dates", "zh-hans": "获取评级时间信息", "zh-hant": "取得評級時間資訊"},
+  "quality_coverage.length": {"en": "Prose lengths", "zh-hans": "获取页面字数信息", "zh-hant": "取得頁面字數資訊"},
+  "quality_coverage.updated": {"en": "Updated", "zh-hans": "更新于", "zh-hant": "更新於"},
+  "quality_coverage.unknown_time": {"en": "Update time not recorded", "zh-hans": "更新时间未记录", "zh-hant": "更新時間未記錄"},
+  "quality_coverage.info": {"en": "{label}: details", "zh-hans": "{label}：查看详情", "zh-hant": "{label}：檢視詳情"},
+  "quality_coverage.comparison": {"en": "Category and PageAssessments differences", "zh-hans": "分类与PageAssessments评级差异", "zh-hant": "分類與PageAssessments評級差異"},
+  "quality_coverage.missing_authorship": {"en": "Pages without contributor information", "zh-hans": "尚未获取贡献者信息的页面", "zh-hant": "尚未取得貢獻者資訊的頁面"},
+  "quality_coverage.missing_dates": {"en": "Pages without assessment dates", "zh-hans": "尚未获取评级时间的页面", "zh-hant": "尚未取得評級時間的頁面"},
+  "quality_coverage.missing_length": {"en": "Pages without prose lengths", "zh-hans": "尚未获取页面字数的页面", "zh-hant": "尚未取得頁面字數的頁面"},
+  "quality_coverage.no_missing": {"en": "No matching pages.", "zh-hans": "没有符合条件的页面。", "zh-hant": "沒有符合條件的頁面。"},
+  "quality_coverage.comparison_unavailable": {"en": "The comparison has not been collected yet.", "zh-hans": "尚未取得分类与PageAssessments的对照数据。", "zh-hant": "尚未取得分類與PageAssessments的對照資料。"},
+  "quality_coverage.category": {"en": "Category grades", "zh-hans": "分类评级", "zh-hant": "分類評級"},
+  "quality_coverage.pageassessments": {"en": "PageAssessments grade", "zh-hans": "PageAssessments评级", "zh-hant": "PageAssessments評級"},
+  "quality_coverage.difference": {"en": "Difference", "zh-hans": "差异类型", "zh-hant": "差異類型"},
+  "quality_coverage.only_categories": {"en": "Categories only", "zh-hans": "仅分类存在", "zh-hant": "僅分類存在"},
+  "quality_coverage.only_pageassessments": {"en": "PageAssessments only", "zh-hans": "仅PageAssessments存在", "zh-hant": "僅PageAssessments存在"},
+  "quality_coverage.grade_mismatch": {"en": "Different grades", "zh-hans": "评级不一致", "zh-hant": "評級不一致"},
+  "quality_coverage.categories_updated": {"en": "Categories collected", "zh-hans": "分类采集时间", "zh-hant": "分類擷取時間"},
+  "quality_coverage.pa_updated": {"en": "PageAssessments collected", "zh-hans": "PageAssessments采集时间", "zh-hant": "PageAssessments擷取時間"},
   "data.heading": {
     "en": "Saved Parquet data",
     "zh-hans": "保存的Parquet数据",
@@ -3308,6 +3484,11 @@
     "en": "Total records",
     "zh-hans": "记录总数",
     "zh-hant": "記錄總數"
+  },
+  "data.field.column_count": {
+    "en": "Columns",
+    "zh-hans": "列数",
+    "zh-hant": "欄數"
   },
   "data.field.sha256": {
     "en": "Content SHA-256",

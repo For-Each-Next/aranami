@@ -127,7 +127,7 @@ class Element {
     }
 }
 
-function fixture(offset = 0, completed = false, logs = false, resources = false, footerOnly = false) {
+function fixture(offset = 0, completed = false, logs = false, resources = false, footerOnly = false, datasetUpdates = false) {
     const subject = "Updating records for October 20, 2026";
     const button = new Element("A", {
         id: "status-button", href: "#popover", "aria-controls": "popover", "aria-haspopup": "dialog",
@@ -181,21 +181,26 @@ function fixture(offset = 0, completed = false, logs = false, resources = false,
         id: "memory-usage", "data-schedule-time": "", "data-stale-text": "Unknown",
     }, "100.0 MiB");
     const runtime = new Element("DIV", { id: "server-runtime" }, "", [memory]);
+    const datasetClock = new Element("SPAN", {id: "dataset-elapsed", "data-clock": "dataset-elapsed", "data-started-at": stamp(-65000), "data-clock-expires": stamp(120000), "data-clock-unknown": "Unknown"});
+    const datasetHeading = new Element("H2", {id: "dataset-updates-current-heading", "data-observation-expires": stamp(120000), "data-stale-text": "Planned updates"}, "Updating datasets");
+    const datasetBody = new Element("DIV", {id: "dataset-update-body", "data-observation-expires": stamp(120000), "data-stale-text": "Progress unknown"}, "", [datasetClock]);
+    const previousUpdates = new Element("SECTION", {id: "dataset-updates-previous"}, "Previous files");
+    const currentUpdates = new Element("SECTION", {id: "dataset-updates-current"}, "", [datasetHeading, datasetBody]);
     const document = {
         hidden: false,
         documentElement: { lang: "en" },
-        roots: footerOnly ? [uptime] : [root, uptime, ...(resources ? [runtime] : [])],
+        roots: footerOnly ? [uptime] : [root, uptime, ...(resources ? [runtime] : []), ...(datasetUpdates ? [previousUpdates, currentUpdates] : [])],
         getElementById(id) {
             const search = (node) => node.id === id ? node
                 : (node.childNodes ?? []).map(search).find(Boolean);
             return this.roots.map(search).find(Boolean) ?? null;
         },
     };
-    return { document, button, statusLabel, statusLine, clock, popup, relative, schedule, server, progress, notice, root, uptime, runtime, memory };
+    return { document, button, statusLabel, statusLine, clock, popup, relative, schedule, server, progress, notice, root, uptime, runtime, memory, datasetClock, datasetHeading, datasetBody, previousUpdates, currentUpdates };
 }
 
 function browser(logs = false, resources = false, options = {}) {
-    const state = fixture(0, false, logs, resources, options.footerOnly);
+    const state = fixture(0, false, logs, resources, options.footerOnly, options.datasetUpdates);
     if (options.fastResources) state.root.setAttribute("data-refresh-interval", "1000");
     const requests = [];
     const warnings = [];
@@ -263,7 +268,7 @@ function browser(logs = false, resources = false, options = {}) {
     });
     return {
         ...state, requests, warnings, sockets, settle, envelope,
-        async respond(next = fixture(now, false, logs, resources, options.footerOnly), response = {}) {
+        async respond(next = fixture(now, false, logs, resources, options.footerOnly, options.datasetUpdates), response = {}) {
             requests.at(-1).resolve({
                 ok: true, status: 200, headers: { get: (key) => key === "Content-Type" ? "application/json; charset=utf-8" : null },
                 json: async () => envelope(next),
@@ -274,7 +279,7 @@ function browser(logs = false, resources = false, options = {}) {
         frame(frame, socket = sockets.at(-1)) {
             socket.message(typeof frame === "string" ? frame : JSON.stringify({schema: 1, instance: "a".repeat(32), sequence: 1, store_id: null, revision: null, observed_at: stamp(0), ...frame}));
         },
-        push(next = fixture(now, false, logs, resources, options.footerOnly), socket = sockets.at(-1)) {
+        push(next = fixture(now, false, logs, resources, options.footerOnly, options.datasetUpdates), socket = sockets.at(-1)) {
             socket.message(JSON.stringify(envelope(next)));
         },
         fire(name, event) { events.get(name)(event); },
@@ -1206,4 +1211,35 @@ test("Server status panels refresh resource values every second", async () => {
     assert.equal(page.memory.textContent, "125.0 MiB");
     page.jump(1000);
     assert.equal(page.requests.length, 3);
+});
+
+
+test("dataset update sections reconcile separately and elapsed clocks need no file requests", async () => {
+    const page = browser(true, true, {datasetUpdates: true});
+    await page.respond();
+    assert.equal(page.datasetClock.textContent, "1:05.00");
+    const requests = page.requests.length;
+    page.jump(1250);
+    assert.equal(page.datasetClock.textContent, "1:06.25");
+    assert.equal(page.requests.length, requests);
+    const next = fixture(1250, false, true, true, false, true);
+    next.previousUpdates.textContent = "Completed new.parquet";
+    next.currentUpdates.childNodes[1].childNodes[0].setAttribute("data-started-at", stamp(0));
+    page.jump(3750);
+    await page.respond(next);
+    assert.equal(page.document.getElementById("server-runtime"), page.runtime);
+    assert.equal(page.document.getElementById("dataset-updates-previous"), page.previousUpdates);
+    assert.equal(page.previousUpdates.textContent, "Completed new.parquet");
+    assert.equal(page.datasetClock.textContent, "0:01.25");
+    assert.ok(page.requests.every(request => !String(request.url).startsWith("/data/")));
+});
+
+test("expired dataset evidence stops elapsed clocks and cannot retain a running heading", async () => {
+    const page = browser(true, true, {datasetUpdates: true});
+    await page.respond();
+    page.jump(120000);
+    assert.equal(page.datasetHeading.textContent, "Planned updates");
+    assert.equal(page.datasetHeading.getAttribute("aria-label"), "Planned updates");
+    assert.equal(page.datasetBody.textContent, "Progress unknown");
+    assert.equal(page.document.getElementById("dataset-elapsed"), null);
 });

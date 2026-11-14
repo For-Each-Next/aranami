@@ -27,6 +27,7 @@ from data.runtime.logs import open_run_log
 from data.runtime.status import record_dataset
 from data.website import read_snapshot
 from runtime.collection_status import CollectionExecution, collection_run
+from shared.support.dataset_activity import dataset_activity
 from webservice.http import ReadOnlyRequestHandler
 
 if TYPE_CHECKING:
@@ -277,6 +278,7 @@ class DashboardUpdater:
             extra=event_extra("website_started"),
         )
         try:
+            dataset_activity("begin", self.output)
             snapshot = self._collect_snapshot()
             self._save(self.output, snapshot)
         except Exception as error:  # ruff: ignore[blind-except]

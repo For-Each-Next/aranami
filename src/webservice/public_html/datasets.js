@@ -1,14 +1,17 @@
+/** Accept only same-origin saved-file viewer links. */
 function datasetURL(value) {
     const url = new URL(value, location.href);
     return url.origin === location.origin && url.pathname === "/data/"
         ? url
         : void 0;
 }
+/** Load one selected page at a time and release it when the dialog closes. */
 function initializeDatasets() {
     let dialog;
     let opener;
     let controller;
     let requestNumber = 0;
+    /** Replace the current page, aborting superseded requests without caching rows. */
     async function load(url, control, opening) {
         const request = ++requestNumber;
         controller?.abort();
@@ -59,7 +62,12 @@ function initializeDatasets() {
                     if (dialog !== opened) return;
                     ++requestNumber;
                     controller?.abort();
-                    if (opener?.isConnected) opener.focus();
+                    controller = void 0;
+                    const returnFocus = opener;
+                    opener = void 0;
+                    dialog = void 0;
+                    opened.remove();
+                    if (returnFocus?.isConnected) returnFocus.focus();
                 });
                 document.body.append(dialog);
             }
@@ -95,8 +103,10 @@ function initializeDatasets() {
             if (request === requestNumber) location.assign(url.href);
         } finally {
             control.removeAttribute("aria-busy");
-            if (request === requestNumber)
+            if (request === requestNumber) {
                 dialog?.removeAttribute("aria-busy");
+                controller = void 0;
+            }
         }
     }
     document.addEventListener("click", (event) => {

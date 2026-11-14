@@ -122,11 +122,28 @@ class CollectionDefinition:
     idle: bool = False
 
 
+# Article/list grades explicitly verified against the project's category tree.
+# Category membership is independent evidence, never a replacement for PA.
+ARTICLE_GRADE_CATEGORIES = {
+    "典范级电子游戏条目": "FA",
+    "特色列表级电子游戏条目": "FL",
+    "甲级电子游戏条目": "A",
+    "甲级列表级电子游戏条目": "AL",
+    "优良级电子游戏条目": "GA",
+    "乙上级电子游戏条目": "Bplus",
+    "乙级电子游戏条目": "B",
+    "乙级列表级电子游戏条目": "BL",
+    "丙级电子游戏条目": "C",
+    "丙级列表级电子游戏条目": "CL",
+    "初级电子游戏条目": "Start",
+    "列表级电子游戏条目": "List",
+    "小作品级电子游戏条目": "Stub",
+    "小列表级电子游戏条目": "SL",
+    "未评级电子游戏条目": "Unassessed",
+}
 ASSESSMENT_CATEGORIES = (
-    "乙上级电子游戏条目",
+    *ARTICLE_GRADE_CATEGORIES,
     "请求乙上级评审的电子游戏条目",
-    "甲级电子游戏条目",
-    "甲级列表级电子游戏条目",
     "请求甲级评审的电子游戏条目",
     "请求专题评审的电子游戏条目",
 )

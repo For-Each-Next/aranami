@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
-import re
 from unittest import TestCase
 
 from status_fixtures import active_collection_record, status_snapshot
@@ -70,29 +69,17 @@ class TestServerWork(TestCase):
                 assert item["observed"]["value"] == self.run["updated_at"]
                 assert item["expires"] == "2026-10-18T12:01:30+00:00"
 
-    def test_full_page_and_live_fragment_render_identical_escaped_work(
-        self,
-    ) -> None:
-        """Share one escaped current-work row and freshness."""
+    def test_current_work_is_removed_from_server_status(self) -> None:
+        """Omit ordinary task activity from the server-status table."""
         for locale in ("en", "zh-hans", "zh-hant"):
-            rows = []
             for live in (False, True):
                 output = self.render(locale, live=live)
-                row = re.search(
-                    r'<tr\b[^>]*\bid="server-work"[^>]*>(.*?)</tr>',
-                    output,
-                    re.DOTALL,
-                )
-                assert row is not None
-                rows.append(row[0])
-                assert "Current source &lt;unsafe&gt;" in row[0]
-                assert "Current source <unsafe>" not in row[0]
+                assert 'id="server-work"' not in output
                 assert (
-                    'data-observation-expires="2026-10-18T12:01:30+00:00"'
-                    in row[0]
+                    Interface(locale).text("server.current_work") not in output
                 )
-                assert Interface(locale).text("server.work_stale") in row[0]
-            assert rows[0] == rows[1]
+                assert 'id="dataset-updates-previous"' in output
+                assert 'id="dataset-updates-current"' in output
 
     def test_website_is_first_and_database_work_is_not_lost(self) -> None:
         """List concurrent collections and omit wiki reports."""

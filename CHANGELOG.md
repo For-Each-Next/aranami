@@ -5,6 +5,20 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.15 (2026-11-14 12:16 UTC)
+
+Overview: Exposed saved dataset updates and article information coverage while
+keeping page requests independent of source collection.
+
+- Separated previous and active dataset updates from server status, retaining
+  actual file outcomes, baselines, shapes and downstream report links.
+- Added bounded Parquet pagination with metadata and first/last navigation;
+  closed previews cancel pending requests and release their displayed rows.
+- Kept article filters selectable during catalog loading and prepared records
+  in small batches; used explicit Chinese article/list grade abbreviations.
+- Added acquisition counts and paginated missing-page dialogs, plus independent
+  bidirectional category and PageAssessments grade comparisons from saved data.
+
 ### 0.9.14 (2026-11-14 11:31 UTC)
 
 Overview: Expanded ordinary article lengths and reordered the main navigation.

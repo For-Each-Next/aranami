@@ -1209,18 +1209,18 @@ async function checkInterface(assetRoot) {
                         await checkHeadingCopy('main .page-heading h1', '');
                     }
 
-                    const work = await evaluate(`(() => {
-                        const row = document.querySelector('#server-work');
-                        return {live: Boolean(row.closest('#live-server-status')), count: row.querySelectorAll('li').length,
-                            expires: Boolean(row.querySelector('[data-observation-expires]')), text: row.textContent};
+                    const updates = await evaluate(`(() => {
+                        const previous = document.querySelector('#dataset-updates-previous');
+                        const current = document.querySelector('#dataset-updates-current');
+                        return {removed: !document.querySelector('#server-work'), separate: Boolean(previous && current && !previous.closest('#live-server-status') && !current.closest('#live-server-status')),
+                            headings: previous?.querySelector('h2')?.id === 'dataset-updates-previous-heading' && current?.querySelector('h2')?.id === 'dataset-updates-current-heading',
+                            noFutureLinks: [...current.querySelectorAll('.dataset-update-files > li > p strong')].every(title => !title.querySelector('a'))};
                     })()`);
-                    assert.ok(work.live && work.expires, 'current work must share live status and expire with its owner');
-                    assert.equal(work.count, 2, 'current work must show concurrent website and database collection');
-                    assert.ok(work.text.includes('CurrentWebsiteSourceWithLongUnbrokenIdentifier') && work.text.includes('3') && work.text.includes('12'), 'current work must retain source and measured progress');
+                    assert.deepEqual(updates, {removed: true, separate: true, headings: true, noFutureLinks: true}, 'dataset updates must have independent live sections and plain future filenames');
                     if ([320, 1440].includes(width)) {
-                        await evaluate("document.querySelector('#server-work').scrollIntoView({block: 'center'})");
+                        await evaluate("document.querySelector('#dataset-updates-previous').scrollIntoView({block: 'start'})");
                         const shot = await call('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false}, sessionId);
-                        fs.writeFileSync(path.join(outputRoot, `${locale}-server-work-${width}.png`), Buffer.from(shot.data, 'base64'));
+                        fs.writeFileSync(path.join(outputRoot, `${locale}-dataset-updates-${width}.png`), Buffer.from(shot.data, 'base64'));
                         await evaluate('scrollTo(0, 0)');
                     }
 
@@ -1644,13 +1644,23 @@ async function checkInterface(assetRoot) {
                             await settle(() => dialog.querySelector('[data-page="2"]'));
                             const secondRows = dialog.querySelectorAll('section:last-of-type tbody tr').length;
                             const constrained = dialog.getBoundingClientRect().width <= innerWidth;
+                            let aborted = false;
+                            window.fetch = (url, options) => {
+                                requests.push(String(url));
+                                return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => {
+                                    aborted = true;
+                                    reject(new DOMException('Closed', 'AbortError'));
+                                }, {once: true}));
+                            };
+                            dialog.querySelector('[data-dataset-page]').click();
                             dialog.close();
                             await settle(() => document.activeElement === opener);
+                            const released = !document.getElementById('dataset-dialog') && !dialog.isConnected;
                             window.fetch = originalFetch;
                             opener.remove();
-                            return {beforeOpen, requests: requests.length, firstRows, secondRows, constrained, unchangedURL: location.href === before};
+                            return {beforeOpen, requests: requests.length, firstRows, secondRows, constrained, aborted, released, unchangedURL: location.href === before};
                         })()`);
-                        assert.deepEqual(lazy, {beforeOpen: 0, requests: 2, firstRows: 3, secondRows: 3, constrained: true, unchangedURL: true}, 'saved Parquet dialogs fetch only opened pages, preserve navigation and restore focus');
+                        assert.deepEqual(lazy, {beforeOpen: 0, requests: 3, firstRows: 3, secondRows: 3, constrained: true, aborted: true, released: true, unchangedURL: true}, 'saved Parquet dialogs fetch only opened pages, release pending requests and DOM on close, preserve navigation and restore focus');
                     }
 
                 }
@@ -2240,7 +2250,7 @@ async function checkInterface(assetRoot) {
                     return {rows: host.querySelectorAll('[data-analysis-row]:not([hidden])').length,
                         catalogInline: form.hasAttribute('data-metadata'),
                         controlsHidden: host.querySelector('[data-analysis-controls]').hidden,
-                        filtersDisabled: [...form.querySelectorAll('input')].every(input => input.disabled),
+                        filtersEnabled: [...form.querySelectorAll('input')].every(input => !input.disabled),
                         overview: document.querySelector('[data-matrix-total]').textContent,
                         authorDialogs: [...document.querySelectorAll('[data-quality-detail]')].some(link => document.getElementById(link.dataset.qualityDetail)),
                         pies: document.querySelectorAll('[data-analysis-pie]').length,
@@ -2249,7 +2259,7 @@ async function checkInterface(assetRoot) {
                 })()`);
                 assert.equal(initial.rows, 20, 'initial page must show its prepared first article page before catalog arrival');
                 assert.equal(initial.pies, 2, 'initial overview must not wait for the catalog');
-                assert.ok(initial.controlsHidden && initial.filtersDisabled && !initial.catalogInline && !initial.authorDialogs);
+                assert.ok(initial.controlsHidden && initial.filtersEnabled && !initial.catalogInline && !initial.authorDialogs);
                 assert.equal(initial.loading, 'loading');
                 await checkQualityDistributions('before catalog');
                 await checkQualityTableLayout(locale);
@@ -2273,12 +2283,26 @@ async function checkInterface(assetRoot) {
                 assert.ok(earlyRows.count > 0 && earlyRows.matches, 'details opened before catalog arrival must use the prepared default cohort');
                 await checkQualityOrdinals();
                 await press('Escape', 27);
+                const pendingSelection = await evaluate(`(() => {
+                    const form = document.querySelector('[data-quality-matrix]');
+                    const parent = form.querySelector('[data-matrix-grade]');
+                    parent.checked = false; parent.dispatchEvent(new Event('change'));
+                    const linked = [...form.querySelectorAll('[data-matrix-cell]')].filter(input => input.dataset.grade === parent.dataset.matrixGrade).every(input => !input.checked);
+                    const all = form.querySelector('[data-matrix-all]');
+                    all.checked = true; all.dispatchEvent(new Event('change'));
+                    return {linked, selected: [...form.querySelectorAll('[data-matrix-cell]')].map(input => input.checked), enabled: [...form.querySelectorAll('input')].every(input => !input.disabled)};
+                })()`);
+                assert.ok(pendingSelection.linked && pendingSelection.enabled && pendingSelection.selected.every(Boolean), 'native matrix controls must respond while the catalog request is pending');
                 const queued = pendingQualityCatalogs;
                 pendingQualityCatalogs = undefined;
                 for (const send of queued) send();
                 await waitForQuality();
-                assert.equal(await evaluate("document.querySelector('[data-matrix-total]').textContent"), initial.overview, 'catalog initialization must preserve prepared default totals');
-                assert.deepEqual(await evaluate("[...document.querySelectorAll('.analysis-mini-violin')].map(svg => svg.getAttribute('aria-label'))"), initial.quartiles, 'initial percentile/count values must agree with the catalog-rendered selection');
+                const appliedSelection = await evaluate(`(() => {
+                    const form = document.querySelector('[data-quality-matrix]');
+                    return {selected: [...form.querySelectorAll('[data-matrix-cell]')].map(input => input.checked), actual: document.querySelector('[data-matrix-total]').textContent, expected: form.qualityMetadata.cells.reduce((sum, cell) => sum + cell.pages, 0).toLocaleString(document.documentElement.lang)};
+                })()`);
+                assert.deepEqual(appliedSelection.selected, pendingSelection.selected, 'catalog readiness must preserve the latest selection');
+                assert.equal(appliedSelection.actual, appliedSelection.expected, 'the completed catalog must apply the pending selection to totals');
                 await checkQualityDistributions('after catalog');
                 assert.equal(qualityResourceRequests.filter(name => name.endsWith('.json')).length, 1, 'catalog consumers must share one request');
                 qualityDeferredLoads++;

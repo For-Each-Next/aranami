@@ -1,6 +1,7 @@
 /** Filter and sort the complete saved article list without source requests. */
 import { compareValues, initializeQualityAuthorship } from "./quality_authorship.js";
-import { initializeQualityMatrix, catalogRows, articleElement, qualityMetadata, loadQualityMetadata } from "./quality_matrix.js";
+import { initializeQualityCoverage } from "./quality_coverage.js";
+import { initializeQualityMatrix, initializeQualitySelection, prepareCatalogRows, catalogRows, articleElement, qualityMetadata, loadQualityMetadata } from "./quality_matrix.js";
 
 /** Keep the prepared overview usable while its full catalog loads after paint. */
 export function initializeQualityPage(previous = {}) {
@@ -8,15 +9,14 @@ export function initializeQualityPage(previous = {}) {
     const complete = () => {
         initializeQualityAnalysis(previous);
         initializeQualityMatrix();
+        if (document.querySelector("[data-quality-coverage]")) initializeQualityCoverage();
         if (document.querySelector("[data-quality-results]")) initializeQualityAuthorship();
         if (form) form.dataset.qualityReady = "1";
     };
-    if (!form || qualityMetadata(form)) {complete(); return;}
-    if (!form.dataset.metadataUrl || form.hasAttribute("data-quality-loading")) return;
+    if (!form) {complete(); return;}
+    initializeQualitySelection(form);
+    if ((!qualityMetadata(form) && !form.dataset.metadataUrl) || form.hasAttribute("data-quality-loading")) return;
     form.setAttribute("data-quality-loading", "");
-    const controls = [...form.querySelectorAll("input, select, button")]
-        .filter(control => !control.hasAttribute("data-quality-retry") && !control.disabled);
-    for (const control of controls) control.disabled = true;
     const status = form.querySelector("[data-quality-load-status]");
     const retry = form.querySelector("[data-quality-retry]");
     const loading = form.dataset.loading || "Loading article filters…";
@@ -34,9 +34,9 @@ export function initializeQualityPage(previous = {}) {
         if (retry) retry.hidden = true;
         try {
             await loadQualityMetadata(form);
+            await prepareCatalogRows(form);
             if (!form.isConnected) return;
             complete();
-            for (const control of controls) control.disabled = false;
             form.dataset.qualityLoadState = "ready";
             if (status) status.hidden = true;
         } catch {
@@ -48,7 +48,8 @@ export function initializeQualityPage(previous = {}) {
     }
     retry?.addEventListener("click", () => void load());
     // Two frames let the initial HTML and charts paint before catalog processing.
-    requestAnimationFrame(() => requestAnimationFrame(() => void load()));
+    if (qualityMetadata(form)) void load();
+    else requestAnimationFrame(() => requestAnimationFrame(() => void load()));
 }
 
 /** Compare existing cell observations while leaving unknown values last. */
@@ -105,10 +106,10 @@ export function initializeQualityAnalysis(previous = {}) {
     const pageStatus = host.querySelector("[data-analysis-page-status]");
     const empty = host.querySelector("[data-analysis-no-matches]");
     const locale = document.documentElement.lang;
-    search.value = previous.search || "";
-    grade.value = previous.grade || "";
-    importance.value = previous.importance || "";
-    if (author) author.value = previous.author || "";
+    search.value = previous.search ?? search.value;
+    grade.value = previous.grade ?? grade.value;
+    importance.value = previous.importance ?? importance.value;
+    if (author) author.value = previous.author ?? author.value;
     if (role) role.value = ["main", "significant"].includes(previous.role) ? previous.role : "main";
     suggestContributors();
     if (previous.size) size.value = previous.size;

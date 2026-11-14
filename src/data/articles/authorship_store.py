@@ -20,6 +20,7 @@ from tempfile import NamedTemporaryFile
 import polars as pl
 
 from data.articles.scope import retain_active
+from shared.support.dataset_activity import dataset_activity
 from shared.support.files import staging_directory
 from shared.support.parquet import (
     parquet_metadata,
@@ -320,6 +321,7 @@ def save(path: Path, refreshed: pl.DataFrame) -> None:
         )
         merged = retain_active(merged, path)
         _validate(merged)
+        dataset_activity("begin", path)
         with NamedTemporaryFile(
             dir=staging_directory(path),
             delete=False,

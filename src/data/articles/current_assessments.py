@@ -16,6 +16,7 @@ from tempfile import NamedTemporaryFile
 import polars as pl
 
 from data.articles.storage import MILESTONES_PATH
+from shared.support.dataset_activity import dataset_activity
 from shared.support.files import open_regular, staging_directory
 from shared.support.parquet import (
     parquet_metadata,
@@ -190,5 +191,6 @@ def save(
                     return
                 message = "Conflicting current assessments at one instant."
                 raise ValueError(message)
+        dataset_activity("begin", path)
         _write(path, frame)
         report_parquet_activity(path, "source_written")

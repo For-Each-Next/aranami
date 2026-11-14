@@ -41,6 +41,7 @@ from shared.support.assessment_encoding import (
     encode_assessments,
     restore_assessment_schema,
 )
+from shared.support.dataset_activity import dataset_activity
 from shared.support.files import read_json_object, staging_directory
 from shared.support.parquet import parquet_metadata, validate_parquet_metadata
 
@@ -729,6 +730,16 @@ class ReportStore:
             tables: dict[str, object] = {}
             for name, frame in result.tables.items():
                 _validate_key(name)
+                dataset_activity(
+                    "begin",
+                    artifact_path(final, f"{name}.parquet"),
+                    baseline=artifact_path(
+                        directory / str(latest),
+                        f"{name}.parquet",
+                    )
+                    if latest
+                    else None,
+                )
                 tables[name] = _write_table(
                     temporary / f"{name}.parquet",
                     frame,
@@ -780,6 +791,11 @@ class ReportStore:
                 temporary.replace(final)
             if self.daily:
                 _sync_directory(owner_directory(directory.parent))
+                for name in result.tables:
+                    dataset_activity(
+                        "completed",
+                        artifact_path(final, f"{name}.parquet"),
+                    )
                 return self._read_bundle_path(final, key, generation)
             _sync_directory(owner_directory(directory))
             _atomic_json(
@@ -794,6 +810,11 @@ class ReportStore:
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
+        for name in result.tables:
+            dataset_activity(
+                "completed",
+                artifact_path(final, f"{name}.parquet"),
+            )
         self._prune(key, generation, latest)
         return self._read_bundle(key, generation)
 

@@ -207,7 +207,7 @@ class QualityAuthorshipPresentationTests(unittest.TestCase):
             assert not row["featured_summary"]
 
     @staticmethod
-    def test_grade_labels_use_localized_prefixes_without_changing_codes() -> (
+    def test_grade_labels_use_explicit_short_names_without_changing_codes() -> (
         None
     ):
         """Keep compact labels and preserve grouping identities."""
@@ -217,13 +217,33 @@ class QualityAuthorshipPresentationTests(unittest.TestCase):
             original = source["authors"][0]["articles"][0]
             source["authors"][0]["articles"] = [
                 {**original, "grade": grade}
-                for grade in ("FL", "AL", "BL", "CL", "Stub", "Start", "A")
+                for grade in (
+                    "FA",
+                    "FL",
+                    "A",
+                    "AL",
+                    "GA",
+                    "Bplus",
+                    "B",
+                    "BL",
+                    "C",
+                    "CL",
+                    "Start",
+                    "List",
+                    "Stub",
+                    "SL",
+                    "Unassessed",
+                )
             ]
             data = quality_authorship_context(source, interface, _NOW)
             rows = data["quality_authorship"]["authors"][0]["articles"]
             for row in rows:
                 full = interface.text(f"assessment.class.{row['grade']}")
-                expected = full[:2] if locale.startswith("zh") else full
+                expected = (
+                    interface.text(f"assessment.short_class.{row['grade']}")
+                    if locale.startswith("zh")
+                    else full
+                )
                 assert row["grade_label"] == expected
             output = render_quality_authorship(
                 source,

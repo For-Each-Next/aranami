@@ -15,7 +15,7 @@ import polars as pl
 
 from data.project_data import normalize_members, project_stem, stored_members
 from shared.assessment_profiles import assessment_profile
-from shared.config import PROJECT_DATA_TASKFORCES
+from shared.config import ASSESSMENT_CATEGORIES, PROJECT_DATA_TASKFORCES
 from shared.support.assessment_encoding import encode_assessments
 from shared.support.cache import ParquetCache
 
@@ -101,7 +101,12 @@ def category_cache(
     return (
         ParquetCache(
             schema=CATEGORY_SCHEMA,
-            contract=f"hourly-categories:2:{wiki}:{now:%Y%m%d%H}",
+            contract=(
+                f"hourly-categories:3:{wiki}:{now:%Y%m%d%H}:"
+                + hashlib.sha256(
+                    repr(ASSESSMENT_CATEGORIES).encode()
+                ).hexdigest()
+            ),
             max_rows=2_000_000,
             max_bytes=128 * 1024 * 1024,
         ),

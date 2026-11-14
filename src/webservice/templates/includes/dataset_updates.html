@@ -1,0 +1,33 @@
+{% set updates = server.dataset_updates | default({}) %}
+{% set previous = updates.previous | default({}) %}
+{% set current = updates.current | default({}) %}
+{% macro instant(stamp) -%}
+{% if stamp and stamp.known %}{% with time=stamp %}{% include "includes/time.html" %}{% endwith %} UTC{% else %}{{ t.data.unknown }}{% endif %}
+{%- endmacro %}
+{% macro baseline(item) -%}
+{{ t.dataset_updates.baseline }} {% if item.baseline %}{% if item.baseline.url %}<a href="{{ item.baseline.url }}" data-dataset-link>{{ item.baseline.filename }}</a>{% else %}{{ item.baseline.filename }}{% endif %}{% if item.baseline.shape %} <span class="dataset-update-shape">({{ item.baseline.shape }})</span>{% endif %}{% else %}{{ t.data.unknown }}{% endif %}
+{%- endmacro %}
+{% macro consumers(item) -%}
+<li>{{ t.dataset_updates.used_by }}{% if item.reports %}<ul>{% for report in item.reports %}<li>{% if report.url %}<a href="{{ report.url }}">{{ report.name }}</a>{% else %}{{ report.name }}{% endif %}</li>{% endfor %}</ul>{% else %} {{ t.data.unknown }}{% endif %}</li>
+{%- endmacro %}
+<section id="dataset-updates-previous" class="dataset-updates" aria-labelledby="dataset-updates-previous-heading">
+<h2 id="dataset-updates-previous-heading">{{ t.dataset_updates.previous }}</h2>
+{% if previous.get('items', []) %}<ul class="dataset-update-files">
+{% for item in previous.get('items', []) %}<li data-key="{{ item.key | default(item.filename) }}">
+<p><span role="img" aria-label="{{ t.dataset_updates.succeeded if item.state == 'succeeded' else t.dataset_updates.failed if item.state == 'failed' else t.data.unknown }}">{{ '✅' if item.state == 'succeeded' else '❌' if item.state == 'failed' else '?' }}</span> <strong>{% if item.url %}<a href="{{ item.url }}" data-dataset-link>{{ item.filename }}</a>{% else %}{{ item.filename }}{% endif %}</strong></p>
+<ul class="dataset-update-details"><li>{{ t.dataset_updates.started }} {{ instant(item.started) }}; {{ baseline(item) }}</li>
+<li>{{ t.dataset_updates.succeeded if item.state == 'succeeded' else t.dataset_updates.failed if item.state == 'failed' else t.dataset_updates.finished }} {{ instant(item.finished) }}{% if item.shape %}; {{ t.dataset_updates.new_shape }} <span class="dataset-update-shape">{{ item.shape }}</span>{% endif %}</li>
+{{ consumers(item) }}</ul></li>{% endfor %}</ul>
+{% else %}<p class="context">{{ t.dataset_updates.no_previous }}</p>{% endif %}
+</section>
+<section id="dataset-updates-current" class="dataset-updates" aria-labelledby="dataset-updates-current-heading">
+<h2 id="dataset-updates-current-heading"{% if current.state == 'running' and updates.expires %} data-observation-expires="{{ updates.expires }}" data-stale-text="{{ t.dataset_updates.planned }}"{% endif %}>{{ t.dataset_updates.running if current.state == 'running' else t.dataset_updates.planned }}</h2>
+<div{% if current.state == 'running' and updates.expires %} data-observation-expires="{{ updates.expires }}" data-stale-text="{{ t.dataset_updates.stale }}"{% endif %}>
+{% if current.get('items', []) %}<ul class="dataset-update-files">
+{% for item in current.get('items', []) %}<li data-key="{{ item.key | default(item.filename) }}">
+<p><span role="img" aria-label="{{ t.dataset_updates.running if item.state == 'running' else t.dataset_updates.planned }}">⌛</span> <strong>{{ item.filename }}</strong></p>
+<ul class="dataset-update-details"><li>{{ t.dataset_updates.started if item.started and item.started.known else t.dataset_updates.scheduled }} {{ instant(item.started if item.started and item.started.known else current.scheduled) }}; {{ baseline(item) }}</li>
+{% if item.elapsed and item.elapsed.running %}<li>{{ t.dataset_updates.elapsed }} <span data-clock="dataset-elapsed" data-started-at="{{ item.elapsed.started }}"{% if updates.expires %} data-clock-expires="{{ updates.expires }}"{% endif %} data-clock-unknown="{{ t.data.unknown }}">{{ item.elapsed.label }}</span>{% if item.activity %} · {{ item.activity }}{% endif %}</li>{% elif item.activity %}<li>{{ item.activity }}</li>{% endif %}
+{{ consumers(item) }}</ul></li>{% endfor %}</ul>
+{% else %}<p class="context">{{ t.dataset_updates.unavailable if current.state == 'unavailable' else t.dataset_updates.no_planned }}</p>{% endif %}
+</div></section>

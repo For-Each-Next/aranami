@@ -10,6 +10,7 @@ import datetime as dt
 import re
 from pathlib import Path
 
+from data.runtime.dataset_updates import planned_updates, read_updates
 from data.runtime.resources import validate_runtime
 from data.runtime.status import read_status
 from shared.support.files import atomic_json, read_json_object
@@ -69,6 +70,11 @@ def read_live_status(runtime: Path) -> dict:
         different-boot samples leave the original saved status intact.
     """
     status = read_status(runtime)
+    status["dataset_updates"] = read_updates(runtime.absolute())
+    status["dataset_updates"]["planned"] = planned_updates(
+        runtime.absolute(),
+        status,
+    )
     service = status.get("services", {}).get("scheduler")
     if service is None or service.get("lifecycle") != "running":
         return status

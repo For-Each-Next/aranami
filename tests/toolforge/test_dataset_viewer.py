@@ -6,12 +6,15 @@
 from __future__ import annotations
 
 import datetime as dt
+import html
 import io
 import os
+import re
 import tempfile
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 import polars as pl
 from starlette.testclient import TestClient
@@ -20,6 +23,7 @@ from data import parquet_preview, project_data
 from data.paths import storage_key
 from shared.support.cache import ParquetCache
 from webservice.datasets import DatasetSelectionError, read_dataset
+from webservice.pages import render_dataset
 from webservice.server import create_app
 
 _BOUNDARY = dt.date(2026, 11, 3)
@@ -421,6 +425,17 @@ class TestDatasetViewer(TestCase):
         ).write(path, frame)
         original = path.read_bytes()
         open_file = os.fdopen
+        collect = pl.LazyFrame.collect
+
+        def bounded_collect(scan: pl.LazyFrame) -> pl.DataFrame:
+            """Keep each collected result within one viewer page.
+
+            Returns:
+                The original lazy query result.
+            """
+            result = collect(scan)
+            assert result.height <= parquet_preview.PAGE_SIZE
+            return result
 
         def descriptor_reader(descriptor: int, mode: str) -> _DescriptorReader:
             """Keep descriptor access while rejecting eager reads.
@@ -441,6 +456,7 @@ class TestDatasetViewer(TestCase):
                 "fdopen",
                 side_effect=descriptor_reader,
             ),
+            patch.object(pl.LazyFrame, "collect", bounded_collect),
         ):
             first = read_dataset(filename, self.runtime)
             second = read_dataset(filename, self.runtime, 2)
@@ -464,12 +480,50 @@ class TestDatasetViewer(TestCase):
         assert "preview-fixture" in response.text
         assert "page=2" in response.text
         assert "Page 1 of 3" in response.text
+        assert "Last page" in response.text
+        assert "Columns" in response.text
         assert path.read_bytes() == original
         path.unlink()
         assert (
             self.client.get("/data/", params={"file": filename}).status_code
             == 404
         )
+
+    def test_large_page_navigation_stays_bounded_and_preserves_selectors(
+        self,
+    ) -> None:
+        """Keep large-file navigation bounded."""
+        for current, expected in (
+            (1, {2, 3, 4, 5, 20_000}),
+            (10_000, {1, 9998, 9999, 10_001, 10_002, 20_000}),
+            (20_000, {1, 19_996, 19_997, 19_998, 19_999}),
+        ):
+            for locale in ("en", "zh-hans", "zh-hant"):
+                with self.subTest(page=current, locale=locale):
+                    output = render_dataset(
+                        {
+                            **dataset_fixture(),
+                            "page": current,
+                            "page_count": 20_000,
+                            "row_count": 1_000_000,
+                        },
+                        locale,
+                    )
+                    links = [
+                        parse_qs(urlsplit(html.unescape(link)).query)
+                        for link in re.findall(
+                            r'data-dataset-page href="([^"]+)"',
+                            output,
+                        )
+                    ]
+                    assert len(links) <= 8
+                    assert {int(link["page"][0]) for link in links} == expected
+                    assert all(link["lang"] == [locale] for link in links)
+                    assert all(
+                        link["file"] == [dataset_fixture()["file"]]
+                        for link in links
+                    )
+                    assert f'aria-current="page">{current}</span>' in output
 
     def test_legacy_report_preview_keeps_write_metadata_unknown(self) -> None:
         """Inspect legacy rows without inventing write facts."""

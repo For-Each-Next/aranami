@@ -118,6 +118,39 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
     """Preserve coverage and the complete native article list."""
 
     @staticmethod
+    def test_coverage_cards_keep_zeroes_and_independent_clocks() -> None:
+        """Never present award dates or render times as collection times."""
+        source = analysis_fixture()
+        source["prepared_at"] = "2026-11-14T00:00:00Z"
+        source["articles"][0]["authorship_available"] = True
+        source["articles"][0]["authorship_editors"] = []
+        cards = {
+            card["key"]: card
+            for card in quality_analysis_context(source, Interface("en"))[
+                "quality_analysis"
+            ]["coverage_cards"]
+        }
+        assert {key: row["count"] for key, row in cards.items()} == {
+            "total": "3",
+            "authorship": "1",
+            "dates": "2",
+            "length": "2",
+        }
+        assert cards["length"]["updated_at"] == _NOW.isoformat()
+        assert cards["total"]["updated_at"] == source["observed_at"]
+        assert cards["authorship"]["updated_at"] is None
+        assert cards["dates"]["updated_at"] is None
+        source["coverage_updated_at"] = {
+            "authorship": "2026-11-12T01:00:00Z",
+            "dates": "2026-11-12T02:00:00Z",
+        }
+        updated = quality_analysis_context(source, Interface("en"))[
+            "quality_analysis"
+        ]["coverage_cards"]
+        assert updated[1]["updated_at"] == "2026-11-12T01:00:00Z"
+        assert updated[2]["updated_at"] == "2026-11-12T02:00:00Z"
+
+    @staticmethod
     def test_display_and_listing_links_keep_separate_revision_provenance() -> (
         None
     ):
@@ -322,7 +355,13 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
             assert grade["color"] == importance["color"] == "#72989c"
             for article in result["articles"]:
                 full = interface.text(f"assessment.class.{article['grade']}")
-                expected = full[:2] if locale.startswith("zh") else full
+                expected = (
+                    interface.text(
+                        f"assessment.short_class.{article['grade']}"
+                    )
+                    if locale.startswith("zh")
+                    else full
+                )
                 assert article["grade_label"] == expected
                 metadata = next(
                     row

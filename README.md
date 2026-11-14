@@ -1,7 +1,7 @@
 # Aranami
 
-Aranami v0.9.14 expands ordinary article lengths on a linear scale and
-compresses the longest articles into a logarithmic tail. The [CHANGELOG](CHANGELOG.md) records completed work.
+Aranami v0.9.15 separates dataset update evidence from service status and
+adds responsive article filters, coverage details and assessment comparisons. The [CHANGELOG](CHANGELOG.md) records completed work.
 The original v0.9.8 release remains available in its Git tag.
 
 Aranami (荒波, “rough waves”) maintains Wikipedia project reports and provides

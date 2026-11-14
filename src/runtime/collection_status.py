@@ -14,8 +14,10 @@ from data.runtime.events import event_extra, logging_context
 from data.runtime.failure_status import exception_failure_details
 from data.runtime.progress import progress_updates
 from data.runtime.status import MAX_STAGES, get_boot_id, save_status, utc_now
+from runtime.dataset_updates import DatasetUpdateRun
 from runtime.interrupted_runs import execution_lease
 from shared.support.activity import activity_observer
+from shared.support.dataset_activity import dataset_observer
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -219,11 +221,20 @@ def collection_run(
         The owner used to mark partial collection as failed.
     """
     run = CollectionExecution(task_id, runtime, dry, trigger)
+    datasets = DatasetUpdateRun(
+        task_id,
+        run.run_id,
+        run.started_at,
+        runtime,
+        dry=dry,
+    )
+    datasets.persist()
     with (
         execution_lease(run.run_id, dry=dry, runtime=runtime),
         logging_context(run_id=run.run_id),
         progress_updates(run.report_progress),
         activity_observer(run.source_activity),
+        dataset_observer(datasets.observe),
     ):
         run.stage("started")
         run.persist()
@@ -243,6 +254,7 @@ def collection_run(
         finally:
             run.stage("finished")
             run.persist(finished=True)
+            datasets.finish(run.outcome)
             _LOGGER.info(
                 "Collection finished: %s (%s).",
                 task_id,

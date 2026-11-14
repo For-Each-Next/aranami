@@ -15,6 +15,7 @@ from uuid import uuid4
 import polars as pl
 
 from data.articles import (
+    assessment_comparison,
     authorship_corrections,
     authorship_store,
     current_authorship,
@@ -934,6 +935,99 @@ def refresh_saved_quality(runtime: Path = Path()) -> bool:
         return _refresh_locked(runtime, store)
 
 
+def _coverage_clocks(
+    articles: pl.DataFrame,
+    high: pl.DataFrame,
+    b_tables: dict[str, pl.DataFrame],
+    observed_at: dt.datetime,
+) -> dict[str, str | None]:
+    """Retain actual fetch clocks for evidence used by this cohort.
+
+    Listing-history acquisition time is not retained in this projection;
+    leave it unknown instead of substituting the award or render time.
+
+    Returns:
+        Independent UTC clocks for membership, lengths and both credit
+        bases, with nulls where acquisition evidence is unavailable.
+    """
+    current = (
+        b_tables["evidence"]
+        .join(
+            articles.select(
+                "page_id",
+                pl.col("article_revision_id").alias("revision_id"),
+            ),
+            on=current_authorship.KEY,
+            how="semi",
+        )["fetched_at"]
+        .max()
+    )
+    listing_keys = articles.select(
+        "page_id",
+        pl
+        .when(pl.col("grade") == "AL")
+        .then(pl.lit(["AL", "A"]))
+        .otherwise(pl.concat_list("grade"))
+        .alias("grade"),
+        pl.col("listed_date").alias("date"),
+    ).explode("grade")
+    listed_high = (
+        high
+        .filter(
+            pl.col("contract").is_in(authorship_store.CURRENT_CONTRACTS)
+            & (pl.col("action") == "added"),
+        )
+        .join(
+            listing_keys.filter(pl.col("grade").is_in(_QUALITY)),
+            on=["page_id", "grade", "date"],
+            how="semi",
+        )["fetched_at"]
+        .max()
+    )
+    listed_other = (
+        b_tables["members"]
+        .join(
+            b_tables["evidence"],
+            on=current_authorship.KEY,
+            how="inner",
+            validate="1:1",
+        )
+        .join(
+            articles.filter(
+                pl.col("grade").is_in(current_authorship.GRADES),
+            ).select(
+                "page_id",
+                "grade",
+                "talk_page_id",
+                pl.col("talk_revision_id").alias("talk_revision"),
+            ),
+            on=["page_id", "grade", "talk_page_id", "talk_revision"],
+            how="semi",
+        )
+        .filter(
+            pl.col("listing_timestamp").is_not_null()
+            & (pl.col("revision_timestamp") <= pl.col("listing_timestamp")),
+        )["fetched_at"]
+        .max()
+    )
+    clocks = {
+        "total": observed_at,
+        "length": articles.filter(
+            pl.col("prose_characters").is_not_null(),
+        )["measured_at"].max(),
+        "authorship_current": current,
+        "authorship_listed": max(
+            (value for value in (listed_high, listed_other) if value),
+            default=None,
+        ),
+        "dates": None,
+    }
+    return {
+        key: value.isoformat() if value is not None else None
+        for key, value in clocks.items()
+    }
+
+
 def _refresh_locked(runtime: Path, store: ReportStore) -> bool:
     """Read sources and select the report under its projection lock.
 
@@ -970,7 +1064,15 @@ def _refresh_locked(runtime: Path, store: ReportStore) -> bool:
         ReportResult(
             family="current-quality",
             tables=tables,
-            metadata={"observed_at": clock.isoformat()},
+            metadata={
+                "observed_at": clock.isoformat(),
+                "coverage_updated_at": _coverage_clocks(
+                    articles,
+                    high,
+                    b_tables,
+                    clock,
+                ),
+            },
         ),
         "",
         run_id=uuid4().hex,
@@ -1116,6 +1218,10 @@ def read_current_quality(
     }
     observed = bundle.manifest["metadata"]["observed_at"]
     prepared = bundle.manifest["generated_at"]
+    coverage_clocks = bundle.manifest["metadata"].get(
+        "coverage_updated_at",
+        {},
+    )
     analysis = {
         "available": True,
         "include_b": include_b,
@@ -1126,6 +1232,19 @@ def read_current_quality(
         "lengths_available": True,
         "selection": matrix,
         "authorship_basis": authorship_basis,
+        "assessment_comparison": assessment_comparison.read(runtime),
+        "coverage_updated_at": {
+            "total": coverage_clocks.get("total", observed),
+            "authorship": coverage_clocks.get(
+                f"authorship_{authorship_basis}",
+            ),
+            "dates": coverage_clocks.get("dates"),
+            **(
+                {"length": coverage_clocks["length"]}
+                if "length" in coverage_clocks
+                else {}
+            ),
+        },
         **{
             name: _iso(selected[name].to_dicts())
             for name in (

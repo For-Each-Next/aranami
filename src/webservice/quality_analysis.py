@@ -703,6 +703,53 @@ def main_author_directory(
     return output
 
 
+def _coverage_cards(data: dict, interface: Interface) -> list[dict]:
+    """Describe selected evidence counts with independent saved clocks.
+
+    Returns:
+        Four coverage cards without substituting award or render times.
+    """
+    rows = data.get("articles", [])
+    selection = data.get("selection")
+    if selection:
+        variant = (
+            2 if data.get("all_grades") else int(bool(data.get("include_b")))
+        )
+        identities = {
+            row["page_id"]
+            for row in selection["defaults"][variant]["articles"]
+        }
+        rows = [row for row in rows if row["page_id"] in identities]
+    counts = {
+        "total": len(rows),
+        "authorship": sum(
+            bool((row.get("authorship") or {}).get("available"))
+            or bool(row.get("authorship_available"))
+            for row in rows
+        ),
+        "dates": sum(row.get("listed_date") is not None for row in rows),
+        "length": sum(row.get("prose_characters") is not None for row in rows),
+    }
+    clocks = {
+        "total": data.get("observed_at"),
+        "length": max(
+            (row["measured_at"] for row in rows if row.get("measured_at")),
+            default=None,
+        ),
+        **data.get("coverage_updated_at", {}),
+    }
+    return [
+        {
+            "key": key,
+            "label": interface.text(f"quality_coverage.{key}"),
+            "count": _number(count),
+            "updated_at": clocks.get(key),
+            "updated_label": utc_time(clocks.get(key)),
+        }
+        for key, count in counts.items()
+    ]
+
+
 def quality_analysis_context(data: dict, interface: Interface) -> dict:
     """Localize saved metrics and lay out proportional chart marks.
 
@@ -758,6 +805,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
         ]
         matrix = {
             "cells": selection["cells"],
+            "assessment_comparison": data.get("assessment_comparison"),
             "length_scale_maximum": length_maximum,
             "extra": [
                 _catalog_article(row, interface)
@@ -850,6 +898,28 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                 data.get("prepared_at") or data.get("observed_at"),
             ),
             "total": _number(total),
+            "coverage_cards": _coverage_cards(data, interface),
+            "assessment_comparison": data.get("assessment_comparison"),
+            "coverage_labels": {
+                key: interface.text(f"quality_coverage.{key}")
+                for key in (
+                    "comparison",
+                    "missing_authorship",
+                    "missing_dates",
+                    "missing_length",
+                    "no_missing",
+                    "comparison_unavailable",
+                    "category",
+                    "pageassessments",
+                    "difference",
+                    "only_categories",
+                    "only_pageassessments",
+                    "grade_mismatch",
+                    "categories_updated",
+                    "pa_updated",
+                    "unknown_time",
+                )
+            },
             "measured": _number(coverage.get("measured", 0)),
             "dated": _number(coverage.get("dated", 0)),
             "unknown_dates": _number(total - coverage.get("dated", 0)),

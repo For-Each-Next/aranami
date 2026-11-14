@@ -2324,6 +2324,7 @@ def render_dataset(
                 manifest.get("generation", storage.get("generation")),
             ),
             ("row_count", f"{data['row_count']:,}"),
+            ("column_count", f"{len(data['columns']):,}"),
         ]
         if manifest:
             fields.extend([
@@ -2364,6 +2365,37 @@ def render_dataset(
             ),
             "page": current,
             "page_count": page_count,
+            "first": local_url(
+                "/data/",
+                file=data["file"],
+                page=1,
+                lang=locale,
+            )
+            if current > 1
+            else None,
+            "last": local_url(
+                "/data/",
+                file=data["file"],
+                page=page_count,
+                lang=locale,
+            )
+            if current < page_count
+            else None,
+            "page_links": [
+                {
+                    "number": number,
+                    "url": local_url(
+                        "/data/",
+                        file=data["file"],
+                        page=number,
+                        lang=locale,
+                    ),
+                }
+                for number in range(
+                    max(1, min(current - 2, page_count - 4)),
+                    min(page_count, max(current + 2, 5)) + 1,
+                )
+            ],
             "previous": local_url(
                 "/data/",
                 file=data["file"],

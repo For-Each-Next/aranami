@@ -29,6 +29,7 @@ import polars as pl
 from shared.support.assessment_encoding import (
     restore_assessment_schema,
 )
+from shared.support.dataset_activity import dataset_activity
 from shared.support.parquet import (
     parquet_metadata,
     report_parquet_activity,
@@ -315,6 +316,12 @@ class ParquetCache:
             if latest is not None and latest > path:
                 message = "Cannot replace a newer cache generation."
                 raise ValueError(message)
+        if self.observe:
+            dataset_activity(
+                "begin",
+                path,
+                baseline=latest if directory is not None else path,
+            )
         write_parquet_cache(
             path,
             frame,
@@ -375,6 +382,8 @@ def write_parquet_cache(  # ruff: ignore[too-many-arguments]
     ):
         message = "Caches require a regular file and directory."
         raise OSError(message)
+    if observe:
+        dataset_activity("begin", path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(
         dir=path.parent,
