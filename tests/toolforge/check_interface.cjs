@@ -213,11 +213,11 @@ async function checkInterface(assetRoot) {
                     const text = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
                     const fits = text.left >= box.left && text.right <= box.right && getComputedStyle(cell).whiteSpace === 'nowrap';
                     cell.textContent = original;
-                    return {width, target: fontSize * 4, fits, aligned: [heading, cell].every(element => ['right', 'end'].includes(getComputedStyle(element).textAlign))};
+                    return {width, target: fontSize * 4, fits, aligned: getComputedStyle(heading).textAlign === 'center' && ['right', 'end'].includes(getComputedStyle(cell).textAlign)};
                 });
             })()`);
             assert.ok(columns.length > 0 && columns.every(column => Math.abs(column.width - column.target) <= 1 && column.fits && column.aligned !== false),
-                'quality ordinal columns must stay four em wide, align right and fit three digits: ' + JSON.stringify(columns));
+                'quality ordinal columns must stay four em wide with centered headings and right-aligned three-digit values: ' + JSON.stringify(columns));
         };
         const checkQualityTableLayout = async locale => {
             const tables = await evaluate(`(() => [...document.querySelectorAll('.quality-data-table')].filter(table => table.getBoundingClientRect().width > 0).map(table => {
@@ -239,19 +239,19 @@ async function checkInterface(assetRoot) {
                         wraps = lines.length > 1 && lines.every(line => line.left >= box.left - 1 && line.right <= box.right + 1);
                         link.textContent = original;
                     }
-                    authorDirectory = {width:originalWidth, editorWidth:widths[title], cap:font * 44, editorCap:font * 20,
+                    authorDirectory = {width:originalWidth, target:Math.max(scroller.clientWidth, parseFloat(getComputedStyle(table).minInlineSize)),
                         countWidth:widths[columns.findIndex(column => column.classList.contains('quality-column-count'))], countTarget:font * 8,
                         wraps, stable:Math.abs(table.getBoundingClientRect().width - originalWidth) <= 1};
                 }
-                return {kind:table.className, widths, widerTitle: compact.every(width => widths[title] > width * 1.2),
+                return {kind:table.className, widths, centered: headings.every(cell => getComputedStyle(cell).textAlign === 'center' && (!cell.querySelector('button') || getComputedStyle(cell.querySelector('button')).justifyContent === 'center')), widerTitle: compact.every(width => widths[title] > width * 1.2),
                     localScroll: table.getBoundingClientRect().width <= scroller.clientWidth + 1 || ['auto', 'scroll'].includes(getComputedStyle(scroller).overflowX),
                     fits: document.documentElement.scrollWidth <= innerWidth + 1 && (!dialog || dialog.scrollWidth <= dialog.clientWidth + 1),
                     missing, authorDirectory, missingLabel: ${JSON.stringify(interfaceMessages['quality_analysis.unknown_listing'][locale])}, misleadingLabel: ${JSON.stringify(interfaceMessages['quality_authorship.current_revision'][locale])}};
             }))()`);
-            assert.ok(tables.length > 0 && tables.every(table => table.widerTitle && table.localScroll && table.fits), 'article/user names need more room than compact columns and overflow must stay in table scrollers: ' + JSON.stringify(tables));
+            assert.ok(tables.length > 0 && tables.every(table => table.centered && table.widerTitle && table.localScroll && table.fits), 'article/user names need more room than compact columns and overflow must stay in table scrollers: ' + JSON.stringify(tables));
             assert.ok(tables.every(table => table.missing.every(text => text.includes(table.missingLabel) && !text.includes(table.misleadingLabel))), 'missing listing dates must use the localized unavailable date label: ' + JSON.stringify(tables));
             const directories = tables.flatMap(table => table.authorDirectory ? [table.authorDirectory] : []);
-            assert.ok(directories.every(table => table.width <= table.cap + 1 && table.editorWidth <= table.editorCap + 1 && Math.abs(table.countWidth - table.countTarget) <= 1 && table.wraps && table.stable), 'author directories must bound short-name space, wrap long names and preserve count width: ' + JSON.stringify(directories));
+            assert.ok(directories.every(table => Math.abs(table.width - table.target) <= 1 && Math.abs(table.countWidth - table.countTarget) <= 1 && table.wraps && table.stable), 'author directories must fill the available width, wrap long names and preserve count width: ' + JSON.stringify(directories));
         };
         const checkQualityText = async phase => {
             const unresolved = await evaluate(`(() => {
@@ -345,7 +345,9 @@ async function checkInterface(assetRoot) {
                 const violins = [...document.querySelectorAll('.analysis-mini-violin')].map(svg => {
                     const median = svg.querySelector('.analysis-violin-median');
                     const dots = [...svg.querySelectorAll('.analysis-violin-quartile')];
-                    const title = svg.querySelector('title')?.textContent || '';
+                    const extrema = [...svg.querySelectorAll('.analysis-violin-extreme')];
+                    const wholeTitle = svg.querySelector(':scope > title');
+                    const mean = svg.querySelector('.analysis-violin-mean');
                     const label = svg.getAttribute('aria-label') || '';
                     const markers = median ? dots.length === 2 && dots.map(dot => dot.dataset.percentile).join(',') === '25,75' && dots.every(dot => dot.getAttribute('x1') === dot.getAttribute('x2') && dot.getAttribute('y1') === dot.getAttribute('y2') && getComputedStyle(dot).strokeLinecap === 'round') && Number(dots[0].getAttribute('x1')) <= Number(median.getAttribute('x1')) && Number(median.getAttribute('x1')) <= Number(dots[1].getAttribute('x1')) : dots.length === 0;
                     const form = document.querySelector('[data-quality-matrix]'), metadata = form.qualityMetadata;
@@ -360,11 +362,18 @@ async function checkInterface(assetRoot) {
                         const count = value => value.toLocaleString('en-US');
                         const percentile = p => { if (!sample.length) return null; const position = (sample.length - 1) * p; return sample[Math.floor(position)] + (sample[Math.ceil(position)] - sample[Math.floor(position)]) * (position % 1); };
                         const expected = metadata.labels.violin_summary.replace('{pages}', count(cells.reduce((total, cell) => total + cell.pages, 0))).replace('{measured}', count(cells.reduce((total, cell) => total + cell.measured, 0))).replace('{minimum}', number(sample.length ? sample[0] : null)).replace('{p25}', number(percentile(.25))).replace('{p50}', number(percentile(.5))).replace('{p75}', number(percentile(.75))).replace('{maximum}', number(sample.length ? sample.at(-1) : null));
-                        values = title.endsWith(expected) && label.endsWith(expected);
-                        const coordinate = value => value <= 0 ? 0 : Math.min(1000, Math.max(0, 50 + 300 * Math.log10(value / 50)));
-                        coordinates = sample.length ? median && Math.abs(Number(median.getAttribute('x1')) - coordinate(percentile(.5))) <= .011 && dots.every(dot => Math.abs(Number(dot.getAttribute('x1')) - coordinate(percentile(Number(dot.dataset.percentile) / 100))) <= .011) : !median && !dots.length;
+                        values = label.endsWith(expected);
+                        const markerTitle = (kind, value) => metadata.labels['violin_' + kind].replace('{value}', number(value));
+                        const meanValue = sample.length ? sample.reduce((sum, value) => sum + value, 0) / sample.length : null;
+                        const titles = sample.length ? median?.querySelector('title')?.textContent === markerTitle('p50', percentile(.5)) && dots.every(dot => dot.querySelector('title')?.textContent === markerTitle('p' + dot.dataset.percentile, percentile(Number(dot.dataset.percentile) / 100))) && extrema.every(mark => mark.querySelector('title')?.textContent === markerTitle(mark.dataset.extreme, mark.dataset.extreme === 'minimum' ? sample[0] : sample.at(-1))) && mean?.querySelector('title')?.textContent === markerTitle('mean', meanValue) : !svg.querySelector('title');
+                        values = values && titles;
+                        const maximum = Math.max(25000, ...metadata.cells.flatMap(cell => cell.histogram.filter(item => item.count > 0).map(item => item.value)));
+                        const coordinate = value => value <= 25000 ? Math.max(0, value / 25000 * 900) : maximum <= 25000 ? 900 : Math.min(1000, 900 + 100 * Math.log(value / 25000) / Math.log(maximum / 25000));
+                        coordinates = metadata.length_scale_maximum === maximum && (sample.length ? median && Math.abs(Number(median.getAttribute('x1')) - coordinate(percentile(.5))) <= .011 && dots.every(dot => Math.abs(Number(dot.getAttribute('x1')) - coordinate(percentile(Number(dot.dataset.percentile) / 100))) <= .011) : !median && !dots.length);
+                        coordinates = coordinates && (sample.length ? extrema.length === 2 && extrema.every((mark, index) => mark.dataset.extreme === (index ? 'maximum' : 'minimum') && Math.abs(Number(mark.getAttribute('x1')) - coordinate(index ? sample.at(-1) : sample[0])) <= .011 && mark.getAttribute('x1') === mark.getAttribute('x2') && mark.getAttribute('y1') === '17' && mark.getAttribute('y2') === '43' && getComputedStyle(mark).strokeWidth === getComputedStyle(median).strokeWidth) : extrema.length === 0);
+                        coordinates = coordinates && (sample.length ? mean && Math.abs(Number(mean.dataset.meanX) - coordinate(meanValue)) <= .011 && mean.querySelectorAll('line').length === 2 : !mean);
                     }
-                    return {markers: markers && coordinates, caption: values && Boolean(title && label) && svg.getAttribute('aria-describedby') === 'analysis-violin-note' && Boolean(document.querySelector('#analysis-violin-note')?.textContent)};
+                    return {markers: markers && coordinates, caption: values && Boolean(label) && !wholeTitle && !svg.closest('a').getAttribute('title') && !document.querySelector('#analysis-violin-note')};
                 });
                 return {counts: counts.length > 0 && counts.every(Boolean), violins: violins.length > 0 && violins.every(item => item.markers && item.caption), fits: document.documentElement.scrollWidth <= innerWidth + 1};
             })()`);
@@ -1797,8 +1806,9 @@ async function checkInterface(assetRoot) {
                                 const svg = document.querySelector('[data-analysis-violin="' + code + '"]');
                                 const expected = form.qualityMetadata.labels.violin_summary.replace('{pages}', '1').replace('{measured}', String(measured)).replace('{minimum}', measured ? '0' : '—').replace('{p25}', measured ? '0' : '—').replace('{p50}', measured ? '0' : '—').replace('{p75}', measured ? '0' : '—').replace('{maximum}', measured ? '0' : '—');
                                 const dots = [...svg.querySelectorAll('.analysis-violin-quartile')];
+                                const extrema = [...svg.querySelectorAll('.analysis-violin-extreme')];
                                 const median = svg.querySelector('.analysis-violin-median');
-                                return svg.querySelector('title').textContent === expected && svg.getAttribute('aria-label').endsWith(expected) && (measured ? dots.length === 2 && dots.every(dot => Number(dot.getAttribute('x1')) === 0) && Number(median.getAttribute('x1')) === 0 : dots.length === 0 && !median);
+                                return !svg.querySelector(':scope > title') && svg.getAttribute('aria-label').endsWith(expected) && (measured ? dots.length === 2 && dots.every(dot => Number(dot.getAttribute('x1')) === 0) && Number(median.getAttribute('x1')) === 0 && extrema.length === 2 && Number(svg.querySelector('.analysis-violin-mean')?.dataset.meanX) === 0 : dots.length === 0 && !median && !extrema.length && !svg.querySelector('.analysis-violin-mean'));
                             };
                             const quantileStates = violinState('C', 1) && violinState('B', 0);
                             from.value = '2002'; from.dispatchEvent(new Event('change'));

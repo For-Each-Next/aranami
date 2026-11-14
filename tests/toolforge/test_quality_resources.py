@@ -11,6 +11,7 @@ import unittest
 from hashlib import sha256
 from html import unescape
 from http import HTTPStatus
+from itertools import pairwise
 from math import isclose, isfinite
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -29,6 +30,7 @@ from webservice.pages import render_quality_analysis, render_quality_authorship
 from webservice.presentation import Interface
 from webservice.quality_analysis import (
     main_author_directory,
+    prose_length_maximum,
     prose_length_position,
     quality_analysis_context,
 )
@@ -101,33 +103,73 @@ class QualityResourcePresentationTests(unittest.TestCase):
 
     @staticmethod
     def test_length_scale_anchors_and_endpoints() -> None:
-        """Keep logarithmic anchors and clamp only display positions."""
+        """Keep a linear 90% segment and continuous logarithmic tail."""
         expected = {
             0: 0,
-            1: 0,
-            50: 50,
-            500: 350,
-            5000: 650,
+            5000: 180,
+            7000: 252,
+            9000: 324,
+            25_000: 900,
             50_000: 950,
             100_000: 1000,
         }
         for length, position in expected.items():
-            assert isclose(prose_length_position(length), position)
-        lengths = [0, 1, 20, 25, 50, 500, 5000, 7000, 9000, 50_000, 10**9]
-        positions = [prose_length_position(length) for length in lengths]
+            assert isclose(prose_length_position(length, 100_000), position)
+        lengths = [0, 1, 5000, 24_999, 25_000, 25_001, 50_000, 100_000]
+        positions = [
+            prose_length_position(length, 100_000) for length in lengths
+        ]
         assert all(
             isfinite(value) and 0 <= value <= 1000 for value in positions
         )
-        assert positions == sorted(positions)
-        assert isclose(prose_length_position(7000), 693.8384107)
-        assert isclose(prose_length_position(9000), 726.5817515)
-        assert prose_length_position(70_000) < 1000
-        assert prose_length_position(74_000) == 1000
+        assert all(a < b for a, b in pairwise(positions))
+        assert prose_length_position(25_001, 100_000) - positions[4] < 0.01
+        assert prose_length_position(25_000, 25_000) == 900
+        assert prose_length_position(50_000, 25_000) == 900
+        assert prose_length_position(100_001, 100_000) == 1000
+
+    @staticmethod
+    def test_length_scale_uses_the_complete_observed_catalog() -> None:
+        """Use observed lengths, excluding empty histogram bins."""
+        data = {
+            "selection": {
+                "cells": [
+                    {"histogram": [{"value": 9000, "count": 1}]},
+                    {
+                        "histogram": [
+                            {"value": 100_000, "count": 1},
+                            {"value": 999_999, "count": 0},
+                        ],
+                    },
+                ],
+            },
+            "articles": [{"prose_characters": 500_000}],
+        }
+        assert prose_length_maximum(data) == 100_000
+        assert prose_length_maximum({"selection": {"cells": []}}) == 25_000
+        assert (
+            prose_length_maximum({
+                "articles": [
+                    {"prose_characters": None},
+                    {"prose_characters": 0},
+                ],
+            })
+            == 25_000
+        )
+        assert (
+            prose_length_maximum({
+                "articles": [
+                    {"prose_characters": 50_000},
+                ],
+            })
+            == 50_000
+        )
 
     @staticmethod
     def test_length_coordinates_do_not_follow_group_maxima() -> None:
-        """Keep 5,000 at 65% when another group is removed."""
+        """Keep the tail fixed when another group's chart is removed."""
         data = analysis_fixture()
+        data["articles"][0]["prose_characters"] = 100_000
         data["lengths"] = [
             {
                 "group": "grade",
@@ -135,30 +177,91 @@ class QualityResourcePresentationTests(unittest.TestCase):
                 "importance": None,
                 "pages": 3,
                 "measured": 3,
-                "median_characters": 5000,
+                "median_characters": 50_000,
                 "density": [
-                    {"position": 5000, "density": 1.0},
+                    {"position": 50_000, "density": 1.0},
                     {"position": maximum, "density": 0.25},
                 ],
             }
-            for grade, maximum in (("FA", 9000), ("GA", 50_000))
+            for grade, maximum in (("FA", 75_000), ("GA", 100_000))
         ]
         interface = Interface("en")
         together = quality_analysis_context(data, interface)[
             "quality_analysis"
         ]
-        assert [row["median_x"] for row in together["lengths"]] == [650, 650]
+        assert [row["median_x"] for row in together["lengths"]] == [950, 950]
         assert together["lengths"][0]["violin_path"].startswith(
-            "M 650.00 6.00 L 726.58 24.00",
+            "M 950.00 6.00 L 979.25 24.00",
         )
         assert together["lengths"][1]["violin_path"].startswith(
-            "M 650.00 6.00 L 950.00 24.00",
+            "M 950.00 6.00 L 1000.00 24.00",
         )
         data["lengths"] = data["lengths"][:1]
         filtered = quality_analysis_context(data, interface)[
             "quality_analysis"
         ]
         assert filtered["lengths"] == together["lengths"][:1]
+
+    @staticmethod
+    def test_extrema_markers_keep_missing_and_zero_distinct() -> None:
+        """Draw singleton endpoints but no missing-data bars."""
+        for value in (None, 0, 52_318):
+            data = _catalog_fixture()["analysis"]
+            data["selection"]["cells"] = [
+                {
+                    "grade": "FA",
+                    "importance": "High",
+                    "year": 2026,
+                    "histogram": []
+                    if value is None
+                    else [{"value": value, "count": 1}],
+                },
+            ]
+            data["lengths"] = [
+                {
+                    "group": "grade",
+                    "grade": "FA",
+                    "importance": None,
+                    "pages": 1,
+                    "measured": int(value is not None),
+                    "median_characters": value,
+                },
+            ]
+            result = quality_analysis_context(data, Interface("en"))[
+                "quality_analysis"
+            ]
+            length = result["lengths"][0]
+            if value is None:
+                assert length["extrema"] == []
+                assert length["quartiles"] == []
+                assert length["mean_x"] is None
+            else:
+                expected = 0 if value == 0 else 1000
+                assert length["extrema"] == [
+                    {"kind": "minimum", "value": value, "x": expected},
+                    {"kind": "maximum", "value": value, "x": expected},
+                ]
+                assert length["median_x"] == expected
+                assert length["mean_x"] == expected
+
+    @staticmethod
+    def test_mean_weights_observed_lengths_and_excludes_empty_bins() -> None:
+        """Include observed zeroes and frequency-weighted lengths."""
+        cells = [
+            {
+                "grade": "FA",
+                "importance": "High",
+                "year": 2026,
+                "histogram": [
+                    {"value": 0, "count": 1},
+                    {"value": 1000, "count": 2},
+                    {"value": 100_000, "count": 0},
+                ],
+            },
+        ]
+        result = quartiles(cells, ["FA"], 2026)
+        assert all(isclose(row["mean"], 2000 / 3) for row in result)
+        assert all(row["maximum"] == 1000 for row in result)
 
     @staticmethod
     def test_missing_listing_dates_are_unlinked_in_every_directory() -> None:
@@ -683,11 +786,15 @@ class QualityResourcePresentationTests(unittest.TestCase):
             interface = Interface(locale)
             result = quality_analysis_context(data, interface)
             length = result["quality_analysis"]["lengths"][0]
+            assert (
+                result["quality_analysis"]["matrix"]["length_scale_maximum"]
+                == 25_000
+            )
             assert length["quartiles"] == [
-                {"percentile": 25, "value": 7.5, "x": 0.0},
-                {"percentile": 75, "value": 25.0, "x": 0.0},
+                {"percentile": 25, "value": 7.5, "x": 0.27},
+                {"percentile": 75, "value": 25.0, "x": 0.9},
             ]
-            assert isclose(length["median_x"], 0)
+            assert isclose(length["median_x"], 0.54)
             assert length["summary"] == interface.text(
                 "quality_analysis.violin_summary",
                 pages="5",
@@ -712,10 +819,32 @@ class QualityResourcePresentationTests(unittest.TestCase):
             output = render_quality_analysis(data, None, None, locale, _NOW)
             assert 'data-percentile="25"' in output
             assert 'data-percentile="75"' in output
-            assert 'x1="0" x2="0"' in output
-            assert 'aria-describedby="analysis-violin-note"' in output
-            assert interface.text("quality_analysis.violin_note") in output
+            assert 'x1="0.54" x2="0.54"' in output
+            assert "analysis-violin-note" not in output
+            assert 'data-extreme="minimum"' in output
+            assert 'data-extreme="maximum"' in output
+            assert length["extrema"] == [
+                {"kind": "minimum", "value": 0, "x": 0.0},
+                {"kind": "maximum", "value": 40, "x": 1.44},
+            ]
             assert length["summary"] in output
+            assert f"<title>{length['summary']}</title>" not in output
+            for kind, value in {
+                "minimum": "0",
+                "p25": "8",
+                "p50": "15",
+                "p75": "25",
+                "maximum": "40",
+                "mean": "18",
+            }.items():
+                title = interface.text(
+                    f"quality_analysis.violin_{kind}",
+                    value=value,
+                )
+                assert length["marker_titles"][kind] == title
+                assert f"<title>{title}</title>" in output
+            assert 'class="analysis-violin-mean"' in output
+            assert isclose(length["mean_x"], 0.63)
 
     @staticmethod
     def test_length_labels_round_half_up_without_changing_quantiles() -> None:

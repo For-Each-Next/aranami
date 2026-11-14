@@ -58,9 +58,9 @@ class NavigationTests(unittest.TestCase):
                 direct = navigation[: details.start()]
                 assert re.findall(r'<a href="([^"]+)"', direct) == [
                     "/",
-                    "/maintenance/",
                     "/discussions/",
                     "/quality-analysis/",
+                    "/maintenance/",
                 ]
                 assert 'href="/reports/"' in details[1]
                 assert 'href="/discussions/"' not in details[1]

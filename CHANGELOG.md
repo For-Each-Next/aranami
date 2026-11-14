@@ -5,6 +5,19 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.14 (2026-11-14 11:31 UTC)
+
+Overview: Expanded ordinary article lengths and reordered the main navigation.
+
+- Used a linear length scale through 25,000 characters at 90%, then a
+  logarithmic tail to the shared observed maximum at 100%.
+- Kept the same scale across groups and filters, with minimum/maximum bars,
+  a mean plus marker and individual tooltips; removed the explanatory paragraph.
+- Centered table headers, shortened Chinese grade labels and compacted
+  metadata columns for wider dates, with a full-width author directory.
+- Matched unassessed articles to the unknown-importance gray theme and
+  ordered navigation as Dashboard, Discussions, Article statistics and Maintenance.
+
 ### 0.9.13 (2026-11-14 11:09 UTC)
 
 Overview: Removed completed migration machinery and made article-length

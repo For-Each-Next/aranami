@@ -1637,7 +1637,7 @@ table.quality-chart-articles {
 }
 
 table.quality-author-directory {
-    max-inline-size: 44em;
+    inline-size: 100%;
 }
 
 .quality-data-table .quality-column-ordinal {
@@ -1645,25 +1645,34 @@ table.quality-author-directory {
 }
 
 .quality-data-table .quality-column-grade,
-.quality-data-table .quality-column-importance,
+.quality-data-table .quality-column-importance {
+    inline-size: 5em;
+}
+
 .quality-data-table .quality-column-size {
-    inline-size: 6.5em;
+    inline-size: 5.5em;
 }
 
 .quality-data-table .quality-column-listed {
-    inline-size: 10em;
+    inline-size: 12em;
 }
 
 .quality-data-table .quality-column-authors {
     inline-size: 10.5em;
 }
 
-.quality-data-table .quality-column-prose,
+.quality-data-table .quality-column-prose {
+    inline-size: 6em;
+}
+
 .quality-data-table .quality-column-count {
     inline-size: 8em;
 }
 
-.quality-author-articles .quality-column-listed,
+.quality-author-articles .quality-column-listed {
+    inline-size: 14em;
+}
+
 .quality-data-table .quality-column-active {
     inline-size: 12em;
 }
@@ -1684,6 +1693,18 @@ table.quality-author-directory {
 .quality-data-table th,
 .quality-data-table td {
     overflow-wrap: anywhere;
+}
+
+.quality-data-table thead th,
+.quality-data-table thead th:first-child,
+.quality-data-table thead th.ui-table__table__cell--align-number {
+    text-align: center;
+}
+
+.quality-data-table thead .ui-table__table__sort-button {
+    justify-content: center;
+    gap: .3em;
+    text-align: center;
 }
 
 .table-hint {

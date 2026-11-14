@@ -20,9 +20,10 @@
 .analysis-legend li { white-space: nowrap; }
 .analysis-violin-density { fill-opacity: .75; stroke: #52797e; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .analysis-violin-track { stroke: #dce6e7; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.analysis-violin-median { stroke: #163c41; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.analysis-violin-median, .analysis-violin-extreme { stroke: #163c41; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .analysis-violin-quartile { stroke: #163c41; stroke-width: 6; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-@media (forced-colors: active) { .analysis-violin-density { fill: Highlight; stroke: CanvasText; } .analysis-violin-track, .analysis-violin-median, .analysis-violin-quartile { stroke: CanvasText; } }
+.analysis-violin-mean line { stroke: #9c3e32; stroke-width: 2; vector-effect: non-scaling-stroke; }
+@media (forced-colors: active) { .analysis-violin-density { fill: Highlight; stroke: CanvasText; } .analysis-violin-track, .analysis-violin-median, .analysis-violin-extreme, .analysis-violin-quartile, .analysis-violin-mean line { stroke: CanvasText; } }
 .analysis-filters { display: flex; gap: .8rem; flex-wrap: wrap; align-items: end; margin: 1rem 0; }
 .analysis-filters[hidden], .analysis-directory [hidden] { display: none; }
 .analysis-filters label { display: flex; flex-direction: column; gap: .35rem; min-width: 0; font-size: .9rem; }
@@ -40,7 +41,6 @@
 .page-updates .analysis-editor-table th:first-child { inline-size: 42%; }
 .analysis-editor-table th, .analysis-editor-table td { padding: .5rem .4rem; border-bottom: 1px solid #dce6e7; text-align: left; }
 .analysis-editor-table td { white-space: nowrap; text-align: center; }
-.analysis-editor-table thead th:not(:first-child) { text-align: center; }
 .analysis-editor-table th { overflow-wrap: anywhere; }
 #quality-authors { margin-top: 2.5rem; }
 #analysis-distribution, #analysis-years, #analysis-articles { margin-top: 2.5rem; }
@@ -57,7 +57,6 @@
 .analysis-pie-key th, .analysis-pie-key td { border-bottom: 1px solid #dce6e7; padding: .5rem .65rem; }
 .analysis-pie-key th { text-align: left; font-weight: 500; }
 .analysis-pie-key thead { background: #f4f7f7; }
-.analysis-pie-key thead th:not(:first-child) { text-align: right; }
 .analysis-assessment-label { display: inline-flex; align-items: center; gap: .4rem; }
 .analysis-swatch { flex: none; border: 1px solid #a2a9b1; }
 .analysis-year-columns rect { stroke: #fff; stroke-width: 1; }
@@ -77,7 +76,7 @@
 
 .analysis-matrix { width: 100%; border-collapse: collapse; white-space: nowrap; }
 .analysis-matrix th, .analysis-matrix td { padding: .65rem; border-bottom: 1px solid var(--border-color-base, #aaa); text-align: center; }
-.analysis-matrix th:first-child { text-align: start; }
+.analysis-matrix tbody th:first-child { text-align: start; }
 .analysis-matrix label { display: inline-flex; align-items: center; gap: .35rem; }
 .analysis-year-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; margin: 1rem 0 2rem; }
 .analysis-year-filter input[type="number"] { width: 6em; padding: .4rem; }
@@ -89,7 +88,6 @@
 .analysis-mini-violin { display: block; width: 100%; height: 2rem; }
 .analysis-mini-cell a { display: block; }
 .analysis-pie-key th, .analysis-pie-key td { padding: .45rem .35rem; }
-.analysis-pie-key thead th:last-child { text-align: center; }
 @media (max-width: 390px) { .analysis-pie-key { font-size: .85rem; } .analysis-assessment-label { gap: .25rem; } }
 
 .analysis-pie-key th:first-child, .analysis-pie-key td.analysis-number { width: 1%; white-space: nowrap; }
@@ -100,3 +98,5 @@
 .quality-detail-loading { display: inline-block; inline-size: .9em; block-size: .9em; margin-inline-start: .4em; vertical-align: -.1em; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; animation: quality-detail-spin .8s linear infinite; }
 @keyframes quality-detail-spin { to { transform: rotate(1turn); } }
 @media (prefers-reduced-motion: reduce) { .quality-detail-loading { animation: none; } }
+
+.analysis-year-data thead th, .analysis-editor-table thead th, .analysis-pie-key thead th, .analysis-chart-article-table thead th, .analysis-matrix thead th { text-align: center; }

@@ -207,6 +207,35 @@ class QualityAuthorshipPresentationTests(unittest.TestCase):
             assert not row["featured_summary"]
 
     @staticmethod
+    def test_grade_labels_use_localized_prefixes_without_changing_codes() -> (
+        None
+    ):
+        """Keep compact labels and preserve grouping identities."""
+        for locale in ("en", "zh-hans", "zh-hant"):
+            interface = Interface(locale)
+            source = _directory()
+            original = source["authors"][0]["articles"][0]
+            source["authors"][0]["articles"] = [
+                {**original, "grade": grade}
+                for grade in ("FL", "AL", "BL", "CL", "Stub", "Start", "A")
+            ]
+            data = quality_authorship_context(source, interface, _NOW)
+            rows = data["quality_authorship"]["authors"][0]["articles"]
+            for row in rows:
+                full = interface.text(f"assessment.class.{row['grade']}")
+                expected = full[:2] if locale.startswith("zh") else full
+                assert row["grade_label"] == expected
+            output = render_quality_authorship(
+                source,
+                None,
+                None,
+                locale,
+                _NOW,
+            )
+            for row in rows:
+                assert f">{row['grade_label']}</td>" in output
+
+    @staticmethod
     def test_whole_article_summaries_and_compact_listing_ages() -> None:
         """Keep whole counts and verified listing links."""
         data = quality_authorship_context(_directory(), Interface("en"), _NOW)

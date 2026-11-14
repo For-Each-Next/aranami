@@ -10,7 +10,7 @@ presentation values without acquiring sources or recalculating metrics.
 from __future__ import annotations
 
 from ipaddress import ip_address
-from math import ceil, cos, floor, log10, pi, sin
+from math import ceil, cos, floor, log, log10, pi, sin
 from operator import itemgetter
 from urllib.parse import quote
 
@@ -22,7 +22,7 @@ from webservice.presentation import (
     title_url,
     utc_time,
 )
-from webservice.quality_authorship import review_url
+from webservice.quality_authorship import grade_label, review_url
 
 _PROFILE = assessment_profile("zhwiki", "电子游戏")
 _GRADES = tuple(
@@ -56,33 +56,21 @@ _HALF_CIRCLE = 0.5
 _FIRST_FILTER_YEAR = 2002
 _DETAIL_SHARE_THRESHOLD = 0.1
 _MAIN_SHARE_THRESHOLD = 0.33
+_PROSE_LENGTH_LINEAR = 25_000
 
 
-def _grade_label(code: str, interface: Interface) -> str:
-    """Return compact Chinese labels for matrix and chart columns.
+def _assessment_color(code: str, dimension: str) -> str:
+    """Use the page's shared gray for unassessed or unknown categories.
 
     Returns:
-        Two-character Chinese labels or the normal English label.
+        A quality-page color without changing the shared wiki profile.
     """
-    if interface.locale.startswith("zh"):
-        return {
-            "FA": "典范" if interface.locale == "zh-hans" else "典範",
-            "FL": "特表",
-            "A": "甲级" if interface.locale == "zh-hans" else "甲級",
-            "AL": "甲表",
-            "GA": "优良" if interface.locale == "zh-hans" else "優良",
-            "Bplus": "乙上",
-            "B": "乙级" if interface.locale == "zh-hans" else "乙級",
-            "BL": "乙表",
-            "C": "丙级" if interface.locale == "zh-hans" else "丙級",
-            "CL": "丙表",
-            "Start": "初级" if interface.locale == "zh-hans" else "初級",
-            "List": "初表",
-            "Stub": "小级" if interface.locale == "zh-hans" else "小級",
-            "SL": "小表",
-            "Unassessed": "未评" if interface.locale == "zh-hans" else "未評",
-        }.get(code, interface.text(f"assessment.class.{code}"))
-    return interface.text(f"assessment.class.{code}")
+    if (dimension, code) in {
+        ("class", "Unassessed"),
+        ("importance", "Unknown"),
+    }:
+        return "#72989c"
+    return _PROFILE.color(code, dimension)
 
 
 def _number(value: float | None) -> str:
@@ -144,10 +132,10 @@ def _pie(
         fraction = row["pages"] / max(total, 1)
         categories.append({
             **row,
-            "label": _grade_label(code, interface)
+            "label": grade_label(code, interface)
             if dimension == "class"
             else interface.text(f"assessment.{dimension}.{code}"),
-            "color": _PROFILE.color(code, dimension),
+            "color": _assessment_color(code, dimension),
             "series": _IMPORTANCE.index(code)
             if code in _IMPORTANCE
             else len(_IMPORTANCE),
@@ -184,8 +172,8 @@ def _years(data: dict, interface: Interface) -> dict:
             if count:
                 segments.append({
                     "grade": code,
-                    "color": _PROFILE.color(code, "class"),
-                    "label": _grade_label(code, interface),
+                    "color": _assessment_color(code, "class"),
+                    "label": grade_label(code, interface),
                     "count": count,
                     "x": round(center - 16, 2),
                     "y": round(248 - offset - height, 2),
@@ -205,8 +193,8 @@ def _years(data: dict, interface: Interface) -> dict:
         "year_legend": [
             {
                 "grade": code,
-                "label": _grade_label(code, interface),
-                "color": _PROFILE.color(code, "class"),
+                "label": grade_label(code, interface),
+                "color": _assessment_color(code, "class"),
             }
             for code in _GRADES
             if any(
@@ -223,24 +211,53 @@ def _years(data: dict, interface: Interface) -> dict:
     }
 
 
-def prose_length_position(characters: float) -> float:
-    """Map prose length onto the fixed logarithmic SVG scale.
+def prose_length_maximum(data: dict) -> float:
+    """Share one scale across groups and filters using saved lengths.
 
-    Every tenfold increase advances 30%: 50 characters map to 5%,
-    500 to 35%, 5,000 to 65%, and 50,000 to 95%. Zero and values
-    outside the visible range sit at the nearest endpoint; labels
-    retain actual observations. Saved density heights remain in the
-    original character units.
+    Returns:
+        Catalog-wide observed maximum, at least the 25,000 linear limit.
+    """
+    selection = data.get("selection")
+    values = (
+        (
+            item["value"]
+            for cell in selection.get("cells", [])
+            for item in cell.get("histogram", [])
+            if item["count"] > 0
+        )
+        if selection is not None
+        else (
+            row["prose_characters"]
+            for row in data.get("articles", [])
+            if row.get("prose_characters") is not None
+        )
+    )
+    return max(_PROSE_LENGTH_LINEAR, max(values, default=0))
+
+
+def prose_length_position(characters: float, maximum: float) -> float:
+    """Reserve 90% for 0-25,000 characters and compress the tail by log.
+
+    The shared observed maximum closes the logarithmic tail at 100%.
+    Zero or missing observations never change the fixed linear segment.
 
     Returns:
         SVG coordinate between zero and 1,000, inclusive.
     """
-    if characters <= 0:
-        return 0
-    return min(1000, max(0, 50 + 300 * log10(characters / 50)))
+    if characters <= _PROSE_LENGTH_LINEAR:
+        return max(0, characters / _PROSE_LENGTH_LINEAR * 900)
+    if maximum <= _PROSE_LENGTH_LINEAR:
+        return 900
+    return min(
+        1000,
+        900
+        + 100
+        * log(characters / _PROSE_LENGTH_LINEAR)
+        / log(maximum / _PROSE_LENGTH_LINEAR),
+    )
 
 
-def _violin_path(points: list[dict]) -> str | None:
+def _violin_path(points: list[dict], maximum: float) -> str | None:
     """Map saved density points into a mirrored horizontal SVG shape.
 
     Returns:
@@ -249,23 +266,27 @@ def _violin_path(points: list[dict]) -> str | None:
     if not points:
         return None
     upper = [
-        f"{prose_length_position(point['position']):.2f} "
+        f"{prose_length_position(point['position'], maximum):.2f} "
         f"{30 - point['density'] * 24:.2f}"
         for point in points
     ]
     lower = [
-        f"{prose_length_position(point['position']):.2f} "
+        f"{prose_length_position(point['position'], maximum):.2f} "
         f"{30 + point['density'] * 24:.2f}"
         for point in reversed(points)
     ]
     return "M " + " L ".join([*upper, *lower]) + " Z"
 
 
-def _lengths(data: dict, interface: Interface) -> list[dict]:
+def _lengths(
+    data: dict,
+    interface: Interface,
+    maximum: float,
+) -> list[dict]:
     """Position saved percentile intervals on a shared visual scale.
 
     Returns:
-        Localized ranges on the fixed compressed character scale.
+        Localized ranges on the shared linear and logarithmic scale.
     """
     selection = data.get("selection") or {}
     quartile_lookup = {
@@ -301,27 +322,60 @@ def _lengths(data: dict, interface: Interface) -> list[dict]:
         )
         lengths.append({
             **row,
-            "label": interface.text(
-                f"assessment.class.{row['grade']}"
-                if row["group"] == "grade"
-                else f"assessment.importance.{row['importance']}",
-            ),
+            "label": grade_label(row["grade"], interface)
+            if row["group"] == "grade"
+            else interface.text(f"assessment.importance.{row['importance']}"),
             "median_label": _number(median),
             "range_68": _range(row, "central_68"),
             "range_95": _range(row, "central_95"),
-            "low": round(prose_length_position(low or 0), 2),
+            "low": round(prose_length_position(low or 0, maximum), 2),
             "width": round(
-                prose_length_position(high or 0)
-                - prose_length_position(low or 0),
+                prose_length_position(high or 0, maximum)
+                - prose_length_position(low or 0, maximum),
                 2,
             ),
-            "median_x": round(prose_length_position(median or 0), 2),
+            "median_x": round(prose_length_position(median or 0, maximum), 2),
+            "mean_x": round(
+                prose_length_position(points["mean"], maximum),
+                2,
+            )
+            if points.get("mean") is not None
+            else None,
+            "marker_titles": {
+                key: interface.text(
+                    f"quality_analysis.violin_{key}",
+                    value=_percentile_label(value),
+                )
+                for key, value in (
+                    ("minimum", points.get("minimum")),
+                    ("p25", points.get("p25")),
+                    ("p50", median),
+                    ("p75", points.get("p75")),
+                    ("maximum", points.get("maximum")),
+                    ("mean", points.get("mean")),
+                )
+            },
+            "extrema": [
+                {
+                    "kind": kind,
+                    "value": points[kind],
+                    "x": round(
+                        prose_length_position(points[kind], maximum),
+                        2,
+                    ),
+                }
+                for kind in ("minimum", "maximum")
+                if points.get(kind) is not None
+            ],
             "quartiles": [
                 {
                     "percentile": percentile,
                     "value": points[f"p{percentile}"],
                     "x": round(
-                        prose_length_position(points[f"p{percentile}"]),
+                        prose_length_position(
+                            points[f"p{percentile}"],
+                            maximum,
+                        ),
                         2,
                     ),
                 }
@@ -338,13 +392,11 @@ def _lengths(data: dict, interface: Interface) -> list[dict]:
                 p75=_percentile_label(points.get("p75")),
                 maximum=_percentile_label(points.get("maximum")),
             ),
-            "violin_path": _violin_path(row.get("density", [])),
-            "color": _PROFILE.color(
+            "violin_path": _violin_path(row.get("density", []), maximum),
+            "color": _assessment_color(
                 row["grade"] or row["importance"],
                 "class" if row["group"] == "grade" else "importance",
-            )
-            if (row["grade"] or row["importance"]) != "Unknown"
-            else "#72989c",
+            ),
         })
     return lengths
 
@@ -408,14 +460,14 @@ def _articles(data: dict, interface: Interface) -> list[dict]:
             ),
             "url": title_url(row["title"]),
             "talk_url": title_url("Talk:" + row["title"]),
-            "grade_label": interface.text(f"assessment.class.{row['grade']}"),
-            "grade_color": _PROFILE.color(row["grade"], "class"),
+            "grade_label": grade_label(row["grade"], interface),
+            "grade_color": _assessment_color(row["grade"], "class"),
             "grade_order": _GRADES.index(row["grade"]),
             "importance": importance,
             "importance_label": interface.text(
                 f"assessment.importance.{importance}",
             ),
-            "importance_color": _PROFILE.color(importance, "importance"),
+            "importance_color": _assessment_color(importance, "importance"),
             "importance_order": _IMPORTANCE.index(importance)
             if importance in _IMPORTANCE
             else len(_IMPORTANCE),
@@ -670,7 +722,8 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
         total,
         interface,
     )
-    lengths = _lengths(data, interface)
+    length_maximum = prose_length_maximum(data)
+    lengths = _lengths(data, interface, length_maximum)
     length_lookup = {
         (row["group"], row["grade"] or row["importance"]): row
         for row in lengths
@@ -705,6 +758,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
         ]
         matrix = {
             "cells": selection["cells"],
+            "length_scale_maximum": length_maximum,
             "extra": [
                 _catalog_article(row, interface)
                 for row in selection["articles"]
@@ -728,6 +782,12 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                         "review",
                         "listing_evidence",
                         "violin_summary",
+                        "violin_minimum",
+                        "violin_p25",
+                        "violin_p50",
+                        "violin_p75",
+                        "violin_maximum",
+                        "violin_mean",
                         "main_unavailable",
                         "no_main_contributors",
                         "anonymous_user",
@@ -746,12 +806,10 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             "grades": [
                 {
                     "value": code,
-                    "label": _grade_label(code, interface),
-                    "article_label": interface.text(
-                        f"assessment.class.{code}",
-                    ),
+                    "label": grade_label(code, interface),
+                    "article_label": grade_label(code, interface),
                     "order": _GRADES.index(code),
-                    "color": _PROFILE.color(code, "class"),
+                    "color": _assessment_color(code, "class"),
                     "checked": code
                     not in {
                         "B",
@@ -773,11 +831,9 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                 {
                     "value": code,
                     "label": interface.text(f"assessment.importance.{code}"),
-                    "article_color": _PROFILE.color(code, "importance"),
+                    "article_color": _assessment_color(code, "importance"),
                     "order": _IMPORTANCE.index(code),
-                    "color": "#72989c"
-                    if code == "Unknown"
-                    else _PROFILE.color(code, "importance"),
+                    "color": _assessment_color(code, "importance"),
                 }
                 for code in ("Top", "High", "Mid", "Low", "Unknown")
             ],
@@ -810,7 +866,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             ]
             if matrix
             else [
-                {"value": code, "label": _grade_label(code, interface)}
+                {"value": code, "label": grade_label(code, interface)}
                 for code in _GRADES
                 if any(
                     row["grade"] == code
@@ -831,7 +887,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             else [
                 {
                     "value": code,
-                    "label": _grade_label(code, interface),
+                    "label": grade_label(code, interface),
                 }
                 for code in _GRADES
                 if data.get("all_grades")

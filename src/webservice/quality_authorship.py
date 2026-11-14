@@ -34,6 +34,16 @@ _GRADES = (
 _DAY_SECONDS = 24 * 60 * 60
 
 
+def grade_label(code: str, interface: Interface) -> str:
+    """Keep Chinese quality labels to their first two characters.
+
+    Returns:
+        A compact Chinese label or the complete English label.
+    """
+    label = interface.text(f"assessment.class.{code}")
+    return label[:2] if interface.locale.startswith("zh") else label
+
+
 def review_url(article: dict) -> str | None:
     """Link only retained, anchored Chinese Wikipedia review evidence.
 
@@ -149,6 +159,7 @@ def quality_authorship_context(
                 ),
                 "review_url": review_url(article),
                 "grade_order": _GRADES.index(article["grade"]),
+                "grade_label": grade_label(article["grade"], interface),
                 "age": _age((today - date).days, interface) if date else None,
                 "coauthors_label": interface.text(
                     "quality_authorship.coauthors",

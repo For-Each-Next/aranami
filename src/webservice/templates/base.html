@@ -20,9 +20,9 @@
       <a href="/" class="brand"><img src="{{ asset_url('assets/images/aranami-wordmark.png') }}" width="205" height="47" alt="Aranami"></a>
       <nav class="global-navigation" aria-label="{{ t.nav.global }}">
         <a href="/"{% if navigation and navigation.path == '/' %} aria-current="page"{% endif %}>{{ t.nav.dashboard }}</a>
-        <a href="/maintenance/"{% if navigation and navigation.path == '/maintenance/' %} aria-current="page"{% endif %}>{{ t.nav.backlog }}</a>
         <a href="/discussions/"{% if navigation and navigation.path == '/discussions/' %} aria-current="page"{% endif %}>{{ t.discussions.heading }}</a>
         <a href="/quality-analysis/"{% if navigation and navigation.path == '/quality-analysis/' %} aria-current="page"{% endif %}>{{ t.quality_analysis.heading }}</a>
+        <a href="/maintenance/"{% if navigation and navigation.path == '/maintenance/' %} aria-current="page"{% endif %}>{{ t.nav.backlog }}</a>
         <details class="navigation-tools">
           <summary>{{ t.nav.tools }}</summary>
           <ul class="navigation-tools-list">

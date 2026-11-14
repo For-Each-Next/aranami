@@ -4394,11 +4394,6 @@
     "zh-hans": "按作者统计",
     "zh-hant": "按作者統計"
   },
-  "quality_analysis.violin_note": {
-    "en": "Logarithmic length scale: 50 / 500 / 5,000 / 50,000 characters at 5% / 35% / 65% / 95%. Values outside the scale sit at its endpoints; hover for actual lengths. The dark line is the median; dots mark P25/P75.",
-    "zh-hans": "对数字数刻度：50 / 500 / 5,000 / 50,000字对应5% / 35% / 65% / 95%。范围外贴边显示，悬停查看实际字数。深色竖线为中位数，圆点为P25和P75。",
-    "zh-hant": "對數字數刻度：50 / 500 / 5,000 / 50,000字對應5% / 35% / 65% / 95%。範圍外貼邊顯示，懸停查看實際字數。深色豎線為中位數，圓點為P25和P75。"
-  },
   "quality_analysis.total_column": {
     "en": "Total",
     "zh-hans": "合计",
@@ -4533,6 +4528,36 @@
     "en": "{pages} articles in total; lengths collected for {measured} articles: shortest length: {minimum} characters; lower quartile (P25): {p25} characters; median (P50): {p50} characters; upper quartile (P75): {p75} characters; longest length: {maximum} characters.",
     "zh-hans": "共{pages}篇条目，{measured}篇条目已采集字数：最短字数：{minimum}；下四分位字数：{p25}；中位字数：{p50}；上四分位字数：{p75}；最长字数：{maximum}。",
     "zh-hant": "共{pages}篇條目，{measured}篇條目已採集字數：最短字數：{minimum}；下四分位字數：{p25}；中位字數：{p50}；上四分位字數：{p75}；最長字數：{maximum}。"
+  },
+  "quality_analysis.violin_minimum": {
+    "en": "Minimum: {value} characters",
+    "zh-hans": "最小值：{value}字",
+    "zh-hant": "最小值：{value}字"
+  },
+  "quality_analysis.violin_p25": {
+    "en": "Lower quartile: {value} characters",
+    "zh-hans": "下四分位数：{value}字",
+    "zh-hant": "下四分位數：{value}字"
+  },
+  "quality_analysis.violin_p50": {
+    "en": "Median: {value} characters",
+    "zh-hans": "中位数：{value}字",
+    "zh-hant": "中位數：{value}字"
+  },
+  "quality_analysis.violin_p75": {
+    "en": "Upper quartile: {value} characters",
+    "zh-hans": "上四分位数：{value}字",
+    "zh-hant": "上四分位數：{value}字"
+  },
+  "quality_analysis.violin_maximum": {
+    "en": "Maximum: {value} characters",
+    "zh-hans": "最大值：{value}字",
+    "zh-hant": "最大值：{value}字"
+  },
+  "quality_analysis.violin_mean": {
+    "en": "Mean: {value} characters",
+    "zh-hans": "平均值：{value}字",
+    "zh-hant": "平均值：{value}字"
   },
   "quality_analysis.anonymous_user": {
     "en": "Anonymous user",

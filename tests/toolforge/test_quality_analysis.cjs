@@ -539,35 +539,66 @@ test("violin quartiles use exact counted lengths and preserve the existing perce
         "Total 5; measured 4; minimum 0; P25 1; P50 2; P75 2; maximum 3");
 });
 
-test("violin length scale uses fixed logarithmic anchors and clamps its endpoints", () => {
-    const position = context.proseLengthPosition;
-    for (const [length, expected] of [[0, 0], [1, 0], [50, 50], [500, 350], [5000, 650], [50000, 950], [100000, 1000]]) {
-        assert.ok(Math.abs(position(length) - expected) < 1e-10);
+test("violin means weight observed lengths, including zero and excluding missing or empty bins", () => {
+    const result = context.combineCells([{pages: 4, measured: 3,
+        histogram: [{value: 0, count: 1}, {value: 1000, count: 2}, {value: 100000, count: 0}], density: []}]);
+    assert.equal(result.mean, 2000 / 3);
+    assert.equal(context.combineCells([{pages: 1, measured: 0, histogram: [], density: []}]).mean, null);
+    for (const value of [0, 52318]) {
+        assert.equal(context.combineCells([{pages: 1, measured: 1, histogram: [{value, count: 1}], density: []}]).mean, value);
     }
-    const lengths = [0, 1, 20, 25, 50, 500, 5000, 7000, 9000, 50000, 1e9];
-    const positions = lengths.map(position);
-    assert.ok(positions.every(value => Number.isFinite(value) && value >= 0 && value <= 1000));
-    assert.ok(positions.slice(1).every((value, index) => value >= positions[index]));
-    assert.ok(Math.abs(position(7000) - 693.8384107) < 1e-6);
-    assert.ok(Math.abs(position(9000) - 726.5817515) < 1e-6);
-    assert.ok(position(70000) < 1000);
-    assert.equal(position(74000), 1000);
 });
 
-test("violin length positions stay fixed when other groups and long articles are filtered", () => {
+test("individual violin tooltips use localized names without percentile codes or counts", () => {
+    const kinds = ["minimum", "p25", "p50", "p75", "maximum", "mean"];
+    for (const locale of ["en", "zh-hans", "zh-hant"]) {
+        const labels = Object.fromEntries(kinds.map(kind => ['violin_' + kind, interfaceMessages['quality_analysis.violin_' + kind][locale]]));
+        for (const kind of kinds) {
+            const title = context.violinMarkerTitle(kind, 52318, labels);
+            assert.equal(title, labels['violin_' + kind].replace('{value}', '52,000'));
+            assert.doesNotMatch(title, /P25|P50|P75|articles|条目|條目|\{value\}/);
+        }
+    }
+    const names = ['最小值', '下四分位数', '中位数', '上四分位数', '最大值', '平均值'];
+    for (const [index, kind] of kinds.entries()) {
+        assert.equal(context.violinMarkerTitle(kind, 0, {["violin_" + kind]: interfaceMessages['quality_analysis.violin_' + kind]['zh-hans']}), names[index] + '：0字');
+    }
+});
+
+test("violin length scale uses a linear 90% segment and a continuous logarithmic tail", () => {
+    const position = length => context.proseLengthPosition(length, 100000);
+    for (const [length, expected] of [[0, 0], [5000, 180], [7000, 252], [9000, 324], [25000, 900], [50000, 950], [100000, 1000]]) {
+        assert.ok(Math.abs(position(length) - expected) < 1e-10);
+    }
+    const lengths = [0, 1, 5000, 24999, 25000, 25001, 50000, 100000];
+    const positions = lengths.map(position);
+    assert.ok(positions.every(value => Number.isFinite(value) && value >= 0 && value <= 1000));
+    assert.ok(positions.slice(1).every((value, index) => value > positions[index]));
+    assert.ok(position(25001) - position(25000) < .01);
+    assert.equal(context.proseLengthPosition(25000, 25000), 900);
+    assert.equal(context.proseLengthPosition(50000, 25000), 900);
+    assert.equal(position(100001), 1000);
+});
+
+test("violin scale maximum uses all observed catalog lengths and ignores empty bins", () => {
+    const cells = [{histogram: [{value: 9000, count: 1}]}, {histogram: [{value: 100000, count: 1}, {value: 999999, count: 0}]}];
+    assert.equal(context.proseLengthMaximum(cells), 100000);
+    assert.equal(context.proseLengthMaximum([]), 25000);
+    assert.equal(context.proseLengthMaximum([{histogram: []}, {histogram: [{value: 0, count: 1}]}]), 25000);
+});
+
+test("violin tail positions stay fixed when other groups and long articles are filtered", () => {
     const cell = maximum => ({pages: 3, measured: 3,
-        histogram: [{value: 0, count: 1}, {value: 5000, count: 1}, {value: maximum, count: 1}],
-        density: [{position: 5000, density: 1}, {position: maximum, density: .25}]});
-    for (const selected of [[cell(9000)], [cell(50000)], [cell(9000), cell(50000)], [cell(500000)]]) {
+        histogram: [{value: 0, count: 1}, {value: 50000, count: 1}, {value: maximum, count: 1}],
+        density: [{position: 50000, density: 1}, {position: maximum, density: .25}]});
+    const all = [cell(75000), cell(100000)], maximum = context.proseLengthMaximum(all);
+    for (const selected of [[all[0]], [all[1]], all]) {
         const statistics = context.combineCells(selected);
-        assert.equal(context.proseLengthPosition(statistics.quantiles[2]), 650);
-        const anchor = statistics.density.find(([length]) => length === 5000);
-        assert.equal(context.proseLengthPosition(anchor[0]), 650);
+        assert.equal(context.proseLengthPosition(statistics.quantiles[2], maximum), 950);
+        const anchor = statistics.density.find(([length]) => length === 50000);
+        assert.equal(context.proseLengthPosition(anchor[0], maximum), 950);
         assert.equal(anchor[1], 1);
     }
-    const extreme = context.combineCells([cell(500000)]);
-    assert.equal(context.proseLengthPosition(extreme.maximum), 1000);
-    assert.equal(context.violinSummary(extreme, "{maximum}"), "500,000");
 });
 
 test("violin missing measurements remain unknown while zero and constant quartiles stay observed", () => {

@@ -68,14 +68,18 @@ new character units.
 
 Miniature horizontal violin charts occupy the third column of the quality
 and importance distribution tables, beside each count and percentage. Horizontal
-position follows `5 + 30 * log10(characters / 50)` percent, clamped to
-0–100%. The fixed anchors are 50 → 5%, 500 → 35%, 5,000 → 65% and
-50,000 → 95%, shared by every group and filter state. Zero sits at the left
-endpoint. Tooltips retain actual lengths even when positions are clipped.
+position is linear through 25,000 characters at 90% of the axis. The final
+10% uses a logarithmic scale up to the complete catalog's observed maximum.
+All groups and filter states share that maximum; density sampling limits do
+not change it. With no lengths above 25,000, the final 10% stays unused.
+Zero sits at the left endpoint; tooltips retain the actual character counts.
 The mirrored upper and lower contours show density in the original character
-units. Two dots mark P25 and P75, and the center line marks the median P50.
-Hover text and accessible labels give total and measured article counts, the
-observed minimum and maximum, and all three percentile lengths. Percentiles
+units. Two dots mark P25 and P75; vertical bars mark the observed minimum,
+median P50 and maximum. A plus marks the arithmetic mean of measured lengths,
+weighted by their observed counts and excluding unknown measurements. Each
+marker has a localized tooltip naming its statistic and character count. The
+whole chart has no hover tooltip; its accessible label retains the counts and
+length summary. Percentiles
 use linear interpolation over known length observations. Displayed lengths
 use two significant digits, rounded to integers with thousands separators;
 article counts and plotted positions retain their exact values. Missing
@@ -198,7 +202,10 @@ button styling. Contributor tables display one total article count without
 quality-subset parentheses. Three-column article-contribution dialogs use a
 narrower width. Article, author and chart-dialog ordinal columns use about
 four em, with enough space for three-digit ranks. Page-size values are plain
-text. Ordinals align right; compact assessment and length columns reserve
-more space for article titles. Missing rating dates are labeled as not obtained,
+text. Column headings are centered; ordinal values remain right-aligned.
+Chinese grade labels use their first two characters in every table, and
+unassessed articles share the unknown-importance gray. Compact assessment,
+prose and size columns leave more room for dates and review links. The author
+directory spans the full content width. Missing rating dates are labeled as not obtained,
 including contributor details. Detail downloads keep the count link and show
 a compact spinner with accessible loading status and visible failure feedback.

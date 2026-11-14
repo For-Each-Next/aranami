@@ -280,6 +280,59 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
         assert 'class="analysis-year-columns"' in pending
 
     @staticmethod
+    def test_unassessed_gray_and_compact_labels_match_all_presentations() -> (
+        None
+    ):
+        """Share page colors and labels with the browser catalog."""
+        source = analysis_fixture()
+        source["articles"][0]["grade"] = "Unassessed"
+        source["articles"][0]["importance"] = "Unknown"
+        source["articles"][1]["grade"] = "FL"
+        source["grade_totals"][0]["grade"] = "Unassessed"
+        source["lengths"][0]["grade"] = "Unassessed"
+        source["years"][0]["grades"] = {"Unassessed": 1}
+        source["selection"] = {
+            "cells": [],
+            "last_year": 2026,
+            "articles": source["articles"],
+            "defaults": [{"articles": source["articles"]}],
+            "authors": [],
+        }
+        for locale in ("en", "zh-hans", "zh-hant"):
+            interface = Interface(locale)
+            result = quality_analysis_context(source, interface)[
+                "quality_analysis"
+            ]
+            assert result["grades"][0]["color"] == "#72989c"
+            assert result["articles"][0]["grade_color"] == "#72989c"
+            assert result["articles"][0]["importance_color"] == "#72989c"
+            assert result["lengths"][0]["color"] == "#72989c"
+            assert result["years"][1]["segments"][0]["color"] == "#72989c"
+            catalog = result["matrix"]
+            grade = next(
+                row
+                for row in catalog["grades"]
+                if row["value"] == "Unassessed"
+            )
+            importance = next(
+                row
+                for row in catalog["importance"]
+                if row["value"] == "Unknown"
+            )
+            assert grade["color"] == importance["color"] == "#72989c"
+            for article in result["articles"]:
+                full = interface.text(f"assessment.class.{article['grade']}")
+                expected = full[:2] if locale.startswith("zh") else full
+                assert article["grade_label"] == expected
+                metadata = next(
+                    row
+                    for row in catalog["grades"]
+                    if row["value"] == article["grade"]
+                )
+                assert metadata["article_label"] == expected
+                assert metadata["label"] == expected
+
+    @staticmethod
     def test_pies_use_full_counts_and_default_class_palette() -> None:
         """Preserve circular geometry and default class colors."""
         source = analysis_fixture()
