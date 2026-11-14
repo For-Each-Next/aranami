@@ -133,42 +133,43 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
         assert ("history", "talk", "tl", "Template:DYKtalk") in tags
         assert ("history", "talk", "tl", "Template:ITNtalk") in tags
 
-    def test_parser_contract_reparses_retained_revision(self) -> None:
-        """Backfill ITNtalk when the source revision is unchanged."""
-        self.collect()
-        self.now += dt.timedelta(hours=1)
-        with patch(_MODULE + "_PARSER_CONTRACT", "new-itntalk-contract"):
+    def test_parser_change_reuses_archived_revision(self) -> None:
+        """Reuse oldid 87963056 until SQL finds a changed revision."""
+        revision = 87963056
+        self.revisions.return_value = pl.DataFrame({
+            "page_id": [10],
+            "page_latest": [revision],
+        })
+        self.contents.return_value = {
+            revision: _content(10, revision, "archived"),
+        }
+        original = self.collect()
+        before = self.path.read_bytes()
+        archived_contract = load(self.path)["contract"].item()
+        self.contents.reset_mock()
+        self.parse.reset_mock()
+        self.now = dt.datetime(2027, 1, 1, tzinfo=dt.UTC)
+        with patch(_MODULE + "_PARSER_CONTRACT", "new-history-contract"):
+            assert self.collect().equals(original)
+            self.contents.assert_not_called()
+            self.parse.assert_not_called()
+            assert self.path.read_bytes() == before
+            assert load(self.path)["contract"].item() == archived_contract
+            self.revisions.return_value = pl.DataFrame({
+                "page_id": [10],
+                "page_latest": [revision + 1],
+            })
+            self.contents.return_value = {
+                revision + 1: _content(10, revision + 1, "updated"),
+            }
             self.collect()
-        assert self.contents.call_count == 2
-        assert self.parse.call_args.args[-1] == ("Template:ITNtalk",)
-
-    def test_multiple_history_upgrade_reparses_the_unchanged_talk(
-        self,
-    ) -> None:
-        """Reparse missing later actions and retain earlier proof."""
-        previous = "zh-article-history:first-template-only"
-        with patch(_MODULE + "_PARSER_CONTRACT", previous):
-            self.collect()
-        self.now += dt.timedelta(hours=1)
-        self.parse.return_value = [
-            *self.parse.return_value,
-            {
-                "kind": "quality",
-                "date": dt.date(2020, 8, 7),
-                "grade": "GA",
-                "action": "added",
-                "parameter": "history2_action1",
-                "oldid": 61028288,
-            },
+        self.contents.assert_called_once_with(self.site, [revision + 1])
+        self.parse.assert_called_once()
+        assert read_versions(self.path)["revision_id"].sort().to_list() == [
+            revision,
+            revision + 1,
         ]
-        rows = self.collect()
-        assert rows.filter(pl.col("kind") == "quality")["date"].to_list() == [
-            dt.date(2020, 8, 7),
-        ]
-        assert self.contents.call_count == 2
-        retained = read_versions(self.path)
-        assert retained["revision_id"].to_list() == [100, 100]
-        assert retained["contract"].n_unique() == 2
+        assert load(self.path)["contract"].item() != archived_contract
 
     def test_prior_month_revision_reuses_original_evidence(self) -> None:
         """Reuse immutable revision evidence across month boundaries."""
@@ -456,16 +457,18 @@ class ArticleHistoryCollectionTests(unittest.TestCase):
         assert load(self.path).height == 1
         self.contents.assert_called_once()
 
-    def test_superseded_contract_cannot_become_confirmed_empty(self) -> None:
-        """Reject an equal-time conflicting parser observation."""
-        self.collect()
+    def test_alias_change_reuses_archived_facts(self) -> None:
+        """Keep unchanged evidence under its original alias contract."""
+        original = self.collect()
+        before = self.path.read_bytes()
         self.aliases.side_effect = lambda _site, title: (
             title,
             title + " alias",
         )
-        with self.assertRaisesRegex(ValueError, "superseded"):
-            self.collect()
-        assert load(self.path).select(pl.col("events").list.len()).item() == 1
+        assert self.collect().equals(original)
+        assert self.path.read_bytes() == before
+        self.contents.assert_called_once()
+        self.parse.assert_called_once()
 
     def test_equal_time_newer_revision_replaces_old_observation(
         self,

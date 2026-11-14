@@ -513,7 +513,7 @@ def write_interface_fixtures(destination: Path) -> None:
     logs["availability"] = "available"
     logs["files"][0]["stream"] = "diagnostics"
     logs["files"][0]["name"] = "20261018.000.log"
-    stored = destination / "reports/data/assessments/zhwiki/Video games"
+    stored = destination / "data/daily/assessments/zhwiki/Video games"
     stored.mkdir(parents=True, exist_ok=True)
     pl.DataFrame({
         "page_id": [1],
@@ -527,6 +527,13 @@ def write_interface_fixtures(destination: Path) -> None:
         documents = {
             "quality-analysis": render_quality_analysis(
                 analysis,
+                fixture["status"],
+                fixture["config"],
+                locale,
+                now,
+            ),
+            "quality-analysis-b": render_quality_analysis(
+                saved_analysis_fixture(now, include_b=True),
                 fixture["status"],
                 fixture["config"],
                 locale,

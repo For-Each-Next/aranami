@@ -864,6 +864,7 @@ class TestEnglishReportJob(TestCase):
                     side_effect=stop,
                 ) as prepare,
             ):
+                snapshot.return_value.manifest = {"metadata": {}}
                 order.attach_mock(snapshot, "snapshot")
                 order.attach_mock(read, "read")
                 order.attach_mock(prepare, "prepare")

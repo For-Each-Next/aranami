@@ -117,7 +117,7 @@ def materialize_history(
         "wiki_edits": False,
     }
     atomic_json(
-        root / "reports/data/historical-import.json",
+        root / "data/daily/historical-import.json",
         receipt,
         max_bytes=64 * 1024,
     )

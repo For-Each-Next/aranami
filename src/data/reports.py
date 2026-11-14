@@ -405,6 +405,20 @@ def _validate_publication(value: object) -> None:
         raise ValueError(message)
 
 
+def report_storage_key(key: str) -> str:
+    """Name a prepared report bundle without scope folders.
+
+    Returns:
+        A readable family prefix and the full logical-identity digest.
+    """
+    _validate_report_key(key)
+    parts = key.split("/")
+    family = (
+        parts[1] if parts[0] == "articles" and len(parts) > 1 else parts[0]
+    )
+    return family + "-" + hashlib.sha256(key.encode()).hexdigest()
+
+
 class ReportStore:
     """Keep durable report bundles separate from source caches."""
 
@@ -426,7 +440,7 @@ class ReportStore:
                 Disable for disposable latest-only result caches.
         """
         self.root = root or Path.cwd() / (
-            "dry-run/reports/records" if dry else "reports/records"
+            "dry-run/data/daily" if dry else "data/daily"
         )
         self.dry = dry
         self.daily = daily
@@ -441,6 +455,16 @@ class ReportStore:
             or self.root.parent.name == "cache"
             else self.root.parent
         )
+        if self.root.name == "reports" and self.root.parent.name in {
+            "daily",
+            "hourly",
+        }:
+            runtime = self.root.parents[2]
+        elif (
+            self.root.name in {"archive", "daily", "hourly"}
+            and self.root.parent.name == "data"
+        ):
+            runtime = self.root.parent.parent
         self.cache = runtime / "cache" / "report-staging"
         self.lock_root = runtime / "state" / "report-locks"
 
@@ -454,6 +478,11 @@ class ReportStore:
         Returns:
             Current physical path or a read-only legacy fallback.
         """
+        if self.root.parent.name == "data" and self.root.name in {
+            "daily",
+            "hourly",
+        }:
+            key = report_storage_key(key)
         return (
             write_storage_path(self.root, key)
             if writing

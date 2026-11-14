@@ -26,6 +26,7 @@ from data.newsletter.archive import (
 )
 from data.newsletter.observations import OBSERVATIONS_PATH, save_observation
 from data.newsletter.schema import read_newsletter_data, valid_newsletter
+from data.prepared import read_values
 from data.website import REPORT_KEYS, validate_dashboard_snapshot
 from newsletter.fixtures import subpage_layouts
 from shared.newsletter import ROOT, SUFFIXES, Issue
@@ -309,7 +310,7 @@ class NewsletterRouteTests(unittest.TestCase):
                 valid_newsletter,
             )
         assert validate_dashboard_snapshot(snapshot)
-        path = self.runtime / "cache" / "toolforge" / "dashboard.json"
+        path = self.runtime / "data/hourly/dashboard.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(snapshot), encoding="utf-8")
         return path
@@ -790,7 +791,7 @@ class NewsletterRouteTests(unittest.TestCase):
         url = "/newsletter/?issue=2027-01&lang=en"
         assert "14,000篇條目" in self.client.get(url).text
         directory = self.runtime / OBSERVATIONS_PATH
-        facts = json.loads((directory / "current.json").read_text())["facts"]
+        facts = read_values(directory / "current.parquet")["facts"]
         facts["issues"]["2027-01"]["overview"]["total"] = 15000
         save_observation(directory, facts, valid_newsletter)
         assert "15,000篇條目" in self.client.get(url).text
@@ -801,7 +802,7 @@ class NewsletterRouteTests(unittest.TestCase):
         self._save_durable(14000)
         url = "/newsletter/?issue=2027-01&lang=en"
         assert self.client.get(url).status_code == HTTPStatus.OK
-        (self.runtime / OBSERVATIONS_PATH / "current.json").write_text("{}")
+        (self.runtime / OBSERVATIONS_PATH / "current.parquet").write_text("{}")
         response = self.client.get(url)
         assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
         assert "13,100篇條目" not in response.text
@@ -809,7 +810,9 @@ class NewsletterRouteTests(unittest.TestCase):
     def test_corrupt_daily_catalog_reports_unavailable(self) -> None:
         """Keep unreadable history distinct from an unrecorded date."""
         self._archive_issue("2026-10-30", 13100)
-        path = self.runtime / DRAFT_ARCHIVE_PATH / "2027-01" / "catalog.json"
+        path = (
+            self.runtime / DRAFT_ARCHIVE_PATH / "2027-01" / "catalog.parquet"
+        )
         path.write_text("{}", encoding="utf-8")
         response = self.client.get(
             "/newsletter/?issue=2027-01&date=2026-10-30&lang=en",

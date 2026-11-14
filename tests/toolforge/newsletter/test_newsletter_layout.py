@@ -232,8 +232,8 @@ class NewsletterSourceLayoutTests(unittest.TestCase):
         assert valid_main_layout(layout)
 
     @staticmethod
-    def test_collector_keeps_reported_baseline() -> None:
-        """Use prior totals only for unknown baselines."""
+    def test_collector_never_uses_prior_text_for_baseline() -> None:
+        """Keep missing metadata unknown despite prior text."""
         reader = SourceReader({f"{ROOT}/2026-10": _original()})
         facts = collect_source_facts(
             reader,
@@ -245,9 +245,9 @@ class NewsletterSourceLayoutTests(unittest.TestCase):
             ),
         )["issues"]["2027-01"]
         assert facts["main_layout"]["source_issue"] == "2026-10"
-        assert facts["previous_overview"]["total"] == 13016
+        assert facts["previous_overview"]["total"] is None
         assert facts["previous_overview"]["fa"] == 7
-        assert facts["previous_overview"]["dyk"] == 1470
+        assert facts["previous_overview"]["dyk"] is None
         assert any(
             source["label"] == f"{ROOT}/2026-10" for source in facts["sources"]
         )

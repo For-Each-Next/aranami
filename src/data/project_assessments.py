@@ -110,7 +110,7 @@ def snapshot_path(
         root /= "dry-run"
     return (
         root
-        / "reports/data"
+        / "data/daily"
         / storage_key(snapshot_key(site_name, project, day) + ".parquet")
     )
 
@@ -126,7 +126,7 @@ def _stored_path(
         Safe path without changing the embedded observation identity.
     """
     return read_storage_path(
-        Path.cwd() / "reports/data",
+        Path.cwd() / "data/daily",
         snapshot_key(site_name, project, day) + ".parquet",
     )
 
@@ -659,9 +659,7 @@ def _read_previous_legacy(
     """
     candidates = []
     for preview in (False, True) if dry else (False,):
-        base = Path.cwd() / (
-            "dry-run/reports/data" if preview else "reports/data"
-        )
+        base = Path.cwd() / ("dry-run/data/daily" if preview else "data/daily")
         for directory in storage_candidates(
             base,
             report_key("assessments", site_name, project),
@@ -683,7 +681,7 @@ def _read_previous_legacy(
                     raise ValueError(message)
     for day, production, _ in sorted(candidates, reverse=True):
         base = Path.cwd() / (
-            "reports/data" if production else "dry-run/reports/data"
+            "data/daily" if production else "dry-run/data/daily"
         )
         path = read_storage_path(
             base,

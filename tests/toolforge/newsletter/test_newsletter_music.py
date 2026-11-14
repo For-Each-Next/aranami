@@ -16,7 +16,7 @@ from tasks.zhwiki.newsletter.annual import enrich_year_dyk
 from tasks.zhwiki.newsletter.collection import collect_source_facts
 from updater.services.newsletter_editorial import render_editorial
 
-_TITLE = "《最终幻想XI》的音乐"
+_TITLE = "最终幻想合辑专辑列表"
 _NOW = dt.datetime(2026, 11, 1, 12, tzinfo=dt.UTC)
 
 
@@ -29,14 +29,22 @@ class NewsletterMusicCollectionTests(DashboardFixture):
         """Retain observed labels until annual preparation."""
         self.page_projects.return_value = pl.DataFrame({
             "page_id": [11, 99],
-            "project": ["音乐", "音乐"],
+            "project": ["音樂", "音樂"],
         })
         self._collect()
         _, scope, names = self.page_projects.call_args.args
         assert scope == "电子游戏"
-        assert tuple(names) == ("虚构角色", "传记", "公司", "音乐")
+        assert tuple(names) == (
+            "虚构角色",
+            "虛構角色",
+            "传记",
+            "傳記",
+            "公司",
+            "音乐",
+            "音樂",
+        )
         assert self.newsletter.call_args.kwargs["dyk_projects"].rows() == [
-            ("Game", "音乐"),
+            ("Game", "音樂"),
         ]
 
 
@@ -47,7 +55,7 @@ class NewsletterMusicEnrichmentTests(TestCase):
         self,
     ) -> None:
         """Render the reported soundtrack in the music group."""
-        for names in (("音乐",), ("音乐", "音乐")):
+        for names in (("音乐",), ("音樂",), ("音乐", "音樂")):
             with self.subTest(names=names):
                 memberships = pl.DataFrame({
                     "full_title": [_TITLE] * len(names),
@@ -95,8 +103,8 @@ class NewsletterMusicEnrichmentTests(TestCase):
 
     @staticmethod
     def test_other_project_names_are_ignored_without_conversion() -> None:
-        """Ignore variant spellings and unrelated or nested projects."""
-        names = ("音樂", "Music", "音乐/流行音乐", "虛構角色", "傳記")
+        """Ignore unconfigured English and nested project names."""
+        names = ("Music", "音乐/流行音乐", "音樂/流行音樂")
         records = enrich_year_dyk(
             [{"title": _TITLE, "date": "2026-05-01"}],
             None,
@@ -120,9 +128,7 @@ class NewsletterMusicEnrichmentTests(TestCase):
         text = render_editorial(Issue(2027, 1), facts)["專題"]
         row = facts["year_review"]["dyk"][0]
         unknown = next(
-            line
-            for line in text.splitlines()
-            if line.startswith("* '''待分類")
+            line for line in text.splitlines() if line.startswith("* '''音樂")
         )
         assert row["title"] in unknown
         assert row["projects"] == ["音樂"]

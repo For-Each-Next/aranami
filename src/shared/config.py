@@ -145,7 +145,10 @@ COLLECTION_DEFINITIONS: dict[str, CollectionDefinition] = {
     "newsletter-daily": CollectionDefinition(
         hour="0",
         idle=True,
-        cutoff="Completed UTC day; retain first complete daily observation.",
+        cutoff=(
+            "Refresh daily metadata and generate the completed-day "
+            "newsletter from saved facts, independently of prior text."
+        ),
     ),
     "website": CollectionDefinition(
         cutoff="Refresh due datasets independently after their last success.",
@@ -176,11 +179,14 @@ PROJECT_DATA_SCOPES: tuple[tuple[str, str], ...] = (
     ("zh", "电子游戏/世嘉工作组"),
     ("zh", "电子游戏/任天堂工作组"),
     ("zh", "电子游戏/米哈游工作组"),
+    ("en", "Video games"),
 )
 
 PROJECT_DATA_TASKFORCES: dict[tuple[str, str], tuple[str, ...]] = {
     ("zhwiki", "电子游戏"): tuple(
-        project for _, project in PROJECT_DATA_SCOPES[1:]
+        project
+        for language, project in PROJECT_DATA_SCOPES[1:]
+        if language == "zh"
     ),
 }
 

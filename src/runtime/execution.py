@@ -18,7 +18,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
-from data.observations import project_snapshot_references
+from data.observations import page_input_keys, project_snapshot_references
 from data.publication import PublicationOutcome
 from data.reports import ReportStore
 from data.runtime.events import (
@@ -84,15 +84,25 @@ def _source_result(result: ReportResult) -> ReportResult:
     Returns:
         Original result or a copy with daily membership provenance.
     """
-    references = project_snapshot_references()
-    if not references or "project_snapshots" in result.provenance:
+    if (
+        "project_snapshots" in result.provenance
+        or "source-pages" in result.tables
+    ):
         return result
+    references = project_snapshot_references()
+    inputs = page_input_keys()
+    provenance = dict(result.provenance)
+    if references:
+        provenance.update(
+            project_snapshots=references,
+            membership_policy="current-daily-cohort",
+        )
     return replace(
         result,
-        provenance={
-            **result.provenance,
-            "project_snapshots": references,
-            "membership_policy": "current-daily-cohort",
+        provenance=provenance,
+        tables={
+            **result.tables,
+            **({"source-pages": inputs} if not inputs.is_empty() else {}),
         },
     )
 

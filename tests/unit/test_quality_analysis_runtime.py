@@ -25,6 +25,24 @@ _BOOT = "a" * 32
 class AnalysisWorkerTests(TestCase):
     """Keep native allocation pools and source bodies out of the hub."""
 
+    def test_saved_report_errors_do_not_prevent_startup_or_worker_progress(
+        self,
+    ) -> None:
+        """Keep optional projection errors at the runtime boundary."""
+        for error in (
+            OSError("storage unavailable"),
+            ValueError("bad saved input"),
+        ):
+            with (
+                patch.object(
+                    worker,
+                    "_refresh_saved_quality",
+                    side_effect=error,
+                ),
+                self.assertLogs(worker.__name__, level="WARNING"),
+            ):
+                assert worker.refresh_saved_quality(Path("/runtime")) is False
+
     @staticmethod
     def test_child_pins_source_without_capturing_output() -> None:
         """Inherit diagnostics and reap the pinned interpreter."""

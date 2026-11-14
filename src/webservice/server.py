@@ -19,7 +19,7 @@ from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from django.core.exceptions import TooManyFieldsSent
 from django.http import (
@@ -32,11 +32,10 @@ from django.urls import path as url_path, re_path
 from polars.exceptions import PolarsError
 lazy import uvicorn
 
-from data.articles.quality_analysis import (
-    quality_analysis_identity,
-    read_quality_analysis,
+from data.articles.current_quality import (
+    current_quality_identity,
+    read_current_quality,
 )
-from data.articles.quality_authors import read_quality_authors
 from data.caching import consistency as consistency_cache
 from data.caching.game_titles import (
     DEFAULT_PATH as GAME_TITLES_PATH,
@@ -58,11 +57,10 @@ from data.runtime.log_store import (
 from data.runtime.logs import open_run_log
 from data.runtime.server_samples import read_live_status as read_status
 from data.runtime.status import get_boot_id, save_status
-from data.website import validate_dashboard_snapshot
+from data.website import read_snapshot, validate_dashboard_snapshot
 from shared.config import routine_configuration
 from shared.deployment import project_version, resource_root
 from shared.newsletter import Issue
-from shared.support.files import read_json_object
 from webservice.asgi import DjangoWebsite, LiveSocket, SocketDisconnectError
 from webservice.asset_cache import AssetCache
 from webservice.datasets import DatasetSelectionError, read_dataset
@@ -860,45 +858,6 @@ class _PublicViews:
             A complete analysis page without source acquisition or
             request-time statistical calculations.
         """
-        if parameters:
-            return _page_error(
-                "backlog.not_found",
-                locale,
-                HTTPStatus.BAD_REQUEST,
-            )
-        try:
-            identity = quality_analysis_identity(self.runtime)
-        except OSError, ValueError:
-            identity = (None,)
-        key = ("/quality-analysis/", locale)
-        content = self.pages.get(key, identity)
-        if content is not None:
-            return _html(content, locale)
-        try:
-            data = read_quality_analysis(self.runtime)
-        except OSError, ValueError, PolarsError:
-            data = {"available": False}
-        content = pages.render_quality_analysis(
-            data,
-            read_status(self.runtime),
-            _configuration(),
-            locale,
-            navigation=navigation,
-        )
-        self.pages.put(key, identity, content)
-        return _html(content, locale)
-
-    def _quality_authorship_page(
-        self,
-        parameters: dict[str, list[str]],
-        locale: str,
-        navigation: dict[str, object],
-    ) -> HttpResponseBase:
-        """Present authorship without triggering source collection.
-
-        Returns:
-            Localized author tables or an explicit unavailable state.
-        """
         if set(parameters) - {"count_b"} or parameters.get(
             "count_b",
             ["0"],
@@ -909,22 +868,59 @@ class _PublicViews:
                 HTTPStatus.BAD_REQUEST,
             )
         try:
-            data = read_quality_authors(
-                self.runtime,
-                include_b=parameters.get("count_b") == ["1"],
-            )
+            identity = current_quality_identity(self.runtime)
+        except OSError, ValueError:
+            identity = (None,)
+        include_b = parameters.get("count_b") == ["1"]
+        key = ("/quality-analysis/", locale, include_b)
+        content = self.pages.get(key, identity)
+        if content is not None:
+            return _html(content, locale)
+        try:
+            data = read_current_quality(self.runtime, include_b=include_b)
         except OSError, ValueError, PolarsError:
-            data = {"available": False, "observed_at": None, "authors": []}
-        data = {**data, "include_b": parameters.get("count_b") == ["1"]}
-        return _html(
-            pages.render_quality_authorship(
-                data,
-                read_status(self.runtime),
-                _configuration(),
-                locale,
-                navigation=navigation,
-            ),
+            data = {
+                "analysis": {"available": False, "include_b": include_b},
+                "authorship": {"available": False, "authors": []},
+            }
+        content = pages.render_quality_analysis(
+            data,
+            read_status(self.runtime),
+            _configuration(),
             locale,
+            navigation=navigation,
+        )
+        self.pages.put(key, identity, content)
+        return _html(content, locale)
+
+    @staticmethod
+    def _quality_authorship_page(
+        parameters: dict[str, list[str]],
+        locale: str,
+        _navigation: dict[str, object],
+    ) -> HttpResponseBase:
+        """Redirect the former author directory to the merged page.
+
+        Returns:
+            A canonical saved-data URL preserving the selected cohort.
+        """
+        if set(parameters) - {"count_b"} or parameters.get(
+            "count_b",
+            ["0"],
+        ) not in (["0"], ["1"]):
+            return _page_error(
+                "backlog.not_found",
+                locale,
+                HTTPStatus.BAD_REQUEST,
+            )
+        query = {"lang": locale}
+        if parameters.get("count_b") == ["1"]:
+            query["count_b"] = "1"
+        return HttpResponse(
+            status=HTTPStatus.MOVED_PERMANENTLY,
+            headers={
+                "Location": "/quality-analysis/?" + urlencode(query),
+            },
         )
 
     def _redirects_page(
@@ -1051,7 +1047,7 @@ class _PublicViews:
             if figures is not None
             else None
         )
-        pointer = self.runtime / OBSERVATIONS_PATH / "current.json"
+        pointer = self.runtime / OBSERVATIONS_PATH / "current.parquet"
         try:
             info = pointer.lstat()
         except OSError:
@@ -1303,9 +1299,10 @@ class _PublicViews:
             self.runtime / relative
             for relative in (
                 "cache",
-                "cache/toolforge",
-                "cache/toolforge/dashboard.json",
-                "cache/toolforge/consistency-repairs.parquet",
+                "data/hourly",
+                "data/hourly/dashboard.parquet",
+                "data/hourly/dashboard.json",
+                "data/hourly/consistency-repairs.parquet",
                 str(GAME_TITLES_PATH),
                 "state",
                 "state/observability",
@@ -1332,14 +1329,17 @@ class _PublicViews:
 
     def _dashboard(self) -> dict[str, object] | None:
         """Return saved dashboard data or None when unavailable."""
-        cache = self.runtime / "cache"
-        if cache.is_symlink():
+        root = self.runtime / "data/hourly"
+        if any(
+            path.is_symlink()
+            for path in (root, root.parent, root.parent.parent)
+        ):
             return None
+        path = root / "dashboard.parquet"
+        if not path.exists():
+            path = root / "dashboard.json"
         try:
-            value = read_json_object(
-                cache / "toolforge" / "dashboard.json",
-                _MAX_BYTES,
-            )
+            value = read_snapshot(path)
         except OSError, ValueError, TypeError, RecursionError, OverflowError:
             return None
         if validate_dashboard_snapshot(value):
@@ -1379,7 +1379,7 @@ class _PublicViews:
             return snapshot
         try:
             record = consistency_cache.read(
-                self.runtime / "cache/toolforge/consistency-repairs.parquet",
+                self.runtime / "data/hourly/consistency-repairs.parquet",
             )
         except OSError, ValueError, TypeError, RecursionError, OverflowError:
             return snapshot

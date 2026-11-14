@@ -59,7 +59,7 @@ class HistoricalFiguresTests(TestCase):
     def test_import_is_idempotent_and_retires_only_valid_staging(self) -> None:
         """Retain an import receipt for all 109 source facts."""
         first = import_historical_data(self.root)
-        directory = self.root / "reports/data/newsletter/historical"
+        directory = self.root / "data/daily/newsletter/historical"
         assert first.tables["figures"].height == 109
         assert not (directory / "temporary-import.json").exists()
         receipt = json.loads((directory / "import-receipt.json").read_text())
@@ -103,7 +103,7 @@ class HistoricalFiguresTests(TestCase):
 
     def test_unknown_temporary_metadata_is_preserved(self) -> None:
         """Refuse to discard unrelated or corrupt migration evidence."""
-        directory = self.root / "reports/data/newsletter/historical"
+        directory = self.root / "data/daily/newsletter/historical"
         directory.mkdir(parents=True)
         staged = directory / "temporary-import.json"
         staged.write_text('{"schema": 999}')
@@ -123,7 +123,7 @@ class HistoricalFiguresTests(TestCase):
             import_historical_data(self.root)
         staged = (
             self.root
-            / "reports/data/newsletter/historical/temporary-import.json"
+            / "data/daily/newsletter/historical/temporary-import.json"
         )
         assert staged.is_file()
         assert read_historical_data(self.root) is None

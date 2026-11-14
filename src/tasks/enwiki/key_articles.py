@@ -85,7 +85,7 @@ def _stored_articles(
         variant=definition.name,
     )
     store = ReportStore()
-    if not (store.root / key).exists():
+    if not store.data_path(key).exists():
         return None
     with store.locked(key):
         for previous in (False, True):
@@ -605,6 +605,8 @@ def prepare_reports(
     existing: Mapping[str, str],
     specs: Sequence[ReportDefinition],
     site: BaseSite,
+    *,
+    english_members: pl.DataFrame | None = None,
 ) -> ReportData:
     """Prepare shared article data from supplied report wikitext.
 
@@ -612,6 +614,7 @@ def prepare_reports(
         existing: Existing report wikitext keyed by report kind.
         specs: Report membership and marker configurations.
         site: Site providing template title and namespace rules.
+        english_members: Completed daily English project page table.
 
     Returns:
         Shared rows and memberships for rendering and summaries.
@@ -647,7 +650,11 @@ def prepare_reports(
             else parsed
         )
     _LOGGER.info("Collecting English comparison articles and assessments.")
-    articles = normalize_en_pages(enwp.fetch_en_key_pages())
+    articles = normalize_en_pages(
+        enwp.fetch_en_key_pages()
+        if english_members is None
+        else enwp.fetch_en_key_pages(english_members),
+    )
     new_ids = articles.get_column("item_id").to_list()
     sitelinks = enwp.fetch_wikidata_sitelinks(sorted(set(new_ids + old_ids)))
     labels = enwp.fetch_wikidata_labels(new_ids)

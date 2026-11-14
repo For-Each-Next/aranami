@@ -338,21 +338,34 @@ def enrich_authorship(  # ruff: ignore[too-many-arguments]
         .head(max_requests)
     )
     completed = []
-    for event in pending.iter_rows(named=True):
-        refreshed, outcome = _attempt(event, site, path)
-        if refreshed is not None:
-            completed.append(refreshed)
-        if attempt_path is not None:
-            attempts = attempt_cache.record(
-                attempt_path,
-                attempts,
-                event,
-                complete=outcome == "complete",
-            )
-        if observe is not None:
-            observe(event, outcome)
-        if outcome == "throttled":
-            break
+    selections = [
+        (
+            row["page_id"],
+            dt.datetime.combine(
+                row["date"] + dt.timedelta(days=1),
+                dt.time(),
+                dt.UTC,
+            ),
+        )
+        for row in pending.iter_rows(named=True)
+        if row["date"] < dt.datetime.now(dt.UTC).date()
+    ]
+    with wikiwho.preloaded_listing_sources(site, selections):
+        for event in pending.iter_rows(named=True):
+            refreshed, outcome = _attempt(event, site, path)
+            if refreshed is not None:
+                completed.append(refreshed)
+            if attempt_path is not None:
+                attempts = attempt_cache.record(
+                    attempt_path,
+                    attempts,
+                    event,
+                    complete=outcome == "complete",
+                )
+            if observe is not None:
+                observe(event, outcome)
+            if outcome == "throttled":
+                break
     evidence = pl.concat([previous, *completed]).select(
         *_EVENT_KEY,
         pl.col("authors").alias("_computed_authors"),

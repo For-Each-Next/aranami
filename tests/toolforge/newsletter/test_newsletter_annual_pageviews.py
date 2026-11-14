@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from data.caching.pageviews import PageviewsCache
+from data.newsletter import traffic
 from data.newsletter.schema import valid_newsletter
 from newsletter.test_newsletter_data import Reader
 from newsletter.test_newsletter_statistics import _popular
@@ -40,8 +40,8 @@ class AnnualPageviewsTests(TestCase):
     """Select calendar data without relabeling a rolling year."""
 
     @staticmethod
-    def test_acquisition_uses_the_pageviews_article_population() -> None:
-        """Exclude inapplicable pages from annual traffic counts."""
+    def test_acquisition_reads_prepared_pageviews_population() -> None:
+        """Use saved traffic metadata without daily aggregation."""
         start, stop = dt.date(2026, 1, 1), dt.date(2026, 1, 2)
         views = 10
         read = MagicMock()
@@ -55,14 +55,19 @@ class AnnualPageviewsTests(TestCase):
             "pa_importance": ["低", "不适用", "低"],
         })
         with TemporaryDirectory() as directory, chdir(directory):
-            cache = PageviewsCache.load("zh.wikipedia.org")
-            cache.replace(
-                "Game",
-                start,
-                stop,
-                pl.DataFrame({"date": [start], "pageview": [views]}),
-            )
-            cache.save(["Game"])
+            traffic.save({
+                "2026": {
+                    "annual": {
+                        "start": start.isoformat(),
+                        "end": start.isoformat(),
+                        "article_count": 1,
+                        "total_views": views,
+                        "items": [{"title": "Game", "views": views}],
+                        "provisional": True,
+                    },
+                    "monthly": [],
+                },
+            })
             with (
                 patch.object(
                     refresh,

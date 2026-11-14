@@ -23,10 +23,8 @@ from data.articles import (
     current_authorship as store,
 )
 from shared.sources import wikiwho
-from shared.sources.assessment_history import (
-    HistoryBudget,
-    article_revision_at,
-)
+from shared.sources.assessment_history import HistoryBudget
+from shared.sources.quarry.assessment import first_revisions, listing_revisions
 from tasks.articles.authorship import score_revision_content
 from tasks.zhwiki.assessment_banner import CONTRACT as BANNER_CONTRACT
 
@@ -126,6 +124,8 @@ def collect_revision(member: dict, site: BaseSite) -> pl.DataFrame:
                 else store.FALLBACK_CONTRACT,
                 "eligible_bytes": total,
                 "revision_timestamp": revision_timestamp,
+                "creation_revision": None,
+                "creation_timestamp": None,
                 "fetched_at": dt.datetime.now(dt.UTC),
                 "contributors": contributors.to_dicts(),
             },
@@ -213,14 +213,44 @@ def _refresh(  # ruff: ignore[too-many-arguments]
     deadline = monotonic() + time_budget
     pending = store.pending(store.load(runtime)).head(max_requests)
     budget = HistoryBudget(deadline, should_yield)
-    for member in pending.iter_rows(named=True):
+    if not budget.admit():
+        return
+    pending = _resolve_cutoffs(site, runtime, pending)
+    _complete_creation_metadata(site, runtime, max_requests)
+    pending = pending.join(
+        store.load(runtime)["evidence"].select(store.KEY),
+        on=store.KEY,
+        how="anti",
+        nulls_equal=True,
+    )
+    selections = {
+        row["revision_id"]: row["page_id"]
+        for row in pending.iter_rows(named=True)
+        if row["revision_id"] is not None
+    }
+    if not selections or not budget.admit():
+        return
+    with wikiwho.preloaded_revision_sources(site, selections):
+        _collect_pending(site, runtime, pending, deadline, should_yield)
+
+
+def _collect_pending(
+    site: BaseSite,
+    runtime: Path,
+    pending: pl.DataFrame,
+    deadline: float,
+    should_yield: Callable[[], bool] | None,
+) -> None:
+    """Checkpoint token responses using preloaded source text."""
+    for member in pending.filter(
+        pl.col("revision_id").is_not_null(),
+    ).iter_rows(named=True):
         if monotonic() >= deadline or (
             should_yield is not None and should_yield()
         ):
             break
         evidence, throttled = None, False
         try:
-            _resolve_listing(member, site, runtime, budget)
             cached = store.load(runtime)["evidence"].filter(
                 (pl.col("page_id") == member["page_id"])
                 & (pl.col("revision_id") == member["revision_id"]),
@@ -247,38 +277,89 @@ def _refresh(  # ruff: ignore[too-many-arguments]
             break
 
 
-def _resolve_listing(
-    member: dict,
+def _resolve_cutoffs(
     site: BaseSite,
     runtime: Path,
-    budget: HistoryBudget,
-) -> None:
-    """Cache an exact article cutoff before requesting token ownership.
+    pending: pl.DataFrame,
+) -> pl.DataFrame:
+    """Resolve missing cutoffs while retaining successful facts.
 
-    Raises:
-        ValueError: No visible article revision precedes the listing.
+    Returns:
+        Selected pending rows with successful SQL cutoffs checkpointed.
+        Unresolved cutoffs retain their fair retry attempts.
     """
-    if member["revision_id"] is None or member["article_timestamp"] is None:
-        selected = article_revision_at(
-            site,
-            page_id=member["page_id"],
-            title=member["title"],
-            instant=member["listing_timestamp"],
-            budget=budget,
-        )
-        if selected is None:
-            message = "B listing-time article revision is unavailable."
-            raise ValueError(message)
-        member["revision_id"] = selected[0]
-        member["article_timestamp"] = selected[1]
+    missing = pending.filter(
+        pl.col("revision_id").is_null()
+        | pl.col("article_timestamp").is_null(),
+    )
+    if missing.is_empty():
+        return pending
+    selected = listing_revisions(
+        site,
+        dict(missing.select("page_id", "listing_timestamp").iter_rows()),
+    )
+    resolved = []
+    for member in missing.iter_rows(named=True):
+        cutoff = selected.get(member["page_id"])
+        if cutoff is None:
+            store.checkpoint(
+                runtime,
+                attempted={key: member[key] for key in store.KEY},
+            )
+        else:
+            resolved.append({
+                **member,
+                "revision_id": cutoff[0],
+                "article_timestamp": cutoff[1],
+            })
+    if resolved:
+        updates = pl.DataFrame(resolved, schema=store.MEMBER_SCHEMA)
         tables = store.load(runtime)
-        revised = pl.DataFrame([member], schema=store.MEMBER_SCHEMA)
         store.checkpoint(
             runtime,
             members=pl.concat([
-                tables["members"].filter(
-                    pl.col("page_id") != member["page_id"],
+                tables["members"].join(
+                    updates.select("page_id"),
+                    on="page_id",
+                    how="anti",
                 ),
-                revised,
+                updates,
             ]).sort("page_id"),
+        )
+    return store.load(runtime)["members"].join(
+        pending.select("page_id"),
+        on="page_id",
+        how="semi",
+    )
+
+
+def _complete_creation_metadata(
+    site: BaseSite,
+    runtime: Path,
+    limit: int,
+) -> None:
+    """Fill missing saved range metadata without token rereads."""
+    tables = store.load(runtime)
+    missing = (
+        tables["evidence"]
+        .join(tables["members"].select(store.KEY), on=store.KEY, how="semi")
+        .filter(pl.col("creation_revision").is_null())
+        .head(limit)
+    )
+    if missing.is_empty():
+        return
+    first = first_revisions(site, missing["page_id"].to_list())
+    updates = []
+    for row in missing.iter_rows(named=True):
+        birth = first.get(row["page_id"])
+        if birth is not None and birth[1] <= row["revision_timestamp"]:
+            updates.append({
+                **row,
+                "creation_revision": birth[0],
+                "creation_timestamp": birth[1],
+            })
+    if updates:
+        store.checkpoint(
+            runtime,
+            evidence=pl.DataFrame(updates, schema=store.EVIDENCE_SCHEMA),
         )

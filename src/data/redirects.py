@@ -19,7 +19,7 @@ import polars as pl
 from shared.support.files import open_regular, staging_directory
 from shared.support.parquet import parquet_metadata, validate_parquet_metadata
 
-DEFAULT_PATH = Path("reports/data/redirects/zhwiki.parquet")
+DEFAULT_PATH = Path("data/daily/redirects/zhwiki.parquet")
 _MAX_BYTES = 64 * 1024 * 1024
 _MAX_ROWS = 200_000
 _MAX_PENDING = 50

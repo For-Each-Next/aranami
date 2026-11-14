@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 import polars as pl
 
 from data.paths import read_storage_path, storage_key
+from data.project_data import snapshot_path
 from shared.support.assessment_encoding import restore_assessment_schema
 from shared.support.parquet import validate_parquet_metadata
 
@@ -61,7 +62,8 @@ def preview_path(filename: str) -> PurePosixPath:
         or any(part.startswith(".") for part in path.parts)
         or not (
             path.parts[0] == "cache"
-            or path.parts[:2] in {("reports", "data"), ("reports", "records")}
+            or path.parts[:2]
+            in {("data", "archive"), ("data", "daily"), ("data", "hourly")}
         )
     ):
         message = "Choose one canonical public Parquet file."
@@ -123,28 +125,27 @@ def _project_manifest(metadata: dict[str, str], path: PurePosixPath) -> dict:
         message = "Invalid daily project preview metadata."
         raise ValueError(message)  # ruff: ignore[type-check-without-type-error]
     details = value["metadata"]
-    required = {"started_at", "finished_at", "generation", "sha256", "schema"}
+    target = value.get("target", {})
+    day = dt.date.fromisoformat(details["snapshot_date"])
+    boundary = day + dt.timedelta(days=1)
+    expected = snapshot_path(
+        target["site"],
+        target["title"],
+        boundary,
+        runtime=Path("/"),
+    )
+    legacy = "data/daily/" + str(value.get("report_key")) + ".parquet"
     if (
-        required - value.keys()
+        details.get("boundary_date") != boundary.isoformat()
+        or path.as_posix()
+        not in {
+            expected.relative_to("/").as_posix(),
+            legacy,
+            storage_key(legacy),
+        }
         or not isinstance(value.get("columns"), dict)
-        or not isinstance(value.get("report_key"), str)
-        or path
-        .as_posix()
-        .removeprefix("reports/data/")
-        .removesuffix(
-            ".parquet",
-        )
-        not in {value["report_key"], storage_key(value["report_key"])}
     ):
-        message = "Invalid daily project preview identity."
-        raise ValueError(message)
-    day = dt.date.fromisoformat(path.stem)
-    if (
-        details.get("snapshot_date") != day.isoformat()
-        or details.get("boundary_date")
-        != (day + dt.timedelta(days=1)).isoformat()
-    ):
-        message = "Invalid daily project preview dates."
+        message = "Invalid daily project preview identity or dates."
         raise ValueError(message)
     for key in ("started_at", "finished_at"):
         if (
@@ -184,7 +185,7 @@ def _restore_columns(
     return frame
 
 
-def read_preview(filename: str, runtime: Path, page: int) -> dict[str, object]:
+def read_preview(filename: str, runtime: Path, page: int) -> dict[str, object]:  # ruff: ignore[too-many-locals]
     """Read metadata and fifty rows without decoding the complete table.
 
     Args:
@@ -205,7 +206,7 @@ def read_preview(filename: str, runtime: Path, page: int) -> dict[str, object]:
     if type(page) is not int or page < 1:
         message = "Preview pages must be positive integers."
         raise ValueError(message)
-    if not filename.isascii() and path.parts[0] == "reports":
+    if not filename.isascii() and path.parts[0] == "data":
         path = preview_path(
             read_storage_path(runtime, filename)
             .relative_to(runtime)
@@ -214,7 +215,7 @@ def read_preview(filename: str, runtime: Path, page: int) -> dict[str, object]:
     try:
         descriptor = _open(path, runtime)
     except FileNotFoundError:
-        if path.parts[0] != "reports":
+        if path.parts[0] != "data":
             raise
         path = preview_path(
             read_storage_path(runtime, filename)
@@ -235,7 +236,8 @@ def read_preview(filename: str, runtime: Path, page: int) -> dict[str, object]:
         descriptors = "/proc/self/fd" if sys.platform == "linux" else "/dev/fd"
         source = Path(descriptors) / str(stream.fileno())
         metadata = pl.read_parquet_metadata(source)
-        project_file = path.parts[:3] == ("reports", "data", "projects")
+        owner = json.loads(metadata.get("aranami", "{}"))
+        project_file = owner.get("family") == "project-data"
         manifest = _project_manifest(metadata, path) if project_file else None
         scan = pl.scan_parquet(source, glob=False, hive_partitioning=False)
         row_count = scan.select(pl.len()).collect().item()

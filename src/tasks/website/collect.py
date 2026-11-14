@@ -27,6 +27,7 @@ from data.newsletter.archive import (
     NewsletterDraftArchive,
 )
 from data.newsletter.observations import OBSERVATIONS_PATH
+from data.observations import page_input_keys, record_page_inputs
 from data.project_data import ACTIVATION_DATE
 from data.runtime.progress import progress_work, report_progress
 from data.website import (
@@ -300,7 +301,7 @@ def _report_plan(
             if name == "pageviews"
             else (
                 "quarterly-newsletter:current-new-article-observation:"
-                "shared-homepage:1"
+                "shared-homepage:1:exact-project-spellings:2"
             )
             if name == "newsletter"
             else f"days:{days}:complete-extracts:showcase-window"
@@ -320,8 +321,18 @@ def _report_plan(
         identity = hashlib.sha256(
             f"dashboard:{name}:{source_id}:{intervals[name]}".encode(),
         ).hexdigest()
-        filename = "consistency" if name == "consistency" else f"{name}.json"
-        path = cache_directory / filename if cache_directory else None
+        filename = (
+            "consistency" if name == "consistency" else f"{name}.parquet"
+        )
+        directory = cache_directory
+        if (
+            name in {"pageviews", "newsletter"}
+            and directory is not None
+            and directory.name == "hourly"
+            and directory.parent.name == "data"
+        ):
+            directory = directory.parent / "daily"
+        path = directory / filename if directory else None
         record = read_report_cache(path, name, days, clock)
         paths[name], identities[name], caches[name] = path, identity, record
         successful = read_timestamp(record["observed_at"]) if record else None
@@ -342,6 +353,18 @@ def _report_plan(
             or record["attempt_config_id"] != identity
             or (clock - attempted).total_seconds() >= _RETRY_INTERVAL
         )
+        if name == "pageviews":
+            ready = clock.replace(hour=19, minute=0, second=0, microsecond=0)
+            if clock < ready:
+                continue
+            expired = expired and (
+                successful is None
+                or successful.date() < clock.date()
+                or record["failed"]
+                or record["config_id"] != identity
+                or record["data"]["date"]
+                < (clock.date() - dt.timedelta(days=1)).isoformat()
+            )
         if expired and retry_ready:
             due.append(name)
 
@@ -694,7 +717,7 @@ def _with_extracts(
     }
 
 
-def collect_dashboard(  # ruff: ignore[too-many-arguments, too-many-statements, too-many-branches, complex-structure]
+def collect_dashboard(  # ruff: ignore[too-many-arguments, too-many-statements, too-many-branches, too-many-locals, complex-structure]
     today: dt.date,
     days: int = 100,
     *,
@@ -791,6 +814,7 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments, too-many-statements, 
             "attempted_at": stamp,
             "failed": True,
             "data": previous["data"] if previous else None,
+            "page_inputs": previous.get("page_inputs") if previous else None,
         }
         if membership is None:
             # A failed shared acquisition has one diagnosis; each output
@@ -849,7 +873,13 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments, too-many-statements, 
                     .astimezone(dt.UTC)
                     .isoformat(timespec="seconds")
                 )
+                record_page_inputs(read.site.dbName(), "电子游戏", membership)
+                inputs = page_input_keys()
                 record.update(
+                    page_inputs={
+                        "columns": inputs.columns,
+                        "rows": inputs.rows(),
+                    },
                     data=data,
                     config_id=plan["identities"][name],
                     observed_at=completed,

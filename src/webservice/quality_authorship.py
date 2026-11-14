@@ -23,7 +23,7 @@ _GRADES = (*_QUALITY_GRADES, "B", "BL")
 _DAY_SECONDS = 24 * 60 * 60
 
 
-def _listing_url(article: dict) -> str | None:
+def review_url(article: dict) -> str | None:
     """Link only retained, anchored Chinese Wikipedia review evidence.
 
     Returns:
@@ -31,7 +31,7 @@ def _listing_url(article: dict) -> str | None:
         when no verified review anchor was retained.
     """
     link = article.get("nomination_link")
-    if not link:
+    if not link or link.casefold() == "#top":
         return None
     if link.startswith("#") and len(link) > 1:
         return (
@@ -51,7 +51,7 @@ def _listing_url(article: dict) -> str | None:
     if (
         parsed.scheme == "https"
         and parsed.netloc == "zh.wikipedia.org"
-        and parsed.fragment
+        and parsed.fragment.casefold() not in {"", "top"}
         and (parsed.path.startswith("/wiki/") or parsed.path == "/w/index.php")
     ):
         return link
@@ -121,7 +121,7 @@ def quality_authorship_context(
                     else None
                 ),
                 "title_label": display_title(
-                    article["title"],
+                    article["title"].replace("_", " "),
                     interface.locale,
                 ),
                 "number": number,
@@ -129,7 +129,14 @@ def quality_authorship_context(
                 "date_label": interface.date(article["date"])
                 if date
                 else None,
-                "listing_url": _listing_url(article),
+                "listing_url": (
+                    "https://zh.wikipedia.org/w/index.php?oldid="
+                    + str(article["revision_id"])
+                    if type(article.get("revision_id")) is int
+                    and article["revision_id"] > 0
+                    else None
+                ),
+                "review_url": review_url(article),
                 "grade_order": _GRADES.index(article["grade"]),
                 "age": _age((today - date).days, interface) if date else None,
                 "coauthors_label": interface.text(

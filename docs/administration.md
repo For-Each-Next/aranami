@@ -31,13 +31,13 @@ process lifetime, including manual jobs.
 | `deployment-backups/source-<id>/` | Validation receipt, former selection and saved job settings |
 | `deployment.lock/` | Promotion serialization; do not remove while setup/promotion is active |
 | `python/`, `uv-bootstrap/` | Managed interpreter and setup tooling |
-| `reports/data/projects/<wiki>/<project>/<year>/<day>.parquet` | Immutable full daily project observations |
-| `reports/data/pageviews/` | Latest/previous detailed traffic generations and coverage |
-| `reports/data/articles/` | Durable history, authorship, milestones and scope evidence |
-| `reports/data/redirects/zhwiki.parquet` | Incremental redirect evidence and resumable scan checkpoint |
-| `reports/data/newsletter/` | Current and original prepared newsletter facts |
-| `reports/records/` | Prepared report bundles and independent dated newsletter archives |
-| `reports/data/assessments/`, `backups/report-layout/` | Retained legacy observations and recovery originals |
+| `data/archive/<day>.parquet`, `data/daily/<project>-<day>.parquet` | Immutable full daily project observations |
+| `data/daily/pageviews/` | Latest/previous detailed traffic generations and coverage |
+| `data/hourly/` | Durable history, authorship, milestones and scope evidence |
+| `data/daily/redirects/zhwiki.parquet` | Incremental redirect evidence and resumable scan checkpoint |
+| `data/daily/newsletter/` | Current and original prepared newsletter facts |
+| `data/daily/` | Prepared report bundles and independent dated newsletter archives |
+| `data/daily/assessments/`, `backups/report-layout/` | Retained legacy observations and recovery originals |
 | `state/observability/status.json` | Versioned service, execution, dataset and publication observations |
 | `state/` | Completion checkpoints, publication membership and active execution locks |
 | `cache/` | Disposable source and presentation optimizations |

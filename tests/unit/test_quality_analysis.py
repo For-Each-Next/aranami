@@ -138,7 +138,7 @@ def _save_legacy(
             )
             .cast(store._LEGACY_LENGTH_SCHEMA)
         )
-    ReportStore(root / "reports/data").write(
+    ReportStore(root / "data/hourly").write(
         store._KEY,
         ReportResult(
             family="quality-analysis",
@@ -217,6 +217,8 @@ class QualityAnalysisStoreTests(TestCase):
                         "AL": 0,
                         "GA": 0,
                         "Bplus": 1,
+                        "B": 0,
+                        "BL": 0,
                     },
                 },
             ]
@@ -302,7 +304,7 @@ class QualityAnalysisStoreTests(TestCase):
             root = Path(directory)
             tables = store._summaries(_members())
             tables["coverage"] = pl.DataFrame({"total": [2]})
-            ReportStore(root / "reports/data").write(
+            ReportStore(root / "data/hourly").write(
                 store._KEY,
                 ReportResult(family="quality-analysis", tables=tables),
                 "",
@@ -466,7 +468,9 @@ class QualityAnalysisStoreTests(TestCase):
         assert tables["coverage"].row(0) == (9, 9, 9, 900)
         assert tables["articles"].height == 9
         assert tables["years"]["pages"].sum() == 9
-        assert tables["grade_totals"]["grade"].to_list() == list(store.GRADES)
+        assert tables["grade_totals"]["grade"].to_list() == list(
+            store.QUALITY_GRADES,
+        )
         importance = tables["importance_totals"]
         assert importance.schema == pl.Schema(store.IMPORTANCE_SCHEMA)
         assert importance["importance"].to_list() == [
@@ -574,7 +578,7 @@ class QualityAnalysisStoreTests(TestCase):
                 ),
                 patch.object(
                     collector,
-                    "read_page_ids",
+                    "read_revision_contents",
                     side_effect=AssertionError,
                 ) as fetch,
             ):
@@ -665,7 +669,7 @@ class QualityAnalysisCollectionTests(TestCase):
     ):
         """Defer rivals while permitting independent checkpoints."""
         pages = [
-            Mock(pageid=i, latest_revision_id=i + 100, text="正文文字")
+            Mock(page_id=i, revision_id=i + 100, text="正文文字")
             for i in (1, 2)
         ]
         with (
@@ -677,11 +681,11 @@ class QualityAnalysisCollectionTests(TestCase):
             ) as history,
             patch.object(
                 collector,
-                "read_page_ids",
-                return_value=pages,
+                "read_revision_contents",
+                return_value={page.revision_id: page for page in pages},
             ) as read,
             patch.object(collector, "extract_prose", return_value="正文文字"),
-            patch.object(collector, "count_words", return_value=2),
+            patch.object(collector, "count_chinese_units", return_value=2),
             patch.object(collector, "sleep"),
         ):
             root = Path(directory)
@@ -704,7 +708,7 @@ class QualityAnalysisCollectionTests(TestCase):
             )
             read.assert_called_once()
             assert (
-                store.read_quality_analysis(root)["coverage"]["measured"] == 2
+                store.load_articles(root)["prose_characters"].null_count() == 0
             )
 
     @staticmethod
@@ -737,7 +741,7 @@ class QualityAnalysisCollectionTests(TestCase):
         """Reuse cached prose through talk-only changes."""
         site = OfflineSite("zh", "wikipedia")
         pages = [
-            Mock(pageid=i, latest_revision_id=i + 100, text="正文文字")
+            Mock(page_id=i, revision_id=i + 100, text="正文文字")
             for i in (1, 2)
         ]
         with (
@@ -749,11 +753,11 @@ class QualityAnalysisCollectionTests(TestCase):
             ),
             patch.object(
                 collector,
-                "read_page_ids",
-                return_value=pages,
+                "read_revision_contents",
+                return_value={page.revision_id: page for page in pages},
             ) as read,
             patch.object(collector, "extract_prose", return_value="正文文字"),
-            patch.object(collector, "count_words", return_value=2),
+            patch.object(collector, "count_chinese_units", return_value=2),
             patch.object(collector, "sleep"),
         ):
             root = Path(directory)
@@ -773,7 +777,9 @@ class QualityAnalysisCollectionTests(TestCase):
             collector.refresh_quality_analysis(site, changed, runtime=root)
             read.assert_called_once()
             report = store.read_quality_analysis(root)
-            assert report["coverage"]["measured"] == 2
+            assert (
+                store.load_articles(root)["prose_characters"].null_count() == 0
+            )
             assert report["coverage"]["dated"] == 0
 
     @staticmethod
@@ -782,7 +788,7 @@ class QualityAnalysisCollectionTests(TestCase):
     ):
         """Rotate pending sources and keep absent bodies unknown."""
         site = OfflineSite("zh", "wikipedia")
-        ahead = Mock(pageid=1, latest_revision_id=999, text="updated")
+        ahead = Mock(page_id=1, revision_id=999, text="updated")
         with (
             TemporaryDirectory() as directory,
             patch.object(
@@ -792,8 +798,8 @@ class QualityAnalysisCollectionTests(TestCase):
             ),
             patch.object(
                 collector,
-                "read_page_ids",
-                side_effect=[[ahead], []],
+                "read_revision_contents",
+                side_effect=[{101: ahead}, {}],
             ) as read,
             patch.object(collector, "sleep"),
         ):
@@ -805,11 +811,14 @@ class QualityAnalysisCollectionTests(TestCase):
                     runtime=root,
                     max_pages=1,
                 )
-            assert [call.args[1] for call in read.call_args_list] == [[1], [2]]
+            assert [call.args[1] for call in read.call_args_list] == [
+                [101],
+                [102],
+            ]
             report = store.read_quality_analysis(root)
             assert report["coverage"]["measured"] == 0
             assert all(
-                row["prose_words"] is None for row in report["articles"]
+                row["prose_characters"] is None for row in report["articles"]
             )
 
     @staticmethod
@@ -838,7 +847,7 @@ class QualityAnalysisCollectionTests(TestCase):
     def test_nonquality_redirects_and_departed_members_leave_the_cohort() -> (
         None
     ):
-        """Include Bplus and exclude nonquality observations."""
+        """Include Bplus and B while excluding current redirects."""
         membership = _membership()
         extra = membership.head(1).with_columns(
             pl.lit(3, dtype=pl.Int64).alias("page_id"),
@@ -852,8 +861,8 @@ class QualityAnalysisCollectionTests(TestCase):
             .alias("page_is_redirect"),
         )
         members = collector.prepare_membership(membership, _history(), _NOW)
-        assert members["page_id"].to_list() == [2]
-        assert members["grade"].to_list() == ["Bplus"]
+        assert members["page_id"].to_list() == [2, 3]
+        assert members["grade"].to_list() == ["Bplus", "B"]
 
     @staticmethod
     def test_no_admitted_work_still_saves_full_nullable_membership() -> None:
@@ -865,7 +874,7 @@ class QualityAnalysisCollectionTests(TestCase):
                 "load",
                 return_value=_history(),
             ),
-            patch.object(collector, "read_page_ids") as read,
+            patch.object(collector, "read_revision_contents") as read,
         ):
             root = Path(directory)
             collector.refresh_quality_analysis(
@@ -882,10 +891,10 @@ class QualityAnalysisCollectionTests(TestCase):
         """Fetch only the changed article revision."""
         site = OfflineSite("zh", "wikipedia")
         pages = [
-            Mock(pageid=i, latest_revision_id=i + 100, text="正文文字")
+            Mock(page_id=i, revision_id=i + 100, text="正文文字")
             for i in (1, 2)
         ]
-        updated = Mock(pageid=1, latest_revision_id=1001, text="新增正文")
+        updated = Mock(page_id=1, revision_id=1001, text="新增正文")
         with (
             TemporaryDirectory() as directory,
             patch.object(
@@ -895,11 +904,18 @@ class QualityAnalysisCollectionTests(TestCase):
             ),
             patch.object(
                 collector,
-                "read_page_ids",
-                side_effect=[pages, [updated]],
+                "read_revision_contents",
+                side_effect=[
+                    {page.revision_id: page for page in pages},
+                    {1001: updated},
+                ],
             ) as read,
             patch.object(collector, "extract_prose", return_value="正文文字"),
-            patch.object(collector, "count_words", side_effect=[2, 2, 4]),
+            patch.object(
+                collector,
+                "count_chinese_units",
+                side_effect=[2, 2, 4],
+            ),
             patch.object(collector, "sleep"),
         ):
             root = Path(directory)
@@ -917,11 +933,11 @@ class QualityAnalysisCollectionTests(TestCase):
             )
             collector.refresh_quality_analysis(site, changed, runtime=root)
             assert [call.args[1] for call in read.call_args_list] == [
-                [1, 2],
-                [1],
+                [101, 102],
+                [1001],
             ]
             assert [
-                row["prose_words"]
+                row["prose_characters"]
                 for row in store.read_quality_analysis(root)["articles"]
             ] == [4, 2]
 

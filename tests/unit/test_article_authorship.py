@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import urllib.error
+from contextlib import nullcontext
 from email.message import Message
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -66,6 +67,13 @@ class AuthorshipTests(TestCase):  # ruff: ignore[too-many-public-methods]
         self.path = Path(temporary.name) / "authors.parquet"
         self.attempt_path = Path(temporary.name) / "attempts"
         self.site = SimpleNamespace()
+        self.enterContext(
+            patch.object(
+                wikiwho,
+                "preloaded_listing_sources",
+                side_effect=lambda *_args: nullcontext(),
+            ),
+        )
         self.metadata = self.enterContext(
             patch.object(
                 wikiwho,

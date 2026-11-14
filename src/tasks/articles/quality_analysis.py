@@ -19,12 +19,17 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from data.articles import history_store, quality_analysis as store
+from data.articles import (
+    current_authorship,
+    history_store,
+    quality_analysis as store,
+)
 from data.articles.storage import HISTORY_PATH
 from shared.assessment_profiles import assessment_profile
-from shared.sources.wiki import read_page_ids
+from shared.sources.quarry.assessment import listing_revisions
+from shared.sources.revisions import read_revision_contents
 from shared.support.prose import extract_prose
-from shared.support.words import count_words
+from shared.support.words import count_chinese_units
 from tasks.prose import PROFILE
 
 if TYPE_CHECKING:
@@ -33,9 +38,9 @@ if TYPE_CHECKING:
     from pywikibot.site import BaseSite
 
 _LOG = logging.getLogger(__name__)
-_BATCH_SIZE = 5
+_BATCH_SIZE = 50
 _MAX_TEXT_BYTES = 4 * 1024 * 1024
-_CONTRACT = "zh-quality-prose:jieba-precise-hmm:2"
+_CONTRACT = "zh-quality-prose:cjk1-western-word2-number2:3"
 
 
 def _contract(*, include_template_values: bool) -> str:
@@ -171,6 +176,12 @@ def _listing_dates(
             pl.col("action").first(),
             pl.col("oldid").drop_nulls().n_unique().alias("_oldids"),
             pl.col("oldid").drop_nulls().first().alias("listed_oldid"),
+            pl.col("nomination_link").drop_nulls().n_unique().alias("_links"),
+            pl
+            .col("nomination_link")
+            .drop_nulls()
+            .first()
+            .alias("listed_review_link"),
         )
         .filter((pl.col("_outcomes") == 1) & (pl.col("action") == "added"))
         .select(
@@ -181,6 +192,11 @@ def _listing_dates(
             .then(pl.col("listed_oldid"))
             .otherwise(None)
             .alias("listed_oldid"),
+            pl
+            .when(pl.col("_links") == 1)
+            .then(pl.col("listed_review_link"))
+            .otherwise(None)
+            .alias("listed_review_link"),
         )
     )
 
@@ -189,6 +205,7 @@ def prepare_membership(
     membership: pl.DataFrame,
     history: pl.DataFrame,
     observed_at: dt.datetime,
+    b_members: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Prepare all current quality members with exact source identities.
 
@@ -196,9 +213,10 @@ def prepare_membership(
         membership: Shared complete project observation from replicas.
         history: Validated latest retained Article history snapshots.
         observed_at: Actual aware UTC time of this cohort observation.
+        b_members: Saved B/BL cutoffs bound to current talk identities.
 
     Returns:
-        Complete FA/FL/A/AL/GA/Bplus rows with nullable prose and dates.
+        Complete current quality rows with nullable prose and dates.
     """
     profile = assessment_profile("zhwiki", "电子游戏")
     members = (
@@ -231,9 +249,35 @@ def prepare_membership(
         )
     )
     dates = _listing_dates(members, history)
+    if b_members is not None and b_members.height:
+        b_dates = b_members.filter(
+            pl.col("listing_timestamp").is_not_null(),
+        ).select(
+            "page_id",
+            "grade",
+            "talk_page_id",
+            pl.col("talk_revision").alias("talk_revision_id"),
+            pl.col("listing_timestamp").dt.date().alias("_b_date"),
+            pl.col("revision_id").alias("_b_oldid"),
+        )
+        members = members.join(
+            b_dates,
+            on=["page_id", "grade", "talk_page_id", "talk_revision_id"],
+            how="left",
+            validate="1:1",
+        )
+    else:
+        members = members.with_columns(
+            pl.lit(None, dtype=pl.Date).alias("_b_date"),
+            pl.lit(None, dtype=pl.Int64).alias("_b_oldid"),
+        )
     return (
         members
         .join(dates, on="page_id", how="left", validate="1:1")
+        .with_columns(
+            pl.coalesce("listed_date", "_b_date").alias("listed_date"),
+            pl.coalesce("listed_oldid", "_b_oldid").alias("listed_oldid"),
+        )
         .with_columns(
             *(
                 pl
@@ -245,7 +289,7 @@ def prepare_membership(
             ),
             pl.lit(observed_at).alias("observed_at"),
             pl
-            .when(pl.col("grade").is_in(["FL", "AL"]))
+            .when(pl.col("grade").is_in(["FL", "AL", "BL"]))
             .then(pl.lit(_contract(include_template_values=True)))
             .otherwise(pl.lit(_contract(include_template_values=False)))
             .alias("measurement_contract"),
@@ -253,6 +297,7 @@ def prepare_membership(
                 pl.lit(None, dtype=store.ARTICLE_SCHEMA[name]).alias(name)
                 for name in (
                     "prose_words",
+                    "prose_characters",
                     "prose_bytes",
                     "measured_at",
                     "attempted_at",
@@ -262,6 +307,52 @@ def prepare_membership(
         .select(list(store.ARTICLE_SCHEMA))
         .cast(store.ARTICLE_SCHEMA)
     )
+
+
+def _resolve_listing_versions(
+    site: BaseSite,
+    current: pl.DataFrame,
+) -> pl.DataFrame:
+    """Fill only missing high-quality article cutoffs from SQL metadata.
+
+    Returns:
+        Current rows with successful exact listing versions retained.
+        Existing cutoffs and B/BL timestamp-owned cutoffs are untouched.
+    """
+    pending = current.filter(
+        pl.col("listed_date").is_not_null()
+        & pl.col("listed_oldid").is_null()
+        & ~pl.col("grade").is_in(current_authorship.GRADES),
+    )
+    if pending.is_empty():
+        return current
+    cutoffs = {
+        row["page_id"]: dt.datetime.combine(
+            row["listed_date"] + dt.timedelta(days=1),
+            dt.time(),
+            dt.UTC,
+        )
+        - dt.timedelta(microseconds=1)
+        for row in pending.iter_rows(named=True)
+    }
+    selected = listing_revisions(site, cutoffs)
+    resolved = pl.DataFrame(
+        [
+            {"page_id": key, "_listed_oldid": value[0]}
+            for key, value in selected.items()
+            if value is not None
+        ],
+        schema={"page_id": pl.Int64, "_listed_oldid": pl.Int64},
+    )
+    updates = (
+        current
+        .join(resolved, on="page_id", how="left")
+        .with_columns(
+            pl.coalesce("listed_oldid", "_listed_oldid").alias("listed_oldid"),
+        )
+        .drop("_listed_oldid")
+    )
+    return updates
 
 
 def _measure(page: object, member: dict, site: BaseSite) -> dict:
@@ -274,9 +365,8 @@ def _measure(page: object, member: dict, site: BaseSite) -> dict:
         ValueError: Identity, revision or visible text is inconsistent.
     """
     if (
-        not page.exists()
-        or page.pageid != member["page_id"]
-        or page.latest_revision_id != member["article_revision_id"]
+        page.page_id != member["page_id"]
+        or page.revision_id != member["article_revision_id"]
     ):
         message = "Quality analysis source differs from selected revision."
         raise ValueError(message)
@@ -289,12 +379,12 @@ def _measure(page: object, member: dict, site: BaseSite) -> dict:
         text,
         site=site,
         profile=PROFILE,
-        include_template_values=member["grade"] in {"FL", "AL"},
+        include_template_values=member["grade"] in {"FL", "AL", "BL"},
     )
     return {
         **member,
         "source_bytes": size,
-        "prose_words": count_words(prose, language="zh"),
+        "prose_characters": count_chinese_units(prose),
         "prose_bytes": len(prose.encode()),
         "measured_at": dt.datetime.now(dt.UTC),
     }
@@ -326,15 +416,20 @@ def _batch_measurements(site: BaseSite, batch: tuple[dict, ...]) -> list[dict]:
         Scalar measurement updates without retained wiki page objects.
     """
     try:
-        pages = read_page_ids(site, [row["page_id"] for row in batch])
+        pages = read_revision_contents(
+            site,
+            [row["article_revision_id"] for row in batch],
+        )
     except Exception as error:  # ruff: ignore[blind-except] - A source outage changes retry order only.
         _LOG.warning(
             "Quality-analysis source batch unavailable (%s).",
             type(error).__name__,
         )
-        pages = []
-    indexed = {page.pageid: page for page in pages}
-    return [_attempt(indexed.get(row["page_id"]), row, site) for row in batch]
+        pages = {}
+    return [
+        _attempt(pages.get(row["article_revision_id"]), row, site)
+        for row in batch
+    ]
 
 
 def refresh_quality_analysis(  # ruff: ignore[too-many-arguments] - Source, runtime and bounded admission are explicit.
@@ -372,16 +467,27 @@ def refresh_quality_analysis(  # ruff: ignore[too-many-arguments] - Source, runt
         observed = dt.datetime.now(dt.UTC)
         deadline = monotonic() + time_budget
         history = history_store.load(runtime / HISTORY_PATH)
-        members = prepare_membership(membership, history, observed)
+        members = prepare_membership(
+            membership,
+            history,
+            observed,
+            current_authorship.load(runtime)["members"],
+        )
         del history
         current = store.checkpoint(
             runtime,
             members=members,
             observed_at=observed,
         )
+        current = _resolve_listing_versions(site, current)
+        current = store.checkpoint(
+            runtime,
+            members=current,
+            observed_at=observed,
+        )
         pending = (
             current
-            .filter(pl.col("prose_words").is_null())
+            .filter(pl.col("prose_characters").is_null())
             .sort(
                 "attempted_at",
                 "page_id",

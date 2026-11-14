@@ -66,8 +66,8 @@ tail -n 100 logs/diagnostics/YYYYMMDD.000.log
 
 Choose a UTC log date and segment. `state/observability/status.json` retains the
 four independent status domains; logs explain their activity. Project and traffic
-facts are under `reports/data/`; report results and newsletter archives are under
-`reports/records/`. Read these through data APIs rather than editing them.
+facts are under `data/daily/`; report results and newsletter archives are under
+`data/daily/`. Read these through data APIs rather than editing them.
 
 ## Routine names and UTC triggers
 
@@ -102,7 +102,8 @@ Pageviews uses titles, classes, importance and task-force flags from the saved
 closing observation for its report date, even on delayed retries. For example,
 November 2 traffic uses `20261102.parquet`, captured at November 3 midnight;
 it never substitutes November 3 membership. Missing historical files block the
-report. Normal first attempt is 19:00; source readiness is checked.
+report. All acquisition and calculation waits until 19:00 UTC, including catch-up;
+source readiness is checked.
 Continuous retained page histories receive only missing
 tails; gapped histories and sparse supplements trigger a full-history fetch.
 Detailed daily observations are saved independently of wiki publication and

@@ -53,7 +53,8 @@ source cycle. The generic cycle accepts this reader without importing runtime.
 One immutable Parquet file represents each wiki, project and completed UTC day:
 
 ```text
-reports/data/projects/<wiki>/<ASCII-project-component>/<YYYY>/<YYYYMMDD>.parquet
+data/archive/<YYYYMMDD>.parquet  # Chinese wpvg, permanent
+data/daily/<project>-<YYYYMMDD>.parquet  # other projects
 ```
 
 The filename names the day ending at the following midnight. Every new file
@@ -64,15 +65,15 @@ establish “no changes.” One-time dates belong only to the
 [retirement checklist](transition.md).
 
 Columns retain page identity, namespace/title, subject and talk revision IDs,
-project class/importance, talk-page ID, byte length, redirect state and task-force
-flags. [Storage](data/storage.md) defines exact types and metadata. Each project
+project Enum class/importance, talk-page ID, byte length, Boolean redirect
+state and List[Enum] taskforces. [Storage](data/storage.md) defines exact types and metadata. Each project
 has its own population and assessments. Task-force membership joins on stable
 page ID; a parent title rename cannot lose a child membership.
 
 The scheduled boundary, actual query start and finish are separate facts.
 [Wiki Replicas](https://wikitech.wikimedia.org/wiki/Help:Wiki_Replicas) may lag;
-a capture observes their available state rather than reconstructing exact
-midnight Wikipedia. Delayed same-day queries retain their actual times. Current
+the daily collector first waits for heartbeat replication through midnight,
+then records the available state without claiming exact historical midnight. Delayed same-day queries retain their actual times. Current
 state cannot fill an earlier missing date. Captures crossing into another UTC
 day fail instead of being backdated.
 
@@ -160,7 +161,7 @@ does not undo a successful wiki result.
 ## Retention and publication
 
 `data.reports.ReportStore` retains complete reusable tables, manifests and
-wikitext beneath `reports/records/`. An atomic selector points to a complete
+wikitext beneath `data/daily/`. An atomic selector points to a complete
 generation and its predecessor. Ordering and predecessor checks prevent stale
 work from replacing a newer result. Display limits never discard source rows.
 
@@ -209,7 +210,8 @@ confirmed completion. Expire old records without refreshing icons alone.
 
 **Pageviews.** Use all-access/user observations from the
 [Wikimedia Pageviews API](https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/reference/page-views.html).
-Yesterday requires actual execution at or after 19:00 UTC, all 24 distinct site
+All traffic acquisition and calculation waits until 19:00 UTC, including
+historical catch-up. Yesterday additionally requires all 24 distinct site
 hours, positive aggregate traffic, the daily top list and up to three leading
 article probes. Anchors, previews and cached history cannot bypass readiness.
 Retry at :00 while behind; stop catch-up on failed or unconfirmed publication.

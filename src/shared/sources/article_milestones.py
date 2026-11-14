@@ -7,13 +7,17 @@ historical boundaries, interpret their contents, and retain evidence.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import pywikibot
-from opencc import OpenCC
-from pywikibot import pagegenerators
-from pywikibot.exceptions import NoPageError
+
+from shared.sources.quarry.revisions import (
+    archive_revisions,
+    revision_metadata,
+    source_revision,
+)
+from shared.sources.revisions import read_revision_contents
+from shared.sources.template_aliases import read_aliases
 
 if TYPE_CHECKING:
     import datetime as dt
@@ -34,37 +38,22 @@ class SourceRevision:
     text: str
 
 
-@lru_cache(maxsize=4)
 def template_names(site: BaseSite) -> dict[str, tuple[str, ...]]:
-    """Resolve bounded template redirects once per runtime process.
+    """Reuse the shared SQL-backed template alias cache.
 
     Returns:
-        Canonical names, redirects, and Chinese title variants.
+        Canonical names, verified redirects and Chinese variants.
 
     Raises:
-        ValueError: A redirect set exceeds the bounded source contract.
+        ValueError: An alias set exceeds the recognition contract.
     """
     result = {}
-    converters = (OpenCC("t2s"), OpenCC("s2t"))
     for name in ("Article history", "DYKtalk", "DYKEntry", "DYKEntry/archive"):
-        page = pywikibot.Page(site, "Template:" + name)
-        redirects = list(
-            page.backlinks(filter_redirects=True, total=_MAX_ALIASES + 1),
-        )
-        if len(redirects) > _MAX_ALIASES:
+        aliases = read_aliases(site, "Template:" + name)
+        if len(aliases) > _MAX_ALIASES:
             message = "Recognition template redirects exceed their bound."
             raise ValueError(message)
-        titles = [page.title(), *(redirect.title() for redirect in redirects)]
-        result[name] = tuple(
-            sorted({
-                variant
-                for title in titles
-                for variant in (
-                    title,
-                    *(converter.convert(title) for converter in converters),
-                )
-            }),
-        )
+        result[name] = aliases
     return result
 
 
@@ -108,28 +97,26 @@ def read_revision(
 
     Returns:
         Exact text, or none for unavailable history.
+
+    Raises:
+        ValueError: An exact revision belongs to another page.
     """
     page = pywikibot.Page(site, title)
-    try:
-        if revision_id is not None:
-            site.loadrevisions(page, revids=revision_id, content=True)
-            revision = page.get_revision(revision_id)
-        else:
-            revision = next(
-                page.revisions(
-                    content=True,
-                    total=1,
-                    starttime=pywikibot.Timestamp.fromISOformat(at.isoformat())
-                    if at
-                    else None,
-                ),
-                None,
-            )
-    except NoPageError:
+    metadata = (
+        revision_metadata(site, [revision_id]).get(revision_id)
+        if revision_id is not None
+        else source_revision(site, title, at=at)
+    )
+    if metadata is None or not metadata["text_visible"]:
         return None
-    if revision is None:
+    if metadata["title"] != page.title():
+        message = "Recognition revision belongs to another page."
+        raise ValueError(message)
+    identifier = metadata["revision_id"]
+    content = read_revision_contents(site, [identifier])[identifier]
+    if content is None or content.page_id != metadata["page_id"]:
         return None
-    return _snapshot(page, revision.revid, revision.text)
+    return _snapshot(page, identifier, content.text)
 
 
 def read_archives(
@@ -155,7 +142,6 @@ def read_archives(
         ValueError: The talk page or continuation is unsafe.
     """
     talk = pywikibot.Page(site, talk_title)
-    prefix = talk.title(with_ns=False) + "/"
     if (
         not 1 <= limit <= _MAX_ARCHIVES
         or talk.namespace() != 1
@@ -163,23 +149,23 @@ def read_archives(
     ):
         message = "Recognition archives require the article's talk prefix."
         raise ValueError(message)
-    start = (
-        pywikibot.Page(site, after).title(with_ns=False) if after else prefix
+    metadata = archive_revisions(site, talk_title, after=after, limit=limit)
+    selected = metadata[:limit]
+    contents = read_revision_contents(
+        site,
+        [row["revision_id"] for row in selected if row["text_visible"]],
     )
-    candidates = [
-        page
-        for page in site.allpages(
-            start=start,
-            prefix=prefix,
-            namespace=1,
-            total=limit + 2,
+    result = []
+    for row in selected:
+        content = contents.get(row["revision_id"])
+        if content is None or content.page_id != row["page_id"]:
+            message = "Recognition archive revision is unavailable."
+            raise ValueError(message)
+        result.append(
+            _snapshot(
+                pywikibot.Page(site, row["title"]),
+                content.revision_id,
+                content.text,
+            ),
         )
-        if page.title() != after
-    ]
-    selected = candidates[:limit]
-    result = [
-        _snapshot(page, page.latest_revision_id, page.text)
-        for page in pagegenerators.PreloadingGenerator(selected)
-        if page.exists()
-    ]
-    return result, selected[-1].title() if len(candidates) > limit else None
+    return result, selected[-1]["title"] if len(metadata) > limit else None

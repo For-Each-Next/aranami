@@ -5,6 +5,37 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.6 (2026-11-14 05:57 UTC)
+
+Overview: Moved report generation onto prepared metadata with incremental
+revision acquisition, permanent project page archives and a migrated flat
+Parquet layout, while unifying quality analysis and fixing newsletter grouping.
+
+- Unified quality articles and authors under a global B/BL switch, with
+  listing evidence, revision ranges and contributor shares above ten percent.
+- Corrected prose counts, annual bars, importance colors, spaced display titles
+  and sequential row ordinals; preserved existing links through redirects.
+- Collected subject/talk identities, revisions and assessments in one project
+  SQL query, with Enum grades, List[Enum] taskforces and nullable redirects.
+- Archived Chinese wpvg page lists permanently and moved other daily lists,
+  hourly observations and prepared reports into documented flat data folders.
+- Migrated historical records without inventing missing revisions, retained
+  rollback copies and added resumable migration verification before activation.
+- Batched missing revision text into 256 hexadecimal shards, reused parsed
+  metadata and pruned raw revisions against two consecutive daily page lists.
+- Reused accepted newsletter history including unchanged oldid 87963056,
+  regenerating daily facts from metadata without yesterday’s rendered text.
+- Replaced repeated source, review, discussion and archive API metadata reads
+  with replica queries and verified caches, preserving publication preconditions.
+- Gated midnight reports on replica readiness with prompt collection retries,
+  preserving prior complete website data and allowing hourly replica lag.
+- Deferred Pageviews acquisition and calculations until 19:00 UTC, preparing
+  newsletter traffic summaries before either output reads saved values.
+- Recognized exact simplified and traditional PageAssessments names, including
+  音樂 for 最终幻想合辑专辑列表, without treating unrelated subprojects as matches.
+- Attached subject/talk revision identities to prepared reports and kept HTTP
+  rendering and wiki projection free of source acquisition and raw parsing.
+
 ### 0.9.5 (2026-11-14 02:44 UTC)
 
 Overview: Corrected native talk-editor prefill checks and revision links,

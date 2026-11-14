@@ -56,7 +56,23 @@ def staging_directory(path: Path) -> Path:
         ),
         None,
     )
-    root = reports.parent if reports is not None else path.parent
+    data_root = next(
+        (
+            parent
+            for parent in path.parents
+            if parent.name == "data"
+            and path.relative_to(parent).parts[0]
+            in {"archive", "daily", "hourly"}
+        ),
+        None,
+    )
+    root = (
+        data_root.parent
+        if data_root is not None
+        else reports.parent
+        if reports is not None
+        else path.parent
+    )
     cache = root / "cache"
     staging = cache / "report-staging"
     for directory in (cache, staging):

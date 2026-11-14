@@ -102,7 +102,25 @@ class TestMembershipCycle(TestCase):
         raw = _membership()
         with patch("shared.sources.quarry.projects._replica") as replica:
             query = replica.return_value.query
-            query.return_value.collect.side_effect = raw.clone
+
+            def collected() -> pl.DataFrame:
+                """Supply offline rows for the requested project.
+
+                Returns:
+                    Complete grouped source fixture rows.
+                """
+                names = (
+                    query.call_args
+                    .args[0]
+                    .compile()
+                    .params["pap_project_title_1"]
+                )
+                return raw.with_columns(
+                    pl.lit(names[0]).alias("membership_project"),
+                    pl.lit("20261114000000").alias("page_rev_timestamp"),
+                )
+
+            query.return_value.collect.side_effect = collected
             with source_cycle():
                 first = projects.query_pages_by_wikiproject(
                     OfflineSite("zh", "wikipedia"),

@@ -15,7 +15,7 @@ from unittest.mock import patch
 import polars as pl
 from starlette.testclient import TestClient
 
-from data.articles import quality_analysis as store
+from data.articles import current_quality, quality_analysis as store
 from shared.assessment_profiles import assessment_profile
 from webservice.pages import render_quality_analysis
 from webservice.presentation import Interface
@@ -35,7 +35,7 @@ def analysis_fixture() -> dict:
         "pages": 2,
         "measured": 1,
         "dated": 1,
-        "median_words": 1000.0,
+        "median_characters": 1000.0,
         "central_68_low": 1000.0,
         "central_68_high": 1000.0,
         "central_95_low": 1000.0,
@@ -48,7 +48,7 @@ def analysis_fixture() -> dict:
             "total": 3,
             "measured": 2,
             "dated": 2,
-            "median_words": 500,
+            "median_characters": 500,
         },
         "grade_totals": [
             {"grade": "FA", **summary},
@@ -91,6 +91,7 @@ def analysis_fixture() -> dict:
                 "listed_oldid": 456 if date else None,
                 "source_bytes": 12345,
                 "prose_words": words,
+                "prose_characters": words,
                 "prose_bytes": words * 4 if words is not None else None,
                 "article_revision_id": 123 + index,
                 "talk_revision_id": 456 + index,
@@ -116,25 +117,90 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
     """Preserve coverage and the complete native article list."""
 
     @staticmethod
+    def test_display_and_listing_links_keep_separate_revision_provenance() -> (
+        None
+    ):
+        """Keep display, listing oldid and proof ranges distinct."""
+        source = analysis_fixture()
+        article = source["articles"][0]
+        article.update(
+            title="PlayStation_5",
+            listed_review_link="#Review",
+            authors=["Main author"],
+            authorship_available=True,
+            authorship_start_revision=11,
+            authorship_end_revision=22,
+            authorship_start_timestamp="2000-01-01T00:00:00Z",
+            authorship_end_timestamp="2026-01-01T23:59:59Z",
+            authorship_eligible_bytes=100,
+            authorship_editors=[
+                {
+                    "editor": "1",
+                    "name": "Main author",
+                    "share": 0.6,
+                    "bytes": 60,
+                },
+                {
+                    "editor": "0|192.0.2.1",
+                    "name": None,
+                    "share": 0.2,
+                    "bytes": 20,
+                },
+                {"editor": "2", "name": "Boundary", "share": 0.1, "bytes": 10},
+                {"editor": "3", "name": "Other", "share": 0.1, "bytes": 10},
+            ],
+        )
+        row = quality_analysis_context(source, Interface("en"))[
+            "quality_analysis"
+        ]["articles"][0]
+        assert row["title_label"] == "PlayStation 5"
+        assert "PlayStation_5" in row["url"]
+        assert row["listing_url"].endswith("oldid=456")
+        assert row["review_url"].endswith("#Review")
+        proof = row["authorship"]
+        assert proof["range_start"]["url"].endswith("oldid=11")
+        assert proof["range_end"]["url"].endswith("oldid=22")
+        assert [editor["name"] for editor in proof["editors"]] == [
+            "Main author",
+            "192.0.2.1",
+        ]
+        assert (
+            "Special%3AContributions%2F192.0.2.1" in proof["editors"][1]["url"]
+        )
+
+    @staticmethod
+    def test_word_only_measurements_are_not_presented_as_characters() -> None:
+        """Keep missing characters distinct from word evidence."""
+        source = analysis_fixture()
+        source["articles"][0].pop("prose_characters")
+        source["coverage"].pop("median_characters")
+        source["coverage"]["median_words"] = 9876
+        result = quality_analysis_context(source, Interface("en"))[
+            "quality_analysis"
+        ]
+        assert result["median"] == "—"
+        assert result["articles"][0]["characters_label"] == "—"
+
+    @staticmethod
     def test_context_uses_precomputed_totals_and_retains_unknowns() -> None:
         """Keep zero, missing data and listing evidence distinct."""
         source = analysis_fixture()
-        source["coverage"]["median_words"] = 9876
+        source["coverage"]["median_characters"] = 9876
         context = quality_analysis_context(source, Interface("en"))[
             "quality_analysis"
         ]
         assert context["median"] == "9,876"
-        assert context["articles"][1]["words_label"] == "—"
-        assert context["articles"][2]["words_label"] == "0"
+        assert context["articles"][1]["characters_label"] == "—"
+        assert context["articles"][2]["characters_label"] == "0"
         assert context["articles"][1]["date_label"] is None
-        assert context["articles"][0]["listing_url"].endswith("oldid=457")
+        assert context["articles"][0]["listing_url"].endswith("oldid=456")
         assert context["articles"][0]["source_url"].endswith("oldid=124")
         source["articles"][0]["listed_oldid"] = 999999
         evidence = quality_analysis_context(source, Interface("en"))[
             "quality_analysis"
         ]["articles"][0]
-        assert evidence["listing_url"].endswith("oldid=457")
-        source["articles"][0]["talk_revision_id"] = None
+        assert evidence["listing_url"].endswith("oldid=999999")
+        source["articles"][0]["listed_oldid"] = None
         assert (
             quality_analysis_context(source, Interface("en"))[
                 "quality_analysis"
@@ -272,7 +338,7 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
             _NOW,
         )
         assert Interface("en").text("quality_analysis.unavailable") in missing
-        assert 'href="#analysis-overview"' not in missing
+        assert 'href="#analysis-overview"' in missing
         assert 'id="analysis-method"' not in missing
         empty = render_quality_analysis(
             {"available": True},
@@ -334,6 +400,7 @@ class QualityAnalysisHTTPTests(unittest.TestCase):
                 updates=frame,
                 observed_at=_NOW,
             )
+            assert current_quality.refresh_saved_quality(root)
             client = TestClient(create_app(root))
             with patch(
                 "data.articles.quality_analysis._summaries",
@@ -361,6 +428,7 @@ class QualityAnalysisHTTPTests(unittest.TestCase):
                 members=changed,
                 observed_at=_NOW + dt.timedelta(minutes=1),
             )
+            assert current_quality.refresh_saved_quality(root)
             response = client.get("/quality-analysis/?lang=en")
             assert "Updated analysis title" in response.text
 
@@ -370,11 +438,11 @@ class QualityAnalysisHTTPTests(unittest.TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "webservice.server.quality_analysis_identity",
+                "webservice.server.current_quality_identity",
                 return_value=(1,),
             ) as identity,
             patch(
-                "webservice.server.read_quality_analysis",
+                "webservice.server.read_current_quality",
                 return_value=analysis_fixture(),
             ) as read,
         ):
@@ -401,7 +469,7 @@ class QualityAnalysisHTTPTests(unittest.TestCase):
         with (
             TemporaryDirectory() as directory,
             patch(
-                "webservice.server.read_quality_analysis",
+                "webservice.server.read_current_quality",
                 side_effect=ValueError("damaged"),
             ),
         ):

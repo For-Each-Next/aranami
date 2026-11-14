@@ -58,6 +58,8 @@ EVIDENCE_SCHEMA = {
     "contract": pl.String,
     "eligible_bytes": pl.UInt32,
     "revision_timestamp": pl.Datetime("us", "UTC"),
+    "creation_revision": pl.Int64,
+    "creation_timestamp": pl.Datetime("us", "UTC"),
     "fetched_at": pl.Datetime("us", "UTC"),
     "contributors": pl.List(pl.Struct(CONTRIBUTOR_SCHEMA)),
 }
@@ -71,7 +73,7 @@ _SCHEMAS = {
     "evidence": EVIDENCE_SCHEMA,
     "attempts": ATTEMPT_SCHEMA,
 }
-_STORE_ROOT = DEFAULT_ROOT.parent
+_STORE_ROOT = DEFAULT_ROOT
 _KEY = "articles/current-authorship/b-class"
 _MAX_ROWS = 100_000
 _MAX_BYTES = 128 * 1024 * 1024
@@ -248,7 +250,18 @@ def _validate(tables: dict[str, pl.DataFrame]) -> None:
         ).height
         or attempts["attempted_at"].null_count()
         or evidence.filter(
-            pl.any_horizontal(pl.all().is_null())
+            pl.any_horizontal(
+                pl.exclude(
+                    "creation_revision",
+                    "creation_timestamp",
+                ).is_null(),
+            )
+            | (pl.col("creation_revision") <= 0)
+            | (pl.col("creation_timestamp") > pl.col("revision_timestamp"))
+            | (
+                pl.col("creation_revision").is_null()
+                != pl.col("creation_timestamp").is_null()
+            )
             | ~pl.col("contract").is_in(CONTRACTS)
             | (pl.col("eligible_bytes") <= 0)
             | (pl.col("revision_timestamp") > pl.col("fetched_at"))
@@ -320,6 +333,22 @@ def _read(
             for name, schema in _SCHEMAS.items()
         }
     )
+    legacy_evidence = {
+        name: dtype
+        for name, dtype in EVIDENCE_SCHEMA.items()
+        if name not in {"creation_revision", "creation_timestamp"}
+    }
+    if tables["evidence"].schema == pl.Schema(legacy_evidence):
+        tables["evidence"] = (
+            tables["evidence"]
+            .with_columns(
+                pl.lit(None, dtype=pl.Int64).alias("creation_revision"),
+                pl.lit(None, dtype=pl.Datetime("us", "UTC")).alias(
+                    "creation_timestamp",
+                ),
+            )
+            .select(list(EVIDENCE_SCHEMA))
+        )
     legacy = {
         name: dtype
         for name, dtype in MEMBER_SCHEMA.items()
@@ -450,7 +479,7 @@ def checkpoint(
             tables["evidence"] = (
                 pl
                 .concat([tables["evidence"], evidence])
-                .sort("fetched_at")
+                .sort("fetched_at", maintain_order=True)
                 .unique(subset=KEY, keep="last", maintain_order=True)
             )
         if attempted is not None:

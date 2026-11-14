@@ -17,7 +17,7 @@ import logging
 import os
 import re
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from shutil import rmtree
 from tempfile import NamedTemporaryFile
@@ -26,6 +26,9 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from shared.support.assessment_encoding import (
+    restore_assessment_schema,
+)
 from shared.support.parquet import (
     parquet_metadata,
     report_parquet_activity,
@@ -130,6 +133,7 @@ class ParquetCache:
     max_rows: int
     max_bytes: int
     observe: bool = True
+    annotations: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Freeze the schema and reject unusable cache definitions.
@@ -190,6 +194,21 @@ class ParquetCache:
                 report_parquet_activity(path, "source_loaded")
             return frame
 
+    def read_required(self, path: Path) -> pl.DataFrame:
+        """Read required values and reject damaged storage.
+
+        Returns:
+            A complete validated table; storage errors propagate.
+
+        Raises:
+            ValueError: The Parquet file is damaged or incompatible.
+        """
+        try:
+            return self._read(path)
+        except pl.exceptions.PolarsError as error:
+            message = "Prepared Parquet data is damaged or incompatible."
+            raise ValueError(message) from error
+
     def _read(self, path: Path) -> pl.DataFrame:
         """Read one open cache generation and validate its contract.
 
@@ -229,9 +248,30 @@ class ParquetCache:
                 raise ValueError(message)
             stream.seek(0)
             frame = pl.read_parquet(stream, n_rows=self.max_rows + 1)
-        self._validate(frame)
+        declarations = json.loads(metadata.get("aranami.storage", "{}"))
+        if declarations.get("columns"):
+            frame = restore_assessment_schema(frame, declarations["columns"])
         validate_parquet_metadata(metadata, frame)
+        frame = self._decoded(frame)
+        self._validate(frame)
         return frame
+
+    def _decoded(self, frame: pl.DataFrame) -> pl.DataFrame:
+        """Restore assessment columns to the declared reader schema.
+
+        Returns:
+            Logical strings or retained Enum columns for typed readers.
+        """
+        columns = []
+        for name, dtype in frame.schema.items():
+            expected = self.schema.get(name)
+            if (isinstance(dtype, pl.Enum) and expected == pl.String) or (
+                isinstance(dtype, pl.List)
+                and isinstance(dtype.inner, pl.Enum)
+                and expected == pl.List(pl.String)
+            ):
+                columns.append(pl.col(name).cast(expected))
+        return frame.with_columns(columns)
 
     def _validate(self, frame: pl.DataFrame) -> None:
         """Check the exact table schema, row count, and decoded size.
@@ -239,6 +279,7 @@ class ParquetCache:
         Raises:
             ValueError: The table exceeds its schema or storage bounds.
         """
+        frame = self._decoded(frame)
         if (
             frame.schema != pl.Schema(self.schema)
             or frame.height > self.max_rows
@@ -281,6 +322,7 @@ class ParquetCache:
             contract=self.contract,
             observe=self.observe,
             metadata={
+                **self.annotations,
                 _METADATA_KEY: json.dumps({
                     "schema": 1,
                     "contract": self.contract,

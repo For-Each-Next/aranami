@@ -22,6 +22,8 @@ from pywikibot import Page
 from data.website import read_timestamp
 from shared.assessment_profiles import assessment_profile
 from shared.sources.discussions import read_comments
+from shared.sources.quarry.revisions import page_info
+from shared.sources.revisions import has_revision_cache
 from shared.support.titles import page_url
 from tasks.zhwiki.review_cache import ITEM_SCHEMA, ReviewCache
 from tasks.zhwiki.reviews import (
@@ -368,12 +370,16 @@ def collect_discussions(
     boundary = activity_start(now)
     recent = []
     for batch in batched(dict.fromkeys(talks), 50, strict=False):
-        response = site.simple_request(
-            action="query",
-            formatversion=2,
-            prop="info",
-            titles=list(batch),
-        ).submit()
+        response = (
+            {"query": {"pages": page_info(site, batch)}}
+            if has_revision_cache()
+            else site.simple_request(
+                action="query",
+                formatversion=2,
+                prop="info",
+                titles=list(batch),
+            ).submit()
+        )
         pages = response.get("query", {}).get("pages")
         if (
             "error" in response

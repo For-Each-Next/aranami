@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+import polars as pl
 from sqlalchemy import select
 
 from data.runtime.status import read_status
@@ -37,9 +38,10 @@ class TestSourceActivity(TestCase):
         scope = {"new_page_count": 1, "redirect_count": 0}
         with (
             activity_observer(observer),
+            patch("shared.sources.wiki.pywikibot.Page", return_value=page),
             patch(
-                "shared.sources.wiki.pagegenerators.PagesFromPageidGenerator",
-                return_value=iter([page]),
+                "shared.sources.wiki.page_metadata",
+                return_value=pl.DataFrame({"full_title": ["Example"]}),
             ),
             patch(
                 "shared.sources.wiki.pagegenerators.PreloadingGenerator",
@@ -246,7 +248,7 @@ class TestSourceActivity(TestCase):
             "target": "Games",
             "date": "2026-11-02",
             "metadata": {
-                "file": "reports/data/Games.parquet",
+                "file": "data/daily/Games.parquet",
                 "observed_at": "",
                 "finished_at": "",
             },

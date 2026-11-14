@@ -19,7 +19,7 @@ from pywikibot.exceptions import NoPageError
 from data.newsletter.grades import QUALITY_HISTORY_GRADES
 from data.newsletter.validation import year_quarters
 from shared.assessment_profiles import assessment_profile
-from shared.newsletter import DYK_PROJECTS, Issue
+from shared.newsletter import DYK_PROJECT_DATABASE_TITLES, DYK_PROJECTS, Issue
 from tasks.zhwiki.newsletter.newpages import collect_new_pages
 
 if TYPE_CHECKING:
@@ -297,7 +297,13 @@ def enrich_year_dyk(
     else:
         membership = (
             projects
-            .filter(pl.col("project").is_in(DYK_PROJECTS))
+            .with_columns(
+                pl.col("project").replace_strict(
+                    DYK_PROJECT_DATABASE_TITLES,
+                    default=None,
+                ),
+            )
+            .filter(pl.col("project").is_not_null())
             .select(
                 pl.col("full_title").str.replace_all("_", " ").alias("title"),
                 "project",

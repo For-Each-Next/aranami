@@ -21,6 +21,26 @@ from shared.config import routine_configuration
 from updater.services.zhwiki import assessment_log
 
 
+class TestImportanceColors(TestCase):
+    """Pin the audited Chinese importance template's theme palette."""
+
+    @staticmethod
+    def test_importance_colors_follow_the_local_template() -> None:
+        """Retain Template:Importance/colour revision 95173028."""
+        expected = {
+            "Top": "#FF97FF",
+            "High": "#FFACFF",
+            "Mid": "#FFC1FF",
+            "Low": "#FFD6FF",
+            "NA": "#F5F5F5",
+            "Unknown": "transparent",
+        }
+        for project in (None, "电子游戏"):
+            profile = assessment_profile("zhwiki", project)
+            for code, color in expected.items():
+                assert profile.color(code, "importance") == color
+
+
 class TestAssessmentProfiles(TestCase):
     """Keep raw labels, codes, full names, and short names distinct."""
 

@@ -19,6 +19,36 @@ _BATCH_SIZE = 200
 _HIDDEN_USER = 4
 SCHEMA = {"name": pl.String, "last_active": pl.Datetime("us", "UTC")}
 
+
+def user_names(site: BaseSite, identifiers: Iterable[int]) -> dict[str, str]:
+    """Resolve public account IDs with bounded replica queries.
+
+    Returns:
+        Observed names keyed by numeric ID strings. Missing or masked
+        identities are omitted rather than guessed.
+    """
+    result = {}
+    for batch in batched(sorted(set(identifiers)), _BATCH_SIZE, strict=False):
+        frame = (
+            Replica
+            .from_site(site)
+            .query(
+                select(tables.User.user_id, tables.User.user_name).where(
+                    tables.User.user_id.in_(batch),
+                    tables.User.user_name.is_not(None),
+                ),
+                schema_overrides={"user_id": pl.Int64, "user_name": pl.String},
+            )
+            .collect()
+        )
+        result.update({
+            str(identifier): name
+            for identifier, name in frame.iter_rows()
+            if name
+        })
+    return result
+
+
 # This public view filters hidden identities before exposing rev_actor.
 # The general revision view masks it with IF(), defeating actor indexes.
 _REVISION_USER_INDEX = Table(

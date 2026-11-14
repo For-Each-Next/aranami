@@ -56,14 +56,14 @@ paths remain available for owners with a fixed observation bucket. Temporary
 staging files use a hidden `.tmp` suffix and never become selected generations.
 Former fixed or hashed cache filenames are ignored and rebuild on demand.
 Activity links identify the file used at that time; a retired cache generation
-is unavailable in the viewer. Durable evidence remains under `reports/`.
+is unavailable in the viewer. Durable evidence remains under `data/`.
 
 | Owner | Reuse requirement |
 |---|---|
 | Hourly project/category observations | Exact UTC hour; complete page lists, replica revisions and category coverage |
 | DYK/quality dates | Exact talk revision and alias/parser contract |
 | Review sources | Fresh revision check and matching parsed-source contract |
-| Raw revision text | Fresh exact-revision metadata and matching SHA-1; hidden content cannot reuse cached bodies |
+| Raw revision text | Fresh SQL ownership/visibility or API metadata, with verified cached content hashes |
 | Article introductions | Title/script identity, freshness and retry interval |
 | Taiwan game titles | Exact `NoteTA` game-group and transcluded dependency revisions; checked hourly |
 | Article authorship attempts | Unresolved listing identity and most recent attempt time |
@@ -76,7 +76,7 @@ reports. It asks Chinese Wikipedia's parser to apply
 and [`Module:CGroup/Games-zh`](https://zh.wikipedia.org/wiki/Module:CGroup/Games-zh)
 through `NoteTA` with `variant=zh-tw`. Labels
 and every transcluded dependency revision are checkpointed under the ASCII
-directory `cache/toolforge/game-title-conversions/`. Unchanged revisions
+directory `data/hourly/game-title-conversions/`. Unchanged revisions
 reuse covered titles; new titles and changed sources trigger bounded batches.
 Metadata-only origin revision checks before and after parsing reject
 mixed-source observations without replica-lag ambiguity.
@@ -84,13 +84,15 @@ A failed optional refresh retains verified prior labels. The HTTP layer only
 reads this cache and falls back to local script conversion for uncovered
 titles. Canonical titles, page IDs, source URLs and anchors stay unchanged.
 
-Hourly project and category files use the hour boundary, such as
-`20261110T140000.parquet`, and retain separate UTC-hour paths for 24 hours,
-so a pass already in progress can finish against its selected observations while
-the next hour collects. These files include replica `page_latest` values.
-Category coverage distinguishes complete project-page links from the additional
-global assessment-list matches. Missing coverage requires a database supplement;
-it cannot establish an empty category or an unchanged page.
+Hourly page and category files name the completed UTC hour, such as
+`2026111400.parquet` written at 01:00, and retain the newest two periods.
+Chinese wpvg lists live directly under `data/hourly`, alongside named child
+project lists and `categories-<hour>.parquet`. Daily Chinese page lists remain
+permanent under `data/archive`. Full revision text lives in the sharded
+`data/revisions` store; only acquisition and parsing use it. See
+[Saved data](storage.md) for schemas, retention and the complete fileset map.
+Category coverage distinguishes complete project-page links from additional
+global assessment-list matches. Missing coverage cannot establish emptiness.
 
 Active collector histories record completed local Parquet reads, committed writes
 and verified unchanged content. Failed writes cannot emit a successful write.
@@ -124,3 +126,19 @@ articles cannot block older history. Every attempted listing checkpoints its
 retry time before progress callbacks; throttling still ends the pass. These
 timestamps survive process restarts but do not establish successful attribution.
 Deleting them restarts retry ordering without losing durable authorship evidence.
+
+Shared source passes retain bounded text per wiki under
+`cache/revision-contents/`, with previews under `dry-run/cache/`. Each reuse
+checks exact revision ownership and visibility through Wiki Replicas and
+verifies the retained text hash. Missing replica metadata or a replica failure
+requires a fresh API read; hidden revisions never reuse old bodies. Source
+selection uses indexed SQL for current revisions, historical cutoffs, display
+intervals and bounded talk archives. Parser changes do not expire raw text.
+
+Discussion activity and review revision checks use batched SQL page metadata.
+Review comment anchors retain complete exact-revision results, including
+confirmed empty discussions, under `review-comment-links`. Failed source reads
+are retried; they never become cached empty results. Canonical title resolution
+uses SQL for existing direct titles, keeping MediaWiki conversion/redirect
+resolution for titles requiring it. Destination precondition checks and saves
+still use fresh Pywikibot reads to protect against concurrent edits and lag.

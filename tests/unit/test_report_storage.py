@@ -18,7 +18,6 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from data.paths import storage_key
 from data.reports import ReportResult, ReportStore, report_key
 from runtime.jobs import JobContext, ProposedEdit, job_run
 from shared.deployment import project_version
@@ -404,7 +403,7 @@ class TestReportStore(TestCase):
                 started_at=_START,
                 target={"site": "zhwiki", "title": "專題:電子遊戲/列表"},
             )
-            assert store.root == Path(directory) / "reports/records"
+            assert store.root == Path(directory) / "data/daily"
             assert key == "assessment-lists/zhwiki/專題:電子遊戲%2F列表"
             generated = dt.datetime.fromisoformat(
                 str(bundle.manifest["generated_at"]),
@@ -421,7 +420,7 @@ class TestReportStore(TestCase):
     def test_daily_observation_installs_named_files_once() -> None:
         """Retain the first observation directly in its date folder."""
         with TemporaryDirectory() as directory:
-            store = ReportStore(Path(directory) / "reports/data", daily=True)
+            store = ReportStore(Path(directory) / "data/daily", daily=True)
             key = report_key(
                 "project-assessments",
                 "zhwiki",
@@ -444,8 +443,8 @@ class TestReportStore(TestCase):
                 started_at=_START + dt.timedelta(hours=1),
                 target={"site": "zhwiki", "title": "電子遊戲"},
             )
-            assert first.path == store.root / storage_key(key)
-            assert first.path.name == "20261020"
+            assert first.path == store.data_path(key)
+            assert first.manifest["report_key"].endswith("20261020")
             assert (first.path / "members.parquet").exists()
             assert again.wikitext == "first"
             assert store.read(key).wikitext == "first"

@@ -19,9 +19,26 @@ from data import consistency as consistency_records
 from data.caching import consistency as consistency_cache
 from data.caching.extracts import MAX_EXTRACT_BYTES
 from data.newsletter import schema as newsletter
+from data.prepared import read_values, write_values
 from shared.support.files import read_json_object
 
 MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
+
+
+def read_snapshot(path: Path) -> dict[str, object]:
+    """Read a precomputed Parquet view without source requests.
+
+    Legacy JSON is accepted only for existing migrated observations.
+
+    Returns:
+        Complete precomputed presentation values and source identities.
+
+    """
+    if path.suffix != ".parquet":
+        return read_json_object(path, MAX_SNAPSHOT_BYTES)
+    return read_values(path, MAX_SNAPSHOT_BYTES)
+
+
 SNAPSHOT_SCHEMA = 2
 REPORT_KEYS = (
     "reviews",
@@ -833,7 +850,7 @@ def read_report_cache(
         record = (
             consistency_cache.read(path)
             if name == "consistency"
-            else read_json_object(path, MAX_SNAPSHOT_BYTES)
+            else read_snapshot(path)
         )
         required = {
             "schema",
@@ -904,7 +921,7 @@ def save_report_cache(path: Path | None, record: dict[str, object]) -> None:
     ):
         message = "Dashboard report cache must not follow symbolic links."
         raise OSError(message)
-    if path.name == "consistency" or path.suffix == ".parquet":
+    if path.name in {"consistency", "consistency.parquet"}:
         consistency_cache.save(path, record)
     else:
         save_snapshot(path, record)
@@ -929,6 +946,9 @@ def save_snapshot(path: Path, snapshot: dict[str, object]) -> None:
     if len(content) > MAX_SNAPSHOT_BYTES:
         message = "The dashboard snapshot exceeds its eight MiB limit."
         raise ValueError(message)
+    if path.suffix == ".parquet":
+        write_values(path, snapshot, max_bytes=MAX_SNAPSHOT_BYTES)
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
         temporary = Path(stream.name)

@@ -18,7 +18,8 @@ const interfaceMessages = JSON.parse(fs.readFileSync(path.resolve(__dirname, "..
 const chromium = process.env.ARANAMI_CHROMIUM || "/Applications/Chromium.app/Contents/MacOS/Chromium";
 const widths = [320, 390, 600, 601, 639, 640, 641, 768, 943, 944, 1120, 1440, 1680, 1920];
 const locales = ["en", "zh-hans", "zh-hant"];
-const surfaces = ["home", "discussions", "quality-authorship", "quality-analysis", "backlog", "checks", "redirects", "maintenance", "consistency", "quarterly", "reports", "reports2", "logs", "dataset", "about", "contentcredits", "maintenancecredits", "codex", "gpl", "lgpl", "error", "newsletter"];
+const selectedSurfaces = process.env.ARANAMI_CHECK_SURFACES?.split(",");
+const surfaces = ["home", "discussions", "quality-authorship", "quality-analysis", "backlog", "checks", "redirects", "maintenance", "consistency", "quarterly", "reports", "reports2", "logs", "dataset", "about", "contentcredits", "maintenancecredits", "codex", "gpl", "lgpl", "error", "newsletter"].filter(surface => !selectedSurfaces || selectedSurfaces.includes(surface));
 const failures = [];
 fs.mkdirSync(outputRoot, { recursive: true });
 
@@ -54,7 +55,7 @@ async function checkInterface(assetRoot) {
         const attribution = {
             '/checks/': 'checks',
             '/discussions/': 'discussions',
-            '/quality-analysis/': 'quality-analysis',
+            '/quality-analysis/': requestURL.searchParams.get('count_b') === '1' ? 'quality-analysis-b' : 'quality-analysis',
             '/quality-authorship/': requestURL.searchParams.get('count_b') === '1' ? 'quality-authorship-b' : 'quality-authorship',
             '/reports/': requestURL.searchParams.get('page') === '2' ? 'reports2' : 'reports',
             '/data/': requestURL.searchParams.get('page') === '2' ? 'dataset2' : 'dataset',
@@ -221,7 +222,7 @@ async function checkInterface(assetRoot) {
                 unnamedNavigation: [...document.querySelectorAll('nav')].filter(nav => !nav.getAttribute('aria-label') && !nav.getAttribute('aria-labelledby')).length,
                 brokenContents: [...document.querySelectorAll('.page-toc a[href^="#"]')].filter(link => !document.getElementById(link.hash.slice(1))).map(link => link.hash),
                 unlabelledControls: [...document.querySelectorAll('input:not([type=hidden]), select')].filter(control => !control.labels?.length && !control.getAttribute('aria-label') && !control.getAttribute('aria-labelledby')).map(control => control.outerHTML),
-                forms: [...document.forms].map(form => ({method: form.method, action: form.getAttribute('action'), submit: Boolean(form.querySelector('button[type=submit], input[type=submit]')), issueSelection: form.hasAttribute('data-newsletter-issue-form'), dateSelection: form.matches('.newsletter-date-controls'), pageSize: form.matches('.page-size[data-auto-submit]'), qualityFilter: form.hasAttribute('data-quality-authorship-filter')}))
+                forms: [...document.forms].map(form => ({method: form.method, action: form.getAttribute('action'), submit: Boolean(form.querySelector('button[type=submit], input[type=submit]')), issueSelection: form.hasAttribute('data-newsletter-issue-form'), dateSelection: form.matches('.newsletter-date-controls'), pageSize: form.matches('.page-size[data-auto-submit]'), qualityFilter: form.hasAttribute('data-quality-authorship-filter') || form.hasAttribute('data-quality-analysis-filter')}))
             }))()`);
             assert.equal(document.main, 1, "missing or duplicate main landmark");
             assert.equal(document.titles, 1, "missing or duplicate page heading");
@@ -691,7 +692,7 @@ async function checkInterface(assetRoot) {
             assert.ok(result.literal && result.readonly && result.native && result.safe && result.unique, `newsletter source semantics failed: ${JSON.stringify(result)}`);
             assert.equal(result.fits, true, 'expanded newsletter textarea should autosize to wrapped source');
         };
-        const initialControls = `(() => [...document.querySelectorAll('button, input:not([type=hidden]), select, summary, a.ui-button, .brand img, main h1, .newsletter-text')].filter(element => !element.closest('[data-redirect-controls], [data-execution-history], [data-quality-authorship-table], [data-quality-authorship-filter], [data-quality-analysis]') && !element.matches('[data-redirect-hide], .heading-copy')).map(element => {
+        const initialControls = `(() => [...document.querySelectorAll('button, input:not([type=hidden]), select, summary, a.ui-button, .brand img, main h1, .newsletter-text')].filter(element => !element.closest('[data-redirect-controls], [data-execution-history], [data-quality-authorship-table], [data-quality-authorship-filter], [data-quality-analysis-filter], [data-quality-analysis]') && !element.matches('[data-redirect-hide], .heading-copy')).map(element => {
             const style = getComputedStyle(element);
             const box = element.getBoundingClientRect();
             return {tag: element.tagName, id: element.id, hidden: element.hidden,
@@ -816,7 +817,15 @@ async function checkInterface(assetRoot) {
                 await loaded;
                 const after = await evaluate(initialControls);
                 assert.deepEqual(after, before, "initialization changed control visibility, colors, typography, or layout");
-                assert.deepEqual(await evaluate(headingGeometry), beforeHeadings, 'section-copy controls changed heading layout');
+                const afterHeadings = await evaluate(headingGeometry);
+                // Article pagination above the author section changes its page
+                // position; heading-copy enhancement must keep its own geometry.
+                const stableHeadings = headings => headings.map(heading => {
+                    if (surface !== 'quality-analysis' || heading.id !== 'quality-authors') return heading;
+                    const [x, , width, height] = heading.geometry;
+                    return {...heading, geometry: [x, 0, width, height]};
+                });
+                assert.deepEqual(stableHeadings(afterHeadings), stableHeadings(beforeHeadings), 'section-copy controls changed heading layout');
                 await assertHeadingAlignment();
                 assert.deepEqual(await evaluate("window.aranamiStartupErrors"), [], "page initialization raised an error");
                 stableInitializations++;
@@ -1407,7 +1416,7 @@ async function checkInterface(assetRoot) {
                     }))()`);
                     assert.equal(dataset.sections, 3, 'dataset details need metadata, schema and bounded preview sections');
                     assert.equal(dataset.previewRows, 3, 'dataset preview must retain the supplied bounded rows');
-                    assert.equal(dataset.schemaRows, 11, 'dataset schema must describe every saved column');
+                    assert.equal(dataset.schemaRows, 13, 'dataset schema must describe every saved column');
                     assert.ok(dataset.source && dataset.scrollRegions, 'dataset tables must retain source identity and keyboard scrolling');
                     assert.equal(dataset.forms, 0, 'dataset reading does not offer source acquisition or write actions');
                     if ([390, 1440].includes(width)) {
@@ -1487,6 +1496,8 @@ async function checkInterface(assetRoot) {
                             columns: [...document.querySelectorAll('[data-analysis-year]')].map(column => ({
                                 x: new Set([...column.querySelectorAll('rect')].map(mark => mark.getAttribute('x'))).size,
                                 marks: column.querySelectorAll('rect').length,
+                                year: Number(column.dataset.analysisYear),
+                                total: column.getAttribute('aria-label').split(': ')[1],
                                 vertical: [...column.querySelectorAll('rect')].every(mark => Number(mark.getAttribute('height')) > 0),
                             })),
                             proseGrades: [...document.querySelectorAll('[data-analysis-length-group="grade"]')].map(row => row.dataset.analysisLengthValue),
@@ -1503,15 +1514,19 @@ async function checkInterface(assetRoot) {
                             bplus: Boolean(host.querySelector('[data-grade="Bplus"]')),
                             fits: document.documentElement.scrollWidth <= innerWidth + 1};
                     })()`);
-                    assert.equal(metrics.rows, 48);
+                    assert.equal(metrics.rows, 36);
                     assert.equal(metrics.visible, 20);
                     assert.equal(metrics.enhanced, true);
                     assert.equal(metrics.pies, 2);
                     assert.ok(metrics.fullWidth && metrics.noMethod);
-                    assert.equal(metrics.columns.length, 3);
-                    assert.ok(metrics.columns.every(column => column.x === 1 && column.marks > 1 && column.vertical));
-                    assert.deepEqual(metrics.proseGrades, ["FA", "GA", "Bplus"]);
-                    assert.deepEqual(metrics.proseImportance, ["Top", "High", "Mid", "Low"]);
+                    assert.equal(metrics.columns[0].year, 2010);
+                    assert.equal(metrics.columns[1].year, 2011);
+                    assert.ok(metrics.columns.length >= 17);
+                    assert.ok(metrics.columns.every((column, index) =>
+                        column.year === 2010 + index && column.vertical &&
+                        (column.total === '0' ? column.marks === 0 : column.x === 1 && column.marks > 0)));
+                    assert.deepEqual(metrics.proseGrades, ["FA", "FL", "A", "AL", "GA", "Bplus"]);
+                    assert.deepEqual(metrics.proseImportance, ["Top", "High", "Mid", "Low", "NA", "Unknown", "Bottom"]);
                     assert.ok(metrics.bplus && metrics.fits && metrics.headersIntact);
                     if ([320, 1440].includes(width)) {
                         const filtered = await evaluate(`(() => {
@@ -1532,16 +1547,16 @@ async function checkInterface(assetRoot) {
                             host.querySelector('[data-analysis-size]').value = 'all';
                             host.querySelector('[data-analysis-size]').dispatchEvent(new Event('change', {bubbles: true}));
                             const complete = host.querySelectorAll('[data-analysis-row]:not([hidden])').length;
-                            host.querySelectorAll('thead th')[5].querySelector('button').click();
-                            const words = [...host.querySelectorAll('[data-analysis-row]:not([hidden])')].map(row => row.cells[5].dataset.sort);
+                            host.querySelectorAll('thead th')[6].querySelector('button').click();
+                            const words = [...host.querySelectorAll('[data-analysis-row]:not([hidden])')].map(row => row.cells[6].dataset.sort);
                             const numeric = words.filter(value => value !== '').map(Number);
                             return {count, allBplus, empty, reset, complete,
                                 zeroFirst: numeric[0] === 0,
                                 sorted: numeric.every((value, index) => !index || value >= numeric[index-1]),
-                                unknownLast: words.slice(-6).every(value => value === ''),
+                                unknownLast: words.slice(-5).every(value => value === ''),
                                 sameDocument: root === document};
                         })()`);
-                        assert.deepEqual(filtered, {count: 8, allBplus: true, empty: true, reset: 20, complete: 48, zeroFirst: true, sorted: true, unknownLast: true, sameDocument: true});
+                        assert.deepEqual(filtered, {count: 6, allBplus: true, empty: true, reset: 20, complete: 36, zeroFirst: true, sorted: true, unknownLast: true, sameDocument: true});
                         const importanceInteraction = await evaluate(`(() => {
                             const originalDocument = document;
                             const host = document.querySelector('[data-quality-analysis]');
@@ -1567,6 +1582,87 @@ async function checkInterface(assetRoot) {
                     }
                 }
                 if (surface === "quality-analysis" && [320, 1440].includes(width)) {
+                    const combined = await evaluate(`(async () => {
+                        const input = document.querySelector('[name=count_b]');
+                        const form = input.form;
+                        const results = document.querySelector('[data-quality-results]');
+                        const originalDocument = document;
+                        const settle = async () => {
+                            const deadline = performance.now() + 6000;
+                            while (results.hasAttribute('aria-busy')) {
+                                if (performance.now() > deadline) throw new Error('Combined quality toggle timed out');
+                                await new Promise(resolve => setTimeout(resolve, 20));
+                            }
+                        };
+                        const total = () => Number(document.querySelector('.analysis-summary dd').textContent.replaceAll(',', ''));
+                        const authors = () => document.querySelector('section[aria-labelledby="quality-authors"] tbody').rows.length;
+                        const initial = {total: total(), authors: authors()};
+                        const sectionIds = ['analysis-overview', 'analysis-articles', 'quality-authors'];
+                        const sections = sectionIds.every(id => document.getElementById(id));
+                        const columns = document.querySelector('[data-quality-analysis] table thead').rows[0].cells.length;
+                        const noOrdinalSort = [...document.querySelectorAll('[data-quality-analysis], [data-quality-authorship-table]')]
+                            .every(host => !host.querySelector('thead th:first-child button'));
+                        const labels = [...document.querySelectorAll('[data-analysis-row] > td:nth-child(2) > a:first-child')];
+                        const displayTitles = labels.every(link => !link.textContent.includes('_'));
+                        const identityTitles = labels.some(link => new URL(link.href).pathname.includes('_'));
+                        const importanceColors = [...document.querySelectorAll('[data-analysis-pie="importance"] .analysis-pie-slice')].map(mark => mark.getAttribute('fill'));
+                        input.focus(); input.click(); await settle();
+                        const included = {total: total(), authors: authors(), b: Boolean(document.querySelector('[data-analysis-row][data-grade="B"]')),
+                            bl: Boolean(document.querySelector('[data-analysis-row][data-grade="BL"]')), selected: results.dataset.countB};
+                        const focus = document.activeElement === input;
+                        const languages = [...document.querySelectorAll('.language-switcher a[hreflang]')]
+                            .every(link => new URL(link.href).searchParams.get('count_b') === '1');
+                        input.click(); await settle();
+                        const excluded = total() === initial.total && authors() === initial.authors && results.dataset.countB === '0';
+                        input.click(); input.click(); await settle();
+                        const latest = total() === initial.total && !input.checked;
+                        const originalFetch = window.fetch;
+                        window.fetch = async () => new Response('', {status: 503, headers: {'content-type': 'text/html'}});
+                        try { input.click(); await settle(); } finally { window.fetch = originalFetch; }
+                        const failedSafely = !input.checked && total() === initial.total &&
+                            Boolean(form.querySelector('[data-quality-analysis-status]').textContent);
+                        form.querySelector('[data-quality-analysis-status]').textContent = '';
+                        const host = document.querySelector('[data-quality-analysis]');
+                        host.querySelector('[data-analysis-size]').value = '20';
+                        host.querySelector('[data-analysis-size]').dispatchEvent(new Event('change', {bubbles: true}));
+                        host.querySelector('[data-analysis-next]').click();
+                        const numbers = [...host.querySelectorAll('[data-analysis-row]:not([hidden])')].map(row => Number(row.cells[0].textContent));
+                        const sequential = numbers.every((value, index) => value === 21 + index);
+                        return {initial, included, sections, columns, noOrdinalSort, displayTitles, identityTitles,
+                            colors: importanceColors.every(Boolean) && new Set(importanceColors).size >= 4,
+                            focus, languages, excluded, latest, failedSafely, sequential,
+                            noReload: originalDocument === document};
+                    })()`);
+                    assert.deepEqual(combined, {initial: {total: 36, authors: 1}, included: {total: 48, authors: 2, b: true, bl: true, selected: '1'},
+                        sections: true, columns: 8, noOrdinalSort: true, displayTitles: true, identityTitles: true, colors: true,
+                        focus: true, languages: true, excluded: true, latest: true, failedSafely: true, sequential: true, noReload: true},
+                        'one current-cohort switch governs charts, article rows and authors while preserving native semantics and identities');
+                    const details = await evaluate(`(() => {
+                        const trigger = [...document.querySelectorAll('.analysis-authorship-info')].find(link => {
+                            const dialog = document.getElementById(link.getAttribute('aria-controls'));
+                            return !link.closest('tr').hidden && dialog.querySelector('.analysis-editor-table');
+                        });
+                        trigger.focus(); trigger.click();
+                        const dialog = document.getElementById(trigger.getAttribute('aria-controls'));
+                        const names = [...dialog.querySelectorAll('.analysis-editor-table tbody th')].map(cell => cell.textContent);
+                        return {open: dialog.open, focused: dialog.contains(document.activeElement),
+                            rangeLinks: dialog.querySelectorAll('.analysis-authorship-evidence a[href*="oldid="]').length,
+                            editors: names.length, boundaryExcluded: !names.includes('Boundary_Editor'),
+                            anonymous: [...dialog.querySelectorAll('.analysis-editor-table a')].some(link =>
+                                link.textContent === '192.0.2.1' && decodeURIComponent(new URL(link.href).pathname).includes('Special:Contributions/192.0.2.1')),
+                            tableFit: dialog.querySelector('.analysis-editor-table').getBoundingClientRect().width <=
+                                dialog.querySelector('.analysis-editor-table').parentElement.clientWidth + 1,
+                            fit: dialog.scrollWidth <= dialog.clientWidth + 1};
+                    })()`);
+                    assert.deepEqual(details, {open: true, focused: true, rangeLinks: 2, editors: 3, boundaryExcluded: true, anonymous: true, tableFit: true, fit: true},
+                        'article evidence opens a bounded dialog with the exact revision range and only editors above ten percent');
+                    const attributionShot = await call('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false}, sessionId);
+                    fs.writeFileSync(path.join(outputRoot, `${locale}-quality-article-attribution-${width}.png`), Buffer.from(attributionShot.data, 'base64'));
+                    await press('Escape', 27);
+                    assert.equal(await evaluate("new Promise(resolve => requestAnimationFrame(() => resolve(document.activeElement.matches('.analysis-authorship-info'))))"), true, 'article evidence dialog restores focus to its visible info link');
+                    await evaluate("document.getElementById('analysis-articles').scrollIntoView()");
+                    const articleShot = await call('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false}, sessionId);
+                    fs.writeFileSync(path.join(outputRoot, `${locale}-quality-article-list-${width}.png`), Buffer.from(articleShot.data, 'base64'));
                     for (const section of ["distribution", "years", "lengths"]) {
                         await evaluate(`document.getElementById('analysis-${section}').scrollIntoView()`);
                         const chart = await call("Page.captureScreenshot", {format: "png", captureBeyondViewport: false}, sessionId);
@@ -2264,11 +2360,11 @@ async function checkInterface(assetRoot) {
                             proseGroups: document.querySelectorAll('[data-analysis-length-group]').length,
                             pageFits: document.documentElement.scrollWidth <= innerWidth + 1};
                     })()`);
-                    assert.equal(native.rows, 48);
+                    assert.equal(native.rows, 36);
                     assert.equal(native.pies, 2);
                     assert.ok(native.noMethod);
-                    assert.equal(native.columns, 3);
-                    assert.equal(native.proseGroups, 7);
+                    assert.ok(native.columns >= 17);
+                    assert.equal(native.proseGroups, 13);
                     assert.ok(native.controlsHidden && native.bplus && native.pageFits);
                 }
                 if (surface === "quality-authorship") {
@@ -2281,7 +2377,7 @@ async function checkInterface(assetRoot) {
                     })()`);
                     assert.deepEqual(native, {rows: 3, native: true, articles: 12, pageFits: true}, 'native quality-author tables must retain all evidence without JavaScript');
                 }
-                if (surface === "reports" || surface === "reports2" || surface === "quality-authorship") {
+                if (surface === "reports" || surface === "reports2" || surface === "quality-authorship" || surface === "quality-analysis") {
                     const fallback = await evaluate(`(() => {
                         const link = document.querySelector('a[aria-haspopup="dialog"]');
                         const dialog = document.getElementById(link.getAttribute('aria-controls'));

@@ -46,7 +46,7 @@ def _members() -> pl.DataFrame:
             "pa_class": ["B"],
             "pa_importance": ["Low"],
         },
-        schema=cache.SCHEMA,
+        schema=projects._PAGE_SCHEMA,  # ruff: ignore[private-member-access]
     )
 
 
@@ -116,7 +116,11 @@ class HourlyObservationTests(TestCase):
             saved, path = cache.cache("zhwiki", "电子游戏", _NOW)
             saved.write(
                 path,
-                _members().with_columns(pl.lit("FA").alias("pa_class")),
+                cache.encode_members(
+                    _members().with_columns(pl.lit("FA").alias("pa_class")),
+                    "zhwiki",
+                    "电子游戏",
+                ),
             )
             collect_project_membership(site, "电子游戏", now=_NOW)
             fetch.assert_called_once()
@@ -187,7 +191,7 @@ class HourlyObservationTests(TestCase):
             assert path == expected
             assert path.as_posix().isascii()
             assert store.contract == expected_store.contract
-            assert path.name == "20261110T150000.parquet"
+            assert path.name == "2026111014.parquet"
             _, preview = cache.cache("zhwiki", "电子游戏", _NOW, dry=True)
             _, other = cache.cache("zhwiki", "电子游戏/手机游戏", _NOW)
             assert preview.as_posix().isascii()
@@ -199,9 +203,12 @@ class HourlyObservationTests(TestCase):
                     "电子游戏",
                     _NOW - dt.timedelta(hours=age),
                 )
-                old_store.write(old_path, _members())
+                old_store.write(
+                    old_path,
+                    cache.encode_members(_members(), "zhwiki", "电子游戏"),
+                )
             cache.prune(_NOW)
-            assert len(list(Path("cache").rglob("*.parquet"))) == 2
+            assert len(list(Path("data/hourly").rglob("*.parquet"))) == 2
 
     @staticmethod
     def test_independent_consumers_share_one_hourly_query() -> None:
@@ -224,7 +231,7 @@ class HourlyObservationTests(TestCase):
                         Mock(),
                         site=site,
                     )
-                    assert frame.equals(_members())
+                    assert frame.select(_members().columns).equals(_members())
                     with patch.object(projects, "_replica") as replica:
                         revisions = projects.latest_revisions(site, [1, 2])
                     replica.assert_not_called()
@@ -239,7 +246,9 @@ class HourlyObservationTests(TestCase):
             )
             assert fetch.call_count == 2
             first, path = cache.cache("zhwiki", "Games", _NOW)
-            assert first.read(path).equals(_members())
+            assert first.read(path).equals(
+                cache.encode_members(_members(), "zhwiki", "Games"),
+            )
 
     @staticmethod
     def test_category_and_revision_consumers_need_no_more_database_reads() -> (
@@ -312,14 +321,17 @@ class HourlyObservationTests(TestCase):
             store, path = cache.cache("zhwiki", "Games", _NOW)
             store.read(path)
             assert not observed
-            store.write(path, _members())
+            store.write(
+                path,
+                cache.encode_members(_members(), "zhwiki", "Games"),
+            )
             store.read(path)
         assert [kind for kind, _ in observed] == [
             "source_written",
             "source_loaded",
         ]
         assert all(
-            source["metadata"]["file"].endswith("20261110T150000.parquet")
+            source["metadata"]["file"].endswith("2026111014.parquet")
             for _, source in observed
         )
         assert all(

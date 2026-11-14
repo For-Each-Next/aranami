@@ -53,6 +53,8 @@ class IdleExecutor(ThreadPoolExecutor):
         self._collections: dict[str, _Pending] = {}
         self._ordinary = 0
         self._primary_active = False
+        self._failed_collections: set[str] = set()
+        self._retries: dict[str, dt.datetime] = {}
         self._active_collections: set[str] = set()
         self._idle_active: str | None = None
         self._dispatching = 0
@@ -94,6 +96,7 @@ class IdleExecutor(ThreadPoolExecutor):
         with self._lock:
             return (
                 not self._closing
+                and not self._failed_collections
                 and not self._dispatching
                 and not self._ordinary
                 and self._idle_active is None
@@ -112,10 +115,14 @@ class IdleExecutor(ThreadPoolExecutor):
     def _start_pending(self) -> None:
         """Run page capture, collection and waiting reports in order."""
         if (
-            self._closing
+            self._closing  # ruff: ignore[too-many-boolean-expressions]
             or self._dispatching
             or self._primary_active
             or self._scheduler.state != STATE_RUNNING
+            or (
+                "project-data" in self._failed_collections
+                and "project-data" not in self._collections
+            )
         ):
             return
         if "project-data" in self._collections:
@@ -124,7 +131,10 @@ class IdleExecutor(ThreadPoolExecutor):
             return
         if "newsletter-history" in self._collections:
             self._start_collection("newsletter-history")
-        if "newsletter-history" in self._active_collections:
+        if (
+            "newsletter-history"
+            in self._active_collections | self._failed_collections
+        ):
             return
         for job_id in tuple(self._collections):
             self._start_collection(job_id)
@@ -165,12 +175,41 @@ class IdleExecutor(ThreadPoolExecutor):
                 if job_id == "project-data":
                     self._primary_active = False
 
+    def _retry_collection(self, job_id: str, *, failed: bool) -> None:
+        """Queue retries without acquiring scheduler shutdown locks."""
+        with self._lock:
+            if job_id not in {"project-data", "newsletter-history"}:
+                return
+            if failed:
+                self._failed_collections.add(job_id)
+                self._retries[job_id] = dt.datetime.now(dt.UTC) + dt.timedelta(
+                    seconds=30,
+                )
+            else:
+                self._failed_collections.discard(job_id)
+                self._retries.pop(job_id, None)
+        self._scheduler.wakeup()
+
+    def take_retries(self) -> dict[str, dt.datetime]:
+        """Transfer pending retry dates to the scheduler thread.
+
+        Returns:
+            Retry dates without holding locks during job changes.
+        """
+        with self._lock:
+            retries, self._retries = self._retries, {}
+            return retries
+
     def _run_job_success(
         self,
         job_id: str,
         events: list[JobExecutionEvent],
     ) -> None:
         """Publish outcomes before admitting more idle work."""
+        self._retry_collection(
+            job_id,
+            failed=any(getattr(event, "exception", None) for event in events),
+        )
         self._completed(job_id)
         super()._run_job_success(job_id, events)
         with self._lock:
@@ -182,7 +221,8 @@ class IdleExecutor(ThreadPoolExecutor):
         exc: BaseException,
         traceback: TracebackType | None = None,
     ) -> None:
-        """Release failed workers so other reports can run."""
+        """Release workers while dependent reports wait for data."""
+        self._retry_collection(job_id, failed=True)
         self._completed(job_id)
         super()._run_job_error(job_id, exc, traceback)
         with self._lock:
@@ -292,6 +332,8 @@ class IdleScheduler(BackgroundScheduler):
         """
         self._work.begin_dispatch()
         try:
+            for job_id, instant in self._work.take_retries().items():
+                self.modify_job(job_id, next_run_time=instant)
             return super()._process_jobs()
         finally:
             self._work.finish_dispatch()

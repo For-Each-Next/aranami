@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from data import project_data
 from data.runtime.status import record_dataset
 from shared.sources.cycle import source_cycle
+from shared.sources.quarry.freshness import require_boundary
 from shared.sources.quarry.projects import query_pages_by_wikiproject
 
 if TYPE_CHECKING:
@@ -49,6 +50,7 @@ def capture(  # ruff: ignore[too-many-arguments]
     Raises:
         ValueError: A missing date is historical, premature, or invalid.
     """  # ruff: ignore[docstring-extraneous-exception]
+    ready = False
 
     def load_members(name: str) -> pl.DataFrame:
         """Read source-native rows without daily-selection recursion.
@@ -56,21 +58,25 @@ def capture(  # ruff: ignore[too-many-arguments]
         Returns:
             Complete current rows with the durable revision columns.
         """
-        with source_cycle():
-            return query_pages_by_wikiproject(site, name).rename({
-                "page_revision": "rev_id",
-                "talk_revision": "talk_page_rev",
-            })
+        nonlocal ready
+        if not ready:
+            require_boundary(site.dbName(), boundary_date)
+            ready = True
+        return query_pages_by_wikiproject(site, name).rename({
+            "page_revision": "rev_id",
+            "talk_revision": "talk_page_rev",
+        })
 
-    bundle = project_data.ensure_snapshot(
-        site.dbName(),
-        project,
-        boundary_date,
-        load_members=load_members,
-        runtime=runtime,
-        dry=dry,
-        observed_at=observed_at,
-    )
+    with source_cycle(share_project_groups=True):
+        bundle = project_data.ensure_snapshot(
+            site.dbName(),
+            project,
+            boundary_date,
+            load_members=load_members,
+            runtime=runtime,
+            dry=dry,
+            observed_at=observed_at,
+        )
     record_dataset(
         bundle.manifest,
         runtime=runtime,

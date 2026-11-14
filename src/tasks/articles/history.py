@@ -298,18 +298,17 @@ def _selected_history(
     retained: pl.DataFrame,
     candidates: pl.DataFrame,
     refreshed: pl.DataFrame,
-    contract: str,
 ) -> pl.DataFrame:
     """Require complete selected evidence after concurrent writes.
 
     Returns:
-        Selected snapshots using this parser's contract, including
-        unchanged revisions retained in earlier months.
+        Archived snapshots, including unchanged revisions retained by
+        earlier parsers and in earlier months.
 
     Raises:
         ValueError: Retained selection has an older source revision.
     """
-    selected = retained.filter(pl.col("contract") == contract)
+    selected = retained
     missing = candidates.join(
         selected.select("page_id", "talk_page_id"),
         on=["page_id", "talk_page_id"],
@@ -383,7 +382,7 @@ def collect_article_history(
     now: dt.datetime,
     path: Path | None = None,
 ) -> pl.DataFrame:
-    """Backfill milestones and refresh changed revisions or contracts.
+    """Backfill milestones and refresh SQL-observed talk revisions.
 
     Args:
         site: Configured Chinese Wikipedia read-only source.
@@ -395,9 +394,11 @@ def collect_article_history(
         Supplied history scope's complete recorded events. Unknown dates
         remain null. Removed project members remain retained on disk.
         Use ``history_membership`` to include associated redirects.
-        Exact revision and parser/alias matches remain reusable without
-        age expiry. Successful source batches retain their observation
-        dates; interrupted acquisition resumes from unfinished pages.
+        Exact revision matches remain reusable without age expiry or
+        parser/alias invalidation. Archived facts retain their original
+        extraction contract. Successful source batches retain their
+        observation dates; interrupted acquisition resumes from
+        unfinished pages.
 
     Raises:
         ValueError: Site, clock, identities, or coverage are invalid.
@@ -442,15 +443,14 @@ def collect_article_history(
             "Newsletter history revision query omitted or duplicated pages."
         )
         raise ValueError(message)
-    unchanged = (
-        saved
-        .filter(pl.col("contract") == contract)
-        .join(revisions, on=["talk_page_id", "revision_id"], how="inner")
-        .join(
-            candidates.select("page_id", "talk_page_id"),
-            on=["page_id", "talk_page_id"],
-            how="semi",
-        )
+    unchanged = saved.join(
+        revisions,
+        on=["talk_page_id", "revision_id"],
+        how="inner",
+    ).join(
+        candidates.select("page_id", "talk_page_id"),
+        on=["page_id", "talk_page_id"],
+        how="semi",
     )
     pending = candidates.join(
         revisions,
@@ -479,7 +479,6 @@ def collect_article_history(
         retained,
         candidates,
         refreshed,
-        contract,
     )
     return _flatten(selected, members)
 

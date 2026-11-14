@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -546,15 +547,24 @@ class CurrentAuthorshipCollectionTests(TestCase):
         self.addCleanup(self.inference.stop)
         self.lookup = patch.object(
             collector,
-            "article_revision_at",
-            side_effect=lambda _site, **options: (
-                options["page_id"] * 10,
-                _NOW - dt.timedelta(days=1),
-                False,
-            ),
+            "listing_revisions",
+            side_effect=lambda _site, cutoffs: {
+                page_id: (page_id * 10, _NOW - dt.timedelta(days=1), False)
+                for page_id in cutoffs
+            },
         )
         self.lookup.start()
         self.addCleanup(self.lookup.stop)
+        self.enterContext(
+            patch.object(collector, "first_revisions", return_value={}),
+        )
+        self.enterContext(
+            patch.object(
+                wikiwho,
+                "preloaded_revision_sources",
+                side_effect=lambda *_args: nullcontext(),
+            ),
+        )
 
     @staticmethod
     def test_listing_lookup_and_tokens_are_cached_across_article_edits() -> (
@@ -570,8 +580,8 @@ class CurrentAuthorshipCollectionTests(TestCase):
             ) as collect,
             patch.object(
                 collector,
-                "article_revision_at",
-                return_value=(10, _NOW - dt.timedelta(days=1), False),
+                "listing_revisions",
+                return_value={1: (10, _NOW - dt.timedelta(days=1), False)},
             ) as lookup,
         ):
             runtime = Path(temporary)
@@ -583,7 +593,7 @@ class CurrentAuthorshipCollectionTests(TestCase):
                     observed_at=_NOW,
                 )
             lookup.assert_called_once()
-            assert lookup.call_args.kwargs["instant"] == _NOW
+            assert lookup.call_args.args[1] == {1: _NOW}
             collect.assert_called_once()
             assert collect.call_args.args[0]["revision_id"] == 10
             articles, coverage = prepare_current_b_articles(
@@ -720,6 +730,90 @@ class CurrentAuthorshipCollectionTests(TestCase):
                 )
                 assert collect.call_count == 2
             assert store.pending(store.load(runtime)).is_empty()
+
+    @staticmethod
+    def test_new_talk_boundary_reuses_an_already_cached_exact_revision() -> (
+        None
+    ):
+        """Reuse cached content and tokens after resolving a cutoff."""
+        with TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            store.checkpoint(
+                runtime,
+                members=_members(_membership(), _NOW),
+                evidence=_evidence(),
+            )
+            inference = _inference(_membership()).with_columns(
+                pl.lit(199).alias("banner_entry_talk_rev_id"),
+                pl.lit(198).alias("banner_prior_talk_rev_id"),
+                pl.lit(_NOW - dt.timedelta(hours=1)).alias(
+                    "banner_entry_timestamp",
+                ),
+            )
+            with (
+                patch.object(
+                    collector.assessment_inference,
+                    "load",
+                    return_value={"inference": inference},
+                ),
+                patch.object(
+                    collector,
+                    "listing_revisions",
+                    return_value={1: (30, _NOW - dt.timedelta(days=1), False)},
+                ) as lookup,
+                patch.object(
+                    wikiwho,
+                    "preloaded_revision_sources",
+                ) as contents,
+                patch.object(collector, "collect_revision") as tokens,
+            ):
+                collector.refresh_current_authorship(
+                    Mock(),
+                    _membership(),
+                    runtime=runtime,
+                    observed_at=_NOW,
+                )
+            lookup.assert_called_once()
+            contents.assert_not_called()
+            tokens.assert_not_called()
+            assert store.load(runtime)["evidence"].height == 1
+
+    @staticmethod
+    def test_cached_authorship_fills_missing_creation_via_sql() -> None:
+        """Fill an optional range without rereading saved tokens."""
+        with TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            store.checkpoint(
+                runtime,
+                members=_members(_membership(), _NOW),
+                evidence=_evidence(),
+            )
+            with (
+                patch.object(
+                    collector,
+                    "first_revisions",
+                    return_value={1: (5, _NOW - dt.timedelta(days=10))},
+                ) as lookup,
+                patch.object(
+                    wikiwho,
+                    "preloaded_revision_sources",
+                ) as contents,
+                patch.object(collector, "collect_revision") as tokens,
+            ):
+                for _ in range(2):
+                    collector.refresh_current_authorship(
+                        Mock(),
+                        _membership(),
+                        runtime=runtime,
+                        observed_at=_NOW,
+                    )
+            lookup.assert_called_once()
+            assert lookup.call_args.args[1] == [1]
+            contents.assert_not_called()
+            tokens.assert_not_called()
+            evidence = store.load(runtime)["evidence"]
+            assert evidence["creation_revision"].item() == 5
+            assert evidence["fetched_at"].item() == _NOW
 
     def test_unprocessed_current_revision_never_falls_back_to_older_one(
         self,

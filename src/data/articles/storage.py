@@ -6,7 +6,7 @@ Toolforge runtime directory for history, authorship, and milestones.
 
 from pathlib import Path
 
-DEFAULT_ROOT = Path("reports/data/articles")
-HISTORY_PATH = DEFAULT_ROOT / "history.parquet"
-AUTHORSHIP_PATH = DEFAULT_ROOT / "authorship.parquet"
-MILESTONES_PATH = DEFAULT_ROOT / "milestones.parquet"
+DEFAULT_ROOT = Path("data/hourly")
+HISTORY_PATH = DEFAULT_ROOT / "article-history.parquet"
+AUTHORSHIP_PATH = DEFAULT_ROOT / "article-authorship.parquet"
+MILESTONES_PATH = DEFAULT_ROOT / "article-milestones.parquet"

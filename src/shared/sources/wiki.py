@@ -14,6 +14,13 @@ import mwparserfromhell
 import pywikibot
 from pywikibot import pagegenerators
 
+from shared.sources.quarry.projects import page_metadata
+from shared.sources.quarry.revisions import (
+    page_info,
+    source_history,
+    source_revision,
+)
+from shared.sources.revisions import has_revision_cache, read_revision_contents
 from shared.sources.summaries import fetch_summary
 from shared.sources.template_aliases import read_aliases
 from shared.support.activity import report_activity
@@ -51,7 +58,10 @@ def read_pages(site: BaseSite, titles: Iterable[str]) -> list[pywikibot.Page]:
         target=", ".join(page.title() for page in pages),
         references=[("page", page.title()) for page in pages],
     )
-    loaded = {page: page for page in pagegenerators.PreloadingGenerator(pages)}
+    loaded = {
+        page: page
+        for page in pagegenerators.PreloadingGenerator(pages, groupsize=50)
+    }
     missing = [page.title() for page in pages if page not in loaded]
     if missing:
         message = f"Page preloading returned no result for: {missing}."
@@ -90,12 +100,14 @@ def read_page_ids(
         purpose=purpose,
         scope=scope,
     )
-    pages = pagegenerators.PagesFromPageidGenerator(
-        identifiers,
-        site=site,
-    )
+    metadata = page_metadata(site, identifiers)
+    pages = [
+        pywikibot.Page(site, title)
+        for title in metadata["full_title"].to_list()
+    ]
     loaded = {
-        page.pageid: page for page in pagegenerators.PreloadingGenerator(pages)
+        page.pageid: page
+        for page in pagegenerators.PreloadingGenerator(pages, groupsize=50)
     }
     if all(identifier in loaded for identifier in identifiers):
         report_activity(
@@ -297,6 +309,18 @@ class WikiReader:
             for title in dict.fromkeys(titles)
             if title not in self._resolved
         ]
+        if has_revision_cache():
+            for row in page_info(self.site, pending):
+                if not row.get("missing") and not row.get("redirect"):
+                    title = row["title"]
+                    self._resolved[title] = pywikibot.Page(
+                        self.site,
+                        title,
+                    ).title()
+                    self._resolved_page_ids[title] = row["pageid"]
+            pending = [
+                title for title in pending if title not in self._resolved
+            ]
         for offset in range(0, len(pending), 50):
             batch = pending[offset : offset + 50]
             result = self.site.simple_request(
@@ -400,6 +424,8 @@ class WikiReader:
             Wikitext from its current revision.
         """
         key = (title, None)
+        if key not in self._texts and has_revision_cache():
+            self._replica_text(title, None)
         if key not in self._texts:
             report_activity(
                 "mediawiki",
@@ -420,6 +446,32 @@ class WikiReader:
         self.source_page_ids[title] = self._text_page_ids[key]
         return self._texts[key]
 
+    def _replica_text(self, title: str, cutoff: dt.datetime | None) -> None:
+        """Select source metadata with SQL and reuse immutable text.
+
+        Raises:
+            NoPageError: The selected source is missing or inaccessible.
+            IsRedirectPageError: A current source redirects elsewhere.
+        """
+        metadata = source_revision(
+            self.site,
+            title,
+            at=cutoff - dt.timedelta(seconds=1) if cutoff else None,
+        )
+        page = pywikibot.Page(self.site, title)
+        if metadata is None or not metadata["text_visible"]:
+            raise pywikibot.exceptions.NoPageError(page)
+        revision = metadata["revision_id"]
+        content = read_revision_contents(self.site, [revision])[revision]
+        if content is None or content.page_id != metadata["page_id"]:
+            raise pywikibot.exceptions.NoPageError(page)
+        if cutoff is None and self.redirect_target(content.text) is not None:
+            raise pywikibot.exceptions.IsRedirectPageError(page)
+        key = (title, cutoff)
+        self._texts[key] = content.text
+        self._text_revisions[key] = revision
+        self._text_page_ids[key] = content.page_id
+
     def at(self, title: str, before: dt.datetime) -> str:
         """Read the source revision before an exclusive boundary.
 
@@ -435,6 +487,8 @@ class WikiReader:
         """
         cutoff = min(before.astimezone(dt.UTC), self.now)
         key = (title, cutoff)
+        if key not in self._texts and has_revision_cache():
+            self._replica_text(title, cutoff)
         if key not in self._texts:
             report_activity(
                 "mediawiki",
@@ -531,6 +585,8 @@ class WikiReader:
             dt.datetime.combine(end, dt.time.min, tzinfo=dt.UTC),
             self.now,
         )
+        if has_revision_cache():
+            return self._replica_history(title, begin, stop)
         page = pywikibot.Page(self.site, title)
         report_activity(
             "mediawiki",
@@ -565,4 +621,37 @@ class WikiReader:
                 "revision": revision.revid,
             })
             self._remember(title, revision.revid)
+        return rows
+
+    def _replica_history(
+        self,
+        title: str,
+        begin: dt.datetime,
+        stop: dt.datetime,
+    ) -> list[dict[str, object]]:
+        """Select display revisions with SQL and reuse shared text.
+
+        Returns:
+            Exact source rows in chronological order.
+
+        Raises:
+            ValueError: A selected revision is missing or mismatched.
+        """
+        metadata = source_history(self.site, title, begin, stop)
+        contents = read_revision_contents(
+            self.site,
+            [row["revision_id"] for row in metadata if row["text_visible"]],
+        )
+        rows = []
+        for row in metadata:
+            content = contents.get(row["revision_id"])
+            if content is None or content.page_id != row["page_id"]:
+                message = f"A display revision is unavailable for {title}."
+                raise ValueError(message)
+            rows.append({
+                "text": content.text,
+                "timestamp": content.timestamp,
+                "revision": content.revision_id,
+            })
+            self._remember(title, content.revision_id)
         return rows

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from data.newsletter.grades import QUALITY_GRADES, QUALITY_HISTORY_GRADES
-from shared.newsletter import DYK_PROJECTS, ROOT
+from shared.newsletter import DYK_PROJECT_DATABASE_TITLES, DYK_PROJECTS, ROOT
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -519,7 +519,15 @@ def _dyk(review: Mapping, year: int) -> str:
             .otherwise(
                 pl.coalesce([
                     pl
-                    .when(pl.col("projects").list.contains(project))
+                    .when(
+                        pl.any_horizontal([
+                            pl.col("projects").list.contains(spelling)
+                            for spelling, label in (
+                                DYK_PROJECT_DATABASE_TITLES.items()
+                            )
+                            if label == project
+                        ]),
+                    )
                     .then(pl.lit(_DYK_PROJECT_HEADINGS[project]))
                     .otherwise(None)
                     for project in DYK_PROJECTS

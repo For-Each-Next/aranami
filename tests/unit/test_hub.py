@@ -127,7 +127,7 @@ class TestHubDispatch(TestCase):
             """
             assert now is stamp
             assert path == Path(
-                "reports/data/articles/history.parquet",
+                "data/hourly/article-history.parquet",
             )
             assert observed.equals(members)
             assert read_membership("zhwiki", "电子游戏", fetch).equals(members)

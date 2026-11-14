@@ -1643,7 +1643,12 @@ class TestPageviewJob(TestCase):
     @staticmethod
     def test_dry_run_builds_each_missing_day_without_publishing() -> None:
         """Chain daily previews without changing the live page."""
-        context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
+        context = JobContext(
+            _site(),
+            dt.date(2026, 1, 13),
+            dry=True,
+            started_at=dt.datetime(2026, 1, 13, 19, tzinfo=dt.UTC),
+        )
         page = MagicMock(text=_TEXT)
         page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with (
@@ -1790,7 +1795,12 @@ class TestPageviewJob(TestCase):
 
     def test_deferred_download_preflight_preserves_report(self) -> None:
         """Defer source outages before constructing a daily report."""
-        context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
+        context = JobContext(
+            _site(),
+            dt.date(2026, 1, 13),
+            dry=True,
+            started_at=dt.datetime(2026, 1, 13, 19, tzinfo=dt.UTC),
+        )
         page = MagicMock(text=_TEXT)
         page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         self.downloads.side_effect = pageviews.PageviewsDeferredError(
@@ -1948,7 +1958,12 @@ class TestPageviewJob(TestCase):
             'aranami begin="page_views" history-days="900" '
             'missing-percent="90"',
         )
-        context = JobContext(_site(), dt.date(2026, 1, 11), dry=True)
+        context = JobContext(
+            _site(),
+            dt.date(2026, 1, 11),
+            dry=True,
+            started_at=dt.datetime(2026, 1, 11, 19, tzinfo=dt.UTC),
+        )
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
             patch.object(
@@ -2015,7 +2030,12 @@ class TestPageviewJob(TestCase):
     @staticmethod
     def test_gateway_outage_defers_without_publishing_or_raising() -> None:
         """Defer transient requests while other routines continue."""
-        context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
+        context = JobContext(
+            _site(),
+            dt.date(2026, 1, 13),
+            dry=True,
+            started_at=dt.datetime(2026, 1, 13, 19, tzinfo=dt.UTC),
+        )
         page = MagicMock(text=_TEXT)
         page.get.side_effect = lambda _page=page, **_kwargs: _page.text
         with (
@@ -2038,7 +2058,12 @@ class TestPageviewJob(TestCase):
     @staticmethod
     def test_custom_destination_controls_read_and_proposal() -> None:
         """Keep the job's destination choice outside report services."""
-        context = JobContext(_site(), dt.date(2026, 1, 13), dry=True)
+        context = JobContext(
+            _site(),
+            dt.date(2026, 1, 13),
+            dry=True,
+            started_at=dt.datetime(2026, 1, 13, 19, tzinfo=dt.UTC),
+        )
         target = "User:Example/Pageviews sandbox"
         with (
             patch.object(job, "job_run", return_value=nullcontext(context)),
@@ -2135,12 +2160,12 @@ class TestPageviewReadiness(TestCase):
             with self.subTest(started_at=timestamp):
                 self._check_run(dt.date(2026, 1, 11), timestamp, expected)
 
-    def test_older_backlog_advances_one_day_before_cutoff(self) -> None:
-        """Fill one older date while yesterday remains ineligible."""
+    def test_older_backlog_waits_until_daily_cutoff(self) -> None:
+        """Defer all Pageviews acquisition before UTC 19:00."""
         self._check_run(
             dt.date(2026, 1, 11),
             dt.datetime(2026, 1, 11, 17, tzinfo=dt.UTC),
-            _DAY,
+            None,
             text=_TEXT.replace("2026-01-09", "2026-01-08"),
         )
 
@@ -2168,22 +2193,15 @@ class TestPageviewReadiness(TestCase):
             ) as build,
         ):
             job.run(context=context)
-        assert [edit.tags[-1] for edit in context.edits] == [
-            "2026-01-10",
-            "2026-01-11",
-            "2026-01-12",
-        ]
-        assert all(
-            request.kwargs["prefetch_stop"] == dt.date(2026, 1, 13)
-            for request in build.call_args_list
-        )
+        assert context.edits == []
+        build.assert_not_called()
 
-    def test_historical_anchor_is_eligible_before_actual_cutoff(self) -> None:
-        """Allow available historical data before today's cutoff."""
+    def test_historical_anchor_waits_before_actual_cutoff(self) -> None:
+        """Defer historical calculations until UTC 19:00."""
         self._check_run(
             dt.date(2026, 1, 11),
             dt.datetime(2026, 1, 20, 1, tzinfo=dt.UTC),
-            _STOP,
+            None,
         )
 
     def test_future_anchor_cannot_bypass_actual_readiness(self) -> None:

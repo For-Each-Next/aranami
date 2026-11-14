@@ -114,6 +114,15 @@ def restore_assessment_schema(
     for name, dtype in frame.schema.items():
         declared = declared_columns.get(name)
         if (
+            name == "pa_taskforces"
+            and isinstance(declared, str)
+            and declared.startswith("List(Enum(categories=")
+        ):
+            expressions.append(
+                pl.col(name).cast(pl.List(_saved_enum(declared[5:-1]))),
+            )
+            continue
+        if (
             dtype != pl.String
             or _categories(name) is None
             or not isinstance(declared, str)

@@ -18,6 +18,7 @@ from sqlalchemy import (
     cast,
     column,
     func,
+    literal,
     or_,
     select,
     table,
@@ -130,7 +131,7 @@ def _project_title(
     raise ValueError(message)
 
 
-def fetch_en_key_pages() -> pl.DataFrame:
+def fetch_en_key_pages(members: pl.DataFrame | None = None) -> pl.DataFrame:
     """Read important or quality English video-game articles.
 
     Returns:
@@ -138,7 +139,11 @@ def fetch_en_key_pages() -> pl.DataFrame:
         and assessments.
     """
     replica = Replica("enwiki")
-    title = _project_title(replica, ("Video games",), "Video")
+    title = (
+        _project_title(replica, ("Video games",), "Video")
+        if members is None
+        else None
+    )
     page = tables.Page.__table__
     assessment = tables.PageAssessments.__table__
     project = tables.PageAssessmentsProjects.__table__
@@ -168,10 +173,16 @@ def fetch_en_key_pages() -> pl.DataFrame:
         .group_by(talk.c.page_title)
         .subquery("current_reviews")
     )
+    relation = page
+    if members is None:
+        relation = relation.join(
+            assessment,
+            assessment.c.pa_page_id == page.c.page_id,
+        ).join(project, project.c.pap_project_id == assessment.c.pa_project_id)
+    elif members.is_empty():
+        return pl.DataFrame(schema=_EN_SCHEMA)
     relation = (
-        page
-        .join(assessment, assessment.c.pa_page_id == page.c.page_id)
-        .join(project, project.c.pap_project_id == assessment.c.pa_project_id)
+        relation
         .join(
             item,
             and_(
@@ -205,23 +216,56 @@ def fetch_en_key_pages() -> pl.DataFrame:
             item.c.pp_value.label("qid"),
             sort.c.pp_value.label("en_defaultsort"),
             display.c.pp_value.label("en_displaytitle"),
-            assessment.c.pa_class.label("en_class"),
-            assessment.c.pa_importance.label("en_importance"),
+            (
+                assessment.c.pa_class if members is None else literal(None)
+            ).label("en_class"),
+            (
+                assessment.c.pa_importance
+                if members is None
+                else literal(None)
+            ).label("en_importance"),
             reviews.c.en_reviews,
         )
         .select_from(relation)
         .where(
             page.c.page_namespace == 0,
             page.c.page_is_redirect == 0,
-            project.c.pap_project_title == title,
-            or_(
-                assessment.c.pa_importance.in_(("Top", "High")),
-                assessment.c.pa_class.in_(("FA", "FL", "GA")),
-                reviews.c.en_reviews.is_not(None),
-            ),
+            and_(
+                project.c.pap_project_title == title,
+                or_(
+                    assessment.c.pa_importance.in_(("Top", "High")),
+                    assessment.c.pa_class.in_(("FA", "FL", "GA")),
+                    reviews.c.en_reviews.is_not(None),
+                ),
+            )
+            if members is None
+            else page.c.page_id.in_(members["page_id"].to_list()),
         )
     )
-    return replica.query(statement, schema_overrides=_EN_SCHEMA).collect()
+    result = replica.query(statement, schema_overrides=_EN_SCHEMA).collect()
+    if members is None:
+        return result
+    return (
+        result
+        .drop("en_title", "en_class", "en_importance")
+        .join(
+            members.select(
+                "page_id",
+                pl.col("page_title").alias("en_title"),
+                pl.col("pa_class").alias("en_class"),
+                pl.col("pa_importance").alias("en_importance"),
+            ),
+            on="page_id",
+            how="inner",
+            validate="1:1",
+        )
+        .filter(
+            pl.col("en_importance").is_in(["Top", "High"])
+            | pl.col("en_class").is_in(["FA", "FL", "GA"])
+            | pl.col("en_reviews").is_not_null(),
+        )
+        .select(*_EN_SCHEMA)
+    )
 
 
 def fetch_en_talk_revisions(page_ids: Sequence[int]) -> pl.DataFrame:

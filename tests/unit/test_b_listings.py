@@ -76,6 +76,81 @@ def _revision(identifier: int, grade: str) -> HistoricalRevision:
 class BListingTests(TestCase):
     """Reuse proved talk ranges independently of subject edits."""
 
+    def setUp(self) -> None:
+        """Exercise SDK fallback with exact-parent fixtures."""
+        self.enterContext(
+            patch.object(
+                collector,
+                "read_talk_revision_batches",
+                side_effect=OSError("Replica unavailable"),
+            ),
+        )
+
+    @staticmethod
+    def test_colors_preserve_completed_and_partial_proofs() -> None:
+        """Keep historical evidence across importance color changes."""
+        profile = assessment_profile("zhwiki", "电子游戏")
+        old = replace(
+            profile,
+            importance=tuple(
+                replace(label, color=None, color_variants=())
+                for label in profile.importance
+            ),
+            compatibility_importance=tuple(
+                replace(label, color=None, color_variants=())
+                for label in profile.compatibility_importance
+            ),
+        )
+        for revisions in (
+            (_revision(5, "B"), _revision(4, "C")),
+            (_revision(5, "B"), HistoricalRevision(4, 3, _NOW, None)),
+        ):
+            with (
+                TemporaryDirectory() as directory,
+                patch.object(
+                    collector,
+                    "template_aliases",
+                    return_value=_ALIASES,
+                ),
+                patch.object(
+                    collector,
+                    "read_talk_revisions",
+                    return_value=revisions,
+                ) as sdk,
+            ):
+                runtime = Path(directory)
+                site = OfflineSite("zh", "wikipedia")
+                with patch.object(
+                    collector,
+                    "assessment_profile",
+                    return_value=old,
+                ):
+                    collector.refresh_b_listings(
+                        site,
+                        _membership(),
+                        runtime=runtime,
+                    )
+                before = store.load(runtime)["inference"].row(0, named=True)
+                sdk.reset_mock()
+                with patch.object(
+                    collector,
+                    "read_talk_revision_batches",
+                ) as batch:
+                    collector.refresh_b_listings(
+                        site,
+                        _membership(),
+                        runtime=runtime,
+                    )
+                after = store.load(runtime)["inference"].row(0, named=True)
+                assert after["parser_version"] == before["parser_version"]
+                assert after["reason"] == before["reason"]
+                assert (
+                    after["banner_entry_talk_rev_id"]
+                    == before["banner_entry_talk_rev_id"]
+                )
+                sdk.assert_not_called()
+                batch.assert_not_called()
+
     @staticmethod
     def test_latest_range_and_subject_edit_reuse() -> None:
         """Select the latest B run and avoid unchanged history reads."""

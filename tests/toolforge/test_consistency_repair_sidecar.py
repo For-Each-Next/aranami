@@ -143,7 +143,7 @@ class TestConsistencyRepairSidecar(TestCase):
         snapshot["payload"] = "x" * (MAX_SNAPSHOT_BYTES - baseline - 300_000)
         with TemporaryDirectory() as directory:
             runtime = Path(directory)
-            path = runtime / "cache/toolforge/dashboard.json"
+            path = runtime / "data/hourly/dashboard.json"
             coordinator.save_dashboard_snapshot(path, snapshot)
             compact = json.loads(path.read_text())
             prepared = consistency_cache.read(
@@ -202,7 +202,7 @@ class TestConsistencyRepairSidecar(TestCase):
         snapshot["payload"] = "x" * (MAX_SNAPSHOT_BYTES - baseline - 300_000)
         with TemporaryDirectory() as directory:
             runtime = Path(directory)
-            path = runtime / "cache/toolforge/dashboard.json"
+            path = runtime / "data/hourly/dashboard.json"
             coordinator.save_dashboard_snapshot(path, snapshot)
             sidecar = path.with_name("consistency-repairs.parquet")
             full = consistency_cache.read(sidecar)["data"]
@@ -358,7 +358,7 @@ class TestConsistencyRepairSidecar(TestCase):
         identity = next(iter(compact["consistency"]["section0_repairs"]))
         with TemporaryDirectory() as directory:
             runtime = Path(directory)
-            sidecar = runtime / "cache/toolforge/consistency-repairs.parquet"
+            sidecar = runtime / "data/hourly/consistency-repairs.parquet"
             sidecar.parent.mkdir(parents=True)
             with patch.object(
                 server._PublicViews,
@@ -428,7 +428,7 @@ class TestConsistencyRepairSidecar(TestCase):
             runtime = Path(directory)
             views = server._PublicViews(runtime, server._ASSETS)
             original = views._page_identity()
-            sidecar = runtime / "cache/toolforge/consistency-repairs.parquet"
+            sidecar = runtime / "data/hourly/consistency-repairs.parquet"
             prepared = coordinator.prepare_snapshot_repairs(_snapshot())
             consistency_cache.save(sidecar, {"data": prepared["consistency"]})
             assert views._page_identity() != original
@@ -462,7 +462,7 @@ class TestConsistencyRepairSidecar(TestCase):
         snapshot = _snapshot()
         with TemporaryDirectory() as directory:
             runtime = Path(directory)
-            path = runtime / "cache/toolforge/dashboard.json"
+            path = runtime / "data/hourly/dashboard.json"
             coordinator.save_dashboard_snapshot(path, snapshot)
             original = path.read_bytes()
             previous = json.loads(original)

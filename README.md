@@ -1,13 +1,8 @@
 # Aranami
 
-This repository preserves the final Aranami v0.9.5 source. The v0.9.2 archive
-consolidated unpublished development after v0.8.8; v0.9.3 adds the corrected
-consistency prefill workflow, direct pagination and memory display. Version
-0.9.4 refines correction diffs, historical B-Class attribution and shared
-newsletter homepage data. Version 0.9.5 corrects native section-editor source
-checks, uses talk revision IDs in prefill links, cleans up talk-header ordering
-and removes the tool suffix from manually reviewed repair summaries. Toolforge
-operation remains independent of this read-only GitHub archive.
+This repository preserves the final Aranami v0.9.6 source. Toolforge
+operation remains independent of this read-only GitHub archive. The
+[CHANGELOG](CHANGELOG.md) records the completed releases.
 
 Aranami (荒波, “rough waves”) maintains Wikipedia project reports and provides
 article-maintenance tools and newsletter drafts. It serves
@@ -33,12 +28,9 @@ and daily Pageviews support later reports and newsletter drafts.
 - [Redirect recovery](https://aranami.toolforge.org/redirects/): redirects whose
   talk-page history contains a removed Video games project banner, with revision
   evidence and historical article excerpts for manual review.
-- [FA/GA editor statistics](https://aranami.toolforge.org/quality-authorship/):
-  experienced editors with estimated article credits by grade, listing evidence
-  and latest observed public edit dates.
-- [Quality article analysis](https://aranami.toolforge.org/quality-analysis/):
-  current quality grades including Bplus, listing-year charts, prose-length
-  ranges and a complete sortable article table, prepared hourly in the background.
+- [Current quality articles and contributors](https://aranami.toolforge.org/quality-analysis/):
+  one current-cohort overview, article directory and author statistics page,
+  with a global B/BL switch, listing revisions and saved contribution details.
 - [Newsletter drafts](https://aranami.toolforge.org/newsletter/): copyable
   quarterly wikitext and a separate January annual review for manual publication.
 - [Reports](https://aranami.toolforge.org/reports/): recorded attempts, confirmed
@@ -85,9 +77,12 @@ refetched. Project snapshots always come from new complete queries.
 [Architecture](docs/architecture.md) defines ownership, data and migration.
 The [documentation index](docs/README.md) links component references.
 
-The final source is retained on `trunk` and tagged `v0.9.5` in
+The final source is retained on `trunk` and tagged `v0.9.6` in
 [aranami-old](https://github.com/For-Each-Next/aranami-old).
 [CHANGELOG](CHANGELOG.md) records the completed releases.
 Historical records remain available through normal data readers after old-format
 extractors retire. Source is licensed under [CC0 1.0 Universal](LICENSE);
 upstream content and bundled assets retain their attributed licenses.
+
+The [saved-data map](docs/data/storage.md) documents the flat data layout,
+Parquet schemas, revision shards, migration and each fileset’s consumers.

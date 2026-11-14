@@ -177,9 +177,9 @@ def _store(runtime: Path | None, *, dry: bool) -> ReportStore:
     return ReportStore(
         root
         / (
-            "dry-run/reports/data/newsletter/historical"
+            "dry-run/data/daily/newsletter/historical"
             if dry
-            else "reports/data/newsletter/historical"
+            else "data/daily/newsletter/historical"
         ),
         dry=dry,
     )

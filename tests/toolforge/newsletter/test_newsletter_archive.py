@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 import tempfile
 from copy import deepcopy
 from html import unescape
@@ -18,6 +17,7 @@ import test_section_cache
 from starlette.testclient import TestClient
 
 from data.newsletter.archive import DEFAULT_PATH, NewsletterDraftArchive
+from data.prepared import read_values, write_values
 from newsletter import test_newsletter_data
 from shared.newsletter import Issue
 from tasks.zhwiki.newsletter.collection import collect_source_facts
@@ -117,11 +117,13 @@ class NewsletterDraftArchiveTests(TestCase):
         with self.assertRaises(ValueError):
             self.archive.read_feature(issue, dt.date(2025, 1, 1))
         metadata = (
-            self.path / issue.value / "annual-feature/20240101/metadata.json"
+            self.path
+            / issue.value
+            / "annual-feature/20240101/metadata.parquet"
         )
-        damaged = json.loads(metadata.read_bytes())
+        damaged = read_values(metadata)
         damaged["year_review"]["overview"]["total"] = 1
-        metadata.write_text(json.dumps(damaged), encoding="utf-8")
+        write_values(metadata, damaged)
         with self.assertRaises(ValueError):
             self.archive.read_feature(issue, first)
 
@@ -207,7 +209,7 @@ class NewsletterDraftArchiveTests(TestCase):
         """Select March's capture from current early annual facts."""
         runtime = self.path.parent
         archive = NewsletterDraftArchive(
-            runtime / "reports/records/newsletter",
+            runtime / "data/daily/newsletter-drafts",
         )
         day = dt.date(2026, 3, 1)
         review = _annual_review(self.issue, day)
@@ -321,12 +323,11 @@ class NewsletterDraftArchiveTests(TestCase):
         tomorrow = self.clock + dt.timedelta(days=1)
         newer = _data(tomorrow, total=4)
         self.archive.save(newer, generated_at=tomorrow)
-        first = self.path / self.issue.value / "20261030/observation.json"
-        second = self.path / self.issue.value / "20261031/observation.json"
+        first = self.path / self.issue.value / "20261030/observation.parquet"
+        second = self.path / self.issue.value / "20261031/observation.parquet"
         previous = first.read_bytes()
         assert (
-            json.loads(second.read_bytes())["facts"]
-            == (newer["issues"][self.issue.value])
+            read_values(second)["facts"] == (newer["issues"][self.issue.value])
         )
         assert first.read_bytes() == previous
         first.unlink()
@@ -390,14 +391,14 @@ class NewsletterDraftArchiveTests(TestCase):
         """Reject unsafe paths and damaged saved facts."""
         self.archive.save(_data(self.clock), generated_at=self.clock)
         folder = self.path / self.issue.value
-        path = folder / "20261030/observation.json"
-        source = path.read_text(encoding="utf-8")
-        damaged = json.loads(source)
+        path = folder / "20261030/observation.parquet"
+        source = path.read_bytes()
+        damaged = read_values(path)
         damaged["facts"]["overview"]["total"] += 1
-        path.write_text(json.dumps(damaged), encoding="utf-8")
+        write_values(path, damaged)
         with self.assertRaises(ValueError):
             self.archive.read(self.issue, dt.date(2026, 10, 30))
-        path.write_text(source, encoding="utf-8")
+        path.write_bytes(source)
         target = folder / "record.json"
         path.rename(target)
         path.symlink_to(target)
@@ -405,7 +406,7 @@ class NewsletterDraftArchiveTests(TestCase):
             self.archive.read(self.issue, dt.date(2026, 10, 30))
         path.unlink()
         target.rename(path)
-        catalog = folder / "catalog.json"
+        catalog = folder / "catalog.parquet"
         catalog.unlink()
         catalog.symlink_to(path)
         with self.assertRaises(OSError):
@@ -417,7 +418,7 @@ class NewsletterDraftArchiveTests(TestCase):
         """Select the original complete file after a catalog failure."""
         self.archive.save(_data(self.clock), generated_at=self.clock)
         original = self.archive.read_entry(self.issue, dt.date(2026, 10, 30))
-        (self.path / self.issue.value / "catalog.json").unlink()
+        (self.path / self.issue.value / "catalog.parquet").unlink()
         later = self.clock + dt.timedelta(hours=1)
         self.archive.save(_data(later, total=4), generated_at=later)
         assert (

@@ -1,16 +1,8 @@
 {% extends "base.html" %}
 {% from "includes/popup_dialog.html" import popup with context %}
+{% from "includes/quality_authorship_tables.html" import table_labels, article_table with context %}
 {% block assets %}<script type="module" src="{{ asset_url('components.js') }}"></script>{% endblock %}
 {% block contents_links %}<ul><li><a href="#quality-authors">{{ t.quality_authorship.authors }}</a></li></ul>{% endblock %}
-{% macro table_labels() %}data-quality-authorship-table data-first="{{ t.reports.first }}" data-last="{{ t.reports.last }}" data-next="{{ t.backlog.next }}" data-prev="{{ t.backlog.previous }}" data-rows="{{ t.reports.rows }}" data-page-size="{{ t.reports.page_size }}" data-page-status="{{ t.reports.page_status }}" data-sort-caption="{{ t.quality_authorship.sort_caption }}"{% endmacro %}
-{% macro article_table(articles, title) %}
-<div class="quality-authorship-table" {{ table_labels() }} data-default-sort="column3">
-<div class="ui-table"><div class="ui-table__table-wrapper table-scroll" tabindex="0" role="region" aria-label="{{ title }}">
-<table class="ui-table__table"><caption class="visually-hidden">{{ title }}</caption>
-<thead><tr><th scope="col" class="ui-table__table__cell--align-number">#</th><th scope="col">{{ t.quality_authorship.article }}</th><th scope="col" data-sort-type="number">{{ t.quality_authorship.grade }}</th><th scope="col">{{ t.quality_authorship.listed }}</th></tr></thead>
-<tbody>{% for article in articles %}<tr><td class="ui-table__table__cell--align-number">{{ loop.index }}</td><td data-sort="{{ article.title_label }}"><a href="{{ article.url }}">{{ article.title_label }}</a>{% if article.coauthors_label %} <span class="quality-authorship-coauthors" role="img" title="{{ article.coauthors_label }}" aria-label="{{ article.coauthors_label }}"><svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="{{ asset_url('assets/icons/report-icons.svg') }}#message-notice"></use></svg></span>{% endif %}</td><td data-sort="{{ article.grade_order }}">{{ article.grade }}</td><td data-sort="{{ article.date or '' }}">{% if article.date %}{% if article.listing_url %}<a href="{{ article.listing_url }}">{% endif %}<time datetime="{{ article.date }}">{{ article.date_label }}</time>{% if article.listing_url %}</a>{% endif %}<span class="context">{{ quality_authorship.parenthesis_open }}{{ article.age }}{{ quality_authorship.parenthesis_close }}</span>{% elif article.source_url %}<a href="{{ article.source_url }}">{{ t.quality_authorship.current_revision }}</a>{% else %}<span class="context">{{ t.data.unknown }}</span>{% endif %}</td></tr>{% endfor %}</tbody>
-</table></div></div></div>
-{% endmacro %}
 {% block content %}
 <p>{{ t.quality_authorship.intro }}</p>
 <p>{{ t.quality_authorship.accuracy_prefix }}<a href="{{ quality_authorship.wikiwho_url }}">WikiWho</a>{{ t.quality_authorship.accuracy_sources }}<a href="{{ quality_authorship.year_reviews_url }}">{{ t.quality_authorship.year_reviews }}</a>{{ t.quality_authorship.accuracy_sources_separator }}<a href="{{ quality_authorship.earlier_intro_url }}">{{ t.quality_authorship.earlier_intro }}</a>{{ t.quality_authorship.accuracy_end }}</p>

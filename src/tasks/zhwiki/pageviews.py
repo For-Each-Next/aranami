@@ -28,6 +28,7 @@ from data.caching.pageviews import (
     PageviewsCache,
     read_pageviews_snapshot,
 )
+from data.newsletter import traffic as newsletter_traffic
 from data.observations import project_snapshot_references
 from data.pageview_types import (
     DestinationState,
@@ -1586,6 +1587,13 @@ def _report_observations(  # ruff: ignore[too-many-arguments]
             dry=dry,
         )
         batch.retained_projects.add(identity)
+        if site.dbName() == "zhwiki" and settings.project == "电子游戏":
+            _prepare_newsletter_traffic(
+                site,
+                prefetch_stop or stop,
+                titles,
+                dry=dry,
+            )
     return articles, views
 
 
@@ -1739,6 +1747,8 @@ def _cached_annual_popularity(
     year: int,
     through: dt.date,
     titles: Sequence[str],
+    *,
+    dry: bool = False,
 ) -> dict | None:
     """Recalculate calendar-year views from retained daily observations.
 
@@ -1747,6 +1757,7 @@ def _cached_annual_popularity(
         year: Calendar year being reviewed.
         through: Exclusive acquisition cutoff.
         titles: Current article population selected by the newsletter.
+        dry: Read only isolated preview observations.
 
     Returns:
         Ranked measured articles and nullable project totals through the
@@ -1761,7 +1772,13 @@ def _cached_annual_popularity(
         {"page": titles},
         schema={"page": pl.String},
     ).unique()
-    retained = pageview_data.read_snapshot(site.dbName(), "电子游戏")
+    retained = pageview_data.read_snapshot(
+        site.dbName(),
+        "电子游戏",
+        dry=dry,
+    )
+    if retained is None and dry:
+        return None
     data = (
         pageview_data.as_cache_frame(retained)
         if retained is not None
@@ -1884,6 +1901,42 @@ def read_monthly_popularity(
         }
         for row in observed.iter_rows(named=True)
     ]
+
+
+def _prepare_newsletter_traffic(
+    site: BaseSite,
+    stop: dt.date,
+    titles: Sequence[str],
+    *,
+    dry: bool,
+) -> None:
+    """Calculate newsletter summaries during Pageviews acquisition.
+
+    Runtime gates acquisition until UTC 19:00. Consumers select these
+    prepared values without scanning raw traffic records.
+    """
+    year = (stop - dt.timedelta(days=1)).year
+    newsletter_traffic.save(
+        {
+            str(value): {
+                "annual": _cached_annual_popularity(
+                    site,
+                    value,
+                    stop,
+                    titles,
+                    dry=dry,
+                ),
+                "monthly": read_monthly_popularity(
+                    site,
+                    value,
+                    stop,
+                    dry=dry,
+                ),
+            }
+            for value in (year - 1, year)
+        },
+        dry=dry,
+    )
 
 
 def read_annual_popularity(

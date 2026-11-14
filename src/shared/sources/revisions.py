@@ -1,9 +1,10 @@
-"""Read exact revision contents and reuse verified newsletter text.
+"""Read exact revision contents and reuse verified source text.
 
 Batch known revision IDs without rediscovering current page metadata.
 Store only immutable raw text, so parser changes need no invalidation.
-Callers must select the historical revision and its SHA-1 from the wiki
-before lookup; hidden content never falls back to cached text.
+Shared source passes check SQL ownership and visibility before reusing
+text. Standalone newsletter caches require fresh API hashes. Hidden
+content never falls back to cached text.
 """
 
 # Response contract violations consistently use ValueError.
@@ -15,17 +16,21 @@ import datetime as dt
 import hashlib
 import logging
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import polars as pl
 from pywikibot.exceptions import APIError
+from sqlalchemy.exc import SQLAlchemyError
 
+from shared.sources.quarry.revisions import revision_metadata
 from shared.support.activity import report_activity
-from shared.support.cache import ParquetCache
+from shared.support.cache import ParquetCache, cache_key
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Iterator
     from pathlib import Path
 
     from pywikibot.site import BaseSite
@@ -50,6 +55,101 @@ _CACHE = ParquetCache(
     max_rows=_MAX_ROWS,
     max_bytes=_MAX_BYTES,
 )
+_CACHES: ContextVar[tuple[Path | None, dict, object] | None] = ContextVar(
+    "source_revision_caches",
+    default=None,
+)
+
+
+@contextmanager
+def revision_text_cache(
+    directory: Path | None,
+    *,
+    factory: Callable | None = None,
+) -> Iterator[None]:
+    """Share SQL-validated revision text during one source pass.
+
+    Args:
+        directory: Mode-specific persistent root, or none for memory.
+        factory: Optional runtime-owned persistent store per wiki.
+
+    Yields:
+        Control with independent per-wiki text caches. Successful reads
+        survive later failures; preview callers supply a separate root.
+    """
+    caches = {}
+    token = _CACHES.set((directory, caches, factory))
+    try:
+        yield
+    finally:
+        _CACHES.reset(token)
+        for cache in caches.values():
+            cache.save()
+
+
+def has_revision_cache() -> bool:
+    """Return whether SQL-backed source acquisition is active."""
+    return _CACHES.get() is not None
+
+
+def _text_cache(site: BaseSite) -> RevisionTextCache | None:
+    """Load this pass's isolated wiki cache on first use.
+
+    Returns:
+        A bounded cache, or none outside a source pass.
+    """
+    scope = _CACHES.get()
+    if scope is None:
+        return None
+    directory, caches, factory = scope
+    wiki = site.dbName()
+    if wiki not in caches:
+        caches[wiki] = (
+            factory(wiki)
+            if factory
+            else RevisionTextCache(
+                directory / cache_key("revision-text", wiki)
+                if directory is not None
+                else None,
+                dt.datetime.now(dt.UTC),
+            )
+        )
+    return caches[wiki]
+
+
+def _retained_contents(
+    site: BaseSite,
+    identifiers: list[int],
+    cache: RevisionTextCache,
+) -> dict[int, RevisionContent | None]:
+    """Reuse content after SQL checks ownership and visibility.
+
+    Returns:
+        Cached and explicitly hidden rows. Replica errors and missing
+        metadata leave IDs for fresh API reads, never stale cache reuse.
+    """
+    try:
+        metadata = revision_metadata(site, identifiers)
+    except OSError, SQLAlchemyError:
+        return {}
+    result = {}
+    for identifier, row in metadata.items():
+        if not row["text_visible"]:
+            cache.unavailable(identifier)
+            result[identifier] = None
+            continue
+        text = cache.verified_text(identifier)
+        if text is not None:
+            result[identifier] = RevisionContent(
+                row["page_id"],
+                row["title"],
+                identifier,
+                row["timestamp"],
+                hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest(),
+                text,
+                row["parent_id"],
+            )
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +163,7 @@ class RevisionContent:
         timestamp: Aware UTC timestamp of the revision.
         sha1: Base-16 revision hash supplied by MediaWiki.
         text: Complete main-slot content, including empty text.
+        parent_id: Actual parent revision when supplied by the source.
     """
 
     page_id: int
@@ -71,6 +172,7 @@ class RevisionContent:
     timestamp: dt.datetime
     sha1: str
     text: str
+    parent_id: int | None = None
 
 
 def _positive_identifier(value: object) -> bool:
@@ -158,6 +260,7 @@ def _revision_content(page: dict, revision: dict) -> RevisionContent | None:
         stamp,
         sha1.lower(),
         text,
+        revision.get("parentid"),
     )
 
 
@@ -249,7 +352,8 @@ def read_revision_contents(
     Pywikibot's high-level revision loader requires all IDs to belong to
     one Page. This narrow adapter permits exact IDs across pages without
     another current-revision query. Historical selection stays with the
-    caller; hidden contents never fall back to previously cached text.
+    caller. Shared source passes reuse SQL-validated text. Hidden
+    contents never fall back to previously cached text.
 
     Args:
         site: Existing authenticated read-only wiki client.
@@ -267,9 +371,13 @@ def read_revision_contents(
         message = "Revision content reads require positive integer IDs."
         raise ValueError(message)
     identifiers = list(dict.fromkeys(identifiers))
-    result = {}
-    for offset in range(0, len(identifiers), _REVISION_BATCH_SIZE):
-        batch = identifiers[offset : offset + _REVISION_BATCH_SIZE]
+    cache = _text_cache(site) if identifiers else None
+    result = _retained_contents(site, identifiers, cache) if cache else {}
+    pending = [
+        identifier for identifier in identifiers if identifier not in result
+    ]
+    for offset in range(0, len(pending), _REVISION_BATCH_SIZE):
+        batch = pending[offset : offset + _REVISION_BATCH_SIZE]
         report_activity(
             "mediawiki",
             "revision_text",
@@ -289,8 +397,23 @@ def read_revision_contents(
         except APIError as error:
             message = "The revision content query failed."
             raise ValueError(message) from error
-        result.update(_revision_response(response, batch))
-    return result
+        contents = _revision_response(response, batch)
+        result.update(contents)
+        if cache is not None:
+            for identifier, content in contents.items():
+                if content is not None:
+                    cache.put_content({
+                        "revision_id": identifier,
+                        "page_id": content.page_id,
+                        "title": content.title,
+                        "timestamp": content.timestamp.isoformat(),
+                        "parent_id": content.parent_id,
+                        "sha1": content.sha1,
+                        "text": content.text,
+                    })
+                else:
+                    cache.unavailable(identifier)
+    return {identifier: result[identifier] for identifier in identifiers}
 
 
 def _load(path: Path | None, now: int) -> pl.DataFrame:
@@ -313,7 +436,7 @@ def _load(path: Path | None, now: int) -> pl.DataFrame:
 
 
 class RevisionTextCache:
-    """Retain Chinese Wikipedia revision texts for thirty days."""
+    """Retain one wiki's immutable revision texts for thirty days."""
 
     def __init__(self, path: Path | None, now: dt.datetime) -> None:
         """Load disposable data without source requests.
@@ -327,6 +450,9 @@ class RevisionTextCache:
         self._rows = {
             row["revision"]: row for row in _load(path, self.now).to_dicts()
         }
+        self._bytes = sum(
+            len(row["text"].encode()) + 128 for row in self._rows.values()
+        )
 
     def get(self, revision: int, sha1: str | None) -> str | None:
         """Return text only when fresh wiki evidence matches its digest.
@@ -360,8 +486,18 @@ class RevisionTextCache:
             revision: Source revision identifier.
             text: Complete source content, including empty text.
         """
-        if len(text.encode()) > _MAX_TEXT:
+        size = len(text.encode())
+        if size > _MAX_TEXT:
             return
+        previous = self._rows.pop(revision, None)
+        if previous is not None:
+            self._bytes -= len(previous["text"].encode()) + 128
+        while self._rows and (
+            len(self._rows) >= _MAX_ROWS
+            or self._bytes + size + 128 > _MAX_BYTES // 2
+        ):
+            removed = self._rows.pop(next(iter(self._rows)))
+            self._bytes -= len(removed["text"].encode()) + 128
         self._rows[revision] = {
             "revision": revision,
             "sha1": hashlib.sha1(
@@ -371,6 +507,27 @@ class RevisionTextCache:
             "text": text,
             "used_at": self.now,
         }
+        self._bytes += size + 128
+
+    def put_content(self, content: dict) -> None:
+        """Accept the common persistent revision-store record."""
+        self.put(content["revision_id"], content["text"])
+
+    def unavailable(self, revision: int) -> None:
+        """Discard text that the source no longer exposes."""
+        row = self._rows.pop(revision, None)
+        if row is not None:
+            self._bytes -= len(row["text"].encode()) + 128
+
+    def verified_text(self, revision: int) -> str | None:
+        """Read verified text after the caller checks SQL visibility.
+
+        Returns:
+            Unmodified cached text, or none for absent or damaged data.
+            A revision ID alone never authorizes using this method.
+        """
+        row = self._rows.get(revision)
+        return self.get(revision, row["sha1"]) if row is not None else None
 
     def save(self) -> None:
         """Save bounded rows without failing report collection."""
@@ -391,4 +548,4 @@ class RevisionTextCache:
         try:
             _CACHE.write(self.path, frame)
         except OSError, ValueError, pl.exceptions.PolarsError:
-            _LOGGER.warning("Could not save newsletter revision cache.")
+            _LOGGER.warning("Could not save source revision cache.")

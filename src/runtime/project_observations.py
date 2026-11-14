@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 from contextlib import contextmanager
 from functools import partial
+from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING
 
@@ -19,13 +20,20 @@ import polars as pl
 from data import project_data
 from data.articles import current_assessments
 from data.caching import project_observations as hourly_cache
-from data.observations import observation_scope, record_project_snapshot
+from data.observations import (
+    observation_scope,
+    record_page_inputs,
+    record_project_snapshot,
+)
+from data.revisions import RevisionStore
 from shared.config import ASSESSMENT_CATEGORIES
 from shared.sources.cycle import source_cycle
 from shared.sources.quarry.projects import (
     category_observations,
     query_pages_by_wikiproject,
 )
+from shared.sources.revisions import RevisionTextCache, revision_text_cache
+from shared.support.cache import cache_key
 from tasks import project_data as project_capture
 
 if TYPE_CHECKING:
@@ -130,20 +138,20 @@ def collect_project_membership(
         if not frame.is_empty() and (
             not retain_assessments or current_assessments.DEFAULT_PATH.exists()
         ):
-            return frame
+            restored = hourly_cache.decode_members(
+                frame,
+                site.dbName(),
+                project,
+            )
+            record_page_inputs(site.dbName(), project, restored)
+            return restored
         reader = (
             partial(_daily_membership, now=now, dry=dry)
             if now.hour == 0 and now.date() >= project_data.ACTIVATION_DATE
             else None
         )
-        with source_cycle(membership_reader=reader):
-            frame = (
-                query_pages_by_wikiproject(site, project)
-                .select(
-                    list(hourly_cache.SCHEMA),
-                )
-                .cast(hourly_cache.SCHEMA)
-            )
+        with source_cycle(membership_reader=reader, share_project_groups=True):
+            frame = query_pages_by_wikiproject(site, project)
         if frame.is_empty():
             message = "Hourly membership has no complete project rows."
             raise ValueError(message)
@@ -166,8 +174,11 @@ def collect_project_membership(
                 frame,
                 observed_at=observed_at,
             )
-        cache.write(path, frame)
-        return frame
+        encoded = hourly_cache.encode_members(frame, site.dbName(), project)
+        cache.write(path, encoded)
+        restored = hourly_cache.decode_members(encoded, site.dbName(), project)
+        record_page_inputs(site.dbName(), project, restored)
+        return restored
 
 
 def _daily_membership(
@@ -205,10 +216,12 @@ def _daily_membership(
             "scheduled_for": manifest["metadata"]["scheduled_for"],
         },
     )
-    return snapshot.tables["members"].rename({
+    frame = snapshot.tables["members"].rename({
         "rev_id": "page_revision",
         "talk_page_rev": "talk_revision",
     })
+    record_page_inputs(site.dbName(), project, frame)
+    return frame
 
 
 @contextmanager
@@ -262,8 +275,30 @@ def project_cycle(
         if selected
         else partial(collect_project_membership, now=instant, dry=dry)
     )
+
+    def revision_store(wiki: str) -> RevisionStore | RevisionTextCache:
+        """Select shared Chinese files or another wiki's isolated cache.
+
+        Returns:
+            The caller's production or preview revision store.
+        """
+        if wiki == "zhwiki":
+            return RevisionStore(
+                Path("dry-run/data/revisions" if dry else "data/revisions"),
+            )
+        return RevisionTextCache(
+            Path("dry-run/cache" if dry else "cache")
+            / "revision-contents"
+            / cache_key("revision-text", wiki),
+            instant,
+        )
+
     with (
         observation_scope(),
+        revision_text_cache(
+            Path("dry-run/cache" if dry else "cache") / "revision-contents",
+            factory=revision_store,
+        ),
         source_cycle(
             membership_reader=reader,
             category_reader=partial(_hourly_categories, now=instant, dry=dry),

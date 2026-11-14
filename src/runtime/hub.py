@@ -50,7 +50,10 @@ from runtime.project_observations import (
     collect_project_membership,
     project_cycle,
 )
-from runtime.quality_analysis import schedule_quality_analysis
+from runtime.quality_analysis import (
+    refresh_startup_quality,
+    schedule_quality_analysis,
+)
 from runtime.redirects import RedirectScanner
 from shared.assessment_profiles import assessment_profile
 from shared.config import COLLECTION_DEFINITIONS, PROJECT_DATA_SCOPES
@@ -58,7 +61,10 @@ from shared.deployment import project_version
 from shared.identity import configure_pywikibot
 from shared.sources.cycle import source_cycle
 from shared.sources.quarry.projects import query_pages_by_wikiproject
-from tasks import project_data as project_capture
+from tasks import (
+    project_data as project_capture,
+    revisions as revision_collection,
+)
 from tasks.articles.authorship import enrich_authorship
 from tasks.articles.authorship_provenance import refresh_current_corrections
 from tasks.articles.history import (
@@ -97,7 +103,7 @@ class HubConfig:
     Attributes:
         dry: Generate wiki previews without website writes or serving.
         run_immediately: Check both outputs before their first trigger.
-        output: Saved JSON read by the website and local HTTP endpoint.
+        output: Saved Parquet for the website and local HTTP endpoint.
         log_dir: Directory for process diagnostics and website lifecycle
             records.
         interval: Website check seconds; the default follows UTC hours.
@@ -109,7 +115,7 @@ class HubConfig:
 
     dry: bool = False
     run_immediately: bool = True
-    output: Path = Path("cache/toolforge/dashboard.json")
+    output: Path = Path("data/hourly/dashboard.parquet")
     log_dir: Path = Path("logs")
     interval: float = _WEBSITE_CHECK_SECONDS
     days: int = 100
@@ -266,7 +272,7 @@ def refresh_article_history() -> None:
         )
 
 
-def refresh_project_data() -> None:
+def refresh_project_data() -> None:  # ruff: ignore[complex-structure]
     """Capture configured projects independently before daily consumers.
 
     Startup recovery captures only the actual current UTC boundary.
@@ -282,25 +288,44 @@ def refresh_project_data() -> None:
     configure_pywikibot()
     failures = []
     memberships: dict[str, list[pl.DataFrame]] = {}
+    chinese_members = None
     with (
         collection_run("project-data", trigger="scheduled") as execution,
         source_cycle(),
     ):
         for language, project in PROJECT_DATA_SCOPES:
-            try:
+            try:  # ruff: ignore[too-many-statements-in-try-clause]
                 project_capture.capture(
                     pywikibot.Site(language, "wikipedia"),
                     project,
                     instant.date(),
                 )
+                if language != "zh":
+                    continue
                 members = collect_project_membership(
                     pywikibot.Site(language, "wikipedia"),
                     project,
                     now=instant,
                 )
                 memberships.setdefault(language, []).append(members)
+                if project == "电子游戏":
+                    chinese_members = members
             except Exception as error:
                 _LOGGER.exception("Project snapshot failed: %s", project)
+                failures.append(error)
+                execution.fail(error)
+        if chinese_members is not None:
+            try:
+                revision_collection.prefetch(
+                    pywikibot.Site("zh", "wikipedia"),
+                    chinese_members,
+                )
+                if instant.hour == 0 and not failures:
+                    revision_collection.prune_daily(instant.date())
+            except Exception as error:
+                _LOGGER.exception(
+                    "Revision prefetch failed; dependent reports will wait.",
+                )
                 failures.append(error)
                 execution.fail(error)
         for language, frames in memberships.items():
@@ -565,6 +590,7 @@ def run(config: HubConfig) -> None:
             updater.start()
             resources.callback(updater.stop)
             refresh_saved_repairs(config.output)
+            refresh_startup_quality(Path.cwd())
 
         scheduler = monitor.start(
             dry=config.dry,
@@ -624,7 +650,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("cache/toolforge/dashboard.json"),
+        default=Path("data/hourly/dashboard.parquet"),
     )
     parser.add_argument("--log-dir", type=Path, default=Path("logs"))
     parser.add_argument(

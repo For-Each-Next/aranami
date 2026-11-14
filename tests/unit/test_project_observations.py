@@ -74,6 +74,7 @@ class TestProjectObservations(TestCase):
         instant = dt.datetime(2026, 11, 3, tzinfo=dt.UTC)
         site = Mock()
         site.dbName.return_value = "zhwiki"
+        site.dbName.return_value = "zhwiki"
         rows = pl.DataFrame({"rev_id": [51], "talk_page_rev": [92]})
         snapshot = _snapshot(rows)
         fetch = Mock(side_effect=AssertionError("Live fallback"))
@@ -153,6 +154,7 @@ class TestProjectObservations(TestCase):
         """Reject missing history without collecting new rows."""
         site = Mock()
         site.dbName.return_value = "zhwiki"
+        site.dbName.return_value = "zhwiki"
         fetch = Mock()
         for boundary in (dt.date(2026, 11, 2), dt.date(2026, 11, 3)):
             with (
@@ -176,6 +178,7 @@ class TestProjectObservations(TestCase):
     def test_capture_reads_current_source_outside_its_own_selector() -> None:
         """Read current replica rows without recursing."""
         site = Mock()
+        site.dbName.return_value = "zhwiki"
         fetch = Mock(return_value=pl.DataFrame({"rev_id": [7]}))
 
         def capture(*_args: object, **_kwargs: object) -> SimpleNamespace:

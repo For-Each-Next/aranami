@@ -179,7 +179,9 @@ class TestReportLifecycle(TestCase):
                     Explicit saved or unchanged publication evidence.
                 """
                 assert self._status(edit.title)["outcome"] == "running"
-                directory = self.root / "reports/records" / edit.report_key
+                directory = ReportStore(self.root / "data/daily").data_path(
+                    edit.report_key,
+                )
                 selected = json.loads((directory / "latest.json").read_text())
                 generation = directory / selected["latest"]
                 manifest = json.loads(
@@ -319,4 +321,4 @@ class TestReportLifecycle(TestCase):
         save.assert_not_called()
         assert not (self.root / "state").exists()
         assert not (self.root / "reports").exists()
-        assert (self.root / "dry-run/reports").is_dir()
+        assert (self.root / "dry-run/data").is_dir()

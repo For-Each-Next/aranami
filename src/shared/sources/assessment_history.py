@@ -13,20 +13,26 @@ from __future__ import annotations
 import datetime as dt
 import time
 from dataclasses import dataclass
+from itertools import batched
 from typing import TYPE_CHECKING
 
+import polars as pl
 import pywikibot
 
-from shared.sources.quarry.assessment import listing_revision
+from shared.sources.quarry.assessment import (
+    listing_revision,
+    talk_revision_rows,
+)
+from shared.sources.revisions import read_revision_contents
 from shared.support.activity import report_activity
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator, Mapping
 
     from pywikibot.site import BaseSite
 
 
-MAX_REVISIONS = 20
+MAX_REVISIONS = 50
 _REQUEST_INTERVAL = 0.2
 _MAX_TEXT_BYTES = 1_000_000
 
@@ -90,6 +96,80 @@ class HistoryBudget:
 
 class AssessmentCohortChangedError(ValueError):
     """Signal a source talk newer than the requested cohort."""
+
+
+def read_talk_revision_batches(
+    site: BaseSite,
+    starts: Mapping[int, int],
+    *,
+    budget: HistoryBudget,
+    stops: Mapping[int, int | None] | None = None,
+    active: Callable[[int], bool] | None = None,
+) -> Iterator[list[tuple[int, HistoricalRevision]]]:
+    """Read immutable talk predecessors in mixed fifty-content batches.
+
+    Args:
+        site: Wiki supplying source metadata and exact contents.
+        starts: Talk page IDs and inclusive unparsed resume revisions.
+        budget: Shared pacing, deadline and foreground priority guard.
+        stops: Optional excluded retained boundary per talk.
+        active: Optional current owner-admission predicate, rechecked
+            before every content batch to avoid already completed scans.
+
+    Yields:
+        At most fifty exact owner/revision pairs per content request.
+        Hidden source stays unknown without falling back to cached text.
+
+    Raises:
+        ValueError: Returned contents disagree with selected metadata.
+    """
+    if not starts or not budget.admit():
+        return
+    rows = (
+        talk_revision_rows(site, starts, limit=50, stops=stops)
+        .with_columns(
+            pl.int_range(pl.len()).over("page_id").alias("_position"),
+            pl
+            .col("page_id")
+            .replace_strict({page: index for index, page in enumerate(starts)})
+            .alias("_priority"),
+        )
+        .sort("_position", "_priority")
+    )
+    selected = (
+        row
+        for row in rows.iter_rows(named=True)
+        if active is None or active(row["page_id"])
+    )
+    for batch in batched(selected, 50, strict=False):
+        if not budget.admit():
+            break
+        contents = read_revision_contents(
+            site,
+            [row["revision_id"] for row in batch if row["text_visible"]],
+        )
+        result = []
+        for row in batch:
+            content = contents.get(row["revision_id"])
+            if content is not None and (
+                content.page_id != row["page_id"]
+                or content.timestamp != row["timestamp"]
+            ):
+                message = "Talk content differs from selected SQL metadata."
+                raise ValueError(message)
+            text = content.text if content is not None else None
+            if text is not None and len(text.encode()) > _MAX_TEXT_BYTES:
+                text = None
+            result.append((
+                row["page_id"],
+                HistoricalRevision(
+                    row["revision_id"],
+                    row["parent_id"],
+                    row["timestamp"],
+                    text,
+                ),
+            ))
+        yield result
 
 
 def _restriction_flags(revision: object) -> tuple[str, ...]:

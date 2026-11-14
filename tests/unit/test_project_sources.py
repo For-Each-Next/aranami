@@ -605,12 +605,14 @@ class TestProjectStatements(TestCase):
             "page_namespace",
             "page_title",
             "page_revision",
+            "page_rev_timestamp",
             "page_length",
             "page_is_redirect",
             "talk_page_id",
             "talk_revision",
             "pa_class",
             "pa_importance",
+            "membership_project",
         )
         with patch(
             "shared.sources.quarry.query._fetch",
@@ -621,10 +623,10 @@ class TestProjectStatements(TestCase):
         compiled = statement.compile()
         assert replica.project == "zhwiki"
         assert statement.is_select
-        assert name in compiled.params.values()
+        assert [name] in compiled.params.values()
         assert name not in str(compiled)
         assert "talk.page_namespace" in str(compiled)
-        assert "JOIN revision" not in str(compiled)
+        assert "JOIN revision" in str(compiled)
         assert "page.page_latest AS page_revision" in str(compiled)
         assert "talk.page_latest AS talk_revision" in str(compiled)
         assert "page_props" not in str(compiled)
@@ -635,12 +637,14 @@ class TestProjectStatements(TestCase):
             "page_namespace": pl.Int64,
             "page_title": pl.String,
             "page_revision": pl.Int64,
+            "page_rev_timestamp": pl.Datetime("us", "UTC"),
             "page_length": pl.Int64,
             "page_is_redirect": pl.Int64,
             "talk_page_id": pl.Int64,
             "talk_revision": pl.Int64,
             "pa_class": pl.String,
             "pa_importance": pl.String,
+            "taskforces": pl.List(pl.String),
             "full_title": pl.String,
             "talk_title": pl.String,
         }
@@ -654,19 +658,54 @@ class TestProjectStatements(TestCase):
             "page_namespace",
             "page_title",
             "page_revision",
+            "page_rev_timestamp",
             "talk_page_id",
             "talk_revision",
             "pa_class",
             "pa_importance",
+            "membership_project",
         )
         with patch(
             "shared.sources.quarry.query._fetch",
             return_value=(
                 columns,
                 [
-                    (7, 0, "Video_game", 101, 11, 102, "B", "High"),
-                    (8, 14, "Games", 103, 12, 104, "Category", None),
-                    (9, 0, "No_talk", 105, None, None, None, None),
+                    (
+                        7,
+                        0,
+                        "Video_game",
+                        101,
+                        "20261103000000",
+                        11,
+                        102,
+                        "B",
+                        "High",
+                        "Games",
+                    ),
+                    (
+                        8,
+                        14,
+                        "Games",
+                        103,
+                        "20261103000000",
+                        12,
+                        104,
+                        "Category",
+                        None,
+                        "Games",
+                    ),
+                    (
+                        9,
+                        0,
+                        "No_talk",
+                        105,
+                        "20261103000000",
+                        None,
+                        None,
+                        None,
+                        None,
+                        "Games",
+                    ),
                 ],
             ),
         ) as fetch:
@@ -1243,8 +1282,11 @@ class TestWikiPreloading(TestCase):
         second = Mock(pageid=20)
         with (
             patch(
-                "shared.sources.wiki.pagegenerators.PagesFromPageidGenerator",
-                return_value=iter([first, second]),
+                "shared.sources.wiki.page_metadata",
+                return_value=pl.DataFrame({
+                    "page_id": [10, 20],
+                    "full_title": ["First", "Second"],
+                }),
             ) as identify,
             patch(
                 "shared.sources.wiki.pagegenerators.PreloadingGenerator",
@@ -1253,7 +1295,7 @@ class TestWikiPreloading(TestCase):
         ):
             result = wiki.read_page_ids(site, [20, 10, 20, 99])
         assert result == [second, first]
-        identify.assert_called_once_with((20, 10, 99), site=site)
+        identify.assert_called_once_with(site, (20, 10, 99))
 
     @staticmethod
     def test_empty_preload_inputs_do_not_create_generators() -> None:

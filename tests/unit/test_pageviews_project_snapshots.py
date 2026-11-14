@@ -91,6 +91,10 @@ def _traffic(
 class TestPageviewsMidnightCohort(TestCase):
     """Use frozen names and assessments when traffic arrives later."""
 
+    def setUp(self) -> None:
+        """Keep source fixtures independent of replica availability."""
+        self.enterContext(patch("tasks.project_data.require_boundary"))
+
     @staticmethod
     def test_evening_traffic_uses_project_and_taskforce_snapshots() -> None:
         """Keep midnight members and metadata at the evening run."""

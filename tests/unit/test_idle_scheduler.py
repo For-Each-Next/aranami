@@ -263,6 +263,42 @@ class TestIdleScheduler(TestCase):
         self.release.set()
         assert self.second_started.wait(2)
 
+    def test_failed_page_capture_retries_before_releasing_reports(
+        self,
+    ) -> None:
+        """Hold reports through a failed source pass and its retry."""
+        completed = Event()
+        attempts = []
+
+        def collect() -> None:
+            """Fail once, then complete the source observation.
+
+            Raises:
+                OSError: The first simulated source is unavailable.
+            """
+            attempts.append(True)
+            if len(attempts) == 1:
+                message = "Replica has not reached midnight."
+                raise OSError(message)
+
+        self._add("project-data", collect)
+        self._add("website", self.second_started.set)
+        self.scheduler.add_listener(
+            lambda event: (
+                completed.set() if getattr(event, "exception", None) else None
+            ),
+        )
+        self._dispatch()
+        assert completed.wait(2)
+        assert not self.second_started.is_set()
+        self.scheduler._process_jobs()
+        source = self.scheduler.get_job("project-data")
+        assert source.next_run_time.year == self.eligible.year
+        self.scheduler.modify_job("project-data", next_run_time=self.eligible)
+        self.scheduler._process_jobs()
+        assert self.second_started.wait(2)
+        assert len(attempts) == len(("failed", "complete"))
+
     def test_failed_idle_job_does_not_block_next_report(self) -> None:
         """Retain failure events and release the next report."""
         failure = Event()

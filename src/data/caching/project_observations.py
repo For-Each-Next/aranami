@@ -7,25 +7,72 @@ previous hour's membership after restart or a failed collection.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
 from pathlib import Path
 
 import polars as pl
 
-from data.reports import report_key
-from shared.support.cache import ParquetCache, cache_key
+from data.project_data import normalize_members, project_stem, stored_members
+from shared.assessment_profiles import assessment_profile
+from shared.config import PROJECT_DATA_TASKFORCES
+from shared.support.assessment_encoding import encode_assessments
+from shared.support.cache import ParquetCache
 
 SCHEMA = {
     "page_id": pl.Int64,
     "page_namespace": pl.Int64,
     "page_title": pl.String,
-    "page_revision": pl.Int64,
-    "page_length": pl.Int64,
-    "page_is_redirect": pl.Int64,
+    "page_rev_latest": pl.Int64,
+    "page_rev_timestamp": pl.Datetime("us", "UTC"),
     "talk_page_id": pl.Int64,
-    "talk_revision": pl.Int64,
+    "talk_page_latest": pl.Int64,
     "pa_class": pl.String,
     "pa_importance": pl.String,
+    "pa_taskforces": pl.List(pl.String),
+    "page_is_redirect": pl.Boolean,
+    "page_length": pl.Int64,
 }
+
+
+def encode_members(
+    frame: pl.DataFrame,
+    wiki: str,
+    project: str,
+) -> pl.DataFrame:
+    """Prepare a compact hourly table using the daily project model.
+
+    Returns:
+        Typed persisted columns, preserving unknown historical fields.
+    """
+    frame = frame.rename({
+        "page_revision": "rev_id",
+        "talk_revision": "talk_page_rev",
+    })
+    names = sorted(PROJECT_DATA_TASKFORCES.get((wiki, project), ()))
+    return encode_assessments(
+        stored_members(normalize_members(frame, names)),
+        profile=assessment_profile(wiki, project),
+    ).with_columns(pl.col("pa_taskforces").cast(pl.List(pl.Enum(names))))
+
+
+def decode_members(
+    frame: pl.DataFrame,
+    wiki: str,
+    project: str,
+) -> pl.DataFrame:
+    """Restore source fields from a completed hourly observation.
+
+    Returns:
+        Native source fields and saved taskforce membership.
+    """
+    names = sorted(PROJECT_DATA_TASKFORCES.get((wiki, project), ()))
+    return normalize_members(frame, names).rename({
+        "rev_id": "page_revision",
+        "talk_page_rev": "talk_revision",
+    })
+
+
 CATEGORY_SCHEMA = {
     "page_id": pl.Int64,
     "page_namespace": pl.Int64,
@@ -49,18 +96,16 @@ def category_cache(
         The cache and its path. A null category retains known pages
         with no category links, distinct from uncovered page IDs.
     """
-    now = now.astimezone(dt.UTC)
-    root = Path("dry-run/cache" if dry else "cache")
+    now = now.astimezone(dt.UTC) - dt.timedelta(hours=1)
+    root = Path("dry-run/data/hourly" if dry else "data/hourly")
     return (
         ParquetCache(
             schema=CATEGORY_SCHEMA,
-            contract=f"hourly-categories:1:{now:%Y%m%dT%H}",
+            contract=f"hourly-categories:2:{wiki}:{now:%Y%m%d%H}",
             max_rows=2_000_000,
             max_bytes=128 * 1024 * 1024,
         ),
-        root
-        / report_key("hourly-categories", wiki, "all")
-        / f"{now:%Y%m%dT%H}0000.parquet",
+        root / f"categories-{now:%Y%m%d%H}.parquet",
     )
 
 
@@ -77,37 +122,62 @@ def cache(
         A bounded cache and its disposable runtime path. Preview files
         remain separate from production observations.
     """
-    now = now.astimezone(dt.UTC)
-    root = Path("dry-run/cache" if dry else "cache")
+    now = now.astimezone(dt.UTC) - dt.timedelta(hours=1)
+    root = Path("dry-run/data/hourly" if dry else "data/hourly")
+    mapping = hashlib.sha256(
+        repr(
+            sorted(PROJECT_DATA_TASKFORCES.get((wiki, project), ())),
+        ).encode(),
+    ).hexdigest()
     return (
         ParquetCache(
             schema=SCHEMA,
-            contract=f"hourly-project:1:{now:%Y%m%dT%H}",
+            contract=f"hourly-project:2:{now:%Y%m%d%H}:{mapping}",
+            annotations={
+                "aranami.taskforce_projects": json.dumps(
+                    sorted(PROJECT_DATA_TASKFORCES.get((wiki, project), ())),
+                    ensure_ascii=False,
+                ),
+            },
             max_rows=1_000_000,
             max_bytes=128 * 1024 * 1024,
         ),
         root
-        / cache_key("hourly-projects", wiki, project)
-        / f"{now:%Y%m%dT%H}0000.parquet",
+        / (
+            (
+                ""
+                if (wiki, project) == ("zhwiki", "电子游戏")
+                else project_stem(wiki, project) + "-"
+            )
+            + f"{now:%Y%m%d%H}.parquet"
+        ),
     )
 
 
 def prune(now: dt.datetime) -> None:
-    """Remove hourly caches older than the preceding twenty-four hours.
-
-    Retain earlier running passes' files while the next hour collects.
-    Durable reports and previews are outside these disposable roots.
+    """Keep two completed observations in each hourly partition.
 
     Args:
-        now: Actual UTC collection clock.
+        now: Actual UTC clock, leaving future observations untouched.
     """
-    cutoff = (now.astimezone(dt.UTC) - dt.timedelta(hours=24)).strftime(
-        "%Y%m%dT%H0000",
+    cutoff = (now.astimezone(dt.UTC) - dt.timedelta(hours=1)).strftime(
+        "%Y%m%d%H",
     )
-    for family in ("hourly-projects", "hourly-categories"):
-        root = Path("cache") / family
-        if root.is_symlink():
+    root = Path("data/hourly")
+    if root.is_symlink():
+        return
+    groups = {}
+    for path in root.glob("*.parquet"):
+        if path.is_symlink():
             continue
-        for path in root.rglob("*.parquet"):
-            if not path.is_symlink() and path.stem < cutoff:
-                path.unlink(missing_ok=True)
+        stamp = path.stem[-10:]
+        if (
+            len(stamp) != len(cutoff)
+            or not stamp.isdecimal()
+            or stamp > cutoff
+        ):
+            continue
+        groups.setdefault(path.stem[:-10], []).append(path)
+    for paths in groups.values():
+        for path in sorted(paths, reverse=True)[2:]:
+            path.unlink(missing_ok=True)

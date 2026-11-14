@@ -624,7 +624,7 @@ class TestDailyCompletion(TestCase):
         assert len(context.edits) == 1
         assert not (self.root / "cache" / "completion").exists()
         assert not (self.root / "reports").exists()
-        assert (self.root / "dry-run" / "reports").exists()
+        assert (self.root / "dry-run" / "data").exists()
         page.assert_not_called()
 
     def test_backlog_saves_each_date_and_checkpoints_complete_catchup(

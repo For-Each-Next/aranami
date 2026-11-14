@@ -524,6 +524,46 @@ class NewsletterDataTests(unittest.TestCase):
         assert result["issues"]["2026-10"]["overview_observed_at"] is None
         assert valid_newsletter(result)
 
+    def test_daily_refresh_uses_metadata_not_previous_newsletter_text(
+        self,
+    ) -> None:
+        """Recalculate counts from fresh metadata."""
+        reader = Reader()
+        reader.existing[f"{ROOT}/2026-10"] = (
+            Path(__file__).parents[2]
+            / "fixtures"
+            / "newsletter-main-2026-10.wikitext"
+        ).read_text()
+        now = dt.datetime(2026, 11, 14, tzinfo=dt.UTC)
+        original = collect_source_facts(
+            reader,
+            now=now,
+            current_counts={"total": 100},
+        )
+        with (
+            patch(
+                "tasks.zhwiki.newsletter.collection._previous_main_layout",
+                side_effect=AssertionError("Previous report text"),
+            ),
+            patch(
+                "tasks.zhwiki.newsletter.collection._previous_subpage_layout",
+                side_effect=AssertionError("Previous report text"),
+            ),
+        ):
+            refreshed = collect_source_facts(
+                reader,
+                now=now + dt.timedelta(days=1),
+                current_counts={"total": 101},
+                prior_facts=original,
+            )
+        facts = refreshed["issues"]["2027-01"]
+        assert facts["overview"]["total"] == 101
+        assert facts["previous_overview"]["total"] is None
+        assert (
+            facts["main_layout"]
+            == original["issues"]["2027-01"]["main_layout"]
+        )
+
     def test_overview_uses_retained_database_boundary_counts(self) -> None:
         """Use internal counts without reading wiki lists or logs."""
         reader = Reader()

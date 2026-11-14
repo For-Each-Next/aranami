@@ -177,6 +177,7 @@ export function initializeQualityAuthorship() {
                 row.hidden =
                     originalRows.length > 10 &&
                     (position < start || position >= start + size);
+                row.cells[0].textContent = String(position + 1);
                 tbody.append(row);
             }
             for (const [position, heading] of headings.entries()) {

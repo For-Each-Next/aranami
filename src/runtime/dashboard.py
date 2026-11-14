@@ -25,9 +25,8 @@ from typing import TYPE_CHECKING
 from data.runtime.events import event_extra
 from data.runtime.logs import open_run_log
 from data.runtime.status import record_dataset
-from data.website import MAX_SNAPSHOT_BYTES
+from data.website import read_snapshot
 from runtime.collection_status import CollectionExecution, collection_run
-from shared.support.files import read_regular
 from webservice.http import ReadOnlyRequestHandler
 
 if TYPE_CHECKING:
@@ -181,7 +180,11 @@ class DashboardUpdater:
             Saved JSON bytes, or None for unavailable or invalid data.
         """
         try:
-            content = read_regular(self.output, MAX_SNAPSHOT_BYTES)
+            content = json.dumps(
+                read_snapshot(self.output),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode()
         except OSError, ValueError:
             return None
         try:

@@ -32,6 +32,7 @@ logs/
 cache/
 dry-run/
 reports/
+/data/
 state/
 
 # Tests, coverage, and tool caches

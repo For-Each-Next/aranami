@@ -22,13 +22,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from data.newsletter.schema import _valid_year_review, valid_newsletter
+from data.prepared import read_values, write_values
 from shared.newsletter import Issue
-from shared.support.files import atomic_json, encode_json, read_json_object
+from shared.support.files import encode_json
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-DEFAULT_PATH = Path("reports/records/newsletter")
+DEFAULT_PATH = Path("data/daily/newsletter-drafts")
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_INDEX_BYTES = 64 * 1024
 _MAX_DATES = 92
@@ -164,7 +165,7 @@ def _write_record(directory: Path, filename: str, record: dict) -> None:
         message = "Newsletter date folders cannot be symlinks."
         raise OSError(message)
     destination.mkdir(mode=0o700, exist_ok=True)
-    atomic_json(destination / filename, record, max_bytes=_MAX_BYTES)
+    write_values(destination / filename, record, max_bytes=_MAX_BYTES)
 
 
 def _calendar_entry(record: dict) -> dict:
@@ -175,8 +176,8 @@ def _calendar_entry(record: dict) -> dict:
 def _select(directory: Path, issue: Issue, dates: dict, record: dict) -> None:
     """Atomically select a complete observation in its date catalog."""
     dates[record["date"]] = _calendar_entry(record)
-    atomic_json(
-        directory / "catalog.json",
+    write_values(
+        directory / "catalog.parquet",
         {"schema": 1, "issue": issue.value, "dates": dates},
         max_bytes=_MAX_BYTES,
     )
@@ -192,7 +193,7 @@ def _catalog(directory: Path, issue: Issue, *, annual: bool = False) -> dict:
         ValueError: Calendar identities, dates, or hashes are invalid.
     """
     try:
-        value = read_json_object(directory / "catalog.json", _MAX_INDEX_BYTES)
+        value = read_values(directory / "catalog.parquet", _MAX_INDEX_BYTES)
     except FileNotFoundError:
         return {}
     dates = value.get("dates")
@@ -331,8 +332,8 @@ class NewsletterDraftArchive:
         if destination.is_symlink():
             message = "Newsletter date folders cannot be symlinks."
             raise OSError(message)
-        path = destination / "observation.json"
-        value = read_json_object(path, _MAX_BYTES)
+        path = destination / "observation.parquet"
+        value = read_values(path, _MAX_BYTES)
         facts, generated = value.get("facts"), value.get("generated_at")
         if not isinstance(facts, dict) or not isinstance(generated, str):
             message = "The daily observation has invalid facts or time."
@@ -390,7 +391,7 @@ class NewsletterDraftArchive:
         if self.path is None:
             return None
         try:
-            metadata = (self._directory(issue) / "catalog.json").stat(
+            metadata = (self._directory(issue) / "catalog.parquet").stat(
                 follow_symlinks=False,
             )
         except FileNotFoundError:
@@ -460,7 +461,7 @@ class NewsletterDraftArchive:
         if directory.is_symlink():
             message = "Annual feature date folders cannot be symlinks."
             raise OSError(message)
-        value = read_json_object(directory / "metadata.json", _MAX_BYTES)
+        value = read_values(directory / "metadata.parquet", _MAX_BYTES)
         try:
             expected = _feature_record(
                 issue,
@@ -541,7 +542,7 @@ class NewsletterDraftArchive:
             try:
                 record = self._read_feature(issue, day)
             except FileNotFoundError:
-                _write_record(directory, "metadata.json", record)
+                _write_record(directory, "metadata.parquet", record)
             _select(directory, issue, dates, record)
 
     def _capture_feature(
@@ -607,5 +608,5 @@ class NewsletterDraftArchive:
                 try:
                     record = self._read_record(issue, day)
                 except FileNotFoundError:
-                    _write_record(directory, "observation.json", record)
+                    _write_record(directory, "observation.parquet", record)
                 _select(directory, issue, dates, record)

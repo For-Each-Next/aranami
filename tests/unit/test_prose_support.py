@@ -91,6 +91,21 @@ class TestWordCounting(TestCase):
     """Check language rules and caller-relative tokenizer caches."""
 
     @staticmethod
+    def test_weighted_chinese_units_do_not_segment_chinese_words() -> None:
+        """Weight CJK once and Western words or numbers twice."""
+        cases = {
+            "PlayStation 5": 4,
+            "中文游戏 PlayStation 5。": 8,
+            "Hello, world! 2026": 6,
+            "中文\uff0c标点\uff01\n\t": 4,
+            "café cafe\u0301": 4,
+            "": 0,
+            "2026年11月": 6,
+        }
+        for text, expected in cases.items():
+            assert words.count_chinese_units(text) == expected
+
+    @staticmethod
     def test_english_words_preserve_internal_apostrophes_and_hyphens() -> None:
         """Count compound words and numbers, excluding punctuation."""
         text = "It's a turn-based game, version 2.0!"

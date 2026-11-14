@@ -6,6 +6,8 @@ import datetime as dt
 import logging
 from typing import TYPE_CHECKING
 
+from data import project_data
+from data.observations import record_page_inputs
 from data.reports import report_key
 from runtime.jobs import ProposedEdit, job_run
 from shared.config import TASK_DEFINITIONS
@@ -48,7 +50,7 @@ REPORT_SPECS = (
 )
 
 
-def run(
+def run(  # ruff: ignore[too-many-locals]
     *,
     targets: Mapping[str, str] | None = None,
     dry: bool = False,
@@ -68,6 +70,7 @@ def run(
 
     Raises:
         ExceptionGroup: A publication failed after trying both targets.
+        ValueError: The daily English source table is unavailable.
     """
     with job_run(
         "enwp_key_articles",
@@ -83,6 +86,31 @@ def run(
             observed_at=dt.datetime.now(dt.UTC),
             dry=active.dry,
         )
+        inputs = {}
+        boundary = snapshot.manifest["metadata"].get("boundary_date")
+        if isinstance(boundary, str):
+            english = project_data.read_snapshot(
+                "enwiki",
+                "Video games",
+                dt.date.fromisoformat(boundary),
+                dry=active.dry,
+            )
+            if english is None:
+                message = (
+                    "English comparisons require the completed "
+                    "daily English page table."
+                )
+                raise ValueError(message)
+            members = english.tables["members"]
+            inputs["english_members"] = members
+            record_page_inputs(
+                "enwiki",
+                "Video games",
+                members.rename({
+                    "rev_id": "page_revision",
+                    "talk_page_rev": "talk_revision",
+                }),
+            )
         existing = {
             name: page.text
             for name, page in zip(
@@ -95,6 +123,7 @@ def run(
             existing,
             tuple(spec.definition for spec in REPORT_SPECS),
             active.site,
+            **inputs,
         )
         texts = reports.build_reports(existing, data, REPORT_SPECS)
         failures: list[Exception] = []

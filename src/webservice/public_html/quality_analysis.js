@@ -1,18 +1,18 @@
 /** Filter and sort the complete saved article list without source requests. */
-import { compareValues } from "./quality_authorship.js";
+import { compareValues, initializeQualityAuthorship } from "./quality_authorship.js";
 
 /** Compare existing cell observations while leaving unknown values last. */
 export function compareAnalysisRows(left, right, column, descending, locale) {
     const read = (row) => {
         const value = row.cells[column].dataset.sort;
         return value === undefined || value === "" ? null :
-            [2, 3, 5, 6].includes(column) ? Number(value) : value;
+            [2, 3, 6, 7].includes(column) ? Number(value) : value;
     };
     return compareValues(read(left), read(right), descending, locale);
 }
 
 /** Enhance the native table while preserving its escaped cells and links. */
-export function initializeQualityAnalysis() {
+export function initializeQualityAnalysis(previous = {}) {
     const host = document.querySelector("[data-quality-analysis]");
     if (!host || host.hasAttribute("data-analysis-enhanced")) return;
     host.setAttribute("data-analysis-enhanced", "");
@@ -29,9 +29,13 @@ export function initializeQualityAnalysis() {
     const pageStatus = host.querySelector("[data-analysis-page-status]");
     const empty = host.querySelector("[data-analysis-no-matches]");
     const locale = document.documentElement.lang;
-    let column = 4;
-    let descending = true;
-    let page = 1;
+    search.value = previous.search || "";
+    grade.value = previous.grade || "";
+    importance.value = previous.importance || "";
+    if (previous.size) size.value = previous.size;
+    let column = previous.column ?? 4;
+    let descending = previous.descending ?? true;
+    let page = previous.page || 1;
     let pages = 1;
     const actions = ["first", "prev", "next", "last"].map((name) =>
         host.querySelector(`[data-analysis-${name}]`));
@@ -50,6 +54,9 @@ export function initializeQualityAnalysis() {
         pages = Math.max(1, Math.ceil(selected.length / limit));
         page = Math.min(page, pages);
         const start = (page - 1) * limit;
+        host.dataset.analysisColumn = String(column);
+        host.dataset.analysisDescending = String(descending);
+        host.dataset.analysisPage = String(page);
         rows.forEach((row) => { row.hidden = true; });
         selected.forEach((row, index) => {
             row.hidden = index < start || index >= start + limit;
@@ -123,4 +130,96 @@ export function initializeQualityAnalysis() {
     render();
 }
 
+/** Retain the current directory selection across a global B-Class update. */
+function analysisState() {
+    const host = document.querySelector("[data-quality-analysis]");
+    if (!host) return {};
+    const value = name => host.querySelector(`[data-analysis-${name}]`)?.value;
+    return {
+        search: value("search"), grade: value("grade-filter"),
+        importance: value("importance-filter"), size: value("size"),
+        column: Number(host.dataset.analysisColumn || 4),
+        descending: host.dataset.analysisDescending !== "false",
+        page: Number(host.dataset.analysisPage || 1),
+    };
+}
+
+/** Replace the complete saved selection so the switch governs every section. */
+export function initializeQualityAnalysisFilter() {
+    const form = document.querySelector("[data-quality-analysis-filter]");
+    const results = document.querySelector("[data-quality-results]");
+    if (!form || !results || form.hasAttribute("data-auto-submit")) return;
+    const input = form.querySelector('[name="count_b"]');
+    const status = form.querySelector("[data-quality-analysis-status]");
+    if (!input || !status) return;
+    form.dataset.autoSubmit = "";
+    if (typeof fetch !== "function" || typeof DOMParser !== "function") {
+        input.addEventListener("change", () => form.requestSubmit());
+        return;
+    }
+    let applied = input.checked;
+    let sequence = 0;
+    let controller;
+
+    /** Apply only the latest valid same-origin saved-data response. */
+    async function update(push) {
+        const request = ++sequence;
+        controller?.abort();
+        controller = new AbortController();
+        const selected = input.checked;
+        const previous = analysisState();
+        const url = new URL(form.action, location.href);
+        url.search = new URLSearchParams(new FormData(form)).toString();
+        results.setAttribute("aria-busy", "true");
+        status.textContent = form.dataset.updating;
+        try {
+            const response = await fetch(url, {
+                credentials: "same-origin", headers: {Accept: "text/html"},
+                redirect: "error", signal: controller.signal,
+            });
+            if (!response.ok || !response.headers.get("content-type")?.includes("text/html"))
+                throw new Error("Quality results unavailable");
+            const page = new DOMParser().parseFromString(await response.text(), "text/html");
+            if (request !== sequence) return;
+            const incoming = page.querySelector("[data-quality-results]");
+            if (!incoming || incoming.dataset.countB !== (selected ? "1" : "0") ||
+                    incoming.querySelector("script, iframe, object, embed") ||
+                    !incoming.querySelector("#analysis-overview") ||
+                    !incoming.querySelector("#analysis-articles") ||
+                    !incoming.querySelector("#quality-authors"))
+                throw new Error("Invalid quality results");
+            for (const dialog of results.querySelectorAll("dialog[open]")) dialog.close();
+            results.replaceChildren(...incoming.childNodes);
+            results.dataset.countB = incoming.dataset.countB;
+            initializeQualityAnalysis(previous);
+            initializeQualityAuthorship();
+            applied = selected;
+            if (push && url.href !== location.href) history.pushState(null, "", url);
+            for (const link of document.querySelectorAll(".language-switcher a[hreflang]")) {
+                const destination = new URL(link.href, location.href);
+                if (selected) destination.searchParams.set("count_b", "1");
+                else destination.searchParams.delete("count_b");
+                link.href = destination.href;
+            }
+            status.textContent = "";
+        } catch (error) {
+            if (request !== sequence || error.name === "AbortError") return;
+            input.checked = applied;
+            status.textContent = form.dataset.updateFailed;
+        } finally {
+            if (request === sequence) results.removeAttribute("aria-busy");
+        }
+    }
+    input.addEventListener("change", () => update(true));
+    form.addEventListener("submit", event => {event.preventDefault(); update(true);});
+    window.addEventListener("popstate", () => {
+        const selected = new URL(location.href).searchParams.get("count_b") === "1";
+        if (selected === applied) return;
+        input.checked = selected;
+        update(false);
+    });
+}
+
 initializeQualityAnalysis();
+initializeQualityAnalysisFilter();
+if (document.querySelector("[data-quality-results]")) initializeQualityAuthorship();

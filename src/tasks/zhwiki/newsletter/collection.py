@@ -654,9 +654,18 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
         )
         for suffix in SUFFIXES
     }
-    main_layout = _previous_main_layout(current, issue)
+    # Layouts are parsed metadata, not a prior rendered newsletter.
+    # Bootstrap extraction is needed only before metadata exists.
+    main_layout = (
+        prior["main_layout"]
+        if prior is not None and "main_layout" in prior
+        else _previous_main_layout(current, issue)
+    )
+    retained_layouts = (prior or {}).get("subpage_layouts") or {}
     subpage_layouts = {
-        suffix: _previous_subpage_layout(current, issue, suffix, kind)
+        suffix: retained_layouts[suffix]
+        if suffix in retained_layouts
+        else _previous_subpage_layout(current, issue, suffix, kind)
         for suffix, kind in (
             ("特優內容", "quality"),
             ("宣告", "announcements"),
@@ -699,13 +708,6 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
             )
             facts["overview"].update(latest)
             facts["overview_observed_at"] = observed
-        if main_layout and main_layout["source_issue"] == issue.previous:
-            facts["previous_overview"] = {
-                key: value
-                if value is not None
-                else main_layout["baseline_counts"][key]
-                for key, value in facts["previous_overview"].items()
-            }
         if not facts["complete"] and current_counts:
             facts["overview"].update(current_counts)
             facts["overview_observed_at"] = current_observed_at.isoformat(

@@ -165,7 +165,15 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
         site, scope_project, projects = self.page_projects.call_args.args
         assert site is self.reader.site
         assert scope_project == "电子游戏"
-        assert tuple(projects) == ("虚构角色", "传记", "公司", "音乐")
+        assert tuple(projects) == (
+            "虚构角色",
+            "虛構角色",
+            "传记",
+            "傳記",
+            "公司",
+            "音乐",
+            "音樂",
+        )
         self.reader.summary.assert_not_called()
         assert self.newsletter.call_args.kwargs["current_counts"] == {
             "total": 1,

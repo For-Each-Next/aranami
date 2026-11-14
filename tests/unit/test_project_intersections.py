@@ -15,6 +15,7 @@ from sqlalchemy import (
 )
 from wiki_fixtures import OfflineSite
 
+from shared.newsletter import DYK_PROJECT_DATABASE_TITLES
 from shared.sources.quarry import Replica, projects
 
 
@@ -149,6 +150,22 @@ class TestProjectIntersections(TestCase):
                 (2, "音乐"),
             ]
             assert result.schema == {"page_id": pl.Int64, "project": pl.String}
+            with patch(
+                "shared.sources.quarry.projects._replica",
+                return_value=replica,
+            ):
+                exact = projects.query_project_intersections(
+                    OfflineSite("zh", "wikipedia"),
+                    "电子游戏",
+                    DYK_PROJECT_DATABASE_TITLES,
+                )
+            # Explicit aliases include traditional rows only.
+            assert exact.filter(pl.col("project") == "音樂").rows() == [
+                (1, "音樂"),
+            ]
+            assert not exact.filter(
+                pl.col("project") == "音樂/流行音樂",
+            ).height
         finally:
             engine.dispose()
 

@@ -1508,7 +1508,7 @@ def render_quality_analysis(  # ruff: ignore[too-many-arguments] - Shared page-r
     """Render precomputed article metrics and complete native tables.
 
     Args:
-        data: Saved quality-analysis observations and summaries.
+        data: Saved current article analysis and authorship variants.
         status: Saved runtime observations for the shared footer.
         config: Current version and routine definitions.
         locale: Negotiated interface language.
@@ -1522,7 +1522,19 @@ def render_quality_analysis(  # ruff: ignore[too-many-arguments] - Shared page-r
     page = _Page(locale)
     context = page.context(page.text("quality_analysis.heading"), live=True)
     context.update(page.live_status(status or {}, config or {}, now))
-    context.update(quality_analysis_context(data, page.interface))
+    analysis = data.get("analysis", data)
+    analysis = {
+        **analysis,
+        "include_b": bool(data.get("include_b", analysis.get("include_b"))),
+    }
+    authorship = {
+        **data.get("authorship", {}),
+        "include_b": bool(analysis.get("include_b")),
+    }
+    context.update(quality_analysis_context(analysis, page.interface))
+    context.update(
+        quality_authorship_context(authorship, page.interface, now),
+    )
     context["navigation"] = navigation
     return _render("quality_analysis.html", context)
 

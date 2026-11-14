@@ -60,9 +60,12 @@ authors. DYK contributor fields come from explicit supported nominations;
 a talk-page date alone supplies no authorship.
 
 Hourly article acquisition reads Article history, including Bplus promotions,
-and associated redirects. Use exact talk revision/parser identities;
-unchanged revisions reuse retained evidence across month boundaries. A changed
-revision or parser/alias contract requires new processing.
+and associated redirects. SQL checks the current talk revision against the
+durable archive; unchanged revisions reuse retained evidence across month
+boundaries and parser/alias changes. Routine updates trust archived facts and
+preserve their original extraction contract. Only a changed SQL revision or
+missing archived evidence requires source text and new processing. Earlier
+revisions remain archived without rescanning their oldids.
 Successful bounded batches survive interruption. Source dates remain unknown
 when absent; current assessment dates never become promotion dates.
 
@@ -110,8 +113,8 @@ threshold. Community honors, feature prose and interview answers stay editorial.
 `tasks.zhwiki.newsletter.refresh` coordinates acquisition;
 its `collection` module prepares facts. `data.newsletter.observations` and
 `data.newsletter.archive` persist them; `data.newsletter.schema` validates reads. Updater renders wikitext and webservice presents
-it. Source facts live in `reports/data/newsletter/observations/`; immutable
-quarterly archives live in `reports/records/newsletter/<issue>/YYYYMMDD/`.
+it. Source facts live in `data/daily/newsletter/observations/`; immutable
+quarterly archives live in `data/daily/newsletter-drafts/<issue>/YYYYMMDD/`.
 Annual features have a separate `annual-feature/YYYYMMDD/` stream.
 
 Every retained date is a complete independent JSON observation with digest,
@@ -121,8 +124,9 @@ its facts. Atomic catalogs index available dates; gaps remain unavailable.
 Archive failure prevents replacing the current presentation. Annual and
 quarterly availability are independent.
 
-Raw revision text is a disposable exact-revision cache, refreshed against fresh
-metadata/SHA-1 before reuse. Hidden content cannot use an old cached body.
+Raw revision text is a disposable exact-revision cache, checked against fresh
+SQL ownership/visibility or API metadata and its content hash before reuse.
+Hidden content cannot use an old cached body.
 Article history, milestones, authorship and newsletter archives are durable.
 Alpha suspends new automatic article-evidence purges while dependencies are
 migrated; existing tombstones remain effective.
@@ -153,3 +157,17 @@ Annual features can require evidence predating the daily series. Preserve
 original hashes and unknown fields; the [retirement checklist](../transition.md)
 tracks remaining historical-source dependencies and removal gates. Calendar
 age alone does not establish that historical data is unused.
+
+PageAssessments project titles are script-sensitive. Topic collection queries
+an explicit vocabulary (`音乐` and `音樂`, `传记` and `傳記`, `虚构角色` and
+`虛構角色`, plus `公司`) and preserves those raw database spellings through
+acquisition. Annual preparation maps them to canonical report labels and
+removes duplicate memberships. English names and nested projects are not
+implicitly converted or included. Existing saved traditional labels render
+under their corresponding topic without rewriting historical observations.
+
+Daily regeneration uses refreshed metadata and prepared tables. It never takes
+counts from yesterday’s rendered newsletter. Parsed layout metadata is reused;
+a missing layout is bootstrapped once from the established issue format. The
+Pageviews pass prepares `data/daily/newsletter-traffic.parquet` after 19:00 UTC;
+newsletter collection only reads eligible saved annual and monthly values.

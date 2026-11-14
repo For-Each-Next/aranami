@@ -11,14 +11,17 @@ Collection and publication retain their strict owner-reader contracts.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
+from data.migration import destination
 from data.parquet_preview import preview_path, read_preview
 from data.project_data import snapshot_path
 from data.reports import report_key
+from shared.support.files import read_regular
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,6 +29,7 @@ if TYPE_CHECKING:
 _MAX_SELECTOR = 1500
 _FIRST_PRINTABLE = 32
 _PROJECT_PATH_PARTS = 7
+_ARCHIVE_PATH_PARTS = 3
 
 
 class DatasetSelectionError(ValueError):
@@ -45,64 +49,74 @@ def _identity(
     Raises:
         ValueError: The selector is not a canonical project-data name.
     """
-    path = PurePosixPath(filename)
-    if (
-        not filename
-        or len(filename) > _MAX_SELECTOR
-        or "\\" in filename
-        or any(ord(character) < _FIRST_PRINTABLE for character in filename)
-    ):
-        message = "Choose one canonical project-data file."
-        raise ValueError(message)
-    if (
-        path.is_absolute()
-        or str(path) != filename
-        or len(path.parts) != _PROJECT_PATH_PARTS
-        or path.parts[:3] != ("reports", "data", "projects")
-        or any(part in {".", ".."} for part in path.parts)
-    ):
-        message = "Choose one canonical project-data file."
-        raise ValueError(message)
-    wiki, encoded_project, year, name = path.parts[3:]
-    if (
-        not re.fullmatch(r"[a-z][a-z0-9_-]*wiki", wiki)
-        or not re.fullmatch(r"\d{4}", year)
-        or not re.fullmatch(r"\d{8}\.parquet", name)
-    ):
-        message = "Invalid project-data file identity."
-        raise ValueError(message)
-    day = dt.date.fromisoformat(name.removesuffix(".parquet"))
-    project = unquote(encoded_project, errors="strict")
-    if manifest is not None:
-        target = manifest.get("target")
-        if (
-            not isinstance(target, dict)
-            or target.get("site") != wiki
-            or not isinstance(target.get("title"), str)
-            or not target["title"]
+    path = preview_path(filename)
+    if manifest is None:
+        if path.parts[:2] == ("data", "archive") and re.fullmatch(
+            r"\d{8}\.parquet",
+            path.name,
         ):
-            message = "Invalid project-data metadata identity."
-            raise ValueError(message)
-        project = target["title"]
-    boundary = day + dt.timedelta(days=1)
+            return (
+                "zhwiki",
+                "电子游戏",
+                dt.date.fromisoformat(path.stem) + dt.timedelta(days=1),
+            )
+        message = "Project identity requires saved metadata."
+        raise ValueError(message)
+    target = manifest.get("target", {})
+    wiki, project = target.get("site"), target.get("title")
+    boundary = dt.date.fromisoformat(manifest["metadata"]["boundary_date"])
     expected = snapshot_path(wiki, project, boundary, runtime=runtime)
-    logical = report_key("projects", wiki, project) + f"/{year}/{name}"
+    logical = (
+        report_key("projects", wiki, project)
+        + f"/{(boundary - dt.timedelta(days=1)):%Y/%Y%m%d}"
+    )
     if (
-        f"{day.year:04d}" != year
-        or day.strftime("%Y%m%d.parquet") != name
-        or filename
-        not in {
-            expected.relative_to(runtime).as_posix(),
-            "reports/data/" + logical,
-        }
-        or (
-            manifest is not None
-            and manifest.get("report_key") != logical.removesuffix(".parquet")
-        )
-    ):
+        filename != expected.relative_to(runtime).as_posix()
+        and filename != "data/daily/" + logical + ".parquet"
+    ) or manifest.get("report_key") != logical:
         message = "Project-data selectors must use their canonical spelling."
         raise ValueError(message)
     return wiki, project, boundary
+
+
+def _legacy_filename(filename: str, runtime: Path) -> str:
+    """Resolve saved activity links through the migration receipt.
+
+    Returns:
+        A current filename, or its supported unmigrated counterpart.
+
+    Raises:
+        DatasetSelectionError: A historical path has inconsistent dates.
+    """
+    receipt = runtime / "state/data-layout-v2.json"
+    if filename.startswith(("reports/", "cache/toolforge/")):
+        try:
+            records = json.loads(read_regular(receipt, 4 * 1024 * 1024))
+        except FileNotFoundError:
+            records = {"files": []}
+        for row in records["files"]:
+            if row["source"] == filename and row["state"] == "complete":
+                return row["destination"]
+        filename = destination(PurePosixPath(filename)).as_posix()
+    parts = PurePosixPath(filename).parts
+    if (
+        parts[:3] == ("data", "daily", "projects")
+        and len(parts) == _PROJECT_PATH_PARTS
+    ):
+        wiki, project, year, leaf = parts[3:]
+        day = dt.date.fromisoformat(leaf.removesuffix(".parquet"))
+        if year != str(day.year):
+            message = "Invalid completed year."
+            raise DatasetSelectionError(message)
+        current = snapshot_path(
+            wiki,
+            unquote(project),
+            day + dt.timedelta(days=1),
+            runtime=runtime,
+        )
+        if current.exists():
+            return current.relative_to(runtime).as_posix()
+    return filename
 
 
 def read_dataset(
@@ -127,14 +141,22 @@ def read_dataset(
         LookupError: The selected capture does not exist.
         OSError: The selected capture is unsafe or unreadable.
     """
+    # Validate the spelling before resolving a legacy link.
+    if PurePosixPath(filename).as_posix() != filename:
+        message = "Choose a canonical saved filename."
+        raise DatasetSelectionError(message)
+    filename = _legacy_filename(filename, runtime)
     if type(page) is not int or page < 1:
         message = "Preview pages must be positive integers."
         raise DatasetSelectionError(message)
-    project_file = filename.startswith("reports/data/projects/")
+    project_file = filename.startswith((
+        "data/daily/projects/",
+        "data/archive/",
+    ))
     try:
         preview_path(filename)
-        if project_file:
-            wiki, project, _ = _identity(filename, runtime)
+        if project_file and filename.startswith("data/archive/"):
+            _identity(filename, runtime)
     except ValueError, UnicodeError, OverflowError:
         message = "Choose one canonical saved Parquet file."
         raise DatasetSelectionError(message) from None
@@ -143,7 +165,7 @@ def read_dataset(
     except FileNotFoundError:
         message = "The selected saved file is unavailable."
         raise LookupError(message) from None
-    if project_file:
+    if value.get("manifest") is not None:
         wiki, project, _ = _identity(
             str(value["file"]),
             runtime,

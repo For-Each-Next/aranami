@@ -60,6 +60,8 @@ def _members() -> pl.DataFrame:
             "page_is_redirect": [0] * _ROWS,
             "page_length": [0] * _ROWS,
             "taskforces": [[]] * _ROWS,
+            "page_rev_timestamp": [None] * _ROWS,
+            "pa_taskforces": [[]] * _ROWS,
         },
         schema=project_data.SCHEMA,
     )
@@ -84,7 +86,7 @@ def dataset_fixture() -> dict:
     )
     schema = {name: str(dtype) for name, dtype in frame.schema.items()}
     return {
-        "file": "reports/data/projects/enwiki/Example & Project/"
+        "file": "data/daily/projects/enwiki/Example & Project/"
         "2026/20261102.parquet",
         "name": "20261102.parquet",
         "wiki": "enwiki",
@@ -165,10 +167,7 @@ class TestDatasetViewer(TestCase):
             ] in note
             assert "page_id" in response.text
             assert "Enum(" in response.text
-            assert (
-                "file=reports%2Fdata%2Fprojects%2Fenwiki%2FExample"
-                in response.text
-            )
+            assert "file=data%2Fdaily%2Fproject-" in response.text
             assert 'href="/data/?' in response.text
         head = self.client.head("/data/", params={"file": self.filename})
         assert head.status_code == 200
@@ -200,13 +199,13 @@ class TestDatasetViewer(TestCase):
         """Reject traversal and noncanonical file identities."""
         for filename in (
             "../.my.cnf",
-            "/reports/data/projects/enwiki/Example/2026/20261102.parquet",
+            "/data/daily/projects/enwiki/Example/2026/20261102.parquet",
             "reports/private/history.parquet",
-            "reports/data/projects/enwiki/../2026/20261102.parquet",
-            self.filename.replace("/2026/", "/2025/"),
-            self.filename.replace("Example", "%45xample"),
+            "data/daily/projects/enwiki/../2026/20261102.parquet",
+            self.filename.replace("data/daily/", "data/../daily/"),
+            self.filename.replace("data/daily/", "data/daily/\x00"),
             self.filename.replace(".parquet", ".json"),
-            self.filename.replace("/projects/", "//projects/"),
+            self.filename.replace("/daily/", "//daily/"),
         ):
             with self.subTest(filename=filename):
                 with self.assertRaises(DatasetSelectionError):
@@ -249,7 +248,7 @@ class TestDatasetViewer(TestCase):
         assert len(value["rows"]) == 50
         assert [row["page_id"] for row in value["rows"]] == list(range(1, 51))
         assert value["rows"][0]["page_length"] == 0
-        assert value["rows"][0]["talk_page_rev"] is None
+        assert value["rows"][0]["talk_page_latest"] is None
         assert value["storage"]["rows"] == _ROWS
         assert value["storage"]["columns"] == dict(value["schema"])
         assert (
@@ -279,10 +278,21 @@ class TestDatasetViewer(TestCase):
         )
         current = saved.path.relative_to(self.runtime).as_posix()
         legacy = (
-            "reports/data/projects/enwiki/电子游戏 & Example/"
+            "data/daily/projects/enwiki/电子游戏 & Example/"
             "2026/20261102.parquet"
         )
-        assert current == storage_key(legacy)
+        assert (
+            current
+            == project_data
+            .snapshot_path(
+                "enwiki",
+                project,
+                _BOUNDARY,
+                runtime=self.runtime,
+            )
+            .relative_to(self.runtime)
+            .as_posix()
+        )
         assert current.isascii()
         original = saved.path.read_bytes()
         for filename in (current, legacy):
@@ -316,9 +326,7 @@ class TestDatasetViewer(TestCase):
             runtime=self.runtime,
             observed_at=_NOW,
         )
-        filename = (
-            "reports/data/projects/enwiki/电子游戏/2026/20261102.parquet"
-        )
+        filename = "data/daily/projects/enwiki/电子游戏/2026/20261102.parquet"
         legacy = self.runtime / filename
         legacy.parent.mkdir(parents=True)
         saved.path.rename(legacy)
@@ -386,7 +394,7 @@ class TestDatasetViewer(TestCase):
             _BOUNDARY,
             runtime=self.runtime,
         )
-        other.parent.mkdir(parents=True)
+        other.parent.mkdir(parents=True, exist_ok=True)
         other.write_bytes(saved.path.read_bytes())
         response = self.client.get(
             "/data/",
@@ -465,7 +473,7 @@ class TestDatasetViewer(TestCase):
 
     def test_legacy_report_preview_keeps_write_metadata_unknown(self) -> None:
         """Inspect legacy rows without inventing write facts."""
-        filename = "reports/data/legacy/example.parquet"
+        filename = "data/daily/legacy/example.parquet"
         path = self.runtime / filename
         path.parent.mkdir(parents=True)
         pl.DataFrame({"value": [0, None]}).write_parquet(path)
@@ -481,7 +489,7 @@ class TestDatasetViewer(TestCase):
 
     def test_retained_report_restores_saved_assessment_types(self) -> None:
         """Keep saved assessment types in generic report previews."""
-        filename = "reports/records/example/generation/members.parquet"
+        filename = "data/daily/reports/example/generation/members.parquet"
         path = self.runtime / filename
         frame = pl.DataFrame({"pa_class": ["C", "FA"]}).cast({
             "pa_class": pl.Enum(["C", "FA"]),

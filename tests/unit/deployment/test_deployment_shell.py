@@ -356,8 +356,9 @@ class TestDeploymentShell(TestCase):  # ruff: ignore[too-many-public-methods]
             for command in commands
             if command[:3] == ["toolforge", "jobs", "run"]
         ]
-        assert len(started) == 1
+        assert len(started) == len(("setup", "migration"))
         assert started[0][3].startswith("aranami-setup-")
+        assert started[1][3].startswith("aranami-data-")
         assert "existing services replaced" in result.stdout
         assert "--port 8000 --publish" in result.stdout
         assert (

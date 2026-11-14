@@ -19,7 +19,12 @@ from wiki_fixtures import offline_site
 
 from data.articles.milestone_store import SCHEMA as MILESTONE_SCHEMA
 from data.newsletter.schema import read_newsletter_data
-from data.website import REPORT_KEYS, validate_dashboard_snapshot
+from data.website import (
+    REPORT_KEYS,
+    read_snapshot,
+    save_snapshot,
+    validate_dashboard_snapshot,
+)
 from shared.newsletter import Issue
 from shared.support.cache import latest_cache_path
 from tasks.website.collect import collect_dashboard, report_intervals
@@ -30,7 +35,7 @@ class DashboardFixture(TestCase):
 
     def setUp(self) -> None:
         """Provide offline Chinese sources and a private cache."""
-        self.clock = dt.datetime(2026, 10, 18, 12, tzinfo=dt.UTC)
+        self.clock = dt.datetime(2026, 10, 18, 19, tzinfo=dt.UTC)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.cache = Path(directory.name)
@@ -447,7 +452,7 @@ class TestDashboardReportCache(DashboardFixture):
         assert repeated["reports"] == first["reports"]
         assert repeated["pageviews"] == first["pageviews"]
         assert all(
-            (self.cache / f"{name}.json").is_file()
+            (self.cache / f"{name}.parquet").is_file()
             for name in REPORT_KEYS
             if name != "consistency"
         )
@@ -470,7 +475,8 @@ class TestDashboardReportCache(DashboardFixture):
         site, scope_project, names = self.page_projects.call_args.args
         assert site is self.reader.site
         assert scope_project == "电子游戏"
-        assert tuple(names) == projects
+        assert set(projects).issubset(names)
+        assert "音樂" in names
         observed = self.newsletter.call_args.kwargs["dyk_projects"]
         assert observed.sort("project").to_dicts() == [
             {"full_title": "Game", "project": project}
@@ -495,7 +501,7 @@ class TestDashboardReportCache(DashboardFixture):
     ) -> None:
         """Keep saved facts when a topic project read fails."""
         first = self._collect()
-        observation = self.cache / "data/observations/current.json"
+        observation = self.cache / "data/observations/current.parquet"
         original = observation.read_bytes()
         self.page_projects.side_effect = RuntimeError(
             "topic project unavailable",
@@ -742,14 +748,14 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     def test_deadline_contract_refreshes_only_reviews(self) -> None:
         """Refresh older facts for nomination deadlines and outcomes."""
         first = self._collect()
-        path = self.cache / "reviews.json"
-        record = json.loads(path.read_text())
+        path = self.cache / "reviews.parquet"
+        record = read_snapshot(path)
         previous_id = hashlib.sha256(
             b"dashboard:reviews:"
             b"nomination-sources:rendered-discussions:pending-dyk:11:3600.0",
         ).hexdigest()
         record.update(config_id=previous_id, attempt_config_id=previous_id)
-        path.write_text(json.dumps(record))
+        save_snapshot(path, record)
         second = self._collect(dt.timedelta(minutes=1))
         assert self.reviews.call_count == 2
         for name in REPORT_KEYS:
@@ -759,8 +765,8 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     def test_empty_schedule_contract_retries_only_recognized(self) -> None:
         """Retry the corrected parser without invalidating peers."""
         first = self._collect()
-        path = self.cache / "recognized.json"
-        record = json.loads(path.read_text())
+        path = self.cache / "recognized.parquet"
+        record = read_snapshot(path)
         previous_source = (
             "days:100:script-extracts:draft:"
             + Issue.upcoming(self.clock.date()).value
@@ -774,7 +780,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
             attempt_config_id=previous_id,
             failed=True,
         )
-        path.write_text(json.dumps(record))
+        save_snapshot(path, record)
         second = self._collect(dt.timedelta(minutes=1))
         assert second["collection"] == {"attempted": 1, "failed": 0}
         assert self.collectors["upcoming"].call_count == 2
@@ -787,8 +793,8 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     ) -> None:
         """Share membership and retain the actual measurement date."""
         options = {"pageviews": 3600, "dyk": 7200}
-        first = self._collect(refresh_intervals=options)
         self.popularity.return_value = self._pageviews(age=6)
+        first = self._collect(refresh_intervals=options)
         second = self._collect(
             dt.timedelta(hours=1),
             refresh_intervals=options,
@@ -858,7 +864,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
             != first["reports"]["dyk"]["last_success_at"]
         )
         assert second["homepage"]["dyk"][0]["title"] == "Game"
-        persisted = json.loads((self.cache / "recognized.json").read_text())
+        persisted = read_snapshot(self.cache / "recognized.parquet")
         assert (
             persisted["observed_at"]
             == first["reports"]["recognized"]["last_success_at"]
@@ -908,7 +914,7 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     def test_malformed_report_recollects_only_that_report(self) -> None:
         """Keep healthy reports when one envelope is corrupt."""
         self._collect()
-        (self.cache / "dyk.json").write_text('{"schema":2,"data":[]}')
+        (self.cache / "dyk.parquet").write_text('{"schema":2,"data":[]}')
         self._collect(dt.timedelta(minutes=1))
         assert self.collectors["dyk"].call_count == 2
         assert self.collectors["featured"].call_count == 1
@@ -918,11 +924,11 @@ class TestDashboardRefreshIntervals(DashboardFixture):
     def test_incomplete_failed_envelope_requires_revalidation(self) -> None:
         """Revalidate retry envelopes with missing data."""
         self._collect()
-        path = self.cache / "dyk.json"
-        record = json.loads(path.read_text())
+        path = self.cache / "dyk.parquet"
+        record = read_snapshot(path)
         record.update(failed=True, observed_at=None)
         del record["data"]
-        path.write_text(json.dumps(record))
+        save_snapshot(path, record)
         self._collect(dt.timedelta(minutes=1))
         assert self.collectors["dyk"].call_count == 2
 

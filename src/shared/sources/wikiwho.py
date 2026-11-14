@@ -1,8 +1,8 @@
 """Read bounded Chinese Wikipedia token provenance from WikiWho.
 
 The caller selects historical revisions and owns persistence. No
-credentials are sent to WikiWho. User-ID lookup uses the Action API
-because Pywikibot's users method accepts names, not numeric identifiers.
+credentials are sent to WikiWho. Source passes resolve registered user
+IDs through Wiki Replicas; standalone callers retain the API fallback.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ import json
 import re
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING
@@ -21,8 +23,17 @@ import polars as pl
 import pywikibot
 
 from shared.identity import USER_AGENT
+from shared.sources.quarry.assessment import first_revisions, listing_revisions
+from shared.sources.quarry.users import user_names
+from shared.sources.revisions import (
+    RevisionContent,
+    has_revision_cache,
+    read_revision_contents,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
+
     from pywikibot.site import BaseSite
 
 _ROOT = "https://wikiwho-api.wmcloud.org/zh/api/v1.0.0-beta/"
@@ -32,6 +43,102 @@ _retry_at: dt.datetime | None = None
 REVISION_SCHEMA = {"revision_id": pl.Int64, "timestamp": pl.String}
 TOKEN_SCHEMA = {"editor": pl.String, "origin": pl.Int64, "text": pl.String}
 TOKEN_ID_SCHEMA = {**TOKEN_SCHEMA, "token_id": pl.String}
+type _RevisionSources = dict[tuple[int, int], RevisionContent | None]
+_SOURCE_BATCH: ContextVar[_RevisionSources | None] = ContextVar(
+    "wikiwho_source_batch",
+    default=None,
+)
+type _ListingMetadata = dict[
+    tuple[int, dt.datetime],
+    tuple[int, int, dt.datetime] | None,
+]
+_LISTING_BATCH: ContextVar[_ListingMetadata | None] = ContextVar(
+    "wikiwho_listing_batch",
+    default=None,
+)
+
+
+@contextmanager
+def preloaded_listing_sources(
+    site: BaseSite,
+    selections: list[tuple[int, dt.datetime]],
+) -> Iterator[None]:
+    """Batch missing listing metadata and source alignment contents.
+
+    Args:
+        site: Wiki owning the selected article histories.
+        selections: Article IDs and exclusive listing-day cutoffs.
+
+    Yields:
+        A source scope reusing indexed SQL boundaries and at most fifty
+        exact revision bodies per API request. WikiWho itself exposes
+        per-article endpoints and retains its independent validation.
+    """
+    groups: list[dict[int, dt.datetime]] = []
+    for page_id, cutoff in dict.fromkeys(selections):
+        for group in groups:
+            if page_id not in group:
+                group[page_id] = cutoff
+                break
+        else:
+            groups.append({page_id: cutoff})
+    first = first_revisions(site, [page for page, _ in selections])
+    cached = dict(_LISTING_BATCH.get() or {})
+    source_selections = {}
+    for group in groups:
+        selected = listing_revisions(
+            site,
+            {
+                page: cutoff - dt.timedelta(microseconds=1)
+                for page, cutoff in group.items()
+            },
+        )
+        for page, cutoff in group.items():
+            tail, birth = selected[page], first.get(page)
+            cached[page, cutoff] = (
+                (tail[0], birth[0], birth[1]) if tail and birth else None
+            )
+            if tail and birth:
+                source_selections[tail[0]] = page
+    token = _LISTING_BATCH.set(cached)
+    try:
+        with preloaded_revision_sources(site, source_selections):
+            yield
+    finally:
+        _LISTING_BATCH.reset(token)
+
+
+@contextmanager
+def preloaded_revision_sources(
+    site: BaseSite,
+    selections: Mapping[int, int],
+) -> Iterator[None]:
+    """Share exact source alignment reads across an attribution batch.
+
+    Args:
+        site: Wiki supplying the selected historical source contents.
+        selections: Exact revision IDs mapped to owning article IDs.
+
+    Yields:
+        A request-local context where source helpers reuse the complete
+        fifty-revision batches, including explicit unavailable results.
+
+    Raises:
+        ValueError: A returned revision belongs to another article.
+    """
+    contents = read_revision_contents(site, selections)
+    cached = dict(_SOURCE_BATCH.get() or {})
+    for revision, page_id in selections.items():
+        content = contents[revision]
+        if content is not None and content.page_id != page_id:
+            message = "Attribution source batch has another article owner."
+            raise ValueError(message)
+        cached[page_id, revision] = content
+    token = _SOURCE_BATCH.set(cached)
+    try:
+        yield
+    finally:
+        _SOURCE_BATCH.reset(token)
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,6 +417,14 @@ def revision_source(
     Raises:
         ValueError: Source identity, parent or content is unavailable.
     """
+    key = page_id, revision_id
+    cached = _SOURCE_BATCH.get() or {}
+    if key in cached:
+        content = cached[key]
+        if content is None or type(content.parent_id) is not int:
+            message = "Batched authorship proof source is unavailable."
+            raise ValueError(message)
+        return RevisionSource(revision_id, content.parent_id, content.text)
     page = pywikibot.Page(site, title)
     if page.pageid != page_id:
         message = "Authorship proof article identity changed."
@@ -344,6 +459,9 @@ def usernames(site: BaseSite, identifiers: list[str]) -> dict[str, str]:
         value: value[2:] for value in identifiers if value.startswith("0|")
     }
     registered = [value for value in identifiers if value.isdecimal()]
+    if has_revision_cache():
+        result.update(user_names(site, [int(value) for value in registered]))
+        registered = []
     for offset in range(0, len(registered), 50):
         response = site.simple_request(
             action="query",
@@ -383,6 +501,14 @@ def revision_text(
     Raises:
         ValueError: Identity changed or text is absent or oversized.
     """
+    key = page_id, revision_id
+    cached = _SOURCE_BATCH.get() or {}
+    if key in cached:
+        content = cached[key]
+        if content is None:
+            message = "Batched listing article text is unavailable."
+            raise ValueError(message)
+        return content.text
     page = pywikibot.Page(site, title)
     if page.pageid != page_id:
         message = "Listing article identity changed."
@@ -402,8 +528,8 @@ def listing_metadata(
 ) -> tuple[int, int, dt.datetime]:
     """Resolve the actual listing revision and creation instant on-wiki.
 
-    A live metadata read prevents lagging replica or WikiWho snapshots
-    from substituting an earlier revision for the listing revision.
+    A prepared scope reuses SQL-selected exact cutoffs. Individual calls
+    outside a batch use the SDK's bounded historical metadata reads.
 
     Args:
         site: Existing Chinese Wikipedia site.
@@ -417,6 +543,13 @@ def listing_metadata(
     Raises:
         ValueError: Identity or historical metadata is unavailable.
     """
+    cached = _LISTING_BATCH.get() or {}
+    if (page_id, cutoff) in cached:
+        selected = cached[page_id, cutoff]
+        if selected is None:
+            message = "Batched listing revision metadata is unavailable."
+            raise ValueError(message)
+        return selected
     page = pywikibot.Page(site, title)
     if page.pageid != page_id:
         message = "Listing article identity changed."

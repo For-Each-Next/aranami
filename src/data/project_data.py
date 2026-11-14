@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from data.paths import read_storage_path, storage_candidates, storage_key
+from data.paths import read_storage_path, storage_key
 from data.reports import ReportBundle, ReportStore, report_key
 from shared.assessment_profiles import assessment_profile
 from shared.config import PROJECT_DATA_TASKFORCES
@@ -57,12 +57,141 @@ SCHEMA = {
     "page_is_redirect": pl.Int64,
     "page_length": pl.Int64,
     "taskforces": pl.List(pl.String),
+    "page_rev_timestamp": pl.Datetime("us", "UTC"),
+    "pa_taskforces": pl.List(pl.String),
+}
+_PHYSICAL_NAMES = {
+    "rev_id": "page_rev_latest",
+    "talk_page_rev": "talk_page_latest",
 }
 _FAMILY = "project-data"
 _MAX_BYTES = 128 * 1024 * 1024
 _MAX_ROWS = 1_000_000
 _MAX_METADATA_BYTES = 1024 * 1024
 _MAX_SNAPSHOTS = 40_000
+_SCHEMA_VERSION = 2
+
+
+def read_file(
+    path: Path,
+    site_name: str,
+    project: str,
+    boundary_date: dt.date,
+) -> ReportBundle | None:
+    """Validate a historical project file for an explicit migration.
+
+    Returns:
+        Verified facts in the current reader model, with unknowns null.
+    """
+    return _read(path, site_name, project, boundary_date)
+
+
+def migrate_snapshot(bundle: ReportBundle, destination: Path) -> ReportBundle:
+    """Write a validated historical observation in the current schema.
+
+    Returns:
+        Converted snapshot preserving its original dates and generation.
+    """
+    manifest = json.loads(json.dumps(dict(bundle.manifest)))
+    site_name = manifest["target"]["site"]
+    project = manifest["target"]["title"]
+    boundary = dt.date.fromisoformat(manifest["metadata"]["boundary_date"])
+    _safe_directories(
+        destination.parent,
+        next(
+            (
+                parent.parent
+                for parent in destination.parents
+                if parent.name == "data"
+            ),
+            destination.parent,
+        ),
+    )
+    return _save(
+        destination,
+        bundle.tables["members"],
+        manifest,
+        site_name=site_name,
+        project=project,
+        boundary_date=boundary,
+    )
+
+
+def _root(site_name: str, project: str, *, dry: bool = False) -> Path:
+    """Select archive storage only for the full Chinese project table.
+
+    Returns:
+        Runtime-relative data root, isolated for previews.
+    """
+    kind = (
+        "archive"
+        if (site_name, project) == ("zhwiki", "电子游戏")
+        else "daily"
+    )
+    return Path("dry-run" if dry else ".") / "data" / kind
+
+
+def normalize_members(
+    frame: pl.DataFrame,
+    _taskforces: list[str],
+) -> pl.DataFrame:
+    """Adapt old project facts while preserving unknown values.
+
+    Returns:
+        Reader columns with nullable revisions and taskforce names.
+    """
+    frame = frame.rename({
+        new: old
+        for old, new in _PHYSICAL_NAMES.items()
+        if new in frame.columns
+    })
+    missing = [
+        pl.lit(None, dtype=dtype).alias(name)
+        for name, dtype in SCHEMA.items()
+        if name not in frame.columns
+        and name not in {"taskforces", "pa_taskforces"}
+    ]
+    frame = frame.with_columns(missing)
+    if "taskforces" not in frame.columns:
+        frame = frame.with_columns(
+            (
+                pl.col("pa_taskforces").cast(pl.List(pl.String))
+                if "pa_taskforces" in frame.columns
+                else pl.lit(None, dtype=pl.List(pl.String))
+            ).alias("taskforces"),
+        )
+    frame = frame.with_columns(
+        pl.col("taskforces").cast(pl.List(pl.String)).alias("pa_taskforces"),
+        pl.col("page_is_redirect").cast(pl.Int64),
+    )
+    return frame.select(*SCHEMA)
+
+
+def stored_members(frame: pl.DataFrame) -> pl.DataFrame:
+    """Expose requested project columns in the saved Parquet model.
+
+    Returns:
+        Canonical on-disk table with taskforce membership lists.
+    """
+    return (
+        frame
+        .with_columns(pl.col("page_is_redirect").cast(pl.Boolean))
+        .rename(_PHYSICAL_NAMES)
+        .select(
+            "page_id",
+            "page_namespace",
+            "page_title",
+            "page_rev_latest",
+            "page_rev_timestamp",
+            "talk_page_id",
+            "talk_page_latest",
+            "pa_class",
+            "pa_importance",
+            "pa_taskforces",
+            "page_is_redirect",
+            "page_length",
+        )
+    )
 
 
 def _key(site_name: str, project: str, boundary_date: dt.date) -> str:
@@ -81,6 +210,48 @@ def _key(site_name: str, project: str, boundary_date: dt.date) -> str:
     return report_key("projects", site_name, project) + completed.strftime(
         "/%Y/%Y%m%d",
     )
+
+
+def project_stem(site_name: str, project: str) -> str:
+    """Name additional project datasets without scope folders.
+
+    Returns:
+        A stable ASCII fileset prefix; original identities stay in
+        metadata.
+    """
+    names = {
+        ("enwiki", "Video games"): "enwiki",
+        ("zhwiki", "电子游戏"): "wpvg",
+        ("zhwiki", "ACG"): "acg",
+        ("zhwiki", "动漫"): "acg",
+        ("zhwiki", "电子游戏/宝可梦工作组"): "pokemon",
+        ("zhwiki", "电子游戏/我的世界"): "minecraft",
+        ("zhwiki", "电子游戏/史克威尔艾尼克斯工作组"): "square-enix",
+        ("zhwiki", "电子游戏/世嘉工作组"): "sega",
+        ("zhwiki", "电子游戏/任天堂工作组"): "nintendo",
+        ("zhwiki", "电子游戏/米哈游工作组"): "mihoyo",
+    }
+    return names.get(
+        (site_name, project),
+        "project-"
+        + hashlib.sha256(f"{site_name}:{project}".encode()).hexdigest()[:16],
+    )
+
+
+def _file_key(site_name: str, project: str, boundary_date: dt.date) -> str:
+    """Build one flat project filename for the completed data day.
+
+    Returns:
+        Date-only archive name or a prefixed daily-input filename.
+    """
+    _key(site_name, project, boundary_date)
+    day = boundary_date - dt.timedelta(days=1)
+    prefix = (
+        ""
+        if _root(site_name, project).name == "archive"
+        else project_stem(site_name, project) + "-"
+    )
+    return f"{prefix}{day:%Y%m%d}.parquet"
 
 
 def snapshot_path(
@@ -108,8 +279,8 @@ def snapshot_path(
         root /= "dry-run"
     return (
         root
-        / "reports/data"
-        / storage_key(_key(site_name, project, boundary_date) + ".parquet")
+        / _root(site_name, project)
+        / storage_key(_file_key(site_name, project, boundary_date))
     )
 
 
@@ -126,10 +297,10 @@ def _stored_path(
     Returns:
         Safe ASCII path or an existing read-only legacy observation.
     """
-    base = runtime / ("dry-run/reports/data" if dry else "reports/data")
+    base = runtime / _root(site_name, project, dry=dry)
     return read_storage_path(
         base,
-        _key(site_name, project, boundary_date) + ".parquet",
+        _file_key(site_name, project, boundary_date),
     )
 
 
@@ -170,10 +341,6 @@ def _validated(frame: pl.DataFrame) -> pl.DataFrame:
         "page_id",
         "page_namespace",
         "page_title",
-        "rev_id",
-        "page_is_redirect",
-        "page_length",
-        "taskforces",
     )
     invalid = pl.any_horizontal(pl.col(name).is_null() for name in required)
     invalid |= (
@@ -188,7 +355,7 @@ def _validated(frame: pl.DataFrame) -> pl.DataFrame:
         | (pl.col("talk_page_rev") <= 0).fill_null(value=False)
         | (
             pl.col("talk_page_id").is_null()
-            != pl.col("talk_page_rev").is_null()
+            & pl.col("talk_page_rev").is_not_null()
         )
     )
     if not compact.filter(invalid).is_empty():
@@ -381,7 +548,7 @@ def _read_details(
         encoded,
         contract="daily-project-data",
     )
-    frame = _validated(decode_assessments(encoded))
+    original = decode_assessments(encoded)
     metadata = manifest.get("metadata")
     profile = (
         metadata.get("assessment_profile")
@@ -400,6 +567,7 @@ def _read_details(
         else None,
         project,
     )
+    frame = _validated(normalize_members(original, taskforce_projects))
     flags = frame.select(
         pl.col("taskforces").explode(empty_as_null=False).drop_nulls(),
     )
@@ -409,12 +577,12 @@ def _read_details(
         )
         raise ValueError(message)
     expected = {
-        "schema": 1,
+        "schema": manifest.get("schema"),
         "family": _FAMILY,
         "report_key": _key(site_name, project, boundary_date),
         "target": {"site": site_name, "title": project},
         "rows": frame.height,
-        "sha256": _digest(frame),
+        "sha256": _digest(original),
         "generation": started.strftime("%Y%m%dT%H%M%S%fZ"),
         "columns": {
             name: str(dtype) for name, dtype in encoded.schema.items()
@@ -431,17 +599,21 @@ def _read_details(
                 dt.time(),
                 dt.UTC,
             ).isoformat(),
-            "source_contract": "project-membership-1",
+            "source_contract": f"project-membership-{manifest.get('schema')}",
             "observation_kind": "current-replica",
             "taskforce_projects": taskforce_projects,
             "assessment_profile": profile,
         },
     }
     if (
-        any(manifest.get(key) != value for key, value in expected.items())
+        any(manifest.get(key) != value for key, value in expected.items())  # ruff: ignore[too-many-boolean-expressions]
         or type(manifest.get("schema")) is not int
         or type(manifest.get("rows")) is not int
-        or encoded.columns != list(SCHEMA)
+        or manifest.get("schema") not in {1, _SCHEMA_VERSION}
+        or (
+            manifest.get("schema") == _SCHEMA_VERSION
+            and encoded.columns != stored_members(frame).columns
+        )
     ):
         message = "Daily project snapshot identity or integrity mismatch."
         raise ValueError(message)
@@ -462,8 +634,6 @@ def _read_details(
             "Daily project snapshot identity, boundary, or integrity mismatch."
         )
         raise ValueError(message)
-    logical_parts = Path(str(manifest["report_key"])).parts
-    relative_file = Path(*path.parts[-len(logical_parts) :]).as_posix()
     report_activity(
         "saved",
         "project_membership",
@@ -472,7 +642,10 @@ def _read_details(
         date=boundary_date - dt.timedelta(days=1),
         kind="source_loaded",
         metadata={
-            "file": f"reports/data/{relative_file}",
+            "file": str(
+                _root(site_name, project)
+                / storage_key(_file_key(site_name, project, boundary_date)),
+            ),
             "observed_at": manifest["calculated_at"],
             "finished_at": manifest["finished_at"],
             "written_at": storage["written_at"] if storage else "",
@@ -588,28 +761,24 @@ def latest_snapshot(
     root = runtime if runtime is not None else Path.cwd()
     candidates = set()
     for preview in (False, True) if dry else (False,):
-        base = root / ("dry-run/reports/data" if preview else "reports/data")
-        for parent in storage_candidates(
-            base,
-            report_key("projects", site_name, project),
-        ):
-            _safe_directories(parent, root)
-            for path in parent.glob("????/????????.parquet"):
-                try:
-                    day = dt.date.fromisoformat(path.stem)
-                except ValueError:
-                    continue
-                boundary = day + dt.timedelta(days=1)
-                if (
-                    path.parent.name == f"{day.year:04d}"
-                    and boundary <= through
-                ):
-                    candidates.add(boundary)
-                if len(candidates) > _MAX_SNAPSHOTS:
-                    message = (
-                        "Daily project history exceeds its supported bound."
-                    )
-                    raise ValueError(message)
+        base = root / _root(site_name, project, dry=preview)
+        _safe_directories(base, root)
+        prefix = (
+            ""
+            if base.name == "archive"
+            else project_stem(site_name, project) + "-"
+        )
+        for path in base.glob(prefix + "????????.parquet"):
+            try:
+                day = dt.date.fromisoformat(path.stem.removeprefix(prefix))
+            except ValueError:
+                continue
+            boundary = day + dt.timedelta(days=1)
+            if boundary <= through:
+                candidates.add(boundary)
+            if len(candidates) > _MAX_SNAPSHOTS:
+                message = "Daily project history exceeds its supported bound."
+                raise ValueError(message)
     for day in sorted(candidates, reverse=True):
         saved = read_snapshot(
             site_name,
@@ -670,7 +839,15 @@ def _save(  # ruff: ignore[too-many-arguments]
         OSError: A durable write or verification fails.
     """
     profile = assessment_profile(site_name, project)
-    encoded = encode_assessments(frame, profile=profile)
+    physical = stored_members(frame)
+    encoded = encode_assessments(physical, profile=profile).with_columns(
+        pl.col("pa_taskforces").cast(
+            pl.List(pl.Enum(manifest["metadata"]["taskforce_projects"])),
+        ),
+    )
+    manifest["schema"] = 2
+    manifest["metadata"]["source_contract"] = "project-membership-2"
+    manifest["sha256"] = _digest(physical)
     manifest["metadata"]["assessment_profile"] = _profile_metadata(
         encoded,
         profile.identifier,
@@ -770,7 +947,7 @@ def ensure_snapshot(  # ruff: ignore[too-many-arguments]
         raise ValueError(message)
     taskforce_projects = _configured_taskforces(site_name, project)
     store = ReportStore(
-        root / ("dry-run/reports/data" if dry else "reports/data"),
+        root / _root(site_name, project, dry=dry),
         dry=dry,
     )
     key = _key(site_name, project, boundary_date)
@@ -806,7 +983,12 @@ def ensure_snapshot(  # ruff: ignore[too-many-arguments]
             message = "Daily project capture expired while waiting for a lock."
             raise ValueError(message)
         frame = load_members(project)
-        frame = _validated(_with_taskforces(frame, children))
+        frame = _validated(
+            normalize_members(
+                _with_taskforces(frame, children),
+                taskforce_projects,
+            ),
+        )
         finished = clock_anchor + dt.timedelta(seconds=monotonic() - began)
         if finished.date() != boundary_date:
             message = "Daily project acquisition crossed its UTC boundary."
@@ -840,7 +1022,13 @@ def ensure_snapshot(  # ruff: ignore[too-many-arguments]
             "rows": frame.height,
             "sha256": _digest(frame),
         }
-        path = store.data_path(key + ".parquet", writing=True)
+        path = snapshot_path(
+            site_name,
+            project,
+            boundary_date,
+            runtime=root,
+            dry=dry,
+        )
         return _save(
             path,
             frame,

@@ -244,13 +244,11 @@ class TestPopularityHistory(TestCase):
         assert not receipt["wiki_edits"]
         assert (
             json.loads(
-                (
-                    self.root / "reports/data/historical-import.json"
-                ).read_text(),
+                (self.root / "data/daily/historical-import.json").read_text(),
             )
             == receipt
         )
         assert not (
             self.root
-            / "reports/data/newsletter/historical/temporary-import.json"
+            / "data/daily/newsletter/historical/temporary-import.json"
         ).exists()

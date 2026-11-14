@@ -51,7 +51,7 @@ class HomepageArchiveStorageTests(TestCase):
     def setUp(self) -> None:
         """Create an isolated durable runtime destination."""
         self.root = Path(self.enterContext(TemporaryDirectory()))
-        self.path = self.root / "reports/data/homepage-archives.parquet"
+        self.path = self.root / "data/daily/homepage-archives.parquet"
 
     def test_initial_inventory_and_daily_append_reuse_previous_coverage(
         self,

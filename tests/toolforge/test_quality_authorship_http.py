@@ -1,4 +1,7 @@
-"""Verify quality authorship stays read-only over HTTP."""
+"""Verify the merged quality page and former author-page redirect."""
+
+# Query counts are explicit cache-identity fixtures.
+# ruff: file-ignore[magic-value-comparison]
 
 from __future__ import annotations
 
@@ -7,54 +10,86 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from starlette.testclient import TestClient
+from test_quality_analysis import analysis_fixture
 
 from webservice.presentation import Interface
 from webservice.server import create_app
 
 
 class QualityAuthorshipHTTPTests(TestCase):
-    """Keep source acquisition outside author page requests."""
+    """Preserve bookmarked controls on one current-cohort page."""
 
     @staticmethod
-    def test_missing_saved_data_is_unavailable_without_writes() -> None:
-        """Serve all locales without creating an absent runtime."""
-        with TemporaryDirectory() as directory:
+    def test_legacy_redirect_preserves_controls_without_reads() -> None:
+        """Redirect old links before loading or calculating evidence."""
+        with (
+            TemporaryDirectory() as directory,
+            patch("webservice.server.read_current_quality") as read,
+        ):
             runtime = Path(directory) / "absent"
             client = TestClient(create_app(runtime))
             for locale in ("en", "zh-hans", "zh-hant"):
-                response = client.get(f"/quality-authorship/?lang={locale}")
-                assert response.status_code == HTTPStatus.OK
-                assert (
-                    Interface(locale).text(
-                        "quality_authorship.heading",
-                    )
-                    in response.text
+                response = client.get(
+                    f"/quality-authorship/?lang={locale}&count_b=1",
+                    follow_redirects=False,
                 )
-                assert 'href="/quality-authorship/"' in response.text
-                assert not runtime.exists()
+                assert response.status_code == HTTPStatus.MOVED_PERMANENTLY
+                target = urlsplit(response.headers["Location"])
+                assert target.path == "/quality-analysis/"
+                assert parse_qs(target.query) == {
+                    "lang": [locale],
+                    "count_b": ["1"],
+                }
+            read.assert_not_called()
+            assert not runtime.exists()
 
     @staticmethod
     def test_invalid_filters_do_not_read_evidence() -> None:
-        """Reject unsupported controls before reading saved data."""
+        """Reject invalid controls before loading saved evidence."""
         with (
             TemporaryDirectory() as directory,
-            patch("webservice.server.read_quality_authors") as read,
+            patch("webservice.server.read_current_quality") as read,
         ):
             client = TestClient(create_app(Path(directory)))
-            response = client.get("/quality-authorship/?user=Someone")
-            assert response.status_code == HTTPStatus.BAD_REQUEST
+            for route in ("quality-authorship", "quality-analysis"):
+                for query in (
+                    "user=Someone",
+                    "count_b=",
+                    "count_b=yes",
+                    "count_b=1&count_b=0",
+                ):
+                    response = client.get(f"/{route}/?{query}")
+                    assert response.status_code == HTTPStatus.BAD_REQUEST
             read.assert_not_called()
 
     @staticmethod
-    def test_b_toggle_uses_saved_data_and_preserves_language_links() -> None:
-        """Keep native GET state without HTTP source acquisition."""
+    def test_global_toggle_selects_a_saved_cohort() -> None:
+        """Use one saved variant for all three sections."""
+
+        def saved(_runtime: Path, *, include_b: bool) -> dict:
+            """Provide a prepared cohort.
+
+            Returns:
+                Saved analysis and an observed empty author directory.
+            """
+            return {
+                "include_b": include_b,
+                "analysis": {**analysis_fixture(), "include_b": include_b},
+                "authorship": {
+                    "available": True,
+                    "authors": [],
+                    "include_b": include_b,
+                },
+            }
+
         with (
             TemporaryDirectory() as directory,
             patch(
-                "webservice.server.read_quality_authors",
-                return_value={"available": True, "authors": []},
+                "webservice.server.read_current_quality",
+                side_effect=saved,
             ) as read,
         ):
             runtime = Path(directory)
@@ -64,52 +99,51 @@ class QualityAuthorshipHTTPTests(TestCase):
                 ("?count_b=0", False),
                 ("?count_b=1", True),
             ):
-                response = client.get("/quality-authorship/" + query)
+                response = client.get("/quality-analysis/" + query)
                 assert response.status_code == HTTPStatus.OK
-                read.assert_called_with(runtime, include_b=included)
                 assert (
                     'name="count_b" value="1" checked' in response.text
                 ) == included
+                assert 'id="analysis-overview"' in response.text
+                assert 'id="analysis-articles"' in response.text
+                assert 'id="quality-authors"' in response.text
                 if included:
                     assert "count_b=1&amp;lang=zh-hans" in response.text
-            read.reset_mock()
-            for query in ("count_b=", "count_b=yes", "count_b=1&count_b=0"):
-                response = client.get("/quality-authorship/?" + query)
-                assert response.status_code == HTTPStatus.BAD_REQUEST
-            read.assert_not_called()
+            assert read.call_count == 2
+            read.assert_called_with(runtime, include_b=True)
 
     @staticmethod
-    def test_unreadable_evidence_keeps_the_page_available() -> None:
-        """Keep corrupt saved files distinct from an empty result."""
+    def test_corrupt_saved_variant_is_unavailable() -> None:
+        """Preserve the unavailable state for corrupt saved data."""
         with (
             TemporaryDirectory() as directory,
             patch(
-                "webservice.server.read_quality_authors",
-                side_effect=ValueError("damaged saved evidence"),
+                "webservice.server.read_current_quality",
+                side_effect=ValueError("damaged"),
             ),
         ):
             response = TestClient(create_app(Path(directory))).get(
-                "/quality-authorship/?lang=en",
+                "/quality-analysis/?lang=en",
             )
             assert response.status_code == HTTPStatus.OK
             assert (
-                Interface("en").text(
-                    "quality_authorship.unavailable",
-                )
+                Interface("en").text("quality_analysis.unavailable")
                 in response.text
             )
 
     @staticmethod
-    def test_post_is_rejected_and_head_has_no_body() -> None:
-        """Expose the tool through the existing safe read methods."""
+    def test_post_is_rejected_and_head_keeps_redirect_without_a_body() -> None:
+        """Keep both routes limited to safe read methods."""
         with TemporaryDirectory() as directory:
             client = TestClient(create_app(Path(directory)))
-            assert (
-                client.post(
-                    "/quality-authorship/",
-                ).status_code
-                == HTTPStatus.METHOD_NOT_ALLOWED
+            for route in ("quality-analysis", "quality-authorship"):
+                assert (
+                    client.post(f"/{route}/").status_code
+                    == HTTPStatus.METHOD_NOT_ALLOWED
+                )
+            response = client.head(
+                "/quality-authorship/?lang=en",
+                follow_redirects=False,
             )
-            response = client.head("/quality-authorship/?lang=en")
-            assert response.status_code == HTTPStatus.OK
+            assert response.status_code == HTTPStatus.MOVED_PERMANENTLY
             assert not response.content

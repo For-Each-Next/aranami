@@ -9,7 +9,9 @@ presentation values without acquiring sources or recalculating metrics.
 
 from __future__ import annotations
 
+from ipaddress import ip_address
 from math import ceil, cos, pi, sin
+from operator import itemgetter
 
 from shared.assessment_profiles import assessment_profile
 from webservice.presentation import (
@@ -18,15 +20,17 @@ from webservice.presentation import (
     title_url,
     utc_time,
 )
+from webservice.quality_authorship import review_url
 
 _PROFILE = assessment_profile("zhwiki", "电子游戏")
 _GRADES = tuple(
     label.code
     for label in _PROFILE.classes
-    if label.code in {"FA", "FL", "A", "AL", "GA", "Bplus"}
+    if label.code in {"FA", "FL", "A", "AL", "GA", "Bplus", "B", "BL"}
 )
 _IMPORTANCE = tuple(label.code for label in _PROFILE.importance)
 _HALF_CIRCLE = 0.5
+_DETAIL_SHARE_THRESHOLD = 0.1
 
 
 def _number(value: float | None) -> str:
@@ -85,9 +89,7 @@ def _pie(
         categories.append({
             **row,
             "label": interface.text(f"assessment.{dimension}.{code}"),
-            "color": _PROFILE.color(code, "class")
-            if dimension == "class"
-            else None,
+            "color": _PROFILE.color(code, dimension),
             "series": _IMPORTANCE.index(code)
             if code in _IMPORTANCE
             else len(_IMPORTANCE),
@@ -114,7 +116,7 @@ def _years(data: dict, interface: Interface) -> dict:
     plot_width = chart_width - 64
     slot_width = plot_width / max(len(saved), 1)
     years = []
-    for index, row in enumerate(reversed(saved)):
+    for index, row in enumerate(sorted(saved, key=itemgetter("year"))):
         center = 48 + (index + 0.5) * slot_width
         offset = 0.0
         segments = []
@@ -169,7 +171,7 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
     lengths = []
     for row in data.get("lengths", []):
         low, high = row.get("central_68_low"), row.get("central_68_high")
-        median = row.get("median_words")
+        median = row.get("median_characters")
         lengths.append({
             **row,
             "label": interface.text(
@@ -198,12 +200,19 @@ def _articles(data: dict, interface: Interface) -> list[dict]:
     """
     articles = []
     for row in data.get("articles", []):
+        page_id = row["page_id"]
         date = row.get("listed_date")
-        talk_revision = row.get("talk_revision_id")
         importance = row.get("importance") or "Unknown"
+        contributors = [
+            {"name": name, "url": title_url(f"User:{name}")}
+            for name in row.get("authors", [])
+        ]
         articles.append({
             **row,
-            "title_label": display_title(row["title"], interface.locale),
+            "title_label": display_title(
+                row["title"].replace("_", " "),
+                interface.locale,
+            ),
             "url": title_url(row["title"]),
             "talk_url": title_url("Talk:" + row["title"]),
             "grade_label": interface.text(f"assessment.class.{row['grade']}"),
@@ -213,20 +222,111 @@ def _articles(data: dict, interface: Interface) -> list[dict]:
             "importance_label": interface.text(
                 f"assessment.importance.{importance}",
             ),
+            "importance_color": _PROFILE.color(importance, "importance"),
             "importance_order": _IMPORTANCE.index(importance)
             if importance in _IMPORTANCE
             else len(_IMPORTANCE),
             "date_label": interface.date(date) if date else None,
-            "listing_url": f"https://zh.wikipedia.org/w/index.php?oldid={talk_revision}"
-            if type(talk_revision) is int and talk_revision > 0
-            else None,
-            "words_label": _number(row.get("prose_words")),
+            "listing_url": _revision_url(row.get("listed_oldid")),
+            "review_url": review_url({
+                "nomination_link": row.get("listed_review_link"),
+                "title": row["title"],
+            }),
+            "characters_label": _number(row.get("prose_characters")),
+            "contributors": contributors,
+            "authorship_popup_id": f"quality-article-{page_id}-authorship",
+            "authorship_popup_title": interface.text(
+                "quality_analysis.authorship_details",
+                title=display_title(
+                    row["title"].replace("_", " "),
+                    interface.locale,
+                ),
+            ),
+            "authorship": _authorship(row, interface),
             "source_label": "—"
             if row.get("source_bytes") is None
             else f"{row['source_bytes'] / 1000:,.1f}",
-            "source_url": f"https://zh.wikipedia.org/w/index.php?oldid={row['article_revision_id']}",
+            "source_url": _revision_url(row.get("article_revision_id")),
         })
     return articles
+
+
+def _revision_url(value: object) -> str | None:
+    """Link a retained positive revision without inventing a boundary.
+
+    Returns:
+        A Chinese Wikipedia oldid URL, or none without a known revision.
+    """
+    if type(value) is not int or value <= 0:
+        return None
+    return f"https://zh.wikipedia.org/w/index.php?oldid={value}"
+
+
+def _authorship(row: dict, interface: Interface) -> dict:
+    """Format saved attribution boundaries and qualifying contributors.
+
+    Returns:
+        Dialog labels preserving independently missing range endpoints.
+    """
+    source = row.get("authorship") or {
+        "available": row.get("authorship_available"),
+        "eligible_bytes": row.get("authorship_eligible_bytes"),
+        "contributors": row.get("authorship_editors", []),
+        **{
+            f"range_{boundary}_{field}": row.get(
+                f"authorship_{boundary}_{field}",
+            )
+            for boundary in ("start", "end")
+            for field in ("revision", "timestamp")
+        },
+    }
+    boundaries = {}
+    for boundary in ("start", "end"):
+        revision = source.get(f"range_{boundary}_revision")
+        instant = source.get(f"range_{boundary}_timestamp")
+        url = _revision_url(revision)
+        label = str(revision)
+        if instant:
+            label += " · " + interface.date(str(instant)[:10])
+        boundaries[f"range_{boundary}"] = (
+            {"url": url, "label": label} if url else None
+        )
+    return {
+        **boundaries,
+        "available": bool(source.get("available")),
+        "eligible_bytes_label": _number(source.get("eligible_bytes")),
+        "editors": [
+            _editor(editor, interface)
+            for editor in source.get("contributors", [])
+            if editor.get("share", 0) > _DETAIL_SHARE_THRESHOLD
+        ],
+    }
+
+
+def _editor(source: dict, interface: Interface) -> dict:
+    """Link registered accounts and public IP contributions correctly.
+
+    Returns:
+        Escaped display values with no invented account for unknown IDs.
+    """
+    identity = source["editor"]
+    name = source.get("name")
+    url = title_url(f"User:{name}") if name else None
+    if identity.startswith("0|"):
+        name = identity[2:]
+        try:
+            ip_address(name)
+        except ValueError:
+            name, url = None, None
+        else:
+            url = title_url(f"Special:Contributions/{name}")
+    return {
+        "name": name
+        or interface.text("quality_analysis.unknown_editor", editor=identity),
+        "url": url,
+        "share_label": f"{source['share'] * 100:.1f}%",
+        "bytes_label": _number(source.get("bytes")),
+    }
 
 
 def quality_analysis_context(data: dict, interface: Interface) -> dict:
@@ -254,10 +354,16 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             "available": bool(data.get("available")),
             "observed_at": data.get("observed_at"),
             "observed_label": utc_time(data.get("observed_at")),
+            "prepared_at": data.get("prepared_at") or data.get("observed_at"),
+            "prepared_label": utc_time(
+                data.get("prepared_at") or data.get("observed_at"),
+            ),
             "total": _number(total),
             "measured": _number(coverage.get("measured", 0)),
             "dated": _number(coverage.get("dated", 0)),
-            "median": _number(coverage.get("median_words")),
+            "median": _number(coverage.get("median_characters")),
+            "include_b": bool(data.get("include_b")),
+            "locale": interface.locale,
             "grades": grades,
             "importance_totals": importance,
             "importance_available": data.get("importance_available", True),
@@ -278,6 +384,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                     "label": interface.text(f"assessment.class.{code}"),
                 }
                 for code in _GRADES
+                if data.get("include_b") or code not in {"B", "BL"}
             ],
             "importance_options": [
                 {

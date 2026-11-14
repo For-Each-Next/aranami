@@ -168,7 +168,7 @@ class AuthorshipCorrectionStorageTests(TestCase):
     def test_incremental_facts_and_complete_coverage_never_regress() -> None:
         """Retain partial proofs across later failures."""
         with TemporaryDirectory() as temporary:
-            path = Path(temporary) / "reports/data/articles/proofs.parquet"
+            path = Path(temporary) / "data/daily/articles/proofs.parquet"
             first = _record()
             store.merge_save(path, first)
             proof = _proof(102)

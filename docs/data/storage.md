@@ -1,209 +1,221 @@
 # Saved data
 
-Use the owning data readers to obtain validated Polars tables without
-source requests. Durable facts live under `reports/data/`; prepared reports and
-newsletter archives live under `reports/records/`. Deleting `cache/` must not
-erase the evidence required to explain a retained result.
+Collection always precedes analysis and publication. Collectors query page
+identities, fetch missing exact revisions in batches, parse metadata, and save
+complete calculated results. Wiki projections and HTTP views read those saved
+Parquet results without source API/SQL requests or raw revision parsing. Wiki
+publication still verifies and saves its destination through MediaWiki.
 
-## ASCII filesystem paths
+## Runtime tree and retention
 
-`data.paths.storage_key` maps logical identities to bounded ASCII path
-components. Ordinary ASCII components retain their spelling. Non-ASCII,
-oversized and reserved `target-` components use `target-` followed by the
-full SHA-256 of their exact UTF-8 spelling. Apply this mapping once to a
-logical identity. Metadata retains the original `report_key`, wiki, project
-and destination title; hashes in directory names never replace those facts
-or article page/revision identifiers.
-
-Owner readers accept an unmigrated legacy path when the current ASCII path
-is absent. Two locations for one logical identity fail visibly rather than
-silently selecting different history. Existing immutable observations are
-reused before acquisition, preserving their dates and original bytes.
-Mutable report writers require explicit migration before writing an existing
-legacy identity. Literal legacy `target-` names require owner-verified migration:
-their old spelling can coincide with another identity's new physical path.
-Public previews open existing ASCII physical selectors directly, and resolve
-old non-ASCII file links through the same guarded mapping. Project identity
-comes from validated saved metadata rather than reversing a directory hash.
-
-Deploy this layout with all runtime writers stopped, including one-off jobs.
-Inventory production reports, report locks and isolated preview equivalents;
-record every file's original/final path, size and SHA-256 before renaming.
-Rename components on the same filesystem, verify the complete final inventory
-and retain a checkpointed rollback receipt outside the managed trees. Preserve
-file contents, manifests, selectors and historical observations unchanged.
-Restart services only after the new readers and mapped layout agree. If source
-activation fails, reverse the renames and verify the original inventory before
-restarting an older reader. Respect the protected midnight maintenance window.
-
-## Project snapshots
+This service serves Chinese Wikipedia's Video games project. Wiki/project
+identities remain in metadata; they do not add directory levels. Assuming the
+clock is **2026-11-14 01:05:03 UTC**, the latest midnight observation describes
+November 13 and the latest completed hourly observation describes 00:00–01:00:
 
 ```text
-reports/data/projects/<wiki>/<project-component>/<YYYY>/<YYYYMMDD>.parquet
+data/
+├── archive/                         permanent Chinese wpvg page lists
+│   ├── 20261105.parquet
+│   ├── 20261106.parquet
+│   └── 20261113.parquet
+├── daily/                           daily report data and other page lists
+│   ├── enwiki-20261113.parquet
+│   ├── acg-20261113.parquet
+│   ├── pokemon-20261113.parquet
+│   ├── minecraft-20261113.parquet
+│   ├── nintendo-20261113.parquet
+│   ├── sega-20261113.parquet
+│   ├── square-enix-20261113.parquet
+│   ├── mihoyo-20261113.parquet
+│   ├── pageviews.parquet            prepared web traffic report
+│   ├── newsletter.parquet           prepared collection envelope
+│   ├── newsletter-traffic.parquet   annual/monthly totals prepared after 19:00
+│   ├── pageviews-<identity>/        detailed daily traffic, two generations
+│   │   ├── latest.json
+│   │   └── pageview-data-<time>/
+│   │       ├── daily.parquet
+│   │       ├── members.parquet
+│   │       ├── coverage.parquet
+│   │       └── manifest.json
+│   ├── <report-family>-<identity>/  prepared wiki reports, two generations
+│   ├── newsletter/                 retained newsletter evidence
+│   │   ├── observations/current.parquet
+│   │   ├── observations/<day>/observation-<time>.parquet
+│   │   ├── historical/
+│   │   └── popularity/
+│   └── newsletter-drafts/<issue>/
+│       ├── catalog.parquet
+│       ├── <day>/observation.parquet
+│       └── annual-feature/<day>/metadata.parquet
+├── hourly/
+│   ├── 2026111323.parquet           latest two completed wpvg hours
+│   ├── 2026111400.parquet
+│   ├── <project>-2026111400.parquet additional Chinese project membership
+│   ├── categories-2026111400.parquet
+│   ├── article-history.parquet     complete retained parsed history
+│   ├── article-authorship.parquet
+│   ├── article-milestones.parquet
+│   ├── current-assessments.parquet
+│   ├── scope.parquet
+│   ├── dashboard.parquet           ready-to-render dashboard
+│   ├── reviews.parquet
+│   ├── recognized.parquet
+│   ├── dyk.parquet
+│   ├── news_history.parquet
+│   ├── backlog.parquet
+│   ├── consistency/                prepared findings and repair proposals
+│   └── <analysis-family>-<identity>/
+└── revisions/
+    ├── 00/                         revision_id % 256 == 0
+    ├── 01/
+    │   ├── 257.wikitext
+    │   └── 257.json
+    ├── …
+    └── FF/                         revision_id % 256 == 255
 ```
 
-The filename names the completed UTC data day, captured at the following
-midnight. January 1 captures belong to the preceding year's December 31 file.
-Every new date runs a complete fresh query, independent of the preceding file.
-A same-date retry reuses its first complete observation. See the
-[retirement checklist](../transition.md) for remaining migration dependencies.
+This is a naming example, not a claim that every illustrated date or revision
+exists. Additional report tables are enumerated by each generation's manifest.
+The identity suffix is the full SHA-256 of the logical report identity; the
+manifest retains its readable wiki, project and destination. Unknown project
+names use a bounded `project-<digest>-<day>.parquet` name. Date-bearing page-list
+files sit directly in their owning directory.
 
-`tasks.project_data.capture` and `data.project_data.read_snapshot` take an explicit
-**capture boundary date**, one day after the filename. This keeps collection
-scheduling distinct from report labels. The acquisition task supplies a builder
-to `data.project_data.ensure_snapshot`; storage requests rows only after locking
-and rechecking an existing file. `read_snapshot` accepts the wiki
-identity string and never creates a Site. Its result is a `ReportBundle` with
-`tables["members"]`. Missing dates return `None`; malformed durable data fails.
-`latest_snapshot` and `read_previous_snapshot` preserve gaps; daily comparisons
-must require adjacent dates rather than treating those search helpers as proof
-of daily continuity.
+Only the complete **Chinese wpvg** daily page list belongs in `archive`.
+Those files are historical evidence and are never pruned. English full project
+lists and other projects belong in `daily`. `daily` and `hourly` describe update
+cadence, not disposability: complete parsed history, milestones and attribution
+proofs remain durable. Temporary hourly page/category observations retain the
+latest two periods. Mutable report bundles retain current and previous complete
+generations. Failed writes preserve the prior selection.
 
-| Column | Polars dtype | Meaning |
+Raw revisions use uppercase hexadecimal shards `00`–`FF`; `0x` adds no value,
+and a separate index is unnecessary. Both subject and talk text use this store.
+A successful midnight pass prunes raw records absent from **both** the current
+and preceding consecutive daily Chinese page lists. Missing either list blocks
+pruning. Historical parsed evidence and permanent page-list archives are not
+part of this cleanup. Preview data stays under `dry-run/data/`.
+
+## Page-list schema
+
+Both daily and hourly page lists store the following physical columns. The data
+reader can expose legacy internal aliases to existing calculations; those
+aliases do not change the on-disk schema.
+
+| Column | Stored dtype | Meaning |
 |---|---|---|
-| `page_id` | Int64 | Required positive subject ID, unique within wiki/project/file |
-| `page_namespace` | Int64 | Observed nonnegative numeric namespace |
-| `page_title` | String | Nonempty database title without namespace prefix |
-| `rev_id` | Int64 | Positive current subject revision observed by the query |
-| `talk_page_rev` | Int64 | Nullable current talk revision; not the assessment-changing edit |
-| `pa_class` | String | Nullable exact class for this project |
-| `pa_importance` | String | Nullable exact importance for this project |
-| `talk_page_id` | Int64 | Nullable associated talk identity, paired with its revision |
-| `page_is_redirect` | Int64 | Observed 0 or 1, used independently of possibly stale grade |
-| `page_length` | Int64 | Nonnegative source byte length, not prose word count |
-| `taskforces` | List[String] | Sorted unique configured task-force names; empty means confirmed none |
+| `page_id` | Int64 | Positive subject identity, unique within a file |
+| `page_namespace` | Int64 | Numeric namespace |
+| `page_title` | String | Database title without namespace prefix |
+| `page_rev_latest` | nullable Int64 | Exact observed subject revision |
+| `page_rev_timestamp` | nullable Datetime(us, UTC) | Timestamp of that revision |
+| `talk_page_id` | nullable Int64 | Associated talk-page identity |
+| `talk_page_latest` | nullable Int64 | Exact observed talk revision |
+| `pa_class` | nullable Enum | Original project class, preserving extra labels |
+| `pa_importance` | nullable Enum | Original project importance |
+| `pa_taskforces` | nullable List[Enum] | Sorted configured taskforce names |
+| `page_is_redirect` | nullable Boolean | `true`/`false`; historical unknown is null |
+| `page_length` | nullable Int64 | Source byte length, independent of prose metrics |
 
-Parent task-force flags are joined by page ID from the same boundary's child
-snapshots. Children retain their own project assessments; they do not inherit
-the parent's grade. Required child failure prevents a complete parent capture.
-The explicit configuration is acyclic. Alpha rejects empty project results
-because the adapter cannot distinguish valid emptiness from unavailable source
-state; it must not invent mass departures or false flags.
+Taskforce Enum vocabulary is saved in `metadata.taskforce_projects` (daily) or
+`aranami.taskforce_projects` (hourly). An empty list means confirmed no taskforce;
+null means not observed. Class/importance profiles and their Enum declarations
+are also retained. Unknown historical revision IDs remain null; migration never
+substitutes today's revisions or creates an observation for a missing day.
 
-Parquet filenames in activity records open the website's read-only data viewer.
-It shows original metadata, the column schema, total records and pages of 50
-rows. Opening the dialog and moving between pages load only the requested page;
-the same `/data/?file=<path>&page=<number>` links work without JavaScript.
-Canonical files under `cache/`, `reports/data/` and `reports/records/` are
-available while retained. Hidden paths, symlinks, previews and private runtime
-files are excluded. Inspection validates storage metadata and project identity;
-it does not replace a durable consumer's full content validation.
+The parent and its configured child projects are captured with **one SQL
+statement**, joining subject pages, current revision timestamps, corresponding
+talk pages and project assessments. Child assessments remain their own values.
+Taskforce membership joins by stable page ID, so subject renames retain it.
+An empty/unavailable parent query cannot create false mass departures.
 
-The embedded `aranami` manifest records schema/family, application version,
-wiki/project identity, generation, row count, declared encoded columns and
-canonical sorted-content SHA-256. `metadata.snapshot_date` is the filename day;
-`metadata.boundary_date` is the capture day; `metadata.scheduled_for` is midnight.
-`started_at`, `finished_at` and `calculated_at` preserve actual acquisition
-times after any lock wait or child capture. `metadata.taskforce_projects`
-records the flag universe.
-The source contract identifies current replica observations; replica lag is
-not measured or reconstructed by this schema. Readers must not claim exact
-midnight historical state.
+At midnight, a separate replica heartbeat readiness check must reach the UTC
+boundary before source capture. A failed/lagged collection retries promptly;
+dependent reports wait and the website retains its last complete data. Actual
+query start/finish and scheduled midnight are separate metadata: delayed
+replicas cannot reconstruct the exact historical midnight state. Hourly scans
+accept lag and record the available state. At 01:00, the hourly label is `00`.
+At 00:00, the daily label is yesterday. Midnight hourly data can represent the
+same facts as that daily file; it need not duplicate source requests.
 
-Class/importance are losslessly Enum-encoded on disk using a wiki/project
-profile and decoded to String by the reader. `metadata.assessment_profile`
-records the profile ID and actual declarations. Video games on zhwiki stores
-its original simplified Chinese database labels, with code/long/short display
-names defined separately. See [Assessment fields](assessments.md). Snapshot
-filenames retain their completed-day spelling without schema suffixes;
-project directories use the ASCII mapping described above.
+The embedded `aranami` manifest records schema, family, application version,
+logical identity, generation, rows, encoded columns and a sorted-content digest.
+The storage envelope adds the actual write time. A same-day retry reuses the
+first complete file. Readers reject corrupt durable files and preserve gaps.
 
-Useful later fields include exact subject/talk revision timestamps, Wikidata
-identity, content model and independently observed disambiguation state. They
-are not in alpha 1's daily schema. Do not infer article creation, promotion
-date, revision count or authorship from snapshot differences.
+## Revision and report keys
 
-## Detailed Pageviews
+Source metadata decides whether content needs fetching. Reuse the stored body
+for an unchanged revision; batch only missing IDs. Revision metadata JSON
+contains `schema`, `wiki`, `revision_id`, `page_id`, `title`, `timestamp`,
+`parent_id`, `sha1`, `source_bytes`, `status`, and versioned `analyses`.
+Unavailable/suppressed revisions retain an explicit unavailable outcome and no
+old body. Available bodies are checked against their saved digest.
 
-The latest reusable traffic dataset uses complete atomic generations:
+The initial text-statistics analysis records `raw_characters`,
+`raw_han_characters` and `source_bytes`. Domain parsers then save article history,
+prose, listing and attribution evidence in their owned Parquet tables. Parser
+contract changes can reparse retained bodies without downloading them again.
+Routine newsletter updates reuse already accepted history, including oldid
+87963056, until SQL reports a changed talk identity/revision or evidence is absent.
 
-```text
-reports/data/pageviews/<wiki>/<project-component>/
-  latest.json
-  pageview-data-YYYYMMDDHHMMSS/
-    manifest.json
-    daily.parquet
-    members.parquet
-    coverage.parquet
-```
+Every newly calculated report records contributing page inputs with columns
+`wiki`, `project`, `page_id`, `page_latest`, `talk_page_id`, `talk_page_latest`.
+The composite key includes `page_id` and whichever subject/talk revisions the
+calculation uses; talk identity is retained as well. Aggregate reports retain
+these input rows alongside their summary tables. Config/parser versions and
+report periods supplement revision keys. Removed pages leave current cohorts;
+unique historical events remain retained.
 
-`data.pageviews.read_snapshot(wiki, project)` reads the selected
-validated bundle without clients. `latest.json` also retains its predecessor;
-consumers must read the selection rather than guess a generation path. Generation
-names receive a numeric suffix when more than one is written in the same second.
+## Fileset consumers and table schemas
 
-| Table | Fields and contract |
-|---|---|
-| `daily` | `page_id`, `title`, `date`, `pageview`, `observed`; one actual nonnegative measurement per title/day, including measured zero |
-| `members` | `page_id`, `title`, `pa_class`, `pa_importance`, `taskforces`; the frozen project population used for this acquisition |
-| `coverage` | `title`, `start`, `stop`, `request_succeeded`, `observed_days`, `complete`; half-open requested ranges and validated observed coverage |
+| Fileset | Main schema/identity | Used by |
+|---|---|---|
+| `archive/<day>.parquet` | Page-list schema above | Daily comparisons, assessment logs, Pageviews populations, historical scope and raw revision retention |
+| `daily/enwiki-<day>.parquet` | Same page-list schema | English quality/importance comparisons; supplemental SQL provides item IDs and current review categories |
+| `daily/<project>-<day>.parquet` | Same page-list schema | Taskforce ranking and cross-project membership calculations |
+| `hourly/<hour>.parquet`, `<project>-<hour>.parquet` | Same page-list schema | Incremental subject/talk collection and current project analyses |
+| `hourly/categories-<hour>.parquet` | `page_id`, `page_namespace`, `page_title`, `page_latest`, `article_page_id`, `name`, `categories_complete` | Current maintenance and assessment consistency collection |
+| `revisions/<shard>/<rev>.*` | Exact text and metadata described above | Collectors/parsers only; never report or HTTP rendering |
+| `hourly/article-history.parquet` | Talk identity/revision, parser contract and nested parsed history | Newsletter recognition/history and listing dates |
+| `hourly/article-authorship.parquet` | Page/listing date, grade, action, revision ranges, contributors and contract | Quality author statistics and newsletter credits |
+| `hourly/article-milestones.parquet` | Canonical event ID, page, date, event kind and source aliases | Recognition, reviews and newsletter event lists |
+| `hourly/current-assessments.parquet`, `scope.parquet` | Page identity, observations, prior state/tombstones | Incremental collection and cohort selection |
+| `daily/pageviews-<identity>/*/daily.parquet` | `page_id`, `title`, `date`, `pageview`, `observed` | Traffic ranking and newsletter period totals |
+| `…/members.parquet` | `page_id`, `title`, `pa_class`, `pa_importance`, `taskforces` | Frozen traffic population and group calculations |
+| `…/coverage.parquet` | `title`, `start`, `stop`, `request_succeeded`, `observed_days`, `complete` | Incremental missing-tail detection and traffic completeness |
+| `daily/newsletter-traffic.parquet` | Prepared annual rankings, nullable totals and complete monthly winners | Newsletter collection reads values calculated by the after-19:00 Pageviews pass |
+| Prepared web/newsletter `.parquet` | One `payload: String` containing validated precomputed nested values | Dashboard, quarterly/annual newsletter HTML and wikitext projection |
+| Prepared report/analysis bundles | Named typed tables with exact schemas in `manifest.json`; `source-pages` preserves revision keys | Wiki publication, saved web analyses and retry/recovery |
 
-Dates use Polars Date; IDs/counts use Int64; flags use Boolean; taskforces use
-List[String]. Missing dates remain absent. Provisional zeroes used in ranking
-calculations never become daily measurements. Metadata/provenance retains
-source intervals and daily project snapshot identities separately from traffic
-acquisition and report publication times.
+Payload decoding and presentation formatting do not recalculate source facts.
+Catalogue/selection metadata can use JSON where it contains no report facts.
+Detailed article contracts are declared by their `data.articles` owners; a
+manifest lists every table, dtype, row count and digest for its generation.
+The read-only data viewer previews Parquet under `data/archive`, `data/daily`,
+`data/hourly` and disposable `cache`, excluding raw revisions, private state,
+symlinks and previews.
 
-Acquisition checks each page's actual daily rows. Continuous retained history
-from the required start permits fetching only the missing tail, or reusing an
-already complete range. Internal gaps or insufficient leading history require
-a full-window download. A failed/incomplete supplement preserves the previous
-durable selection. Complete accepted data is persisted before wiki publication,
-so a failed wiki save does not discard reusable traffic. Previews write only
-under `dry-run/reports/data/`. Newsletter calculations read complete formal
-calendar periods first, then retained historical period records. Temporary
-old-format acquisition is used only for missing periods. Corruption is not a
-reason to fall back silently.
+Pageviews acquisition **and calculation wait until 19:00 UTC**, including
+historical catch-up. Daily data is retained independently of wiki publication;
+continuous history fetches only a missing tail, while gaps require a full
+window. Readiness still checks site-hour coverage and leading article probes.
+No current page list substitutes for an absent historical population.
 
-## Supplementary evidence
+## Migration and recovery
 
-| Dataset | Location and identity |
-|---|---|
-| Talk history | `reports/data/articles/history.parquet`; `(talk_page_id, revision_id, contract)` |
-| Listing authorship | `reports/data/articles/authorship.parquet`; `(page_id, date, grade, action, contract)` |
-| Current project assessments | `reports/data/articles/current-assessments.parquet`; unique `page_id` and actual observation time |
-| Recognition/review events | `reports/data/articles/milestones.parquet`; canonical `event_id` with retained aliases |
-| Scope ledger | `reports/data/articles/scope.parquet`; page identity, last seen, absence and prior tombstones |
-| Current newsletter facts | `reports/data/newsletter/observations/current.json`, with original dated observations |
-| Quarterly archive | `reports/records/newsletter/<issue>/YYYYMMDD/observation.json` |
-| Annual feature archive | `reports/records/newsletter/<issue>/annual-feature/YYYYMMDD/metadata.json` |
-| Historical popularity periods | `reports/data/newsletter/popularity-history/<year>/`; `periods.parquet` selected through `data.newsletter.popularity.PopularitySource` |
-| Historical newsletter figures | `reports/data/newsletter/historical/audited-aggregates/<generation>/figures.parquet`; atomic `latest.json` selection |
+Deployment drains writers, runs `python -m data.migration`, verifies its receipt,
+then promotes the source and restarts the services. Migration copies existing
+files, upgrades page schemas, converts prepared newsletter/web JSON to Parquet,
+and records original/final hashes in `state/data-layout-v2.json`. Old files are
+preserved for rollback. Successful converted files resume without duplicate
+work. If rollback has advanced an old source, it can replace only its unchanged
+migration copy; conflicting newer data requires explicit reconciliation.
+Migration never invents historical values or refetches old revisions merely to
+fill an unknown field. Protect the midnight maintenance window.
 
-Talk history preserves every retained source revision/parser contract and its
-nested events. Confirmed empty events differ from unobserved history. Events
-keep actual dates, actions, grades, source oldids, roles, discussion links,
-questions and explicit contributors. Milestones retain per-field coverage
-(`known`, `not_applicable`, `pending`, `blocked`, `unresolved`); only evidence
-establishes completeness. Attribution retains the listing revision, cutoff,
-creation/fetch times, contributor token counts, non-reference UTF-8 byte scores,
-shares and tied leading authors. Nominators and authors are different roles.
-
-The current project page list provides unique `page_id` primary keys for joins
-from historical article records. A retained hourly assessment projection gates
-the author directory to main-namespace, nonredirect FA/FL/A/AL/GA/Bplus members.
-It replaces current membership after a complete source query, preserving raw
-assessment labels and rejecting stale writes. Historical revision evidence stays
-under `reports/data/` when an article is delisted or leaves current membership.
-
-The `wikiwho-zh:listing-range-nonref-bytes-v4` contract uses WikiWho's
-`range_rev_content/{article_title}/{start_rev_id}/{end_rev_id}/` endpoint with
-the listing revision as its inclusive start and a following processed revision
-as its exclusive end. If the listing is the latest processed revision, the
-exact `rev_content/rev_id/` endpoint supplies that same snapshot. Token origins
-retain history back to creation, independently checked against revision
-metadata. Only the exact listing snapshot contributes; a later revision used
-as a range bound never contributes text. This avoids downloading every
-historical snapshot. The exact historical wikitext establishes reference and
-bibliography-section exclusions; comment source remains eligible.
-Missing provenance and responses over 32 MiB leave the new observation
-unavailable rather than substituting current text. If exact source alignment or
-reference exclusion is unavailable, complete API token bytes remain usable under
-`wikiwho-zh:listing-range-token-bytes-v1`. This fallback includes references and
-uses summed API token bytes as its denominator; it never claims a non-reference
-source total. The scoring contract remains explicit in retained evidence.
-
-`reports/data/articles/authorship-corrections.parquet` retains independently
+`data/hourly/authorship-corrections.parquet` retains independently
 proved reference-cleanup corrections alongside unchanged raw observations.
 A correction binds the exact page/revision, raw contract, original fetch time
 and eligible-byte denominator. Proofs retain the actual origin and parent
@@ -260,7 +272,7 @@ These tables provide facts absent from project snapshots and remain durable.
 Use their declared owner schemas and merge writers rather than handwritten
 file mutations. [Newsletter collection](../tasks/newsletter.md) defines report cutoffs.
 
-`articles/history.parquet` also retains source-backed homepage appearances.
+`article-history.parquet` also retains source-backed homepage appearances.
 Physical rows distinguish talk snapshots from homepage evidence; public talk
 readers keep their established schema. Source-page revisions never occupy
 talk-revision fields. Both writers share the same lock and preserve the other
@@ -284,7 +296,7 @@ fetch those exact bodies in API batches. Returned page and revision identities
 must match before parsing; missing or hidden bodies leave prior snapshots
 intact. Completed-day snapshot IDs do not establish the current talk revision.
 
-The website's mutable `cache/toolforge/consistency/<timestamp>.parquet`
+The website's mutable `data/hourly/consistency/<timestamp>.parquet`
 stores typed current findings, check outcomes and source links, with optional suggestion facts and
 the canonical history fingerprint. It is rebuilt by background collection and
 reused by the saved dashboard; HTTP reads never collect or rewrite it. Its
@@ -313,7 +325,7 @@ historical record. `tasks.zhwiki.newsletter.popularity` coordinates acquisition;
 
 ## Quality-author activity
 
-`reports/data/articles/quality-author-activity.parquet` retains the latest
+`data/hourly/quality-author-activity.parquet` retains the latest
 publicly attributed Chinese Wikipedia edit for registered editors identified
 by the directory's listing-time contribution threshold. Rows contain the
 canonical account name,
@@ -339,7 +351,7 @@ recollected in bounded passes before entering current statistics. Missing
 current evidence differs from a confirmed empty selection.
 
 Optional B/BL credits use a separate
-`reports/data/articles/current-authorship/b-class/` bundle. It retains current
+`data/hourly/current-authorship/b-class/` bundle. It retains current
 membership, the first talk revision of the latest continuous B/BL banner range,
 its exact UTC assessment timestamp, the article cutoff revision and timestamp,
 and successful
@@ -371,7 +383,7 @@ older contracts still require their original nonnull author list.
 
 ## Legacy observations and safe writes
 
-Old `reports/data/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet`
+Old `data/daily/assessments/<wiki>/<project>/assessments-YYYYMMDD.parquet`
 files retain their original completed-day meaning and hashes. The compatibility
 reader maps its completed-day argument to the next capture boundary for new
 files. Old three-column rows keep unknown identities; do not fill them from

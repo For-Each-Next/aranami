@@ -216,7 +216,7 @@ Only articles whose latest saved project assessment is FA, FL, A, AL, GA or
 Bplus contribute to these totals. The current project page list supplies unique
 `page_id` keys; historical records join through those identities. Delisted,
 departed and redirected articles retain their history but leave the directory.
-Hourly project collection saves current eligibility under `reports/data/`;
+Hourly project collection saves current eligibility under `data/daily/`;
 missing eligibility makes the directory unavailable until collection succeeds.
 The native table shows editor and talk links, independent all-article and FA/FL
 counts such as `44 articles (7 featured)`, and the latest observed public edit.

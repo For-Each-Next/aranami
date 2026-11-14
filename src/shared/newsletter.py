@@ -10,6 +10,17 @@ from urllib.parse import quote, urlencode
 ROOT = "WikiProject:電子遊戲/簡訊"
 SUFFIXES = ("", "特優內容", "宣告")
 DYK_PROJECTS = ("虚构角色", "传记", "公司", "音乐")
+# PageAssessments uses exact, script-sensitive database project titles.
+# Explicit spellings share report labels; never convert arbitrary names.
+DYK_PROJECT_DATABASE_TITLES = {
+    "虚构角色": "虚构角色",
+    "虛構角色": "虚构角色",
+    "传记": "传记",
+    "傳記": "传记",
+    "公司": "公司",
+    "音乐": "音乐",
+    "音樂": "音乐",
+}
 _QUARTER_MONTHS = 3
 _LAST_QUARTER_MONTH = 10
 

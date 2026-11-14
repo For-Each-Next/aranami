@@ -193,7 +193,7 @@ class NewsletterIssueControlsTests(unittest.TestCase):
             for path in self.runtime.rglob("*")
             if path.is_file()
         } == files
-        (self.runtime / OBSERVATIONS_PATH / "current.json").write_text("{")
+        (self.runtime / OBSERVATIONS_PATH / "current.parquet").write_text("{")
         archived = self.client.get(url)
         assert archived.status_code == HTTPStatus.OK
         assert "data-newsletter-wikitext" in archived.text

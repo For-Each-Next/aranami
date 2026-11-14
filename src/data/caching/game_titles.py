@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     import datetime as dt
     from collections.abc import Mapping
 
-DEFAULT_PATH = Path("cache/toolforge/game-title-conversions")
+DEFAULT_PATH = Path("data/hourly/game-title-conversions")
 SCHEMA = {
     "title": pl.String,
     "label": pl.String,

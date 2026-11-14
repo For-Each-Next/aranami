@@ -10,17 +10,20 @@ import datetime as dt
 import hashlib
 import json
 import logging
+from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING
 
 import polars as pl
+from sqlalchemy.exc import SQLAlchemyError
 
 from data.articles import b_listings as store
 from shared.assessment_profiles import assessment_profile
 from shared.sources.assessment_history import (
     HistoryBudget,
+    read_talk_revision_batches,
     read_talk_revisions,
 )
 from shared.sources.wiki import template_aliases
@@ -53,11 +56,18 @@ def _parser_identity(
     contract: str,
     metadata: tuple,
 ) -> str:
-    """Bind parser semantics to exact template and assessment metadata.
+    """Bind parser semantics while ignoring importance display colors.
 
     Returns:
         The complete identity used for current and compatible old facts.
+        Importance colors retain their pre-theme defaults in the key,
+        preserving existing completed and partial history evidence.
     """
+    metadata = deepcopy(metadata)
+    for dimension in ("importance", "compatibility_importance"):
+        for label in metadata[2].get(dimension, ()):
+            label["color"] = None
+            label["color_variants"] = ()
     return hashlib.sha256(
         json.dumps([contract, *metadata]).encode(),
     ).hexdigest()
@@ -105,17 +115,11 @@ def _members(
     )
 
 
-def _attempt(
-    site: BaseSite,
-    member: dict,
-    aliases: tuple[str, ...],
-    budget: HistoryBudget,
-    shell_aliases: tuple[str, ...],
-) -> dict:
-    """Advance a prefix without repeating parsed revisions.
+def _initial_progress(member: dict) -> EntryProgress:
+    """Resume the exact parent after the parsed prefix.
 
     Returns:
-        One complete owner row with explicit proof coverage.
+        Existing contiguous progress or an unparsed selected head.
     """
     state = begin(member["class"], member["scanned_talk_rev_id"])
     if member["expected_revision"]:
@@ -128,13 +132,29 @@ def _attempt(
             cursor_timestamp=member["cursor_timestamp"],
             expected_revision=member["expected_revision"],
         )
+    return state
+
+
+def _attempt(
+    site: BaseSite,
+    member: dict,
+    aliases: tuple[str, ...],
+    budget: HistoryBudget,
+    shell_aliases: tuple[str, ...],
+) -> dict:
+    """Use the bounded SDK fallback when replica history is unavailable.
+
+    Returns:
+        One complete owner row with explicit proof coverage.
+    """
+    state = _initial_progress(member)
     for revision in read_talk_revisions(
         site,
         page_id=member["talk_page_id"],
         title=member["talk_title"],
         selected_revision=member["scanned_talk_rev_id"],
         start_revision=state.expected_revision,
-        limit=20,
+        limit=50,
         budget=budget,
         stop_revision=member["anchor_talk_rev_id"],
     ):
@@ -154,6 +174,15 @@ def _attempt(
         )
         if state.stopped:
             break
+    return _progress_row(member, state)
+
+
+def _progress_row(member: dict, state: EntryProgress) -> dict:
+    """Apply a retained anchor and serialize one successful scan prefix.
+
+    Returns:
+        Complete checkpoint fields without retaining source bodies.
+    """
     anchor = member["anchor_talk_rev_id"]
     if (
         not state.stopped
@@ -193,6 +222,98 @@ def _attempt(
         "expected_revision": state.expected_revision,
         "attempted_at": dt.datetime.now(dt.UTC),
     }
+
+
+def _attempt_batch(
+    site: BaseSite,
+    pending: pl.DataFrame,
+    aliases: tuple[str, ...],
+    budget: HistoryBudget,
+    shell_aliases: tuple[str, ...],
+) -> list[dict]:
+    """Advance selected talks through shared fifty-content API requests.
+
+    Returns:
+        Independent checkpoint rows, including resumable partial scans.
+        Replica failures use the existing bounded SDK fallback.
+    """
+    if pending.is_empty():
+        return []
+    members = {
+        row["talk_page_id"]: row for row in pending.iter_rows(named=True)
+    }
+    states = {page: _initial_progress(row) for page, row in members.items()}
+    attempted = set()
+    try:
+        for batch in read_talk_revision_batches(
+            site,
+            {page: state.expected_revision for page, state in states.items()},
+            budget=budget,
+            stops={
+                page: row["anchor_talk_rev_id"]
+                for page, row in members.items()
+            },
+            active=lambda page: (
+                not states[page].stopped
+                and states[page].expected_revision
+                != members[page]["anchor_talk_rev_id"]
+            ),
+        ):
+            for page, revision in batch:
+                state, member = states[page], members[page]
+                if (
+                    state.stopped
+                    or state.expected_revision == member["anchor_talk_rev_id"]
+                ):
+                    continue
+                attempted.add(page)
+                states[page] = advance(
+                    state,
+                    AssessmentRevision(
+                        revision.revision_id,
+                        revision.parent_id,
+                        revision.timestamp,
+                        banner_class(
+                            revision.text,
+                            site,
+                            aliases,
+                            shell_aliases=shell_aliases,
+                        ),
+                    ),
+                )
+    except OSError, ValueError, SQLAlchemyError:
+        if attempted:
+            _LOG.warning(
+                "B-listing source batch failed; retained parsed progress.",
+            )
+        else:
+            _LOG.warning(
+                "B-listing replica unavailable; using SDK history.",
+            )
+            rows = []
+            for row in members.values():
+                if not budget.admit():
+                    break
+                try:
+                    rows.append(
+                        _attempt(site, row, aliases, budget, shell_aliases),
+                    )
+                except Exception as error:  # ruff: ignore[blind-except] - Preserve independent source coverage.
+                    _LOG.warning(
+                        "B listing history unavailable for page %s (%s).",
+                        row["page_id"],
+                        type(error).__name__,
+                    )
+                    rows.append({
+                        **row,
+                        "attempted_at": dt.datetime.now(dt.UTC),
+                    })
+            return rows
+    return [
+        _progress_row(members[page], states[page])
+        for page in members
+        if page in attempted
+    ]
 
 
 def refresh_b_listings(  # ruff: ignore[too-many-arguments] - Explicit source, runtime and admission bounds.
@@ -269,18 +390,13 @@ def refresh_b_listings(  # ruff: ignore[too-many-arguments] - Explicit source, r
             .sort("attempted_at", "page_id", nulls_last=False)
             .head(max_requests)
         )
-        for member in pending.iter_rows(named=True):
-            if not budget.admit():
-                break
-            try:
-                row = _attempt(site, member, aliases, budget, shell_aliases)
-            except Exception as error:  # ruff: ignore[blind-except] - Retain parsed progress after source failures.
-                _LOG.warning(
-                    "B listing history unavailable for page %s (%s).",
-                    member["page_id"],
-                    type(error).__name__,
-                )
-                row = {**member, "attempted_at": dt.datetime.now(dt.UTC)}
+        for row in _attempt_batch(
+            site,
+            pending,
+            aliases,
+            budget,
+            shell_aliases,
+        ):
             store.checkpoint(
                 runtime,
                 update=pl.DataFrame([row], schema=store.INFERENCE_SCHEMA),

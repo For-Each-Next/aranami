@@ -46,7 +46,7 @@ from shared.sources.quarry.projects import category_members
 from shared.support.titles import page_url
 from tasks.zhwiki.article_milestones import explicit_account, explicit_question
 from tasks.zhwiki.assessment_lists import review_heading
-from tasks.zhwiki.review_cache import ITEM_SCHEMA, ReviewCache
+from tasks.zhwiki.review_cache import ITEM_SCHEMA, ReplyLinkCache, ReviewCache
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -849,7 +849,12 @@ def collect_reviews(  # ruff: ignore[too-many-arguments]
         "comment_count",
         "section_bytes",
     )
-    public = _reply_links(site, public, ordered)
+    links = ReplyLinkCache(
+        cache_directory / "review-comment-links" if cache_directory else None,
+        now,
+    )
+    public = _reply_links(site, public, ordered, cache=links)
+    links.save()
     return {
         "items": [
             {**row, "url": page_url(site, row["title"])}
@@ -862,6 +867,8 @@ def _reply_links(
     site: BaseSite,
     public: pl.DataFrame,
     sources: pl.DataFrame,
+    *,
+    cache: ReplyLinkCache | None = None,
 ) -> pl.DataFrame:
     """Attach reply and latest-comment IDs from saved revisions.
 
@@ -869,6 +876,7 @@ def _reply_links(
         site: Existing source client.
         public: Public rows with observed reply authors and timestamps.
         sources: Corresponding rows with exact source revisions.
+        cache: Optional exact-revision anchor cache for this wiki.
 
     Returns:
         Verified reply and latest-comment links from the same lookup.
@@ -888,15 +896,9 @@ def _reply_links(
     ):
         revision = source["source_revision"]
         try:
-            result = site.simple_request(
-                action="discussiontoolspageinfo",
-                oldid=revision,
-                prop="threaditemshtml",
-                formatversion=2,
-            ).submit()
-            threads = result["discussiontoolspageinfo"]["threaditemshtml"]
+            fetch = partial(_read_thread_targets, site, revision)
             targets[revision] = (
-                _thread_targets(threads) if isinstance(threads, list) else {}
+                cache.read(revision, fetch) if cache is not None else fetch()
             )
         except Exception as error:  # ruff: ignore[blind-except]
             _LOGGER.warning(
@@ -917,6 +919,31 @@ def _reply_links(
                 )
         rows.append(row)
     return pl.DataFrame(rows, schema=public.schema)
+
+
+def _read_thread_targets(
+    site: BaseSite,
+    revision: int,
+) -> dict[tuple[str, str], list[str]]:
+    """Fetch comment anchors absent from the exact-revision cache.
+
+    Returns:
+        Complete anchors, including a confirmed empty discussion.
+
+    Raises:
+        TypeError: The source response omits its thread list.
+    """
+    result = site.simple_request(
+        action="discussiontoolspageinfo",
+        oldid=revision,
+        prop="threaditemshtml",
+        formatversion=2,
+    ).submit()
+    threads = result["discussiontoolspageinfo"]["threaditemshtml"]
+    if not isinstance(threads, list):
+        message = "DiscussionTools omitted the comment anchor list."
+        raise TypeError(message)
+    return _thread_targets(threads)
 
 
 def _thread_targets(items: list[dict]) -> dict[tuple[str, str], list[str]]:

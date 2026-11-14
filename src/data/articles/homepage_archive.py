@@ -71,7 +71,7 @@ def read(path: Path) -> tuple[pl.DataFrame, dt.date | None]:
     """Read durable archive coverage without creating source clients.
 
     Args:
-        path: Runtime archive beneath reports/data.
+        path: Runtime archive beneath data/daily.
 
     Returns:
         Retained evidence and last completed inventory date. Only a

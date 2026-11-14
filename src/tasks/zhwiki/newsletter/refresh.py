@@ -14,7 +14,7 @@ import polars as pl
 
 from data import project_assessments, project_data
 from data.articles import history_store, homepage_archive
-from data.newsletter import schema
+from data.newsletter import schema, traffic
 from data.newsletter.historical import (
     FrameFigureSource,
     using_sources,
@@ -22,8 +22,7 @@ from data.newsletter.historical import (
 from data.newsletter.observations import save_observation
 from data.observations import membership_observed_at
 from shared.assessment_profiles import assessment_profile
-from shared.config import TASK_DEFINITIONS
-from shared.newsletter import DYK_PROJECTS
+from shared.newsletter import DYK_PROJECT_DATABASE_TITLES
 from shared.sources.quarry.projects import (
     project_revision_counts,
     query_project_intersections,
@@ -37,10 +36,6 @@ from tasks.zhwiki.newsletter import collection
 from tasks.zhwiki.newsletter.popularity import (
     PopularitySource,
     using_popularity_source,
-)
-from tasks.zhwiki.pageviews import (
-    read_annual_popularity,
-    read_monthly_popularity,
 )
 
 if TYPE_CHECKING:
@@ -174,7 +169,11 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments,too-many-locals]
         "full_title",
     )
     dyk_projects = (
-        query_project_intersections(read.site, "电子游戏", DYK_PROJECTS)
+        query_project_intersections(
+            read.site,
+            "电子游戏",
+            DYK_PROJECT_DATABASE_TITLES,
+        )
         .join(articles, on="page_id", how="inner", validate="m:1")
         .select("full_title", "project")
     )
@@ -210,12 +209,13 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments,too-many-locals]
     providers = None
     popularity = None
     monthly_popularity = None
+    annual_popularity = traffic.read_annual
     if observations_path is not None:
         path = observations_path.absolute()
         runtime = (
             path.parents[3]
             if path.parts[-4:]
-            == ("reports", "data", "newsletter", "observations")
+            == ("data", "daily", "newsletter", "observations")
             else path.parent
         )
         dry = runtime.name == "dry-run"
@@ -228,8 +228,12 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments,too-many-locals]
             dry=dry,
         )
         monthly_popularity = partial(
-            read_monthly_popularity,
-            read.site,
+            traffic.read_monthly,
+            runtime=runtime.parent if dry else runtime,
+            dry=dry,
+        )
+        annual_popularity = partial(
+            traffic.read_annual,
             runtime=runtime.parent if dry else runtime,
             dry=dry,
         )
@@ -260,18 +264,7 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments,too-many-locals]
                 read.site,
                 "电子游戏",
             ),
-            annual_pageviews=partial(
-                read_annual_popularity,
-                read.site,
-                title=TASK_DEFINITIONS["pageviews"].pages["report"],
-                titles=membership
-                .filter(
-                    (pl.col("page_namespace") == 0)
-                    & (pl.col("pa_importance") != "不适用"),
-                )
-                .get_column("full_title")
-                .to_list(),
-            ),
+            annual_pageviews=annual_popularity,
             current_assessments=membership,
             dyk_projects=dyk_projects,
             overview_at=partial(_overview_at, read),

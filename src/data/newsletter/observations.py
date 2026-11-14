@@ -19,13 +19,14 @@ import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from shared.support.files import atomic_json, encode_json, read_json_object
+from data.prepared import read_values, write_values
+from shared.support.files import encode_json
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 DATA_VERSION = 2
-DEFAULT_ROOT = Path("reports/data/newsletter")
+DEFAULT_ROOT = Path("data/daily/newsletter")
 OBSERVATIONS_PATH = DEFAULT_ROOT / "observations"
 
 _MAX_BYTES = 16 * 1024 * 1024
@@ -91,12 +92,12 @@ def _archive(directory: Path, generation: dict) -> None:
     stem = "observation-" + stamp.strftime("%H%M%S%f")
     for ordinal in range(_MAX_CAPTURES):
         suffix = f"-{ordinal + 1}" if ordinal else ""
-        path = day / f"{stem}{suffix}.json"
+        path = day / f"{stem}{suffix}.parquet"
         if path.exists() or path.is_symlink():
-            if read_json_object(path, _MAX_BYTES) == generation:
+            if read_values(path, _MAX_BYTES) == generation:
                 return
             continue
-        atomic_json(path, generation, max_bytes=_MAX_BYTES)
+        write_values(path, generation, max_bytes=_MAX_BYTES)
         return
     message = "Too many newsletter captures share one observation time."
     raise ValueError(message)
@@ -119,10 +120,10 @@ def load_observation(
         OSError: A persisted path is unsafe or unreadable.
         ValueError: Saved metadata, digest, or facts are invalid.
     """
-    current = directory / "current.json"
+    current = directory / "current.parquet"
     if current.exists() or current.is_symlink():
         return _validate_generation(
-            read_json_object(current, _MAX_BYTES),
+            read_values(current, _MAX_BYTES),
             validate,
         )
     return None
@@ -191,8 +192,8 @@ def save_observation(
             )
             if latest > captured:
                 return
-        atomic_json(
-            directory / "current.json",
+        write_values(
+            directory / "current.parquet",
             generation,
             max_bytes=_MAX_BYTES,
         )

@@ -199,9 +199,9 @@ def _report_cutoff(
 ) -> dt.date:
     """Limit the report anchor to data eligible at the UTC start time.
 
-    Yesterday becomes eligible at UTC 19:00. Earlier runs can still
-    catch up older dates. Historical report anchors retain their
-    earlier cutoffs.
+    Yesterday becomes eligible at UTC 19:00. The runtime waits until
+    then before all acquisition, including historical catch-up. Earlier
+    report anchors still retain their original cutoffs.
 
     Args:
         today: Requested report anchor date.
@@ -234,8 +234,8 @@ def run(
     missing historical values as provisional zeroes.
     Downloads for later report dates can fill these gaps. Historical
     gaps alone do not trigger another same-day attempt.
-    Yesterday is eligible from UTC 19:00; earlier runs can still fill
-    older gaps. The actual run time limits historical or future report
+    Acquisition and calculation begin at UTC 19:00; earlier calls wait.
+    The actual run time limits historical or future report
     anchors.
     Fail if no unpublished end date passes the daily availability guard.
     Stop at a required source failure or failed/unconfirmed save;
@@ -255,7 +255,11 @@ def run(
     Raises:
         ValueError: If a generated report has an unexpected data date.
     """
-    now = _utc_now()
+    now = context.started_at if context is not None else _utc_now()
+    now = now.astimezone(dt.UTC)
+    ready = now.replace(hour=19, minute=0, second=0, microsecond=0)
+    if now < ready:
+        return ready
     key = identity("pageviews", title, repr(settings))
     if automatic and context is None and not dry:
         next_run = completed_until(

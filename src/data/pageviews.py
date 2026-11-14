@@ -58,7 +58,7 @@ def _store(runtime: Path | None, *, dry: bool) -> ReportStore:
         Store using atomic generations and selectors.
     """
     root = (runtime or Path.cwd()) / (
-        "dry-run/reports/data" if dry else "reports/data"
+        "dry-run/data/daily" if dry else "data/daily"
     )
     return ReportStore(root, dry=dry)
 

@@ -3970,9 +3970,9 @@
     "zh-hant": "乙級條目及列表按討論頁最近一段連續乙級評級開始時或之前的最近條目版本推定作者，並以該條目版本的時間為入選日期。"
   },
   "quality_authorship.b_coverage": {
-    "en": "B-Class listing-time attribution collected: {collected}/{total} articles and lists. Pending history or revisions have unknown authorship.",
-    "zh-hans": "乙级入选时作者资料已收集：{collected}/{total}条目及列表。待收集历史或版本的作者尚未确定。",
-    "zh-hant": "乙級入選時作者資料已收集：{collected}/{total}條目及列表。待收集歷史或版本的作者尚未確定。"
+    "en": "B/BL listing-revision attribution coverage: {collected}/{total} pages. Missing listing history, article revisions or attribution evidence remain unknown.",
+    "zh-hans": "乙级入选版本作者证据覆盖：{collected}/{total}条目及列表。入选历史、条目版本或作者证据尚未取得的项目显示为未知。",
+    "zh-hant": "乙級入選版本作者證據覆蓋：{collected}/{total}條目及列表。入選歷史、條目版本或作者證據尚未取得的項目顯示為未知。"
   },
   "quality_authorship.b_unavailable": {
     "en": "B-Class attribution is unavailable; retained high-quality article totals are shown.",
@@ -4225,14 +4225,14 @@
     "zh-hant": "檔案大小（位元組）"
   },
   "quality_authorship.updating": {
-    "en": "Loading saved statistics…",
-    "zh-hans": "正在加载已保存的统计…",
-    "zh-hant": "正在載入已儲存的統計…"
+    "en": "Updating the report…",
+    "zh-hans": "正在更新报告…",
+    "zh-hant": "正在更新報告…"
   },
   "quality_authorship.update_failed": {
-    "en": "Could not update the authors. Please try again.",
-    "zh-hans": "作者统计更新失败，请重试。",
-    "zh-hant": "作者統計更新失敗，請重試。"
+    "en": "Could not update the report. The previous results remain visible.",
+    "zh-hans": "无法更新报告，已保留先前显示的结果。",
+    "zh-hant": "無法更新報告，已保留先前顯示的結果。"
   },
   "quality_authorship.only_quality": {
     "en": "High-quality only",
@@ -4240,14 +4240,14 @@
     "zh-hant": "僅高品質條目"
   },
   "quality_analysis.heading": {
-    "en": "Quality article analysis",
-    "zh-hans": "高品质条目分析",
-    "zh-hant": "高品質條目分析"
+    "en": "Quality articles and contributors",
+    "zh-hans": "品质条目与贡献者",
+    "zh-hant": "品質條目與貢獻者"
   },
   "quality_analysis.intro": {
-    "en": "Explore the current quality content of Chinese Wikipedia’s Video games project, including Bplus articles.",
-    "zh-hans": "分析中文维基百科电子游戏专题当前的高品质内容，包含乙上级条目。",
-    "zh-hant": "分析中文維基百科電子遊戲專題目前的高品質內容，包含乙上級條目。"
+    "en": "Only current articles and lists in the Chinese Wikipedia Video games project are counted. The B/BL switch applies to the overview, article list and author statistics.",
+    "zh-hans": "仅统计中文维基百科电子游戏专题当前的条目及列表。B/BL开关同时作用于概览、条目列表及作者统计。",
+    "zh-hant": "僅統計中文維基百科電子遊戲專題目前的條目及列表。B/BL開關同時作用於概覽、條目列表及作者統計。"
   },
   "quality_analysis.background": {
     "en": "Collected hourly in the background. This page reads saved results.",
@@ -4255,9 +4255,9 @@
     "zh-hant": "資料每小時在背景收集，本頁讀取已儲存的分析結果。"
   },
   "quality_analysis.listing_evidence": {
-    "en": "Talk-page listing evidence",
-    "zh-hans": "讨论页入选依据",
-    "zh-hant": "討論頁入選依據"
+    "en": "Article revision at listing",
+    "zh-hans": "入选时的条目版本",
+    "zh-hant": "入選時的條目版本"
   },
   "quality_analysis.observed": {
     "en": "Analysis updated:",
@@ -4300,9 +4300,9 @@
     "zh-hant": "正文長度比較"
   },
   "quality_analysis.lengths_note": {
-    "en": "Compare FA, GA and Bplus prose lengths. Importance groups pool these three grades; FL, A and AL are excluded from this section. The central 68% range covers the 16th–84th percentiles and describes the saved cohort, not a minimum quality requirement.",
-    "zh-hans": "比较典范、优良及乙上条目的正文长度。重要度分组汇总这三个品质，不计入特色列表、甲及甲级列表。中央68%区间为第16至84百分位，描述已保存条目的分布，不代表品质要求。",
-    "zh-hant": "比較典範、優良及乙上條目的正文長度。重要度分組彙總這三個品質，不計入特色列表、甲及甲級列表。中央68%區間為第16至84百分位，描述已儲存條目的分布，不代表品質要求。"
+    "en": "Each Chinese character counts as one; each Western word or number block counts as two. Spaces and punctuation are excluded: PlayStation 5 = 4. The central 68% range covers the 16th–84th percentiles of the current cohort.",
+    "zh-hans": "每个汉字计1字，每个西文单词或数字块计2字，空白与标点不计，例如 PlayStation 5 = 4字。中央68%区间为当前条目的第16至84百分位。",
+    "zh-hant": "每個漢字計1字，每個西文單字或數字區塊計2字，空白與標點不計，例如 PlayStation 5 = 4字。中央68%區間為目前條目的第16至84百分位。"
   },
   "quality_analysis.articles": {
     "en": "All articles and lists",
@@ -4335,9 +4335,9 @@
     "zh-hant": "正文長度中位數"
   },
   "quality_analysis.words": {
-    "en": "words",
-    "zh-hans": "词",
-    "zh-hant": "詞"
+    "en": "characters",
+    "zh-hans": "字",
+    "zh-hant": "字"
   },
   "quality_analysis.importance": {
     "en": "Importance",
@@ -4415,14 +4415,14 @@
     "zh-hant": "沒有符合篩選條件的條目。"
   },
   "quality_analysis.prose": {
-    "en": "Prose length",
-    "zh-hans": "正文长度",
-    "zh-hant": "正文長度"
+    "en": "Prose characters",
+    "zh-hans": "正文字数",
+    "zh-hant": "正文字數"
   },
   "quality_analysis.source_size": {
-    "en": "Source size",
-    "zh-hans": "源码大小",
-    "zh-hant": "原始碼大小"
+    "en": "Page size",
+    "zh-hans": "页面大小",
+    "zh-hant": "頁面大小"
   },
   "routine.quality-authorship": {
     "en": "Quality author statistics",
@@ -4435,9 +4435,9 @@
     "zh-hant": "高品質條目分析"
   },
   "quality_analysis.grade_comparison": {
-    "en": "By grade: FA, GA and Bplus",
-    "zh-hans": "按品质：典范、优良及乙上",
-    "zh-hant": "按品質：典範、優良及乙上"
+    "en": "By quality",
+    "zh-hans": "按品质",
+    "zh-hant": "按品質"
   },
   "quality_analysis.importance_comparison": {
     "en": "By importance",
@@ -4445,9 +4445,9 @@
     "zh-hant": "按重要度"
   },
   "quality_analysis.importance_pool": {
-    "en": "Top, High, Mid and Low groups combine FA, GA and Bplus articles. Unknown importance is excluded.",
-    "zh-hans": "极高、高、中、低重要度均汇总典范、优良及乙上条目；不计入重要度未知的条目。",
-    "zh-hant": "極高、高、中、低重要度均彙總典範、優良及乙上條目；不計入重要度未知的條目。"
+    "en": "Importance groups include all grades selected by the B/BL switch.",
+    "zh-hans": "重要度分组包含B/BL开关选定的全部品质。",
+    "zh-hant": "重要度分組包含B/BL開關選定的全部品質。"
   },
   "quality_analysis.group": {
     "en": "Group",
@@ -4513,5 +4513,65 @@
     "en": "Install / download script",
     "zh-hans": "安装／下载脚本",
     "zh-hant": "安裝／下載指令碼"
+  },
+  "quality_analysis.report_time": {
+    "en": "Report time",
+    "zh-hans": "报告时间",
+    "zh-hant": "報告時間"
+  },
+  "quality_analysis.contributors": {
+    "en": "Main contributors",
+    "zh-hans": "主要贡献者",
+    "zh-hant": "主要貢獻者"
+  },
+  "quality_analysis.authorship_details": {
+    "en": "Authorship of {title}",
+    "zh-hans": "{title}的作者贡献",
+    "zh-hant": "{title}的作者貢獻"
+  },
+  "quality_analysis.authorship_note": {
+    "en": "Authorship uses the saved revision range below. Shares measure attributable prose bytes; only editors contributing more than 10% are shown.",
+    "zh-hans": "作者贡献依据下面保存的历史版本范围估算，比例按可归属的正文字节计算，仅列出贡献超过10%的编辑者。",
+    "zh-hant": "作者貢獻依據下面儲存的歷史版本範圍估算，比例按可歸屬的正文字節計算，僅列出貢獻超過10%的編輯者。"
+  },
+  "quality_analysis.revision_range": {
+    "en": "Revision range",
+    "zh-hans": "修订版本范围",
+    "zh-hant": "修訂版本範圍"
+  },
+  "quality_analysis.editor_share": {
+    "en": "Share",
+    "zh-hans": "贡献比例",
+    "zh-hant": "貢獻比例"
+  },
+  "quality_analysis.editor_bytes": {
+    "en": "Attributed bytes",
+    "zh-hans": "归属字节",
+    "zh-hant": "歸屬位元組"
+  },
+  "quality_analysis.authorship_unavailable": {
+    "en": "Listing-time authorship evidence has not been collected yet.",
+    "zh-hans": "入选时的作者证据尚未取得。",
+    "zh-hant": "入選時的作者證據尚未取得。"
+  },
+  "quality_analysis.no_top_editors": {
+    "en": "No editor has a saved share above 10%.",
+    "zh-hans": "没有编辑者的已保存贡献比例超过10%。",
+    "zh-hant": "沒有編輯者的已儲存貢獻比例超過10%。"
+  },
+  "quality_analysis.review": {
+    "en": "review",
+    "zh-hans": "评审",
+    "zh-hant": "評審"
+  },
+  "quality_analysis.unknown_editor": {
+    "en": "Unnamed editor {editor}",
+    "zh-hans": "未具名编辑者 {editor}",
+    "zh-hant": "未具名編輯者 {editor}"
+  },
+  "quality_analysis.by_author": {
+    "en": "By author",
+    "zh-hans": "按作者统计",
+    "zh-hant": "按作者統計"
   }
 }

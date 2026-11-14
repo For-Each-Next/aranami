@@ -36,6 +36,7 @@ def _directory() -> dict:
                     {
                         "page_id": 1,
                         "title": "Game <script> & title",
+                        "revision_id": 777,
                         "grade": "FA",
                         "date": "2024-01-01",
                         "nomination_link": "#典范条目评选",
@@ -45,6 +46,7 @@ def _directory() -> dict:
                     {
                         "page_id": 2,
                         "title": "Shared 遊戲",
+                        "revision_id": 778,
                         "grade": "GA",
                         "date": "2026-11-09",
                         "nomination_link": "https://zh.wikipedia.org/w/index.php?oldid=123#GA_review",
@@ -215,11 +217,11 @@ class QualityAuthorshipPresentationTests(unittest.TestCase):
         assert authors[0]["last_active"]["age"] == "1 month ago"
         assert authors[0]["articles"][0]["age"] == "2 years ago"
         assert authors[0]["articles"][1]["age"] == "1 day ago"
-        assert authors[0]["articles"][0]["listing_url"] == (
+        assert authors[0]["articles"][0]["review_url"] == (
             title_url("Talk:Game <script> & title")
             + "#%E5%85%B8%E8%8C%83%E6%9D%A1%E7%9B%AE%E8%AF%84%E9%80%89"
         )
-        assert authors[0]["articles"][1]["listing_url"] == (
+        assert authors[0]["articles"][1]["review_url"] == (
             "https://zh.wikipedia.org/w/index.php?oldid=123#GA_review"
         )
         assert "Special%3AContributions%2F" in authors[0]["contributions_url"]
@@ -441,7 +443,7 @@ class QualityAuthorshipPresentationTests(unittest.TestCase):
             ]
             assert article["title_label"] == title
             assert article["url"] == title_url("Shared 遊戲")
-            assert article["listing_url"] == (
+            assert article["review_url"] == (
                 "https://zh.wikipedia.org/w/index.php?oldid=123#GA_review"
             )
 
@@ -486,6 +488,8 @@ class QualityAuthorshipPresentationTests(unittest.TestCase):
             "",
             "https://other.example/#review",
             "#",
+            "#top",
+            "https://zh.wikipedia.org/w/index.php?oldid=123#top",
             "javascript:alert(1)",
         ):
             source = _directory()
@@ -493,7 +497,7 @@ class QualityAuthorshipPresentationTests(unittest.TestCase):
             context = quality_authorship_context(source, Interface("en"), _NOW)
             assert (
                 context["quality_authorship"]["authors"][0]["articles"][0][
-                    "listing_url"
+                    "review_url"
                 ]
                 is None
             )

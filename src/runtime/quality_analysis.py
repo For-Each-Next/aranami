@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import logging
 import os
 import re
 import signal
@@ -23,17 +24,30 @@ from time import monotonic
 from typing import TYPE_CHECKING
 
 lazy import pywikibot
+lazy from polars.exceptions import PolarsError
 
 from data.runtime.status import get_boot_id, read_status
 from runtime.collection_status import collection_run
 from shared.config import COLLECTION_DEFINITIONS
+lazy from data.articles import (
+    current_assessments,
+    current_authorship,
+    history_store,
+    quality_analysis as analysis_store,
+)
+lazy from data.articles.current_quality import (
+    refresh_saved_quality as _refresh_saved_quality,
+)
+lazy from data.articles.storage import HISTORY_PATH
 lazy from data.collection_leases import collection_lease
+lazy from data.observations import membership_observed_at
 lazy from runtime.project_observations import project_cycle
 lazy from shared.identity import configure_pywikibot
 lazy from shared.sources.quarry.projects import query_pages_by_wikiproject
 lazy from tasks.articles.b_listings import refresh_b_listings
 lazy from tasks.articles.current_authorship import refresh_current_authorship
 lazy from tasks.articles.quality_analysis import (
+    prepare_membership,
     refresh_quality_analysis as collect,
 )
 lazy from tasks.articles.quality_authors import refresh_quality_author_activity
@@ -57,6 +71,74 @@ _MAX_BOOTSTRAP_SECONDS = 300
 _AUTHOR_RANGE_PAGES = 80
 _AUTHOR_TIME_BUDGET = 240
 _AUTHOR_WORKER_TIMEOUT = 360
+_LOG = logging.getLogger(__name__)
+
+
+def refresh_startup_quality(runtime: Path) -> bool:
+    """Prepare the full saved current cohort before idle source work.
+
+    Args:
+        runtime: Owner of shared metadata and retained source evidence.
+
+    Returns:
+        Whether the unified projection was refreshed. Current-hour
+        membership comes from its shared cache or read-only SQL, without
+        article bodies, listing lookups or new authorship acquisition.
+        Source failures preserve the previous cohort and report.
+    """
+    try:  # ruff: ignore[too-many-statements-in-try-clause] - Keep optional cohort acquisition within the startup failure boundary.
+        if analysis_store.quality_analysis_identity(runtime) == (None,):
+            return False
+        configure_pywikibot()
+        instant = dt.datetime.now(dt.UTC)
+        with project_cycle(now=instant):
+            site = pywikibot.Site("zh", "wikipedia")
+            membership = query_pages_by_wikiproject(site, "电子游戏")
+            observed = membership_observed_at(site.dbName(), "电子游戏")
+            if observed is None:
+                observed = current_assessments.load(
+                    runtime / current_assessments.DEFAULT_PATH,
+                )["observed_at"].max()
+            observed = observed or instant
+            members = prepare_membership(
+                membership,
+                history_store.load(runtime / HISTORY_PATH),
+                observed,
+                current_authorship.load(runtime)["members"],
+            )
+            analysis_store.checkpoint(
+                runtime,
+                members=members,
+                observed_at=observed,
+            )
+    except Exception as error:  # ruff: ignore[blind-except] - Optional metadata bootstrap must never stop hub startup.
+        _LOG.warning(
+            "Current-quality startup cohort unavailable (%s).",
+            type(error).__name__,
+            exc_info=True,
+        )
+    return refresh_saved_quality(runtime)
+
+
+def refresh_saved_quality(runtime: Path) -> bool:
+    """Prepare optional saved views without stopping runtime startup.
+
+    Args:
+        runtime: Owner of the retained source facts and report cache.
+
+    Returns:
+        Whether a new report was prepared. Invalid or unavailable saved
+        inputs are logged and leave the previous generation intact.
+    """
+    try:
+        return _refresh_saved_quality(runtime)
+    except (OSError, ValueError, PolarsError) as error:
+        _LOG.warning(
+            "Saved current-quality projection unavailable (%s).",
+            type(error).__name__,
+            exc_info=True,
+        )
+        return False
 
 
 def _should_yield(
@@ -229,6 +311,7 @@ def _collect(
                     time_budget=time_budget,
                     should_yield=should_yield,
                 )
+            refresh_saved_quality(runtime)
 
 
 def _collect_authorship(  # ruff: ignore[too-many-arguments] - Preserve explicit scope, runtime and request bounds.

@@ -19,7 +19,7 @@ import polars as pl
 from polars.testing import assert_frame_equal
 
 from data import project_data as snapshots
-from data.paths import storage_key
+from data.migration import migrate
 from runtime.project_observations import project_cycle
 from shared.sources.quarry import projects
 from shared.support.activity import activity_observer
@@ -70,6 +70,7 @@ class _ProjectDataFixture(TestCase):
     def setUp(self) -> None:
         """Replace source reads and isolate the runtime directory."""
         self.root = Path(self.enterContext(TemporaryDirectory()))
+        self.enterContext(patch.object(acquisition, "require_boundary"))
         self.query = self.enterContext(
             patch.object(
                 acquisition,
@@ -110,8 +111,7 @@ class TestProjectData(_ProjectDataFixture):
         """Capture November 2's closing state at November 3 midnight."""
         bundle = self._capture()
         assert bundle.path == (
-            self.root
-            / "reports/data/projects/enwiki/Video games/2026/20261102.parquet"
+            self.root / "data/daily/enwiki-20261102.parquet"
         )
         assert bundle.manifest["metadata"]["snapshot_date"] == "2026-11-02"
         assert bundle.manifest["metadata"]["boundary_date"] == "2026-11-03"
@@ -130,7 +130,10 @@ class TestProjectData(_ProjectDataFixture):
             )
             .sort("page_id")
         )
-        assert_frame_equal(bundle.tables["members"], expected)
+        assert_frame_equal(
+            bundle.tables["members"],
+            snapshots.normalize_members(expected, []),
+        )
         assert bundle.tables["members"]["pa_class"].null_count() == 1
         assert not list(bundle.path.parent.glob("*.json"))
 
@@ -276,8 +279,8 @@ class TestProjectData(_ProjectDataFixture):
             runtime=self.root,
         )
         assert latest is not None
-        assert latest.path.name == "20261231.parquet"
-        assert latest.path.parent.name == "2026"
+        assert latest.path.name == "enwiki-20261231.parquet"
+        assert latest.path.parent.name == "daily"
 
     def test_malformed_source_fails_without_publishing_a_file(self) -> None:
         """Reject incomplete, duplicate, or incoherent identities."""
@@ -372,10 +375,10 @@ class TestProjectData(_ProjectDataFixture):
             _DAY,
             runtime=self.root,
         )
-        assert path.is_relative_to(self.root / "reports/data/projects/enwiki")
+        assert path.is_relative_to(self.root / "data/daily")
         target = self.root / "target"
         target.mkdir()
-        (self.root / "reports").symlink_to(target, target_is_directory=True)
+        (self.root / "data").symlink_to(target, target_is_directory=True)
         with self.assertRaisesRegex(OSError, "regular directories"):
             self._capture()
         self.query.assert_not_called()
@@ -610,8 +613,11 @@ class TestUnicodeProjectData(_ProjectDataFixture):
                 logical = f"projects/enwiki/{project}/2026/20261102"
                 assert saved.path == (
                     self.root
-                    / "reports/data"
-                    / (storage_key(logical) + ".parquet")
+                    / "data/daily"
+                    / (
+                        snapshots.project_stem("enwiki", project)
+                        + "-20261102.parquet"
+                    )
                 )
                 assert saved.path.relative_to(self.root).as_posix().isascii()
                 assert saved.manifest["report_key"] == logical
@@ -651,6 +657,8 @@ class TestUnicodeProjectData(_ProjectDataFixture):
         legacy.parent.mkdir(parents=True)
         current.rename(legacy)
         original = legacy.read_bytes()
+
+        migrate(self.root)
         reused = snapshots.ensure_snapshot(
             "enwiki",
             project,
@@ -659,10 +667,10 @@ class TestUnicodeProjectData(_ProjectDataFixture):
             runtime=self.root,
             observed_at=_NOW + dt.timedelta(hours=2),
         )
-        assert reused.path == legacy
+        assert reused.path == current
         assert reused.manifest == saved.manifest
         assert legacy.read_bytes() == original
-        assert not current.exists()
+        assert current.exists()
 
 
 class TestSavedProjectActivity(_ProjectDataFixture):
@@ -692,10 +700,7 @@ class TestSavedProjectActivity(_ProjectDataFixture):
                 "target": _PROJECT,
                 "date": "2026-11-02",
                 "metadata": {
-                    "file": (
-                        "reports/data/projects/enwiki/Video games/"
-                        "2026/20261102.parquet"
-                    ),
+                    "file": ("data/daily/enwiki-20261102.parquet"),
                     "observed_at": bundle.manifest["calculated_at"],
                     "finished_at": bundle.manifest["finished_at"],
                     "written_at": storage["written_at"],

@@ -134,9 +134,7 @@ class HistoricalNewsletterRequests(TestCase):
         assert status == HTTPStatus.OK
         assert _UNKNOWN in text
         assert "| y1 = 2 " not in text
-        assert not (
-            self.runtime / "reports/data/newsletter/historical"
-        ).exists()
+        assert not (self.runtime / "data/daily/newsletter/historical").exists()
 
     def test_import_invalidates_warm_page_and_uses_explicit_runtime(
         self,

@@ -44,6 +44,9 @@ class _SourceCycle:
     )
     active: bool = True
     revisions: dict[str, pl.DataFrame] = field(default_factory=dict)
+    project_groups: dict[tuple[str, ...], pl.DataFrame] = field(
+        default_factory=dict,
+    )
     membership_reader: Callable[[BaseSite, str], pl.DataFrame] | None = None
     category_reader: (
         Callable[[str], tuple[pl.DataFrame, frozenset[str]] | None] | None
@@ -62,6 +65,7 @@ _CYCLE: ContextVar[_SourceCycle | None] = ContextVar(
 @contextmanager
 def source_cycle(
     *,
+    share_project_groups: bool = False,
     membership_reader: Callable[[BaseSite, str], pl.DataFrame] | None = None,
     category_reader: (
         Callable[[str], tuple[pl.DataFrame, frozenset[str]] | None] | None
@@ -75,6 +79,7 @@ def source_cycle(
     later work from retaining its observations.
 
     Args:
+        share_project_groups: Reuse complete parent SQL observations.
         membership_reader: Optional runtime-selected durable observation
             reader. Source adapters supplying a Site use this instead
             of querying current membership.
@@ -88,6 +93,9 @@ def source_cycle(
         membership_reader=membership_reader,
         category_reader=category_reader,
     )
+    parent = _CYCLE.get()
+    if share_project_groups and parent is not None and parent.active:
+        cycle.project_groups = parent.project_groups
     token = _CYCLE.set(cycle)
     try:
         yield
@@ -98,6 +106,23 @@ def source_cycle(
         cycle.revisions.clear()
         cycle.categories.clear()
         _CYCLE.reset(token)
+
+
+def read_project_group(
+    key: tuple[str, ...],
+    read: Callable[[], pl.DataFrame],
+) -> pl.DataFrame:
+    """Reuse a complete SQL observation across related projects.
+
+    Returns:
+        Detached rows, caching only a successfully completed query.
+    """
+    cycle = _CYCLE.get()
+    if cycle is None or not cycle.active:
+        return read()
+    if key not in cycle.project_groups:
+        cycle.project_groups[key] = read()
+    return cycle.project_groups[key].clone()
 
 
 def read_membership(

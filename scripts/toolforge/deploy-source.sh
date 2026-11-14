@@ -148,6 +148,10 @@ for service in aranami-web aranami-hub; do
 done
 # Drain before selection or pod deletion; Kubernetes' grace timer has not begun.
 if [ -f "$backup/aranami-hub.replicas" ]; then drain_hub; fi
+# Preserve the old layout for rollback while installing verified data copies.
+toolforge jobs run "aranami-data-$token" --image python3.13 --mount=all \
+    --command "env PYTHONPATH=$stage/src PYTHONDONTWRITEBYTECODE=1 $environment/bin/python -m data.migration --receipt $backup/data-success.json" --wait 1800
+python3 -c 'import json, os, sys; proof=json.load(open(sys.argv[1])); assert proof["complete"] and os.path.samefile(proof["source"], sys.argv[2])' "$backup/data-success.json" "$stage"
 # app is the only selection pointer. Keep every uploaded source at its path.
 python3 "$validator" select "$stage"
 selected=true

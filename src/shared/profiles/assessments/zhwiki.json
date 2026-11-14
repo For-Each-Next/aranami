@@ -574,7 +574,8 @@
             "極高"
           ],
           "rank": 5,
-          "order": 0
+          "order": 0,
+          "color": "#FF97FF"
         },
         {
           "raw_value": "高",
@@ -585,7 +586,8 @@
             "high"
           ],
           "rank": 4,
-          "order": 1
+          "order": 1,
+          "color": "#FFACFF"
         },
         {
           "raw_value": "中",
@@ -596,7 +598,8 @@
             "mid"
           ],
           "rank": 3,
-          "order": 2
+          "order": 2,
+          "color": "#FFC1FF"
         },
         {
           "raw_value": "低",
@@ -607,7 +610,8 @@
             "low"
           ],
           "rank": 2,
-          "order": 3
+          "order": 3,
+          "color": "#FFD6FF"
         },
         {
           "raw_value": "不适用",
@@ -619,7 +623,8 @@
             "不適用"
           ],
           "rank": null,
-          "order": 5
+          "order": 5,
+          "color": "#F5F5F5"
         },
         {
           "raw_value": "未知",
@@ -634,7 +639,8 @@
             "未评级"
           ],
           "rank": null,
-          "order": null
+          "order": null,
+          "color": "transparent"
         }
       ],
       "compatibility_classes": [],
@@ -1060,7 +1066,8 @@
             "極高"
           ],
           "rank": 5,
-          "order": 0
+          "order": 0,
+          "color": "#FF97FF"
         },
         {
           "raw_value": "高",
@@ -1071,7 +1078,8 @@
             "high"
           ],
           "rank": 4,
-          "order": 1
+          "order": 1,
+          "color": "#FFACFF"
         },
         {
           "raw_value": "中",
@@ -1082,7 +1090,8 @@
             "mid"
           ],
           "rank": 3,
-          "order": 2
+          "order": 2,
+          "color": "#FFC1FF"
         },
         {
           "raw_value": "低",
@@ -1093,7 +1102,8 @@
             "low"
           ],
           "rank": 2,
-          "order": 3
+          "order": 3,
+          "color": "#FFD6FF"
         },
         {
           "raw_value": "不适用",
@@ -1105,7 +1115,8 @@
             "不適用"
           ],
           "rank": null,
-          "order": 5
+          "order": 5,
+          "color": "#F5F5F5"
         },
         {
           "raw_value": "未知",
@@ -1120,7 +1131,8 @@
             "未评级"
           ],
           "rank": null,
-          "order": null
+          "order": null,
+          "color": "transparent"
         }
       ],
       "compatibility_classes": [

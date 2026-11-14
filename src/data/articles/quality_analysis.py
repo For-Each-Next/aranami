@@ -8,6 +8,7 @@ without creating locks or recomputing report statistics.
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -24,7 +25,8 @@ if TYPE_CHECKING:
 
     from data.reports import ReportBundle
 
-GRADES = ("FA", "FL", "A", "AL", "GA", "Bplus")
+QUALITY_GRADES = ("FA", "FL", "A", "AL", "GA", "Bplus")
+GRADES = (*QUALITY_GRADES, "B", "BL")
 _LENGTH_GRADES = ("FA", "GA", "Bplus")
 _LENGTH_IMPORTANCE = ("Top", "High", "Mid", "Low")
 STAMP = pl.Datetime("us", "UTC")
@@ -39,9 +41,11 @@ ARTICLE_SCHEMA = {
     "source_bytes": pl.Int64,
     "listed_date": pl.Date,
     "listed_oldid": pl.Int64,
+    "listed_review_link": pl.String,
     "observed_at": STAMP,
     "measurement_contract": pl.String,
     "prose_words": pl.Int64,
+    "prose_characters": pl.Int64,
     "prose_bytes": pl.Int64,
     "measured_at": STAMP,
     "attempted_at": STAMP,
@@ -49,11 +53,13 @@ ARTICLE_SCHEMA = {
 MEASURE_KEY = ["page_id", "article_revision_id", "measurement_contract"]
 MEASURE_FIELDS = (
     "prose_words",
+    "prose_characters",
     "prose_bytes",
     "source_bytes",
     "measured_at",
     "attempted_at",
 )
+UPDATE_FIELDS = (*MEASURE_FIELDS, "listed_oldid", "listed_review_link")
 _QUANTILES = {
     "median_words": pl.Float64,
     "central_68_low": pl.Float64,
@@ -104,7 +110,7 @@ _SCHEMAS = {
     "coverage": COVERAGE_SCHEMA,
 }
 _KEY = "articles/quality-analysis/zhwiki-video-games"
-_ROOT = DEFAULT_ROOT.parent
+_ROOT = DEFAULT_ROOT
 _MAX_ROWS = 10_000
 _MAX_BYTES = 16 * 1024 * 1024
 
@@ -152,14 +158,26 @@ def _validate_articles(frame: pl.DataFrame) -> None:
         | ~pl.col("title").str.len_bytes().is_between(1, 4096)
         | (pl.col("measurement_contract").str.len_bytes() == 0)
         | pl.any_horizontal(
-            pl.col("source_bytes", "prose_words", "prose_bytes") < 0,
+            pl.col(
+                "source_bytes",
+                "prose_words",
+                "prose_characters",
+                "prose_bytes",
+            )
+            < 0,
         )
         | pl.any_horizontal(
             pl.col("talk_page_id", "talk_revision_id", "listed_oldid") <= 0,
         )
         | (pl.col("listed_date") > pl.col("observed_at").dt.date())
-        | (pl.col("measured_at").is_null() != pl.col("prose_words").is_null())
-        | (pl.col("prose_words").is_null() != pl.col("prose_bytes").is_null()),
+        | (
+            pl.col("measured_at").is_null()
+            != (
+                pl.col("prose_words").is_null()
+                & pl.col("prose_characters").is_null()
+            )
+        )
+        | (pl.col("measured_at").is_null() != pl.col("prose_bytes").is_null()),
     )
     if invalid.height:
         message = "Invalid quality-analysis identity or measurement."
@@ -566,10 +584,42 @@ def _read_bundle(runtime: Path) -> ReportBundle | None:
     """
     store = ReportStore(runtime / _ROOT)
     try:
-        return store.read(_KEY, locked=True)
+        bundle = store.read(_KEY, locked=True)
     except FileNotFoundError:
         # A writer can prune the generation after its selector was read.
-        return store.read(_KEY, locked=True)
+        bundle = store.read(_KEY, locked=True)
+    if bundle is None:
+        return None
+    tables = dict(bundle.tables)
+    legacy = {
+        name: dtype
+        for name, dtype in ARTICLE_SCHEMA.items()
+        if name not in {"prose_characters", "listed_review_link"}
+    }
+    if tables["articles"].schema == pl.Schema(legacy):
+        tables["articles"] = (
+            tables["articles"]
+            .with_columns(
+                pl.lit(None, dtype=pl.Int64).alias("prose_characters"),
+                pl.lit(None, dtype=pl.String).alias("listed_review_link"),
+            )
+            .select(list(ARTICLE_SCHEMA))
+        )
+    legacy_years = {
+        name: dtype
+        for name, dtype in YEARS_SCHEMA.items()
+        if name not in {"B", "BL"}
+    }
+    if tables["years"].schema == pl.Schema(legacy_years):
+        tables["years"] = (
+            tables["years"]
+            .with_columns(
+                pl.lit(0, dtype=pl.Int64).alias("B"),
+                pl.lit(0, dtype=pl.Int64).alias("BL"),
+            )
+            .select(list(YEARS_SCHEMA))
+        )
+    return replace(bundle, tables=tables)
 
 
 def checkpoint(
@@ -615,6 +665,39 @@ def checkpoint(
                 raise ValueError(message)
             if previous is not None and observed_at < previous:
                 return frame
+            listing_key = [
+                "page_id",
+                "grade",
+                "talk_page_id",
+                "talk_revision_id",
+                "listed_date",
+            ]
+            listing_fields = ("listed_oldid", "listed_review_link")
+            listing_cache = frame.filter(
+                pl.all_horizontal(pl.col(listing_key).is_not_null()),
+            ).select(
+                *listing_key,
+                *(
+                    pl.col(name).alias(f"saved_{name}")
+                    for name in listing_fields
+                ),
+            )
+            members = (
+                members
+                .join(
+                    listing_cache,
+                    on=listing_key,
+                    how="left",
+                    validate="1:1",
+                )
+                .with_columns(
+                    *(
+                        pl.coalesce(name, f"saved_{name}").alias(name)
+                        for name in listing_fields
+                    ),
+                )
+                .select(list(ARTICLE_SCHEMA))
+            )
             cached = frame.select(
                 *MEASURE_KEY,
                 *(
@@ -650,7 +733,7 @@ def checkpoint(
                         *MEASURE_KEY,
                         *(
                             pl.col(name).alias(f"new_{name}")
-                            for name in MEASURE_FIELDS
+                            for name in UPDATE_FIELDS
                         ),
                     ),
                     on=MEASURE_KEY,
@@ -660,7 +743,7 @@ def checkpoint(
                 .with_columns(
                     *(
                         pl.coalesce(f"new_{name}", name).alias(name)
-                        for name in MEASURE_FIELDS
+                        for name in UPDATE_FIELDS
                     ),
                 )
                 .select(list(ARTICLE_SCHEMA))
@@ -780,7 +863,9 @@ def read_quality_analysis(runtime: Path = Path()) -> dict:
             "importance",
             "source_bytes",
             "prose_words",
+            "prose_characters",
             "prose_bytes",
+            "listed_review_link",
             "article_revision_id",
             "talk_revision_id",
             "listed_oldid",

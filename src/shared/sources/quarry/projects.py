@@ -16,10 +16,12 @@ import pywikibot
 from pywikibot.site import Namespace
 from sqlalchemy import and_, func, literal, or_, select, tuple_, union_all
 
+from shared.config import PROJECT_DATA_TASKFORCES
 from shared.sources.cycle import (
     read_categories,
     read_category_members,
     read_membership,
+    read_project_group,
     read_revisions,
 )
 from shared.sources.quarry import Replica, tables
@@ -719,6 +721,56 @@ def _project_membership(database: str, project_name: str) -> pl.DataFrame:
     Returns:
         Raw typed page identities and nullable project assessments.
     """
+    parent = next(
+        (
+            name
+            for (wiki, name), children in PROJECT_DATA_TASKFORCES.items()
+            if wiki == database and project_name in {name, *children}
+        ),
+        project_name,
+    )
+    names = (
+        parent,
+        *sorted(PROJECT_DATA_TASKFORCES.get((database, parent), ())),
+    )
+    rows = read_project_group(
+        (database, *names),
+        lambda: _project_group(database, names),
+    )
+    frame = rows.filter(pl.col("membership_project") == project_name).drop(
+        "membership_project",
+    )
+    children = sorted(
+        PROJECT_DATA_TASKFORCES.get((database, project_name), ()),
+    )
+    flags = [
+        pl
+        .when(
+            pl.col("page_id").is_in(
+                rows.filter(pl.col("membership_project") == name)[
+                    "page_id"
+                ].implode(),
+            ),
+        )
+        .then(pl.lit(name))
+        .otherwise(None)
+        for name in children
+    ]
+    return frame.with_columns(
+        (
+            pl.concat_list(flags).list.drop_nulls()
+            if flags
+            else pl.lit([], dtype=pl.List(pl.String))
+        ).alias("taskforces"),
+    )
+
+
+def _project_group(database: str, names: tuple[str, ...]) -> pl.DataFrame:
+    """Read subjects, talks and assessments in one SQL statement.
+
+    Returns:
+        Project memberships with their latest subject timestamps.
+    """
     page = tables.Page.__table__
     talk = page.alias("talk")
     assessment = tables.PageAssessments
@@ -729,16 +781,22 @@ def _project_membership(database: str, project_name: str) -> pl.DataFrame:
             page.c.page_namespace,
             page.c.page_title,
             page.c.page_latest.label("page_revision"),
+            tables.Revision.rev_timestamp.label("page_rev_timestamp"),
             page.c.page_len.label("page_length"),
             page.c.page_is_redirect,
             talk.c.page_id.label("talk_page_id"),
             talk.c.page_latest.label("talk_revision"),
             assessment.pa_class,
             assessment.pa_importance,
+            project.pap_project_title.label("membership_project"),
         )
         .select_from(project)
         .join(assessment, project.pap_project_id == assessment.pa_project_id)
         .join(page, assessment.pa_page_id == page.c.page_id)
+        .outerjoin(
+            tables.Revision,
+            tables.Revision.rev_id == page.c.page_latest,
+        )
         .outerjoin(
             talk,
             and_(
@@ -746,18 +804,28 @@ def _project_membership(database: str, project_name: str) -> pl.DataFrame:
                 talk.c.page_title == page.c.page_title,
             ),
         )
-        .where(project.pap_project_title == project_name)
+        .where(project.pap_project_title.in_(names))
         .order_by(page.c.page_id)
     )
     return (
         _replica(database)
         .query(
             statement,
-            schema_overrides=_PAGE_SCHEMA,
+            schema_overrides={
+                **_PAGE_SCHEMA,
+                "page_rev_timestamp": pl.String,
+                "membership_project": pl.String,
+            },
             purpose="project_membership",
-            scope={"project": project_name},
+            scope={"projects": list(names)},
         )
         .collect()
+        .with_columns(
+            pl.col("page_rev_timestamp").str.to_datetime(
+                "%Y%m%d%H%M%S",
+                time_zone="UTC",
+            ),
+        )
     )
 
 

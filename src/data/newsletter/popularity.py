@@ -218,7 +218,7 @@ class PopularitySource:
         self.store = ReportStore(
             runtime
             / ("dry-run" if dry else "")
-            / "reports/data/newsletter/popularity-history",
+            / "data/daily/newsletter/popularity-history",
             dry=dry,
         )
 

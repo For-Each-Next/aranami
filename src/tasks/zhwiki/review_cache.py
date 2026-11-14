@@ -2,7 +2,7 @@
 
 The hourly collector checks revision IDs in batches and downloads only
 changed revisions. This disposable Parquet cache also retains confirmed
-empty parses. Freshness always requires a successful API check.
+empty parses. Freshness requires a successful SQL or API revision check.
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from shared.sources.quarry.revisions import page_info
+from shared.sources.revisions import has_revision_cache, read_revision_contents
 from shared.support.cache import ParquetCache
 
 if TYPE_CHECKING:
@@ -69,6 +71,78 @@ _CACHE = ParquetCache(
     max_rows=_MAX_ROWS,
     max_bytes=_MAX_BYTES,
 )
+
+_LINK_SCHEMA = {
+    "revision": pl.Int64,
+    "targets": pl.List(
+        pl.Struct({
+            "author": pl.String,
+            "timestamp": pl.String,
+            "anchors": pl.List(pl.String),
+        }),
+    ),
+    "used_at": pl.Int64,
+}
+_LINK_CACHE = ParquetCache(
+    schema=_LINK_SCHEMA,
+    contract="review-comment-links",
+    max_rows=_MAX_ROWS,
+    max_bytes=_MAX_BYTES,
+)
+
+
+class ReplyLinkCache:
+    """Reuse comment anchors for checked review revisions."""
+
+    def __init__(self, path: Path | None, now: dt.datetime) -> None:
+        """Load bounded comment anchors without source requests."""
+        self.path = path
+        self.now = int(now.timestamp())
+        frame = _LINK_CACHE.read(path).filter(
+            (pl.col("revision") > 0)
+            & pl.col("used_at").is_between(self.now - _RETENTION, self.now)
+            & pl.col("targets").is_not_null(),
+        )
+        self.rows = {row["revision"]: row for row in frame.to_dicts()}
+
+    def read(
+        self,
+        revision: int,
+        fetch: Callable[[], dict[tuple[str, str], list[str]]],
+    ) -> dict[tuple[str, str], list[str]]:
+        """Reuse a complete result or fetch once on a cache miss.
+
+        Returns:
+            Verified author/time anchors, including a confirmed empty
+            result. Failed lookups are not cached.
+        """
+        row = self.rows.get(revision)
+        if row is None:
+            targets = fetch()
+            row = {
+                "revision": revision,
+                "targets": [
+                    {"author": author, "timestamp": stamp, "anchors": ids}
+                    for (author, stamp), ids in targets.items()
+                ],
+            }
+            self.rows[revision] = row
+        row["used_at"] = self.now
+        return {
+            (target["author"], target["timestamp"]): target["anchors"]
+            for target in row["targets"]
+        }
+
+    def save(self) -> None:
+        """Persist bounded anchors without failing the review report."""
+        if self.path is None:
+            return
+        frame = pl.DataFrame(list(self.rows.values()), schema=_LINK_SCHEMA)
+        frame = frame.sort("used_at", descending=True).head(_MAX_ROWS)
+        try:
+            _LINK_CACHE.write(self.path, frame)
+        except OSError, ValueError, pl.exceptions.PolarsError:
+            _LOGGER.warning("Could not save review comment links.")
 
 
 def _valid_items(frame: pl.DataFrame) -> bool:
@@ -262,6 +336,14 @@ class ReviewCache:
             ValueError: A requested page's revision is unavailable.
         """
         pending = [s for s in sources if s not in self._revisions]
+        if not pending:
+            return
+        if has_revision_cache():
+            self._revisions.update({
+                row["title"]: row.get("lastrevid")
+                for row in page_info(self.site, pending)
+            })
+            return
         for batch in batched(pending, 50, strict=False):
             found = {}
             for page in self._pages(prop="info", titles=list(batch)):
@@ -288,6 +370,18 @@ class ReviewCache:
                 if revision not in self._texts
             ),
         )
+        if not pending:
+            return
+        if has_revision_cache():
+            contents = read_revision_contents(self.site, pending)
+            if any(content is None for content in contents.values()):
+                message = "Review source revision content is unavailable."
+                raise ValueError(message)
+            self._texts.update({
+                revision: content.text
+                for revision, content in contents.items()
+            })
+            return
         for batch in batched(pending, 50, strict=False):
             for page in self._pages(
                 prop="revisions",
