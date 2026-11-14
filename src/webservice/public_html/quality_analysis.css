@@ -16,25 +16,12 @@
 .analysis-chart-data summary { cursor: pointer; color: #176c73; }
 .analysis-year-data { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 .analysis-year-data th, .analysis-year-data td { padding: .4rem .6rem; text-align: right; border-bottom: 1px solid #dce6e7; }
-.analysis-length-groups { display: grid; gap: 1.5rem; }
-.analysis-length-groups section { min-width: 0; }
-.analysis-length-groups h4 { font-size: 1.05rem; margin-bottom: .75rem; }
 .analysis-legend { display: flex; flex-wrap: wrap; gap: .4rem 1rem; list-style: none; padding: 0; font-size: .85rem; }
 .analysis-legend li { white-space: nowrap; }
-.analysis-length-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.analysis-length-table th, .analysis-length-table td { text-align: left; padding: .6rem .7rem; border-bottom: 1px solid #dce6e7; }
-.analysis-length-table thead { background: #f4f7f7; }
-.analysis-length-table th { overflow-wrap: normal; word-break: normal; }
-.analysis-length-table .analysis-number { text-align: right; }
-.analysis-length-table th:first-child { min-width: 4rem; white-space: nowrap; }
-.analysis-length-table thead th:nth-child(2) { min-width: 6rem; }
-.analysis-length-table thead th:nth-child(3) { min-width: 7rem; }
-.analysis-length-table thead th:nth-child(5) { min-width: 7rem; }
-.analysis-length-table td:nth-child(4) { min-width: 11rem; }
-.analysis-range-label { display: inline-block; font-size: .9rem; margin-bottom: .25rem; }
-.analysis-range { display: block; width: 100%; height: .9rem; fill: #4b9397; }
-.analysis-range-track { stroke: #dce6e7; stroke-width: 2; }
-.analysis-median-mark { stroke: #223f43; stroke-width: 8; }
+.analysis-violin-density { fill-opacity: .75; stroke: #52797e; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.analysis-violin-track { stroke: #dce6e7; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.analysis-violin-median { stroke: #163c41; stroke-width: 2; vector-effect: non-scaling-stroke; }
+@media (forced-colors: active) { .analysis-violin-density { fill: Highlight; stroke: CanvasText; } .analysis-violin-track, .analysis-violin-median { stroke: CanvasText; } }
 .analysis-filters { display: flex; gap: .8rem; flex-wrap: wrap; align-items: end; margin: 1rem 0; }
 .analysis-filters[hidden], .analysis-directory [hidden] { display: none; }
 .analysis-filters label { display: flex; flex-direction: column; gap: .35rem; min-width: 0; font-size: .9rem; }
@@ -55,10 +42,10 @@
 .analysis-editor-table td { white-space: nowrap; text-align: right; }
 .analysis-editor-table th { overflow-wrap: anywhere; }
 #quality-authors { margin-top: 2.5rem; }
-#analysis-distribution, #analysis-years, #analysis-lengths, #analysis-articles { margin-top: 2.5rem; }
+#analysis-distribution, #analysis-years, #analysis-articles { margin-top: 2.5rem; }
 @media (max-width: 943px) { .analysis-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }  }
 @media (max-width: 390px) { .analysis-summary { gap: .6rem; } .analysis-summary > div { padding: .8rem; } .analysis-summary dd { font-size: 1.5rem; } .analysis-filters label { flex: 1 1 100%; } }
-@media (forced-colors: active) { .analysis-pie-slice, .analysis-range rect, .analysis-year-columns rect { fill: Highlight; stroke: CanvasText; } .analysis-range-track, .analysis-median-mark, .analysis-year-grid { stroke: CanvasText; } .analysis-axis-label, .analysis-column-total { fill: CanvasText; } .analysis-summary > div { border: 1px solid CanvasText; } }
+@media (forced-colors: active) { .analysis-pie-slice, .analysis-year-columns rect { fill: Highlight; stroke: CanvasText; } .analysis-year-grid { stroke: CanvasText; } .analysis-axis-label, .analysis-column-total { fill: CanvasText; } .analysis-summary > div { border: 1px solid CanvasText; } }
 .analysis-pies { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.5rem; margin: 1.25rem 0; }
 .analysis-pie-panel { margin: 0; min-width: 0; }
 .analysis-pie-panel h4 { font-size: 1.05rem; margin-bottom: .5rem; }
@@ -77,3 +64,29 @@
 @media (forced-colors: active) { .analysis-pie-slice, .analysis-year-columns rect { fill: Highlight; stroke: CanvasText; } .analysis-pie-empty { fill: Canvas; stroke: CanvasText; } }
 
 [data-quality-analysis-status]:not(:empty) { display: block; margin-block: .5rem; font-size: .9rem; }
+
+.analysis-year-data .analysis-total-column { font-weight: 700; }
+
+[data-chart-group] { cursor: pointer; }
+[data-chart-group]:focus-visible { outline: 2px solid #36c; outline-offset: 3px; }
+.analysis-chart-article-table { border-collapse: collapse; width: 100%; min-width: 38rem; font-variant-numeric: tabular-nums; }
+.analysis-chart-article-table th, .analysis-chart-article-table td { padding: .5rem .65rem; border-bottom: 1px solid #dce6e7; text-align: left; }
+.analysis-chart-article-table td:first-child, .analysis-chart-article-table td:last-child { text-align: right; }
+.analysis-missing-authorship { margin-block: .5rem 1.25rem; }
+
+.analysis-matrix { width: 100%; border-collapse: collapse; white-space: nowrap; }
+.analysis-matrix th, .analysis-matrix td { padding: .65rem; border-bottom: 1px solid var(--border-color-base, #aaa); text-align: center; }
+.analysis-matrix th:first-child { text-align: start; }
+.analysis-matrix label { display: inline-flex; align-items: center; gap: .35rem; }
+.analysis-year-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; margin: 1rem 0 2rem; }
+.analysis-year-filter input[type="number"] { width: 6em; padding: .4rem; }
+.analysis-selection { margin-block: 1.5rem; }
+
+.ui-dialog.analysis-authorship-dialog { width: min(40rem, calc(100vw - 2rem)); max-width: 40rem; }
+
+.analysis-mini-cell { width: 38%; min-width: 5rem; }
+.analysis-mini-violin { display: block; width: 100%; height: 2rem; }
+.analysis-mini-cell a { display: block; }
+.analysis-pie-key th, .analysis-pie-key td { padding: .45rem .35rem; }
+.analysis-pie-key thead th:last-child { text-align: center; }
+@media (max-width: 390px) { .analysis-pie-key { font-size: .85rem; } .analysis-assessment-label { gap: .25rem; } }

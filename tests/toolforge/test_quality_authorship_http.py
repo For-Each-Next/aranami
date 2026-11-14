@@ -69,12 +69,18 @@ class QualityAuthorshipHTTPTests(TestCase):
     def test_global_toggle_selects_a_saved_cohort() -> None:
         """Use one saved variant for all three sections."""
 
-        def saved(_runtime: Path, *, include_b: bool) -> dict:
+        def saved(
+            _runtime: Path,
+            *,
+            include_b: bool,
+            authorship_basis: str,
+        ) -> dict:
             """Provide a prepared cohort.
 
             Returns:
                 Saved analysis and an observed empty author directory.
             """
+            assert authorship_basis == "current"
             return {
                 "include_b": include_b,
                 "analysis": {**analysis_fixture(), "include_b": include_b},
@@ -110,7 +116,11 @@ class QualityAuthorshipHTTPTests(TestCase):
                 if included:
                     assert "count_b=1&amp;lang=zh-hans" in response.text
             assert read.call_count == 2
-            read.assert_called_with(runtime, include_b=True)
+            read.assert_called_with(
+                runtime,
+                include_b=True,
+                authorship_basis="current",
+            )
 
     @staticmethod
     def test_corrupt_saved_variant_is_unavailable() -> None:

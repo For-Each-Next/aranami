@@ -45,7 +45,10 @@ lazy from runtime.project_observations import project_cycle
 lazy from shared.identity import configure_pywikibot
 lazy from shared.sources.quarry.projects import query_pages_by_wikiproject
 lazy from tasks.articles.b_listings import refresh_b_listings
-lazy from tasks.articles.current_authorship import refresh_current_authorship
+lazy from tasks.articles.current_authorship import (
+    refresh_current_authorship,
+    refresh_current_versions,
+)
 lazy from tasks.articles.quality_analysis import (
     prepare_membership,
     refresh_quality_analysis as collect,
@@ -334,6 +337,14 @@ def _collect_authorship(  # ruff: ignore[too-many-arguments] - Preserve explicit
         should_yield=should_yield,
     )
     refresh_current_authorship(
+        site,
+        membership,
+        runtime=runtime,
+        max_requests=max(1, max_pages // 2),
+        time_budget=max(0, (deadline - monotonic()) / 2),
+        should_yield=should_yield,
+    )
+    refresh_current_versions(
         site,
         membership,
         runtime=runtime,

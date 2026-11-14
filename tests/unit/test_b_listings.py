@@ -430,6 +430,11 @@ class BListingTests(TestCase):
             }
 
     @staticmethod
+    @patch.object(
+        collector,
+        "CONTRACT",
+        collector._COMPLETED_PROOF_CURRENT_CONTRACT,
+    )
     def test_completed_old_parser_proofs_reuse_identical_metadata() -> None:
         """Keep completed dates across the parser upgrade."""
         for revisions, reason in (
@@ -591,6 +596,11 @@ class BListingTests(TestCase):
                 )
 
     @staticmethod
+    @patch.object(
+        collector,
+        "CONTRACT",
+        collector._COMPLETED_PROOF_CURRENT_CONTRACT,
+    )
     def test_migrated_completed_proof_keeps_new_head_anchor() -> None:
         """Scan only new revisions above a compatible completed head."""
         with (
@@ -719,7 +729,7 @@ class BListingTests(TestCase):
                     _ALIASES,
                     shell_aliases=_SHELL_ALIASES,
                 )
-                == "丙"
+                == "乙"
             )
             assert (
                 banner_class(
@@ -728,7 +738,7 @@ class BListingTests(TestCase):
                     _ALIASES,
                     shell_aliases=_SHELL_ALIASES,
                 )
-                == "丙"
+                == "乙"
             )
         for flags, expected in (
             ("", "未评"),

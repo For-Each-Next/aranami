@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import polars as pl
 from wiki_fixtures import OfflineSite
@@ -18,6 +18,7 @@ from data import migration, project_data
 from data.caching import project_observations
 from shared.config import PROJECT_DATA_TASKFORCES
 from shared.sources.quarry import freshness
+from shared.support.activity import activity_observer
 from shared.support.assessment_encoding import decode_assessments
 from tasks.project_data import capture
 
@@ -90,6 +91,7 @@ class TestDataLayout(TestCase):
         ]
         with (
             TemporaryDirectory() as directory,
+            activity_observer(Mock()),
             patch.dict(
                 PROJECT_DATA_TASKFORCES,
                 {("zhwiki", "电子游戏"): ("Games/A",)},
@@ -234,3 +236,22 @@ class TestDataLayout(TestCase):
                 assert statement.is_select
                 assert "heartbeat_p.heartbeat" in str(statement)
                 assert "meta_p.wiki" not in str(statement)
+
+    @staticmethod
+    def test_readiness_reports_its_boundary_with_logging_enabled() -> None:
+        """Validate the real adapter's public scope before SQL runs."""
+        observer = Mock()
+        with (
+            activity_observer(observer),
+            patch(
+                "shared.sources.quarry.query._fetch",
+                return_value=(
+                    ("last_updated",),
+                    [("2026-11-14T00:00:00",)],
+                ),
+            ),
+        ):
+            freshness.require_boundary("enwiki", _NOW.date())
+        fact = observer.call_args.args[1]
+        assert fact["purpose"] == "daily_replica_readiness"
+        assert fact["scope"] == {"boundary": "2026-11-14"}

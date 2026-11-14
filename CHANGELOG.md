@@ -5,14 +5,24 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
-### 0.9.6 (2026-11-14 05:57 UTC)
+### 0.9.7 (2026-11-14 07:33 UTC)
 
 Overview: Moved report generation onto prepared metadata with incremental
 revision acquisition, permanent project page archives and a migrated flat
 Parquet layout, while unifying quality analysis and fixing newsletter grouping.
 
-- Unified quality articles and authors under a global B/BL switch, with
-  listing evidence, revision ranges and contributor shares above ten percent.
+- Added all-grade quality/importance selection, inclusive date filtering and
+  optional unknown dates to the promoted Article statistics navigation page.
+- Prepared hourly current and listing-version authorship, contribution-rank
+  filtering, exact endpoint links and WikiWho visual-analysis links.
+- Limited article-table rendering to visible and adjacent pages, unified site
+  pagination footers and simplified author totals and contribution dialogs.
+- Recognized explicit B and all six B criteria independently, with complete
+  criteria taking precedence over C and all article grades using talk history.
+- Embedded miniature length violins in distribution tables, hid unsupported
+  importance and empty A/AL groups, and emphasized annual chart totals.
+- Opened exact chart cohorts in article dialogs and listed missing B/BL
+  attribution evidence beside its coverage count without extra source requests.
 - Corrected prose counts, annual bars, importance colors, spaced display titles
   and sequential row ordinals; preserved existing links through redirects.
 - Collected subject/talk identities, revisions and assessments in one project
@@ -33,8 +43,8 @@ Parquet layout, while unifying quality analysis and fixing newsletter grouping.
   newsletter traffic summaries before either output reads saved values.
 - Recognized exact simplified and traditional PageAssessments names, including
   音樂 for 最终幻想合辑专辑列表, without treating unrelated subprojects as matches.
-- Attached subject/talk revision identities to prepared reports and kept HTTP
-  rendering and wiki projection free of source acquisition and raw parsing.
+- Attached subject/talk revision identities and validated batched query scopes
+  to prepared reports, keeping both renderers free of source reads and parsing.
 
 ### 0.9.5 (2026-11-14 02:44 UTC)
 

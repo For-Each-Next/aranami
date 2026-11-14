@@ -8,6 +8,7 @@ immutable generation without joining data or calculating statistics.
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,13 +20,14 @@ from data.articles import (
     current_authorship,
     quality_analysis,
     quality_authors,
+    quality_selection,
 )
 from data.articles.storage import AUTHORSHIP_PATH, DEFAULT_ROOT
 from data.reports import ReportResult, ReportStore
 from shared.assessment_profiles import assessment_profile
 
 STAMP = pl.Datetime("us", "UTC")
-GRADES = quality_analysis.GRADES
+GRADES = (*quality_analysis.QUALITY_GRADES, "B", "BL")
 _QUALITY = quality_analysis.QUALITY_GRADES
 _CONTRIBUTORS = pl.List(pl.Struct(authorship_store.CONTRIBUTOR_SCHEMA))
 _PROOF_SCHEMA = {
@@ -46,6 +48,7 @@ ARTICLE_SCHEMA = {
     },
     "authorship_available": pl.Boolean,
     "authors": pl.List(pl.String),
+    "author_ranks": pl.List(pl.Struct({"name": pl.String, "rank": pl.UInt32})),
     "authorship_editors": _CONTRIBUTORS,
 }
 _QUANTILES = {
@@ -55,6 +58,15 @@ _QUANTILES = {
     "central_95_low": pl.Float64,
     "central_95_high": pl.Float64,
 }
+_DENSITY = pl.List(pl.Struct({"position": pl.Float64, "density": pl.Float64}))
+_DENSITY_STEPS = 128
+_MISSING_ARTICLES = pl.List(
+    pl.Struct({
+        "page_id": pl.Int64,
+        "title": pl.String,
+        "grade": pl.String,
+    }),
+)
 GRADE_SCHEMA = {
     "grade": pl.String,
     "pages": pl.Int64,
@@ -75,6 +87,7 @@ LENGTH_SCHEMA = {
     "pages": pl.Int64,
     "measured": pl.Int64,
     **_QUANTILES,
+    "density": _DENSITY,
 }
 YEAR_SCHEMA = {"year": pl.Int32, "grade": pl.String, "pages": pl.Int64}
 YEARS_SCHEMA = {
@@ -90,6 +103,7 @@ COVERAGE_SCHEMA = {
     "authorship_collected": pl.Int64,
     "b_total": pl.Int64,
     "b_collected": pl.Int64,
+    "missing_b_articles": _MISSING_ARTICLES,
 }
 _AUTHOR_ARTICLE = {
     key: dtype
@@ -246,6 +260,26 @@ def _article_rows(
             ),
         )
     )
+    ranked = (
+        contributors
+        .with_columns(
+            pl
+            .col("bytes")
+            .rank(method="min", descending=True)
+            .over("page_id")
+            .cast(pl.UInt32)
+            .alias("rank"),
+            pl
+            .when(pl.col("editor").str.starts_with("0|"))
+            .then(pl.col("editor").str.slice(2))
+            .otherwise(pl.col("name"))
+            .alias("name"),
+        )
+        .filter(pl.col("name").is_not_null())
+        .sort("page_id", "rank", "name")
+        .group_by("page_id", maintain_order=True)
+        .agg(pl.struct("name", "rank").alias("author_ranks"))
+    )
     return (
         articles
         .join(
@@ -255,6 +289,7 @@ def _article_rows(
             validate="1:1",
         )
         .join(names, on="page_id", how="left", validate="1:1")
+        .join(ranked, on="page_id", how="left", validate="1:1")
         .join(editors, on="page_id", how="left", validate="1:1")
         .with_columns(
             pl
@@ -262,6 +297,9 @@ def _article_rows(
             .is_not_null()
             .alias("authorship_available"),
             pl.col("authors").fill_null(pl.lit([], dtype=pl.List(pl.String))),
+            pl.col("author_ranks").fill_null(
+                pl.lit([], dtype=ARTICLE_SCHEMA["author_ranks"]),
+            ),
             pl.col("authorship_editors").fill_null(
                 pl.lit([], dtype=_CONTRIBUTORS),
             ),
@@ -304,6 +342,72 @@ def _counts() -> list[pl.Expr]:
         pl.len().cast(pl.Int64).alias("pages"),
         pl.col("prose_characters").count().cast(pl.Int64).alias("measured"),
     ]
+
+
+def _length_density(articles: pl.DataFrame, dimension: str) -> pl.DataFrame:
+    """Prepare Gaussian violin samples over each observed length range.
+
+    Use Silverman's normal-reference bandwidth and normalize each
+    group's width independently. A constant sample becomes a vertical
+    mark at its actual value. Unknown measurements produce no density.
+
+    Returns:
+        Group keys with ordered, bounded density points for rendering.
+    """
+    samples = articles.select(
+        dimension,
+        pl.col("prose_characters").cast(pl.Float64).alias("value"),
+    ).drop_nulls()
+    if samples.is_empty():
+        return pl.DataFrame(schema={dimension: pl.String, "density": _DENSITY})
+    grid = (
+        samples
+        .group_by(dimension)
+        .agg(
+            pl.col("value").min().alias("minimum"),
+            pl.col("value").max().alias("maximum"),
+            (1.06 * pl.col("value").std(ddof=0) * pl.len().pow(-0.2))
+            .clip(lower_bound=1)
+            .alias("bandwidth"),
+        )
+        .join(
+            pl.DataFrame({"step": range(_DENSITY_STEPS + 1)}),
+            how="cross",
+        )
+        .with_columns(
+            (
+                pl.col("minimum")
+                + (pl.col("maximum") - pl.col("minimum"))
+                * pl.col("step")
+                / _DENSITY_STEPS
+            ).alias("position"),
+        )
+    )
+    return (
+        grid
+        .join(samples, on=dimension, how="inner")
+        .group_by(dimension, "step", "position")
+        .agg(
+            (
+                -0.5
+                * (
+                    (pl.col("value") - pl.col("position"))
+                    / pl.col("bandwidth")
+                ).pow(2)
+            )
+            .exp()
+            .mean()
+            .alias("density"),
+        )
+        .with_columns(
+            (
+                pl.col("density") / pl.col("density").max().over(dimension)
+            ).alias("density"),
+        )
+        .sort(dimension, "step")
+        .group_by(dimension, maintain_order=True)
+        .agg(pl.struct("position", "density").alias("density"))
+    )
 
 
 def _summary_tables(
@@ -363,12 +467,20 @@ def _summary_tables(
                 how="left",
                 maintain_order="left",
             )
+            .join(
+                _length_density(articles, dimension),
+                on=dimension,
+                how="left",
+                validate="1:1",
+                maintain_order="left",
+            )
             .with_columns(
                 pl.lit(dimension).alias("group"),
                 pl.lit(None, dtype=pl.String).alias(
                     "importance" if dimension == "grade" else "grade",
                 ),
                 pl.col("pages", "measured").fill_null(0),
+                pl.col("density").fill_null(pl.lit([], dtype=_DENSITY)),
             )
             .select(list(LENGTH_SCHEMA))
             .cast(LENGTH_SCHEMA),
@@ -376,7 +488,7 @@ def _summary_tables(
     dated = articles.filter(pl.col("listed_date").is_not_null()).with_columns(
         pl.col("listed_date").dt.year().alias("year"),
     )
-    first = min(dated["year"].min() or observed_at.year, 2010)
+    first = min(dated["year"].min() or observed_at.year, 2009)
     year_keys = pl.DataFrame(
         {"year": range(first, observed_at.year + 1)},
         schema={"year": pl.Int32},
@@ -422,17 +534,22 @@ def _summary_tables(
         .alias("authorship_collected"),
         pl
         .col("grade")
-        .is_in(current_authorship.GRADES)
+        .is_in(["B", "BL"])
         .sum()
         .cast(pl.Int64)
         .alias("b_total"),
-        (
-            pl.col("grade").is_in(current_authorship.GRADES)
-            & pl.col("authorship_available")
-        )
+        (pl.col("grade").is_in(["B", "BL"]) & pl.col("authorship_available"))
         .sum()
         .cast(pl.Int64)
         .alias("b_collected"),
+        pl
+        .struct("page_id", "title", "grade")
+        .filter(
+            pl.col("grade").is_in(["B", "BL"])
+            & ~pl.col("authorship_available"),
+        )
+        .implode()
+        .alias("missing_b_articles"),
     ).cast(COVERAGE_SCHEMA)
     return {
         "articles": articles,
@@ -556,10 +673,81 @@ def prepare_current_quality(
             ).select("include_b", *frame.columns)
             for name, frame in tables.items()
         })
-    return {
+    result = {
         name: pl.concat([variant[name] for variant in variants])
         for name in _SCHEMAS
     }
+    defaults = []
+    for include_b in (False, True):
+        selected = joined.filter(
+            pl.col("grade").is_in(GRADES if include_b else _QUALITY)
+            & (
+                pl.col("listed_date").is_null()
+                | pl.col("listed_date").is_between(
+                    dt.date(2002, 1, 1),
+                    dt.date(observed_at.year, 12, 31),
+                )
+            ),
+        )
+        tables = _summary_tables(
+            selected,
+            GRADES if include_b else _QUALITY,
+            observed_at,
+        )
+        defaults.append({
+            name: _iso(frame.to_dicts()) for name, frame in tables.items()
+        })
+    current_proofs = (
+        articles
+        .select("page_id", pl.col("article_revision_id").alias("revision_id"))
+        .join(
+            b_tables["evidence"],
+            on=current_authorship.KEY,
+            how="inner",
+            validate="1:1",
+        )
+        .select(
+            "page_id",
+            pl.col("creation_revision").alias("authorship_start_revision"),
+            pl.col("revision_id").alias("authorship_end_revision"),
+            pl.col("creation_timestamp").alias("authorship_start_timestamp"),
+            pl.col("revision_timestamp").alias("authorship_end_timestamp"),
+            pl.col("eligible_bytes").alias("authorship_eligible_bytes"),
+            "contributors",
+        )
+        .cast(_PROOF_SCHEMA)
+    )
+    current_rows = _article_rows(articles, current_proofs)
+    current_coverage = (
+        current_rows
+        .filter(pl.col("grade").is_in(["B", "BL"]))
+        .select(
+            pl.len().alias("total"),
+            pl.col("authorship_available").sum().alias("collected"),
+            pl
+            .struct("page_id", "title", "grade")
+            .filter(~pl.col("authorship_available"))
+            .implode()
+            .alias("missing"),
+        )
+        .row(0, named=True)
+    )
+    payload = {
+        "current_coverage": current_coverage,
+        "articles": _iso(joined.to_dicts()),
+        "current_articles": _iso(current_rows.to_dicts()),
+        "current_authors": _iso(
+            _author_table(current_rows, activity).to_dicts(),
+        ),
+        "authors": _iso(_author_table(joined, activity).to_dicts()),
+        "cells": quality_selection.cells(joined).to_dicts(),
+        "defaults": defaults,
+        "last_year": observed_at.year,
+    }
+    result["selection"] = pl.DataFrame({
+        "payload": [json.dumps(payload, ensure_ascii=False, allow_nan=False)],
+    })
+    return result
 
 
 def _validate(tables: dict[str, pl.DataFrame]) -> None:
@@ -568,6 +756,10 @@ def _validate(tables: dict[str, pl.DataFrame]) -> None:
     Raises:
         ValueError: A selected report lacks complete bounded tables.
     """
+    tables = dict(tables)
+    selection = tables.pop("selection", None)
+    if selection is not None:
+        quality_selection.validate(selection)
     if set(tables) != set(_SCHEMAS):
         message = "Current quality requires every prepared table."
         raise ValueError(message)
@@ -701,6 +893,24 @@ def _validate_mode(
         ).height:
             message = "Current-quality saved character intervals are invalid."
             raise ValueError(message)
+    lengths = tables["lengths"]
+    points = lengths.select("density").explode("density").unnest("density")
+    if (
+        lengths.filter(
+            pl.col("density").list.len() > _DENSITY_STEPS + 1,
+        ).height
+        or points.filter(
+            pl.col("position").is_not_null()
+            & (
+                ~pl.col("position").is_finite()
+                | (pl.col("position") < 0)
+                | ~pl.col("density").is_finite()
+                | ~pl.col("density").is_between(0, 1)
+            ),
+        ).height
+    ):
+        message = "Current-quality density metadata is invalid."
+        raise ValueError(message)
 
 
 def refresh_saved_quality(runtime: Path = Path()) -> bool:
@@ -808,18 +1018,26 @@ def read_current_quality(
     runtime: Path = Path(),
     *,
     include_b: bool = False,
+    authorship_basis: str = "listed",
 ) -> dict:
     """Read one precomputed mode without network, locks or aggregation.
 
     Args:
         runtime: Toolforge runtime independent of uploaded source files.
         include_b: Select the globally B/BL-inclusive saved variant.
+        authorship_basis: Saved listing or current-revision credits.
 
     Returns:
         Analysis and author-directory dictionaries for the same cohort.
         ``observed_at`` retains the source cohort's actual clock, while
         ``prepared_at`` is the saved generation's preparation time.
+
+    Raises:
+        ValueError: The selected basis or saved data is invalid.
     """
+    if authorship_basis not in {"listed", "current"}:
+        message = "Unknown authorship basis."
+        raise ValueError(message)
     store = ReportStore(runtime / _ROOT)
     try:
         bundle = store.read(_KEY, locked=True)
@@ -852,7 +1070,36 @@ def read_current_quality(
             },
         }
     tables = dict(bundle.tables)
+    if "author_ranks" not in tables["articles"].columns:
+        tables["articles"] = (
+            tables["articles"]
+            .with_columns(
+                pl.lit([], dtype=ARTICLE_SCHEMA["author_ranks"]).alias(
+                    "author_ranks",
+                ),
+            )
+            .select("include_b", *ARTICLE_SCHEMA)
+        )
+    if "missing_b_articles" not in tables["coverage"].columns:
+        tables["coverage"] = tables["coverage"].with_columns(
+            pl.lit([], dtype=_MISSING_ARTICLES).alias("missing_b_articles"),
+        )
+    if "density" not in tables["lengths"].columns:
+        tables["lengths"] = tables["lengths"].with_columns(
+            pl.lit([], dtype=_DENSITY).alias("density"),
+        )
     _validate(tables)
+    matrix = (
+        json.loads(tables.pop("selection")["payload"].item())
+        if "selection" in tables
+        else None
+    )
+    if matrix and authorship_basis == "current":
+        matrix = {
+            **matrix,
+            "articles": matrix["current_articles"],
+            "authors": matrix["current_authors"],
+        }
     selected = {
         name: frame.filter(pl.col("include_b") == include_b).drop("include_b")
         for name, frame in tables.items()
@@ -866,6 +1113,8 @@ def read_current_quality(
         "prepared_at": prepared,
         "importance_available": True,
         "lengths_available": True,
+        "selection": matrix,
+        "authorship_basis": authorship_basis,
         **{
             name: _iso(selected[name].to_dicts())
             for name in (
@@ -893,7 +1142,15 @@ def read_current_quality(
         "authors": _iso(selected["authors"].to_dicts()),
         "include_b": include_b,
         "b_unavailable": False,
+        "b_missing_articles": matrix["current_coverage"]["missing"]
+        if matrix and authorship_basis == "current"
+        else analysis["coverage"]["missing_b_articles"],
         "b_coverage": {
+            key: matrix["current_coverage"][key]
+            for key in ("total", "collected")
+        }
+        if matrix and authorship_basis == "current"
+        else {
             "total": analysis["coverage"]["b_total"],
             "collected": analysis["coverage"]["b_collected"],
         },

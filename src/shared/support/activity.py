@@ -29,6 +29,7 @@ _MAX_SCOPE_ITEMS = 64
 
 type SourcePurpose = Literal[
     "project_membership",
+    "daily_replica_readiness",
     "category_members",
     "page_tags",
     "latest_revisions",
@@ -45,6 +46,8 @@ class SourceScope(TypedDict, total=False):
     """
 
     project: str
+    projects: list[str]
+    boundary: str
     template: str
     categories: list[str]
     templates: list[str]
@@ -57,7 +60,8 @@ class SourceScope(TypedDict, total=False):
 
 
 _PURPOSE_SCOPE_FIELDS = {
-    "project_membership": {"project"},
+    "project_membership": {"project", "projects"},
+    "daily_replica_readiness": {"boundary"},
     "category_members": {"categories", "page_kind"},
     "page_tags": {"categories", "templates", "page_kind"},
     "latest_revisions": {
@@ -196,11 +200,16 @@ def _scope(purpose: object, value: object) -> SourceScope:
     for field, item in value.items():
         if field in {"project", "template"}:
             valid = _public_text(item, empty=False)
-        elif field in {"categories", "templates"}:
+        elif field in {"categories", "templates", "projects"}:
             valid = (
                 isinstance(item, list)
                 and 0 < len(item) <= _MAX_SCOPE_ITEMS
                 and all(_public_text(name, empty=False) for name in item)
+            )
+        elif field == "boundary":
+            valid = (
+                _public_text(item, empty=False)
+                and dt.date.fromisoformat(item).isoformat() == item
             )
         elif field == "page_kind":
             valid = (

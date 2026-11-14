@@ -243,7 +243,7 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
             )
 
     @staticmethod
-    def test_vertical_columns_and_seven_saved_prose_groups() -> None:
+    def test_vertical_columns_and_inline_prose_distributions() -> None:
         """Render stacks and pooled strata from saved statistics."""
         source = analysis_fixture()
         context = quality_analysis_context(source, Interface("en"))[
@@ -269,14 +269,13 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
         output = render_quality_analysis(source, None, None, "en", _NOW)
         assert 'class="analysis-year-columns"' in output
         assert output.count("data-analysis-year=") == 2
-        assert output.count('data-analysis-length-group="grade"') == 3
-        assert output.count('data-analysis-length-group="importance"') == 4
-        assert 'data-analysis-length-value="FL"' not in output
+        assert output.count('class="analysis-mini-violin"') == 4
+        assert 'id="analysis-lengths"' not in output
+        assert "PlayStation 5" not in output
+        assert 'data-analysis-violin="FL"' not in output
         source.update(lengths=[], lengths_available=False)
         pending = render_quality_analysis(source, None, None, "en", _NOW)
-        assert (
-            Interface("en").text("quality_analysis.lengths_pending") in pending
-        )
+        assert 'class="analysis-mini-violin"' not in pending
         assert pending.count("data-analysis-row ") == 3
         assert 'class="analysis-year-columns"' in pending
 
@@ -347,9 +346,8 @@ class QualityAnalysisPresentationTests(unittest.TestCase):
             "en",
             _NOW,
         )
-        assert (
-            Interface("en").text("quality_analysis.no_measurements") in empty
-        )
+        assert 'class="analysis-mini-violin"' not in empty
+        assert 'id="analysis-lengths"' not in empty
         assert 'id="analysis-articles"' in empty
         assert "data-analysis-row " not in empty
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 from ipaddress import ip_address
 from math import ceil, cos, pi, sin
 from operator import itemgetter
+from urllib.parse import quote
 
 from shared.assessment_profiles import assessment_profile
 from webservice.presentation import (
@@ -26,10 +27,32 @@ _PROFILE = assessment_profile("zhwiki", "电子游戏")
 _GRADES = tuple(
     label.code
     for label in _PROFILE.classes
-    if label.code in {"FA", "FL", "A", "AL", "GA", "Bplus", "B", "BL"}
+    if label.code
+    in {
+        "FA",
+        "FL",
+        "A",
+        "AL",
+        "GA",
+        "Bplus",
+        "B",
+        "BL",
+        "C",
+        "CL",
+        "Start",
+        "List",
+        "Stub",
+        "SL",
+        "Unassessed",
+    }
 )
-_IMPORTANCE = tuple(label.code for label in _PROFILE.importance)
+_IMPORTANCE = tuple(
+    label.code
+    for label in _PROFILE.importance
+    if label.code not in {"NA", "Bottom"}
+)
 _HALF_CIRCLE = 0.5
+_FIRST_FILTER_YEAR = 2002
 _DETAIL_SHARE_THRESHOLD = 0.1
 
 
@@ -85,6 +108,10 @@ def _pie(
     categories = []
     for row in rows:
         code = row["grade" if dimension == "class" else "importance"]
+        if (dimension == "importance" and code not in _IMPORTANCE) or (
+            dimension == "class" and code in {"A", "AL"} and row["pages"] == 0
+        ):
+            continue
         fraction = row["pages"] / max(total, 1)
         categories.append({
             **row,
@@ -152,24 +179,63 @@ def _years(data: dict, interface: Interface) -> dict:
     }
 
 
+def _violin_path(points: list[dict], maximum: float) -> str | None:
+    """Map saved density points into a mirrored horizontal SVG shape.
+
+    Returns:
+        A closed path, or none before density metadata is available.
+    """
+    if not points:
+        return None
+    upper = [
+        f"{point['position'] / maximum * 1000:.2f} "
+        f"{30 - point['density'] * 24:.2f}"
+        for point in points
+    ]
+    lower = [
+        f"{point['position'] / maximum * 1000:.2f} "
+        f"{30 + point['density'] * 24:.2f}"
+        for point in reversed(points)
+    ]
+    return "M " + " L ".join([*upper, *lower]) + " Z"
+
+
 def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
     """Position saved percentile intervals on a shared visual scale.
 
     Returns:
         Localized ranges and the common maximum label.
     """
+    visible = [
+        row
+        for row in data.get("lengths", [])
+        if not (
+            (
+                row["group"] == "importance"
+                and row["importance"] not in _IMPORTANCE
+            )
+            or (
+                row["group"] == "grade"
+                and row["grade"] in {"A", "AL"}
+                and row["pages"] == 0
+            )
+        )
+    ]
     range_maximum = (
         max(
             (
-                row.get("central_95_high") or 0
-                for row in data.get("lengths", [])
+                max(
+                    (point["position"] for point in row.get("density", [])),
+                    default=row.get("central_95_high") or 0,
+                )
+                for row in visible
             ),
             default=1,
         )
         or 1
     )
     lengths = []
-    for row in data.get("lengths", []):
+    for row in visible:
         low, high = row.get("central_68_low"), row.get("central_68_high")
         median = row.get("median_characters")
         lengths.append({
@@ -188,6 +254,16 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
                 2,
             ),
             "median_x": round((median or 0) / range_maximum * 1000, 2),
+            "violin_path": _violin_path(
+                row.get("density", []),
+                range_maximum,
+            ),
+            "color": _PROFILE.color(
+                row["grade"] or row["importance"],
+                "class" if row["group"] == "grade" else "importance",
+            )
+            if (row["grade"] or row["importance"]) != "Unknown"
+            else "#72989c",
         })
     return lengths, _number(range_maximum)
 
@@ -209,6 +285,29 @@ def _articles(data: dict, interface: Interface) -> list[dict]:
         ]
         articles.append({
             **row,
+            "default_selected": bool(
+                (
+                    not date
+                    or _FIRST_FILTER_YEAR
+                    <= int(str(date)[:4])
+                    <= (data.get("selection") or {}).get("last_year", 9999)
+                )
+                and (
+                    row["grade"]
+                    not in {
+                        "B",
+                        "BL",
+                        "C",
+                        "CL",
+                        "Start",
+                        "List",
+                        "Stub",
+                        "SL",
+                        "Unassessed",
+                    }
+                    or (data.get("include_b") and row["grade"] in {"B", "BL"})
+                ),
+            ),
             "title_label": display_title(
                 row["title"].replace("_", " "),
                 interface.locale,
@@ -289,10 +388,24 @@ def _authorship(row: dict, interface: Interface) -> dict:
         if instant:
             label += " · " + interface.date(str(instant)[:10])
         boundaries[f"range_{boundary}"] = (
-            {"url": url, "label": label} if url else None
+            {
+                "url": url,
+                "label": label,
+                "date": interface.date(str(instant)[:10]) if instant else None,
+            }
+            if url
+            else None
         )
     return {
         **boundaries,
+        "visualization_url": (
+            "https://xtools.wmcloud.org/authorship/zh.wikipedia.org/"
+            + quote(row["title"].replace(" ", "_"), safe="")
+            + "/"
+            + str(source["range_end_revision"])
+            if _revision_url(source.get("range_end_revision"))
+            else None
+        ),
         "available": bool(source.get("available")),
         "eligible_bytes_label": _number(source.get("eligible_bytes")),
         "editors": [
@@ -349,9 +462,120 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
         interface,
     )
     lengths, range_maximum = _lengths(data, interface)
+    length_lookup = {
+        (row["group"], row["grade"] or row["importance"]): row
+        for row in lengths
+    }
+    grades = [
+        {**row, "length": length_lookup.get(("grade", row["grade"]))}
+        for row in grades
+    ]
+    importance = [
+        {**row, "length": length_lookup.get(("importance", row["importance"]))}
+        for row in importance
+    ]
+    selection = data.get("selection")
+    matrix = None
+    shown = data.get("articles", [])
+    if selection:
+        default_ids = {
+            row["page_id"]
+            for row in selection["defaults"][int(bool(data.get("include_b")))][
+                "articles"
+            ][:20]
+        }
+        shown = [row for row in shown if row["page_id"] in default_ids]
+    if selection:
+        codes = [
+            code
+            for code in _GRADES
+            if code not in {"A", "AL"}
+            or any(row["grade"] == code for row in selection["articles"])
+        ]
+        matrix = {
+            "cells": selection["cells"],
+            "extra": [
+                [
+                    row.get(key)
+                    for key in (
+                        "page_id",
+                        "title",
+                        "grade",
+                        "importance",
+                        "listed_date",
+                        "listed_oldid",
+                        "prose_characters",
+                        "source_bytes",
+                        "authors",
+                        "author_ranks",
+                    )
+                ]
+                + [
+                    display_title(
+                        row["title"].replace("_", " "),
+                        interface.locale,
+                    ),
+                    interface.date(row["listed_date"])
+                    if row["listed_date"]
+                    else None,
+                    _authorship(row, interface)
+                    if row.get("authorship_available")
+                    else None,
+                ]
+                for row in selection["articles"]
+                if row["page_id"] not in default_ids
+            ],
+            "labels": {
+                key: interface.text(f"quality_analysis.{key}")
+                for key in (
+                    "until",
+                    "visualization",
+                    "authorship_unavailable",
+                    "unknown_listing",
+                    "contributors",
+                    "authorship_note",
+                    "editor_share",
+                    "editor_bytes",
+                )
+            },
+            "last_year": selection["last_year"],
+            "grades": [
+                {
+                    "value": code,
+                    "label": interface.text(f"assessment.class.{code}"),
+                    "color": _PROFILE.color(code, "class"),
+                    "checked": code
+                    not in {
+                        "B",
+                        "BL",
+                        "C",
+                        "CL",
+                        "Start",
+                        "List",
+                        "Stub",
+                        "SL",
+                        "Unassessed",
+                    }
+                    or (data.get("include_b") and code in {"B", "BL"}),
+                }
+                for code in codes
+            ],
+            "importance": [
+                {
+                    "value": code,
+                    "label": interface.text(f"assessment.importance.{code}"),
+                    "color": "#72989c"
+                    if code == "Unknown"
+                    else _PROFILE.color(code, "importance"),
+                }
+                for code in ("Top", "High", "Mid", "Low", "Unknown")
+            ],
+        }
     return {
         "quality_analysis": {
             "available": bool(data.get("available")),
+            "matrix": matrix,
+            "listing_authors": data.get("authorship_basis") == "listed",
             "observed_at": data.get("observed_at"),
             "observed_label": utc_time(data.get("observed_at")),
             "prepared_at": data.get("prepared_at") or data.get("observed_at"),
@@ -361,6 +585,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             "total": _number(total),
             "measured": _number(coverage.get("measured", 0)),
             "dated": _number(coverage.get("dated", 0)),
+            "unknown_dates": _number(total - coverage.get("dated", 0)),
             "median": _number(coverage.get("median_characters")),
             "include_b": bool(data.get("include_b")),
             "locale": interface.locale,
@@ -377,14 +602,18 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                 row for row in lengths if row["group"] == "importance"
             ],
             "range_maximum": range_maximum,
-            "articles": _articles(data, interface),
-            "grade_options": [
+            "articles": _articles({**data, "articles": shown}, interface),
+            "grade_options": matrix["grades"]
+            if matrix
+            else [
                 {
                     "value": code,
                     "label": interface.text(f"assessment.class.{code}"),
                 }
                 for code in _GRADES
                 if data.get("include_b") or code not in {"B", "BL"}
+                if code not in {"A", "AL"}
+                or any(row["grade"] == code for row in grades)
             ],
             "importance_options": [
                 {

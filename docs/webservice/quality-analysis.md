@@ -6,11 +6,18 @@ games quality cohort and its contributor statistics. Former
 B/BL selection. Only currently selected articles and lists count; historical
 promotions and departed project members do not add author credits.
 
-The leading B/BL switch applies to the entire saved report. The default covers
-FA, FL, A, AL, GA and Bplus. Enabling it also includes B and BL. Overview totals,
-charts, article rows and author counts always use the same selected cohort.
-The native GET form works without JavaScript; enhanced switching preserves
-focus and rejects stale responses.
+A leading quality-by-importance checkbox matrix selects any current article
+class, from featured through unassessed. The default includes FA, FL, A, AL,
+GA and Bplus. The inclusive year range defaults to 2002 through the current
+year; unknown dates are included by default through a separate checkbox.
+Matrix labels contain no counts. Every chart and both directories use the
+same cohort. Table-local title, author and contribution-rank filters further
+restrict the article directory without changing the cohort charts.
+
+The unchecked listing-version checkbox uses prepared current-revision
+attribution. Checking it selects prepared listing-time evidence. Both are
+collected hourly in the background; changing the setting only reads saved
+Parquet. Unknown evidence never falls back silently to the other version.
 
 ## Overview and article directory
 
@@ -19,7 +26,7 @@ preparation time. Source observation times remain separate saved metadata.
 Quality and importance pies include exact counts and percentages. Their colors
 come from the assessment profile; importance colors follow Chinese
 [Template:Importance/colour](https://zh.wikipedia.org/w/index.php?oldid=95173028).
-Annual columns cover a continuous year range including 2010 and 2011, retaining
+Annual columns cover a continuous year range beginning in 2009, retaining
 zero-count years. They describe the latest supported listing at each current
 grade, not historical annual project totals. Unknown dates stay outside bars.
 
@@ -28,7 +35,12 @@ listing date, main contributors, prose count and page size. Display titles use
 spaces instead of underscores; original titles and page IDs retain their
 identity. The ordinal column cannot be sorted and follows the displayed order
 after sorting, filtering or pagination. Other missing observations sort last.
-Table-local filters do not change the whole-cohort overview; the B/BL switch does.
+Table-local filters do not change the whole-cohort overview; the matrix does.
+Clicking a chart opens the corresponding article list from saved rows. Annual
+segments select both year and grade, independently of directory filters. No
+source requests occur. The annual data table labels and bolds its total column.
+The B/BL coverage notice lists every article whose attribution is still missing,
+with article and talk links so those cases can be inspected.
 
 Listing dates link to an explicit retained article oldid when available. Missing
 oldids are resolved from the listing date through Wiki Replica revision
@@ -46,17 +58,24 @@ other non-prose sections; list grades include readable template values.
 Legacy word counts remain readable internally but are never displayed as these
 new character units.
 
-Length summaries compare all selected grades and importance groups. Central
+Miniature horizontal violin charts occupy the third column of the quality
+and importance distribution tables, beside each count and percentage. They use
+precomputed Gaussian density points and median marks; their accessible labels
+retain measurements without adding a separate chart or explanatory paragraph. NA and Bottom importance groups are omitted, and A/AL groups
+hide when their current count is zero. Central
 68% and 95% intervals are linear empirical 16th–84th and 2.5th–97.5th
 percentiles. They describe the measured current cohort rather than minimum
 assessment requirements. Measured zero differs from an unknown measurement.
+Density uses the normal-reference bandwidth over 129 positions between the
+observed minimum and maximum. Constant samples remain a vertical mark; unknown
+measurements add no density. These values are saved before HTTP rendering.
 Page size uses known current SQL byte length even while prose is pending.
 
 Main contributors retain the registered primary-author or at-least-33% rule.
 The adjacent information dialog gives the actual saved attribution revision
-range and editors whose attributable byte share is strictly greater than 10%.
-Anonymous contributors link to their public contribution history. Missing range
-endpoints remain unknown, and absence of attribution is distinct from an
+endpoint date and editors whose attributable byte share is strictly greater than 10%.
+Anonymous contributors link to their public contribution history. The endpoint date links to the exact revision and an XTools WikiWho
+visualization; the first revision is not displayed. Missing endpoints remain unknown, and absence of attribution is distinct from an
 observed result with no editor above the threshold.
 
 Existing high-quality attribution can use a saved end-of-listing-day revision
@@ -94,7 +113,7 @@ saved facts before ordinary source dispatch. Bounded analysis and authorship
 passes refresh it after their checkpoints. HTTP readers only validate, select
 and serialize a variant; they never join, aggregate, acquire sources or write.
 
-Analysis and B/BL authorship keep separate short-lived workers scheduled hourly
+Analysis and all-grade authorship keep separate short-lived workers scheduled hourly
 at :02 UTC while ordinary work is idle. The parent retains no article bodies or
 worker frames. Each pass checkpoints bounded work and releases parser/native
 memory on exit. Foreground work and the protected midnight window stop admission
@@ -106,4 +125,19 @@ up to forty article attempts afterward. Existing successful evidence is skipped.
 A completed history batch processes at most fifty selected revision bodies at a
 time. Native Polars pools default to two threads unless explicitly configured.
 Rendered HTML is bounded to eight MiB per entry and cached by saved generation,
-locale and the selected B/BL mode.
+locale, the compatibility B/BL mode and attribution basis.
+
+## Browser pagination
+
+Only the initial twenty article rows are emitted as table markup. Remaining
+rows use a compact saved catalog; the browser creates the visible page and
+prepares the preceding and following two pages during idle time. It evicts
+other generated rows. Filtering, sorting, chart dialogs and adjacent-page
+preloading do not contact upstream APIs or replicas. Author filters use saved
+WikiWho contribution ranks: first, top two, top three or all; tied shares
+receive the same minimum rank.
+
+All site table footers share typography, spacing, record counts and navigation
+button styling. Contributor tables display one total article count without
+quality-subset parentheses. Three-column article-contribution dialogs use a
+narrower width. Page-size values are plain text.

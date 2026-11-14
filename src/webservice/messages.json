@@ -3966,13 +3966,13 @@
   },
   "quality_authorship.count_b_description": {
     "en": "For B-Class articles and lists, authors are inferred from the article revision at or before the start of the latest continuous B-Class range on the talk page. That article revision supplies the listing date.",
-    "zh-hans": "乙级条目及列表按讨论页最近一段连续乙级评级开始时或之前的最近条目版本推定作者，并以该条目版本的时间为入选日期。",
-    "zh-hant": "乙級條目及列表按討論頁最近一段連續乙級評級開始時或之前的最近條目版本推定作者，並以該條目版本的時間為入選日期。"
+    "zh-hans": "乙级条目及列表按讨论页最近一段连续乙级评级开始时或之前的最近条目版本推定作者，并以该条目版本的时间为品质评级日期。",
+    "zh-hant": "乙級條目及列表按討論頁最近一段連續乙級評級開始時或之前的最近條目版本推定作者，並以該條目版本的時間為品質評級日期。"
   },
   "quality_authorship.b_coverage": {
     "en": "B/BL listing-revision attribution coverage: {collected}/{total} pages. Missing listing history, article revisions or attribution evidence remain unknown.",
-    "zh-hans": "乙级入选版本作者证据覆盖：{collected}/{total}条目及列表。入选历史、条目版本或作者证据尚未取得的项目显示为未知。",
-    "zh-hant": "乙級入選版本作者證據覆蓋：{collected}/{total}條目及列表。入選歷史、條目版本或作者證據尚未取得的項目顯示為未知。"
+    "zh-hans": "乙级作者证据覆盖：{collected}/{total}条目及列表。入选历史、条目版本或作者证据尚未取得的项目显示为未知。",
+    "zh-hant": "乙級作者證據覆蓋：{collected}/{total}條目及列表。入選歷史、條目版本或作者證據尚未取得的項目顯示為未知。"
   },
   "quality_authorship.b_unavailable": {
     "en": "B-Class attribution is unavailable; retained high-quality article totals are shown.",
@@ -3996,8 +3996,8 @@
   },
   "quality_authorship.listed_or_revision": {
     "en": "Listed date / attributed revision",
-    "zh-hans": "入选日期／署名版本",
-    "zh-hant": "入選日期／署名版本"
+    "zh-hans": "品质评级日期／署名版本",
+    "zh-hant": "品質評級日期／署名版本"
   },
   "quality_authorship.current_revision": {
     "en": "Current-revision attribution",
@@ -4025,14 +4025,14 @@
     "zh-hant": "條目"
   },
   "quality_authorship.grade": {
-    "en": "Grade",
-    "zh-hans": "等级",
-    "zh-hant": "等級"
+    "en": "Quality",
+    "zh-hans": "品质",
+    "zh-hant": "品質"
   },
   "quality_authorship.listed": {
-    "en": "Listed date",
-    "zh-hans": "入选日期",
-    "zh-hant": "入選日期"
+    "en": "Quality assessment date",
+    "zh-hans": "品质评级日期",
+    "zh-hant": "品質評級日期"
   },
   "quality_authorship.articles": {
     "en": "{count} articles",
@@ -4240,14 +4240,14 @@
     "zh-hant": "僅高品質條目"
   },
   "quality_analysis.heading": {
-    "en": "Quality articles and contributors",
-    "zh-hans": "品质条目与贡献者",
-    "zh-hant": "品質條目與貢獻者"
+    "en": "Article statistics",
+    "zh-hans": "条目统计",
+    "zh-hant": "條目統計"
   },
   "quality_analysis.intro": {
-    "en": "Only current articles and lists in the Chinese Wikipedia Video games project are counted. The B/BL switch applies to the overview, article list and author statistics.",
-    "zh-hans": "仅统计中文维基百科电子游戏专题当前的条目及列表。B/BL开关同时作用于概览、条目列表及作者统计。",
-    "zh-hant": "僅統計中文維基百科電子遊戲專題目前的條目及列表。B/BL開關同時作用於概覽、條目列表及作者統計。"
+    "en": "This page analyses articles in WikiProject Video games using their current assessments. Former featured articles are not counted as featured.",
+    "zh-hans": "本页分析电子游戏专题条目，仅采用当前评级数据；例如，已撤销的典范条目不再计入典范条目。",
+    "zh-hant": "本頁分析電子遊戲專題條目，僅採用目前評級資料；例如，已撤銷的典範條目不再計入典範條目。"
   },
   "quality_analysis.background": {
     "en": "Collected hourly in the background. This page reads saved results.",
@@ -4290,19 +4290,14 @@
     "zh-hant": "年份"
   },
   "quality_analysis.years_note": {
-    "en": "Listing years of the current cohort, not historical annual project totals. Undated articles are excluded.",
-    "zh-hans": "统计当前条目的入选年份，并非专题历年的条目总数。日期未知的条目不计入。",
-    "zh-hant": "統計目前條目的入選年份，並非專題歷年的條目總數。日期未知的條目不計入。"
+    "en": "Another {count} articles have no assessment date available.",
+    "zh-hans": "另有{count}篇条目未获取到评级时间。",
+    "zh-hant": "另有{count}篇條目未取得評級時間。"
   },
   "quality_analysis.lengths": {
     "en": "Prose length comparison",
     "zh-hans": "正文长度比较",
     "zh-hant": "正文長度比較"
-  },
-  "quality_analysis.lengths_note": {
-    "en": "Each Chinese character counts as one; each Western word or number block counts as two. Spaces and punctuation are excluded: PlayStation 5 = 4. The central 68% range covers the 16th–84th percentiles of the current cohort.",
-    "zh-hans": "每个汉字计1字，每个西文单词或数字块计2字，空白与标点不计，例如 PlayStation 5 = 4字。中央68%区间为当前条目的第16至84百分位。",
-    "zh-hant": "每個漢字計1字，每個西文單字或數字區塊計2字，空白與標點不計，例如 PlayStation 5 = 4字。中央68%區間為目前條目的第16至84百分位。"
   },
   "quality_analysis.articles": {
     "en": "All articles and lists",
@@ -4326,8 +4321,8 @@
   },
   "quality_analysis.dated": {
     "en": "Known listing dates",
-    "zh-hans": "入选日期已知",
-    "zh-hant": "入選日期已知"
+    "zh-hans": "品质评级日期已知",
+    "zh-hant": "品質評級日期已知"
   },
   "quality_analysis.median": {
     "en": "Median prose length",
@@ -4366,8 +4361,8 @@
   },
   "quality_analysis.no_dates": {
     "en": "No supported listing dates are saved yet.",
-    "zh-hans": "尚无已保存且有证据支持的入选日期。",
-    "zh-hant": "尚無已儲存且有證據支持的入選日期。"
+    "zh-hans": "尚无已保存且有证据支持的品质评级日期。",
+    "zh-hant": "尚無已儲存且有證據支持的品質評級日期。"
   },
   "quality_analysis.no_measurements": {
     "en": "No prose measurements are saved yet.",
@@ -4573,5 +4568,125 @@
     "en": "By author",
     "zh-hans": "按作者统计",
     "zh-hant": "按作者統計"
+  },
+  "quality_analysis.violin_note": {
+    "en": "Wider shapes show more articles near that prose length. The vertical mark is the median; the dark line spans the central 68%. Widths are normalized within each group; measured and total article counts appear beside each label.",
+    "zh-hans": "图形越宽，表示该正文长度附近的条目越密集。竖线为中位数，深色横线为中央68%区间。各组宽度分别归一化；标签下方显示已测量数和总条目数。",
+    "zh-hant": "圖形越寬，表示該正文長度附近的條目越密集。豎線為中位數，深色橫線為中央68%區間。各組寬度分別歸一化；標籤下方顯示已測量數和總條目數。"
+  },
+  "quality_analysis.total_column": {
+    "en": "Total",
+    "zh-hans": "合计",
+    "zh-hant": "合計"
+  },
+  "quality_analysis.chart_article_count": {
+    "en": "{count} articles and lists",
+    "zh-hans": "共{count}篇条目及列表",
+    "zh-hant": "共{count}篇條目及列表"
+  },
+  "quality_analysis.until": {
+    "en": "Through ",
+    "zh-hans": "至",
+    "zh-hant": "至"
+  },
+  "quality_analysis.visualization": {
+    "en": "WikiWho visual analysis (XTools)",
+    "zh-hans": "WikiWho 可视化分析（XTools）",
+    "zh-hant": "WikiWho 視覺化分析（XTools）"
+  },
+  "quality_analysis.listing_intro": {
+    "en": "Listing dates use the latest award of the current grade. High-quality dates come from the talk page’s Article history template; other grades are inferred from assessment banners in talk-page history.",
+    "zh-hans": "品质评级日期以当前评级最后获评的时间为准。高品质条目的日期来自讨论页 {{Article history}} 模板；其他评级通过解析讨论页历史记录中的评级模板推断。",
+    "zh-hant": "品質評級日期以目前評級最後獲評的時間為準。高品質條目的日期來自討論頁 {{Article history}} 模板；其他評級透過解析討論頁歷史記錄中的評級模板推斷。"
+  },
+  "quality_analysis.author_intro": {
+    "en": "Main-contributor estimates come from WikiWho and may be inaccurate. This page helps editors find experienced contributors to the project.",
+    "zh-hans": "主要贡献者数据来自 WikiWho，未必准确。本项目旨在帮助编者寻找有经验的专题编者。",
+    "zh-hant": "主要貢獻者資料來自 WikiWho，未必準確。本專案旨在協助編者尋找有經驗的專題編者。"
+  },
+  "quality_analysis.year_from": {
+    "en": "Listing year from",
+    "zh-hans": "品质评级日期从",
+    "zh-hant": "品質評級日期從"
+  },
+  "quality_analysis.year_to": {
+    "en": "to",
+    "zh-hans": "至",
+    "zh-hant": "至"
+  },
+  "quality_analysis.unknown_time": {
+    "en": "Unknown listing date",
+    "zh-hans": "时间未知",
+    "zh-hant": "時間未知"
+  },
+  "quality_analysis.updated": {
+    "en": "Data updated at",
+    "zh-hans": "数据更新于",
+    "zh-hant": "資料更新於"
+  },
+  "quality_analysis.select_all": {
+    "en": "Select all",
+    "zh-hans": "全选",
+    "zh-hant": "全選"
+  },
+  "quality_analysis.unknown_listing": {
+    "en": "Not obtained",
+    "zh-hans": "未获取",
+    "zh-hant": "未取得"
+  },
+  "quality_authorship.author_all_articles": {
+    "en": "Articles by {name}",
+    "zh-hans": "{name}的条目",
+    "zh-hant": "{name}的條目"
+  },
+  "quality_analysis.author_filter": {
+    "en": "Author",
+    "zh-hans": "作者",
+    "zh-hant": "作者"
+  },
+  "quality_analysis.author_rank": {
+    "en": "Contribution rank",
+    "zh-hans": "贡献排名",
+    "zh-hant": "貢獻排名"
+  },
+  "quality_analysis.author_first": {
+    "en": "1st author",
+    "zh-hans": "第1位",
+    "zh-hant": "第1位"
+  },
+  "quality_analysis.author_second": {
+    "en": "Top 2 authors",
+    "zh-hans": "前2位",
+    "zh-hant": "前2位"
+  },
+  "quality_analysis.author_third": {
+    "en": "Top 3 authors",
+    "zh-hans": "前3位",
+    "zh-hant": "前3位"
+  },
+  "quality_analysis.all_authors": {
+    "en": "All authors",
+    "zh-hans": "全部",
+    "zh-hant": "全部"
+  },
+  "quality_analysis.use_listing_authors": {
+    "en": "Use authorship analysis of the listing-time revision",
+    "zh-hans": "使用入选时版本的作者贡献分析资料",
+    "zh-hant": "使用入選時版本的作者貢獻分析資料"
+  },
+  "quality_analysis.apply": {
+    "en": "Apply",
+    "zh-hans": "应用",
+    "zh-hant": "套用"
+  },
+  "quality_analysis.count_column": {
+    "en": "Count",
+    "zh-hans": "数量",
+    "zh-hant": "數量"
+  },
+  "quality_analysis.length_distribution": {
+    "en": "Length distribution",
+    "zh-hans": "长度分布",
+    "zh-hant": "長度分布"
   }
 }

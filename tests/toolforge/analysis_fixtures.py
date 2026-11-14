@@ -150,7 +150,7 @@ def _authorship_rows(
             "fetched_at": now,
             "contributors": contributors,
         }
-        if row["grade"] not in {"B", "BL"}:
+        if row["grade"] in store.QUALITY_GRADES:
             high.append({
                 **common,
                 "date": row["listed_date"],

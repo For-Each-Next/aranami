@@ -151,6 +151,11 @@ class TestSourceActivity(TestCase):
             {"scope": {"page_kind": []}},
             {"purpose": "latest_revisions", "scope": {"page_count": True}},
             {"purpose": "latest_revisions", "scope": {"page_count": -1}},
+            {"purpose": "project_membership", "scope": {"projects": []}},
+            {
+                "purpose": "daily_replica_readiness",
+                "scope": {"boundary": "2026-02-30"},
+            },
             {
                 "purpose": "new_page_candidates",
                 "scope": {"new_page_count": 1},

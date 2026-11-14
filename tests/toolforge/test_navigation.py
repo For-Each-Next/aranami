@@ -60,9 +60,11 @@ class NavigationTests(unittest.TestCase):
                     "/",
                     "/maintenance/",
                     "/discussions/",
+                    "/quality-analysis/",
                 ]
                 assert 'href="/reports/"' in details[1]
                 assert 'href="/discussions/"' not in details[1]
+                assert 'href="/quality-analysis/"' not in details[1]
                 assert navigation.count('href="/newsletter/"') == 1
                 assert 'role="menu' not in navigation
                 assert "aria-expanded" not in navigation
@@ -75,6 +77,7 @@ class NavigationTests(unittest.TestCase):
                 "/maintenance/",
                 "/reports/",
                 "/discussions/",
+                "/quality-analysis/",
                 "/about/",
                 "/newsletter/",
             ):

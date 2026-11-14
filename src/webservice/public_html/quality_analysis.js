@@ -1,5 +1,6 @@
 /** Filter and sort the complete saved article list without source requests. */
 import { compareValues, initializeQualityAuthorship } from "./quality_authorship.js";
+import { initializeQualityMatrix, catalogRows, articleElement } from "./quality_matrix.js";
 
 /** Compare existing cell observations while leaving unknown values last. */
 export function compareAnalysisRows(left, right, column, descending, locale) {
@@ -16,13 +17,20 @@ export function initializeQualityAnalysis(previous = {}) {
     const host = document.querySelector("[data-quality-analysis]");
     if (!host || host.hasAttribute("data-analysis-enhanced")) return;
     host.setAttribute("data-analysis-enhanced", "");
-    const rows = [...host.querySelectorAll("[data-analysis-row]")];
+    const rows = [...host.querySelectorAll("[data-analysis-row]"), ...catalogRows()];
+    host.analysisRows = rows;
     const table = host.querySelector("table");
     const body = table.tBodies[0];
     const headings = [...table.querySelectorAll("thead th")];
     const search = host.querySelector("[data-analysis-search]");
     const grade = host.querySelector("[data-analysis-grade-filter]");
     const importance = host.querySelector("[data-analysis-importance-filter]");
+    const author = host.querySelector("[data-analysis-author]");
+    const rank = host.querySelector("[data-analysis-author-rank]");
+    const ranks = new Map(rows.map(row => [row, JSON.parse(row.dataset.authorRanks || "[]")]));
+    const names = [...new Set([...ranks.values()].flatMap(items => items.map(item => item.name)))].sort();
+    const suggestions = host.querySelector("#analysis-author-names");
+    if (suggestions) for (const name of names) {const option = document.createElement("option"); option.value = name; suggestions.append(option);}
     const size = host.querySelector("[data-analysis-size]");
     const pager = host.querySelector("[data-analysis-pager]");
     const result = host.querySelector("[data-analysis-result-count]");
@@ -37,6 +45,7 @@ export function initializeQualityAnalysis(previous = {}) {
     let descending = previous.descending ?? true;
     let page = previous.page || 1;
     let pages = 1;
+    let preloadGeneration = 0;
     const actions = ["first", "prev", "next", "last"].map((name) =>
         host.querySelector(`[data-analysis-${name}]`));
 
@@ -44,6 +53,8 @@ export function initializeQualityAnalysis(previous = {}) {
     function render() {
         const query = search.value.trim().toLocaleLowerCase(locale);
         const selected = rows.filter((row) =>
+            (row.dataset.cohort !== "0") &&
+            (!author?.value.trim() || ranks.get(row).some(item => item.name.toLocaleLowerCase(locale) === author.value.trim().toLocaleLowerCase(locale) && (rank.value === "all" || item.rank <= Number(rank.value)))) &&
             (!grade.value || row.dataset.grade === grade.value) &&
             (!importance.value || row.dataset.importance === importance.value) &&
             (!query || `${row.dataset.title} ${row.cells[1].textContent}`
@@ -57,12 +68,19 @@ export function initializeQualityAnalysis(previous = {}) {
         host.dataset.analysisColumn = String(column);
         host.dataset.analysisDescending = String(descending);
         host.dataset.analysisPage = String(page);
-        rows.forEach((row) => { row.hidden = true; });
-        selected.forEach((row, index) => {
-            row.hidden = index < start || index >= start + limit;
-            row.cells[0].textContent = String(index + 1);
-            body.append(row);
-        });
+        body.replaceChildren(...selected.slice(start, start + limit).map((record, index) => {
+            const row = articleElement(record); row.hidden = false;
+            row.cells[0].textContent = String(start + index + 1);
+            Object.assign(row.dataset, record.dataset);
+            return row;
+        }));
+        const generation = ++preloadGeneration;
+        const adjacent = selected.slice(Math.max(0, start - limit * 2), Math.min(selected.length, start + limit * 3));
+        const retained = new Set(adjacent);
+        for (const record of rows) if (record.article && !retained.has(record)) delete record.element;
+        const prepare = () => {if (generation === preloadGeneration) for (const record of adjacent) articleElement(record);};
+        if (typeof requestIdleCallback === "function") requestIdleCallback(prepare, {timeout: 500});
+        else requestAnimationFrame(prepare);
         result.textContent = host.dataset.resultCount
             .replace("{count}", String(selected.length)).replace("{total}", String(rows.length));
         pageStatus.textContent = host.dataset.pageStatus
@@ -78,8 +96,8 @@ export function initializeQualityAnalysis(previous = {}) {
                 (descending ? "descending" : "ascending") : "none");
         });
     }
-    [search, grade, importance, size].forEach((control) => {
-        control.addEventListener(control === search ? "input" : "change", () => {
+    [search, grade, importance, size, author, rank].filter(Boolean).forEach((control) => {
+        control.addEventListener(control === search || control === author ? "input" : "change", () => {
             page = 1;
             render();
         });
@@ -105,29 +123,61 @@ export function initializeQualityAnalysis(previous = {}) {
     }));
     host.querySelector("[data-analysis-reset]").addEventListener("click", () => {
         search.value = grade.value = importance.value = "";
+        if (author) author.value = "";
+        if (rank) rank.value = "all";
         page = 1;
         render();
         search.focus();
     });
-    document.querySelectorAll("[data-analysis-grade]").forEach((link) => {
-        link.addEventListener("click", (event) => {
-            if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-            grade.value = link.dataset.analysisGrade;
-            page = 1;
-            render();
-        });
-    });
-    document.querySelectorAll("[data-analysis-importance]").forEach((link) => {
-        link.addEventListener("click", (event) => {
-            if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-            importance.value = link.dataset.analysisImportance;
-            page = 1;
-            render();
-        });
-    });
+    document.addEventListener("quality-cohort-change", () => {page = 1; render();});
+    initializeChartArticles(rows);
     host.querySelector("[data-analysis-controls]").hidden = false;
     host.querySelector("[data-analysis-filter-note]").hidden = false;
     render();
+}
+
+/** Select a chart's saved cohort independently of directory filters. */
+export function chartArticleMatches(row, selection) {
+    return row.dataset.cohort !== "0" && row.dataset[selection.chartGroup] === selection.chartValue &&
+        (!selection.chartYear || row.dataset.year === selection.chartYear) &&
+        (!selection.chartMeasured || row.dataset.measured === "1");
+}
+
+/** Fill one accessible dialog from already rendered, escaped article cells. */
+function initializeChartArticles(rows) {
+    const dialog = document.getElementById("analysis-chart-articles");
+    if (!dialog || typeof dialog.showModal !== "function") return;
+    const body = dialog.querySelector("[data-chart-article-rows]");
+    const count = dialog.querySelector("[data-chart-article-count]");
+    const heading = document.getElementById("analysis-chart-articles-heading");
+    document.addEventListener("click", event => {
+        const link = event.target.closest?.("[data-chart-group]");
+        if (!link || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const selected = rows.filter(row => chartArticleMatches(row, link.dataset))
+            .sort((left, right) => compareAnalysisRows(left, right, 4, true, document.documentElement.lang));
+        body.replaceChildren(...selected.map((source, index) => {
+            const row = document.createElement("tr");
+            row.dataset.chartArticle = source.dataset.title;
+            for (const column of [0, 1, 2, 3, 4, 6]) {
+                const cell = articleElement(source).cells[column].cloneNode(true);
+                if (!column) cell.textContent = String(index + 1);
+                row.append(cell);
+            }
+            return row;
+        }));
+        heading.textContent = link.dataset.chartLabel;
+        count.textContent = count.dataset.label.replace("{count}", String(selected.length));
+        link.focus();
+        if (!dialog.open) dialog.showModal();
+    });
+    document.addEventListener("keydown", event => {
+        const link = event.target.closest?.("[data-chart-group]");
+        if (!link || event.key !== " ") return;
+        event.preventDefault();
+        link.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+    });
 }
 
 /** Retain the current directory selection across a global B-Class update. */
@@ -222,4 +272,7 @@ export function initializeQualityAnalysisFilter() {
 
 initializeQualityAnalysis();
 initializeQualityAnalysisFilter();
+initializeQualityMatrix();
+const basis = document.querySelector("[data-authorship-basis]");
+if (basis) basis.querySelector("input[type=checkbox]").addEventListener("change", () => basis.requestSubmit());
 if (document.querySelector("[data-quality-results]")) initializeQualityAuthorship();

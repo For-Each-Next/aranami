@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 DEFAULT_PATH = DEFAULT_ROOT / "current-authorship"
 KEY = ["page_id", "revision_id"]
-GRADES = ("B", "BL")
+GRADES = ("B", "BL", "C", "CL", "Start", "List", "Stub", "SL", "Unassessed")
 CONTRACT = "wikiwho-zh:current-revision-nonref-bytes-v1"
 FALLBACK_CONTRACT = "wikiwho-zh:current-revision-token-bytes-v1"
 CONTRACTS = (CONTRACT, FALLBACK_CONTRACT)
@@ -68,7 +68,12 @@ ATTEMPT_SCHEMA = {
     "revision_id": pl.Int64,
     "attempted_at": pl.Datetime("us", "UTC"),
 }
+TARGET_SCHEMA = {
+    key: MEMBER_SCHEMA[key]
+    for key in ("page_id", "revision_id", "title", "grade", "observed_at")
+}
 _SCHEMAS = {
+    "targets": TARGET_SCHEMA,
     "members": MEMBER_SCHEMA,
     "evidence": EVIDENCE_SCHEMA,
     "attempts": ATTEMPT_SCHEMA,
@@ -212,6 +217,20 @@ def _validate(tables: dict[str, pl.DataFrame]) -> None:
         ):
             message = "Invalid current authorship table schema or identity."
             raise ValueError(message)
+    targets = tables["targets"]
+    profile = assessment_profile("zhwiki", "电子游戏")
+    if (
+        targets["page_id"].n_unique() != targets.height
+        or targets.filter(
+            pl.any_horizontal(pl.all().is_null())
+            | ~pl.col("grade").is_in([
+                label.code for label in profile.classes if label.is_article
+            ])
+            | ~pl.col("title").str.len_bytes().is_between(1, 4096),
+        ).height
+    ):
+        message = "Invalid current-revision attribution targets."
+        raise ValueError(message)
     members, evidence, attempts = (
         tables[name] for name in ("members", "evidence", "attempts")
     )
@@ -333,6 +352,7 @@ def _read(
             for name, schema in _SCHEMAS.items()
         }
     )
+    tables.setdefault("targets", pl.DataFrame(schema=TARGET_SCHEMA))
     legacy_evidence = {
         name: dtype
         for name, dtype in EVIDENCE_SCHEMA.items()
@@ -419,6 +439,7 @@ def checkpoint(
     runtime: Path,
     *,
     members: pl.DataFrame | None = None,
+    targets: pl.DataFrame | None = None,
     evidence: pl.DataFrame | None = None,
     attempted: dict[str, int | None] | None = None,
 ) -> None:
@@ -430,6 +451,7 @@ def checkpoint(
         members: Complete B/BL cohort, or none to retain it. Cached
             article cutoffs survive identical nonnull talk, class and
             listing boundaries, including a parser-provenance refresh.
+        targets: Current-revision cohort for hourly attribution.
         evidence: Successful exact-revision evidence, when available.
         attempted: Page and revision identity attempted in this pass.
 
@@ -475,6 +497,11 @@ def checkpoint(
                     .select(list(MEMBER_SCHEMA))
                 )
                 tables["members"] = members
+        if targets is not None:
+            previous = tables["targets"]["observed_at"].max()
+            latest = targets["observed_at"].max()
+            if previous is None or latest is None or latest >= previous:
+                tables["targets"] = targets
         if evidence is not None:
             tables["evidence"] = (
                 pl
@@ -496,7 +523,10 @@ def checkpoint(
         tables["attempts"] = (
             tables["attempts"]
             .join(
-                tables["members"].select(KEY),
+                pl.concat([
+                    tables["members"].select(KEY),
+                    tables["targets"].select(KEY),
+                ]).unique(),
                 on=KEY,
                 how="semi",
                 nulls_equal=True,

@@ -1531,6 +1531,20 @@ def render_quality_analysis(  # ruff: ignore[too-many-arguments] - Shared page-r
         **data.get("authorship", {}),
         "include_b": bool(analysis.get("include_b")),
     }
+    selection = analysis.get("selection")
+    if selection:
+        defaults = selection["defaults"][int(analysis["include_b"])]
+        analysis = {
+            **analysis,
+            **defaults,
+            "coverage": defaults["coverage"][0],
+            "years": [
+                {"year": row["year"], "pages": row["pages"], "grades": row}
+                for row in defaults["years"]
+            ],
+            "articles": selection["articles"],
+        }
+        authorship = {**authorship, "authors": selection["authors"]}
     context.update(quality_analysis_context(analysis, page.interface))
     context.update(
         quality_authorship_context(authorship, page.interface, now),

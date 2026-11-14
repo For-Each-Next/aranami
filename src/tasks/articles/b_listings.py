@@ -96,7 +96,17 @@ def _members(
         .filter(
             (pl.col("page_namespace") == 0)
             & (pl.col("page_is_redirect") == 0)
-            & pl.col("grade").is_in(["B", "BL"]),
+            & pl.col("grade").is_in([
+                "B",
+                "BL",
+                "C",
+                "CL",
+                "Start",
+                "List",
+                "Stub",
+                "SL",
+                "Unassessed",
+            ]),
         )
         .select(
             "page_id",
@@ -104,7 +114,11 @@ def _members(
             pl.col("talk_revision").alias("scanned_talk_rev_id"),
             pl
             .col("grade")
-            .replace_strict({"B": "乙", "BL": "乙级列表"})
+            .replace_strict({
+                label.code: label.raw_value
+                for label in profile.classes
+                if label.is_article
+            })
             .alias("class"),
             pl.lit(parser).alias("parser_version"),
             pl.col("full_title").alias("title"),

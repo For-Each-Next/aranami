@@ -249,6 +249,7 @@ class AuthorWorkerTests(TestCase):
             patch.object(worker, "monotonic", return_value=100),
             patch.object(worker, "refresh_b_listings") as ranges,
             patch.object(worker, "refresh_current_authorship") as authors,
+            patch.object(worker, "refresh_current_versions"),
             patch.object(
                 worker,
                 "refresh_quality_author_activity",
@@ -275,7 +276,7 @@ class AuthorWorkerTests(TestCase):
                 members,
                 runtime=Path(),
                 max_requests=40,
-                time_budget=240,
+                time_budget=120,
                 should_yield=should_yield,
             )
             activity.assert_called_once_with(site, runtime=Path())
@@ -302,10 +303,16 @@ class AuthorWorkerTests(TestCase):
                 patch.object(
                     worker,
                     "monotonic",
-                    side_effect=[100, after_range, before_activity],
+                    side_effect=[
+                        100,
+                        after_range,
+                        before_activity,
+                        before_activity,
+                    ],
                 ),
                 patch.object(worker, "refresh_b_listings"),
                 patch.object(worker, "refresh_current_authorship") as authors,
+                patch.object(worker, "refresh_current_versions"),
                 patch.object(
                     worker,
                     "refresh_quality_author_activity",
@@ -319,7 +326,7 @@ class AuthorWorkerTests(TestCase):
                     time_budget=240,
                     should_yield=Mock(return_value=False),
                 )
-            assert authors.call_args.kwargs["time_budget"] == remaining
+            assert authors.call_args.kwargs["time_budget"] * 2 == remaining
             assert authors.call_args.kwargs["max_requests"] == 40
             assert activity.call_count == activities
 

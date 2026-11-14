@@ -524,3 +524,21 @@ most 100 events or 256 KiB, reporting truncation explicitly. An incomplete final
 line is omitted; a malformed complete line is unreadable evidence, not an empty
 result. Downloads select one bounded segment. Reads never initialize directories,
 repair files or create source clients.
+
+### Article statistics selection metadata
+
+The `current-quality` report includes a one-row `selection.parquet` table
+with a validated JSON payload. It retains all current article-grade rows,
+both listing-time and current-revision contributor projections, default
+views and additive `(grade, importance, year)` cells. Each cell stores page
+and measured counts, an exact counted length histogram and Gaussian density
+sums on a shared 129-point grid. Null years remain unknown. Article rows
+retain `(page_id, article_revision_id, talk_page_id, talk_revision_id)` and
+ranked contributor names. The browser combines these prepared cells only.
+
+The `current-authorship` report now also retains a `targets` table with
+`page_id: Int64`, `revision_id: Int64`, `title: String`, `grade: String` and
+`observed_at: Datetime(us, UTC)`. Listing and current collectors share immutable
+`(page_id, revision_id)` evidence and persist fair retry order. Unchanged
+revisions reuse saved attribution. Older reports receive an empty targets
+table and empty contributor ranks until the hourly collector prepares them.

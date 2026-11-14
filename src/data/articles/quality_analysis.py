@@ -26,7 +26,18 @@ if TYPE_CHECKING:
     from data.reports import ReportBundle
 
 QUALITY_GRADES = ("FA", "FL", "A", "AL", "GA", "Bplus")
-GRADES = (*QUALITY_GRADES, "B", "BL")
+GRADES = (
+    *QUALITY_GRADES,
+    "B",
+    "BL",
+    "C",
+    "CL",
+    "Start",
+    "List",
+    "Stub",
+    "SL",
+    "Unassessed",
+)
 _LENGTH_GRADES = ("FA", "GA", "Bplus")
 _LENGTH_IMPORTANCE = ("Top", "High", "Mid", "Low")
 STAMP = pl.Datetime("us", "UTC")
@@ -111,8 +122,8 @@ _SCHEMAS = {
 }
 _KEY = "articles/quality-analysis/zhwiki-video-games"
 _ROOT = DEFAULT_ROOT
-_MAX_ROWS = 10_000
-_MAX_BYTES = 16 * 1024 * 1024
+_MAX_ROWS = 30_000
+_MAX_BYTES = 64 * 1024 * 1024
 
 
 def collection_lease(runtime: Path = Path()) -> AbstractContextManager[bool]:
@@ -605,17 +616,22 @@ def _read_bundle(runtime: Path) -> ReportBundle | None:
             )
             .select(list(ARTICLE_SCHEMA))
         )
-    legacy_years = {
-        name: dtype
-        for name, dtype in YEARS_SCHEMA.items()
-        if name not in {"B", "BL"}
-    }
-    if tables["years"].schema == pl.Schema(legacy_years):
+    missing = set(GRADES) - set(tables["years"].columns)
+    if missing and missing <= {
+        "B",
+        "BL",
+        "C",
+        "CL",
+        "Start",
+        "List",
+        "Stub",
+        "SL",
+        "Unassessed",
+    }:
         tables["years"] = (
             tables["years"]
             .with_columns(
-                pl.lit(0, dtype=pl.Int64).alias("B"),
-                pl.lit(0, dtype=pl.Int64).alias("BL"),
+                *(pl.lit(0, dtype=pl.Int64).alias(code) for code in missing),
             )
             .select(list(YEARS_SCHEMA))
         )

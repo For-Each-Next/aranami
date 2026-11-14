@@ -112,6 +112,7 @@ export function initializeQualityAuthorship() {
             table.querySelector("caption")?.textContent || "",
         );
         const label = document.createElement("label");
+        label.className = "ui-table-pager__start";
         label.htmlFor = `quality-page-size-${index}`;
         label.textContent = host.dataset.pageSize;
         const select = document.createElement("select");
@@ -126,8 +127,12 @@ export function initializeQualityAuthorship() {
         }
         label.append(select);
         const status = document.createElement("span");
+        status.className = "ui-table-pager__center";
         status.setAttribute("role", "status");
         pager.append(label, status);
+        const navigation = document.createElement("div");
+        navigation.className = "ui-table-pager__end";
+        pager.append(navigation);
         const actions = [];
         for (const [key, destination] of [
             ["first", () => 1],
@@ -145,7 +150,7 @@ export function initializeQualityAuthorship() {
                 render();
             });
             actions.push(button);
-            pager.append(button);
+            navigation.append(button);
         }
         select.addEventListener("change", () => {
             size = Number(select.value);
@@ -156,7 +161,8 @@ export function initializeQualityAuthorship() {
 
         /** Reorder existing escaped cells and show only the selected page. */
         function render() {
-            const rows = [...originalRows].sort((left, right) => {
+            originalRows.forEach(row => {row.hidden = true;});
+            const rows = originalRows.filter(row => row.dataset.cohort !== "0").sort((left, right) => {
                 const read = (row) => {
                     const value = row.cells[column].dataset.sort;
                     return value === undefined || value === ""
@@ -172,6 +178,7 @@ export function initializeQualityAuthorship() {
                     locale,
                 );
             });
+            page = Math.min(page, Math.max(1, Math.ceil(rows.length / size)));
             const start = (page - 1) * size;
             for (const [position, row] of rows.entries()) {
                 row.hidden =
@@ -223,6 +230,7 @@ export function initializeQualityAuthorship() {
             buttons.push(button);
             heading.replaceChildren(button);
         }
+        document.addEventListener("quality-cohort-change", () => {page = 1; render();});
         const dialog = host.closest("dialog");
         if (dialog) {
             for (const opener of document.querySelectorAll(

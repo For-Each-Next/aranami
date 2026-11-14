@@ -858,7 +858,7 @@ class _PublicViews:
             A complete analysis page without source acquisition or
             request-time statistical calculations.
         """
-        if set(parameters) - {"count_b"} or parameters.get(
+        if set(parameters) - {"count_b", "listing_authors"} or parameters.get(
             "count_b",
             ["0"],
         ) not in (["0"], ["1"]):
@@ -867,17 +867,32 @@ class _PublicViews:
                 locale,
                 HTTPStatus.BAD_REQUEST,
             )
+        if parameters.get("listing_authors", ["0"]) not in (["0"], ["1"]):
+            return _page_error(
+                "backlog.not_found",
+                locale,
+                HTTPStatus.BAD_REQUEST,
+            )
+        basis = (
+            "listed"
+            if parameters.get("listing_authors") == ["1"]
+            else "current"
+        )
         try:
             identity = current_quality_identity(self.runtime)
         except OSError, ValueError:
             identity = (None,)
         include_b = parameters.get("count_b") == ["1"]
-        key = ("/quality-analysis/", locale, include_b)
+        key = ("/quality-analysis/", locale, include_b, basis)
         content = self.pages.get(key, identity)
         if content is not None:
             return _html(content, locale)
         try:
-            data = read_current_quality(self.runtime, include_b=include_b)
+            data = read_current_quality(
+                self.runtime,
+                include_b=include_b,
+                authorship_basis=basis,
+            )
         except OSError, ValueError, PolarsError:
             data = {
                 "analysis": {"available": False, "include_b": include_b},

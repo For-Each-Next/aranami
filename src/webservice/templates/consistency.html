@@ -13,7 +13,7 @@
   <{{ 'div' if section.ordered else 'ul' }} class="consistency-findings consistency-cards{% if section.ordered %} consistency-history-cards{% endif %}">
   {% for finding in section.findings %}{% if section.ordered %}{% with finding_ordinal=section.offset + loop.index %}{% include "includes/consistency_finding.html" %}{% endwith %}{% else %}<li>{% include "includes/consistency_finding.html" %}</li>{% endif %}{% endfor %}
   </{{ 'div' if section.ordered else 'ul' }}>
-  {% if section.pagination %}<nav class="history-pagination consistency-pagination" aria-label="{{ section.label }}">
+  {% if section.pagination %}<nav class="ui-table-pager history-pagination consistency-pagination" aria-label="{{ section.label }}">
     {% for name, relation, label in [('previous', 'prev', t.backlog.previous), ('next', 'next', t.backlog.next)] %}
     {% if name == 'next' %}<span>{{ section.pagination.label }}</span>{% endif %}
     {% if section.pagination[name] %}<a class="ui-button ui-button--fake-button ui-button--fake-button--enabled" href="{{ section.pagination[name] }}" rel="{{ relation }}">{{ label }}</a>{% else %}<button class="ui-button" type="button" disabled>{{ label }}</button>{% endif %}

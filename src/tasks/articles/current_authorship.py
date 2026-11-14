@@ -22,6 +22,7 @@ from data.articles import (
     b_listings as assessment_inference,
     current_authorship as store,
 )
+from shared.assessment_profiles import assessment_profile
 from shared.sources import wikiwho
 from shared.sources.assessment_history import HistoryBudget
 from shared.sources.quarry.assessment import first_revisions, listing_revisions
@@ -363,3 +364,74 @@ def _complete_creation_metadata(
             runtime,
             evidence=pl.DataFrame(updates, schema=store.EVIDENCE_SCHEMA),
         )
+
+
+def refresh_current_versions(  # ruff: ignore[too-many-arguments]
+    site: BaseSite,
+    membership: pl.DataFrame,
+    *,
+    runtime: Path = Path(),
+    max_requests: int = 20,
+    time_budget: float = 60,
+    should_yield: Callable[[], bool] | None = None,
+) -> None:
+    """Collect only missing exact current revisions for the hourly view.
+
+    Successful listing and current revision evidence share the same key.
+    Failed requests keep a fair retry position across process restarts.
+    """
+    profile = assessment_profile("zhwiki", "电子游戏")
+    targets = (
+        membership
+        .with_columns(
+            profile.expression(
+                "pa_class",
+                "class",
+                preserve_unknown=False,
+            ).alias("grade"),
+        )
+        .filter(
+            (pl.col("page_namespace") == 0)
+            & (pl.col("page_is_redirect") == 0)
+            & pl.col("grade").is_in([
+                label.code for label in profile.classes if label.is_article
+            ]),
+        )
+        .select(
+            "page_id",
+            pl.col("page_revision").alias("revision_id"),
+            pl.col("full_title").alias("title"),
+            "grade",
+            pl.lit(dt.datetime.now(dt.UTC)).alias("observed_at"),
+        )
+        .cast(store.TARGET_SCHEMA)
+    )
+    store.checkpoint(runtime, targets=targets)
+    tables = store.load(runtime)
+    pending = (
+        targets
+        .join(tables["evidence"].select(store.KEY), on=store.KEY, how="anti")
+        .join(tables["attempts"], on=store.KEY, how="left", validate="1:1")
+        .sort(
+            "attempted_at",
+            profile.expression(
+                "grade",
+                "class",
+                field="order",
+                preserve_unknown=False,
+            ),
+            "page_id",
+            nulls_last=False,
+        )
+        .head(max_requests)
+    )
+    if (
+        not pending.height
+        or time_budget <= 0
+        or (should_yield is not None and should_yield())
+    ):
+        return
+    deadline = monotonic() + time_budget
+    selections = dict(pending.select("revision_id", "page_id").iter_rows())
+    with wikiwho.preloaded_revision_sources(site, selections):
+        _collect_pending(site, runtime, pending, deadline, should_yield)

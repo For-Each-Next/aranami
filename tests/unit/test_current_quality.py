@@ -207,6 +207,27 @@ class CurrentQualityTests(TestCase):
     """Keep every section bound to the same selected current pages."""
 
     @staticmethod
+    def test_density_preserves_zero_unknown_and_constant_samples() -> None:
+        """Preserve real distributions and unknown lengths."""
+        frame = pl.DataFrame({
+            "grade": ["FA", "FA", "FA", "GA", "AL"],
+            "prose_characters": [0, 100, None, 10, None],
+        })
+        rows = store._length_density(frame, "grade")
+        assert rows["grade"].to_list() == ["FA", "GA"]
+        varied, constant = rows["density"].to_list()
+        assert varied[0]["position"] == 0
+        assert varied[-1]["position"] == 100
+        assert all(point["position"] == 10 for point in constant)
+        for points in (varied, constant):
+            assert max(point["density"] for point in points) == 1
+            assert all(0 <= point["density"] <= 1 for point in points)
+        assert store._length_density(
+            frame.filter(pl.col("grade") == "AL"),
+            "grade",
+        ).is_empty()
+
+    @staticmethod
     def test_toggle_changes_every_section_and_uses_current_grades() -> None:
         """Count optional B pages and reject stronger former badges."""
         tables = store.prepare_current_quality(
@@ -224,6 +245,7 @@ class CurrentQualityTests(TestCase):
             selected = {
                 name: frame.filter(pl.col("include_b") == include_b)
                 for name, frame in tables.items()
+                if name != "selection"
             }
             assert selected["coverage"]["total"].item() == expected_total
             assert selected["grade_totals"]["pages"].sum() == expected_total
@@ -269,7 +291,7 @@ class CurrentQualityTests(TestCase):
             observed_at=_NOW,
         )
         years = tables["years"].filter(~pl.col("include_b"))
-        assert years["year"].to_list() == list(range(2010, 2027))
+        assert years["year"].to_list() == list(range(2009, 2027))
         assert years.filter(pl.col("year").is_in([2010, 2011]))[
             "pages"
         ].to_list() == [0, 0]

@@ -39,7 +39,7 @@
     {% endfor %}
     </ol>
     {% if not redirects.total and redirect_scan %}<p>{{ t.redirects.empty }}</p>{% endif %}
-    <nav class="redirect-pagination" aria-label="{{ t.redirects.heading }}">
+    <nav class="ui-table-pager redirect-pagination" aria-label="{{ t.redirects.heading }}">
       <form action="/redirects/" method="get">
         <input type="hidden" name="lang" value="{{ language_tag | lower }}">
         <label for="redirect-limit">{{ t.backlog.rows }}</label>

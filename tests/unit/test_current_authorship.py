@@ -169,8 +169,8 @@ class CurrentAuthorshipStoreTests(TestCase):
             (7, 70, "丙"),
         ))
         members = store.prepare_membership(membership, _NOW)
-        assert members["page_id"].to_list() == [1, 2, 3, 4, 5]
-        assert members["grade"].to_list() == ["B", "BL", "BL", "B", "BL"]
+        assert members["page_id"].to_list() == [1, 2, 3, 4, 5, 7]
+        assert members["grade"].to_list() == ["B", "BL", "BL", "B", "BL", "C"]
         for field in ("page_namespace", "page_is_redirect"):
             excluded = membership.with_columns(pl.lit(1).alias(field))
             assert store.prepare_membership(excluded, _NOW).is_empty()
@@ -565,6 +565,83 @@ class CurrentAuthorshipCollectionTests(TestCase):
                 side_effect=lambda *_args: nullcontext(),
             ),
         )
+
+    @staticmethod
+    def test_current_versions_only_collect_missing_exact_revisions() -> None:
+        """Reuse evidence and request changed current revisions only."""
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(
+                collector,
+                "collect_revision",
+                side_effect=lambda member, _site: _evidence(
+                    member["page_id"],
+                    member["revision_id"],
+                ),
+            ) as collect,
+        ):
+            runtime = Path(temporary)
+            store.checkpoint(runtime, evidence=_evidence(1, 30))
+            membership = _membership((
+                (1, 30, "乙"),
+                (2, 40, "丙"),
+            )).with_columns(
+                pl.col("page_title").alias("full_title"),
+            )
+            for _ in range(2):
+                collector.refresh_current_versions(
+                    Mock(),
+                    membership,
+                    runtime=runtime,
+                )
+            assert [
+                (call.args[0]["page_id"], call.args[0]["revision_id"])
+                for call in collect.call_args_list
+            ] == [(2, 40)]
+            changed = membership.with_columns(
+                pl
+                .when(pl.col("page_id") == 1)
+                .then(31)
+                .otherwise(pl.col("page_revision"))
+                .alias("page_revision"),
+            )
+            collector.refresh_current_versions(
+                Mock(),
+                changed,
+                runtime=runtime,
+            )
+            assert collect.call_args.args[0]["revision_id"] == 31
+            assert store.load(runtime)["evidence"].height == 3
+
+    @staticmethod
+    def test_current_failures_rotate_without_retrying_warm_revisions() -> None:
+        """Preserve failures while untouched pages get the next turn."""
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(
+                collector,
+                "collect_revision",
+                side_effect=ValueError("pending"),
+            ) as collect,
+        ):
+            runtime = Path(temporary)
+            membership = _membership((
+                (1, 30, "乙"),
+                (2, 40, "丙"),
+            )).with_columns(
+                pl.col("page_title").alias("full_title"),
+            )
+            for _ in range(2):
+                collector.refresh_current_versions(
+                    Mock(),
+                    membership,
+                    runtime=runtime,
+                    max_requests=1,
+                )
+            assert [
+                call.args[0]["page_id"] for call in collect.call_args_list
+            ] == [1, 2]
+            assert store.load(runtime)["attempts"].height == 2
 
     @staticmethod
     def test_listing_lookup_and_tokens_are_cached_across_article_edits() -> (

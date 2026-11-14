@@ -2271,3 +2271,31 @@ footer nav {
 .consistency-review-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0; }
 
 .consistency-userscript { margin: 1rem 0 1.5rem; }
+
+/* Shared table footers keep existing pagination behavior on every route. */
+.ui-table-pager,
+.history-pagination,
+.dataset-pagination,
+.redirect-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: .75rem;
+    margin-block: 0 1rem;
+    padding-block: .875rem;
+    border-block-start: 1px solid var(--border-color-subtle);
+    font-size: .875rem;
+}
+.ui-table-pager > span,
+.ui-table-pager__center { flex: 1; text-align: center; }
+.ui-table-pager__start,
+.ui-table-pager__end { flex-wrap: wrap; }
+.ui-table-pager select { min-block-size: 2.25rem; font: inherit; }
+.ui-table-pager .ui-button { min-block-size: 2.25rem; }
+.history-pagination > span,
+.dataset-pagination > span { order: -1; text-align: start; }
+@media (max-width: 600px) {
+    .ui-table-pager__center { min-width: 9rem; }
+    .ui-table-pager__end { justify-content: flex-end; margin-inline-start: auto; }
+}

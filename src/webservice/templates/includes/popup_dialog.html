@@ -1,5 +1,5 @@
-{% macro popup(dialog_id, dialog_title, return_to) %}
-<dialog id="{{ dialog_id }}" class="ui-dialog page-updates" aria-labelledby="{{ dialog_id }}-heading">
+{% macro popup(dialog_id, dialog_title, return_to, class_name="") %}
+<dialog id="{{ dialog_id }}" class="ui-dialog page-updates{% if class_name %} {{ class_name }}{% endif %}" aria-labelledby="{{ dialog_id }}-heading">
 <header class="ui-dialog__header"><h3 id="{{ dialog_id }}-heading" class="ui-dialog__header__title">{{ dialog_title }}</h3><button type="button" class="ui-button ui-dialog__header__close-button" command="close" commandfor="{{ dialog_id }}" autofocus aria-label="{{ t.ops.close }}">×</button><noscript><a href="{{ return_to }}">{{ t.ops.close }}</a></noscript></header>
 <div class="ui-dialog__body">{{ caller() }}</div>
 </dialog>

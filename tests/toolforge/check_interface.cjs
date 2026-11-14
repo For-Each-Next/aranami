@@ -222,7 +222,7 @@ async function checkInterface(assetRoot) {
                 unnamedNavigation: [...document.querySelectorAll('nav')].filter(nav => !nav.getAttribute('aria-label') && !nav.getAttribute('aria-labelledby')).length,
                 brokenContents: [...document.querySelectorAll('.page-toc a[href^="#"]')].filter(link => !document.getElementById(link.hash.slice(1))).map(link => link.hash),
                 unlabelledControls: [...document.querySelectorAll('input:not([type=hidden]), select')].filter(control => !control.labels?.length && !control.getAttribute('aria-label') && !control.getAttribute('aria-labelledby')).map(control => control.outerHTML),
-                forms: [...document.forms].map(form => ({method: form.method, action: form.getAttribute('action'), submit: Boolean(form.querySelector('button[type=submit], input[type=submit]')), issueSelection: form.hasAttribute('data-newsletter-issue-form'), dateSelection: form.matches('.newsletter-date-controls'), pageSize: form.matches('.page-size[data-auto-submit]'), qualityFilter: form.hasAttribute('data-quality-authorship-filter') || form.hasAttribute('data-quality-analysis-filter')}))
+                forms: [...document.forms].map(form => ({method: form.method, action: form.getAttribute('action'), submit: Boolean(form.querySelector('button[type=submit], input[type=submit]')), issueSelection: form.hasAttribute('data-newsletter-issue-form'), dateSelection: form.matches('.newsletter-date-controls'), pageSize: form.matches('.page-size[data-auto-submit]'), qualityFilter: form.hasAttribute('data-quality-authorship-filter') || form.hasAttribute('data-quality-analysis-filter') || form.hasAttribute('data-quality-matrix') || form.hasAttribute('data-authorship-basis')}))
             }))()`);
             assert.equal(document.main, 1, "missing or duplicate main landmark");
             assert.equal(document.titles, 1, "missing or duplicate page heading");
@@ -692,7 +692,7 @@ async function checkInterface(assetRoot) {
             assert.ok(result.literal && result.readonly && result.native && result.safe && result.unique, `newsletter source semantics failed: ${JSON.stringify(result)}`);
             assert.equal(result.fits, true, 'expanded newsletter textarea should autosize to wrapped source');
         };
-        const initialControls = `(() => [...document.querySelectorAll('button, input:not([type=hidden]), select, summary, a.ui-button, .brand img, main h1, .newsletter-text')].filter(element => !element.closest('[data-redirect-controls], [data-execution-history], [data-quality-authorship-table], [data-quality-authorship-filter], [data-quality-analysis-filter], [data-quality-analysis]') && !element.matches('[data-redirect-hide], .heading-copy')).map(element => {
+        const initialControls = `(() => [...document.querySelectorAll('button, input:not([type=hidden]), select, summary, a.ui-button, .brand img, main h1, .newsletter-text')].filter(element => !element.closest('[data-redirect-controls], [data-execution-history], [data-quality-authorship-table], [data-quality-authorship-filter], [data-quality-analysis-filter], [data-quality-matrix], [data-authorship-basis], [data-quality-analysis]') && !element.matches('[data-redirect-hide], .heading-copy')).map(element => {
             const style = getComputedStyle(element);
             const box = element.getBoundingClientRect();
             return {tag: element.tagName, id: element.id, hidden: element.hidden,
@@ -1483,192 +1483,63 @@ async function checkInterface(assetRoot) {
                 if (surface === "quality-analysis") {
                     const metrics = await evaluate(`(() => {
                         const host = document.querySelector('[data-quality-analysis]');
+                        const matrix = document.querySelector('[data-quality-matrix]');
                         return {rows: host.querySelectorAll('[data-analysis-row]').length,
-                            visible: host.querySelectorAll('[data-analysis-row]:not([hidden])').length,
-                            enhanced: host.hasAttribute('data-analysis-enhanced'),
+                            records: host.analysisRows.length, enhanced: host.hasAttribute('data-analysis-enhanced'),
+                            unknown: matrix.querySelector('[data-matrix-unknown]').checked,
+                            countsHidden: !matrix.querySelector('[data-matrix-count], [data-matrix-grade-count]'),
+                            from: matrix.querySelector('[data-matrix-from]').value,
+                            firstYear: Number(document.querySelector('[data-analysis-year]').dataset.analysisYear),
                             pies: document.querySelectorAll('[data-analysis-pie]').length,
-                            fullWidth: (() => {
-                                const distribution = document.getElementById('analysis-distribution').getBoundingClientRect();
-                                const years = document.getElementById('analysis-years').getBoundingClientRect();
-                                return Math.abs(distribution.width - years.width) < 1 && years.y > distribution.bottom;
-                            })(),
-                            noMethod: !document.getElementById('analysis-method') && !document.querySelector('a[href="#analysis-method"]'),
-                            columns: [...document.querySelectorAll('[data-analysis-year]')].map(column => ({
-                                x: new Set([...column.querySelectorAll('rect')].map(mark => mark.getAttribute('x'))).size,
-                                marks: column.querySelectorAll('rect').length,
-                                year: Number(column.dataset.analysisYear),
-                                total: column.getAttribute('aria-label').split(': ')[1],
-                                vertical: [...column.querySelectorAll('rect')].every(mark => Number(mark.getAttribute('height')) > 0),
-                            })),
-                            proseGrades: [...document.querySelectorAll('[data-analysis-length-group="grade"]')].map(row => row.dataset.analysisLengthValue),
-                            proseImportance: [...document.querySelectorAll('[data-analysis-length-group="importance"]')].map(row => row.dataset.analysisLengthValue),
-                            headersIntact: !document.documentElement.lang.startsWith('en') ||
-                                [...document.querySelectorAll('.analysis-length-table thead th')].every(heading => {
-                                    const text = heading.firstChild;
-                                    const word = text.textContent.trim().split(" ")[0];
-                                    const range = document.createRange();
-                                    range.setStart(text, text.textContent.indexOf(word));
-                                    range.setEnd(text, text.textContent.indexOf(word) + word.length);
-                                    return range.getClientRects().length === 1;
-                                }),
-                            bplus: Boolean(host.querySelector('[data-grade="Bplus"]')),
+                            footer: Boolean(host.querySelector('.ui-table-pager__start') && host.querySelector('.ui-table-pager__center') && host.querySelector('.ui-table-pager__end')),
+                            sizesUnlinked: !host.querySelector('tbody td:last-child a'),
                             fits: document.documentElement.scrollWidth <= innerWidth + 1};
                     })()`);
-                    assert.equal(metrics.rows, 36);
-                    assert.equal(metrics.visible, 20);
-                    assert.equal(metrics.enhanced, true);
-                    assert.equal(metrics.pies, 2);
-                    assert.ok(metrics.fullWidth && metrics.noMethod);
-                    assert.equal(metrics.columns[0].year, 2010);
-                    assert.equal(metrics.columns[1].year, 2011);
-                    assert.ok(metrics.columns.length >= 17);
-                    assert.ok(metrics.columns.every((column, index) =>
-                        column.year === 2010 + index && column.vertical &&
-                        (column.total === '0' ? column.marks === 0 : column.x === 1 && column.marks > 0)));
-                    assert.deepEqual(metrics.proseGrades, ["FA", "FL", "A", "AL", "GA", "Bplus"]);
-                    assert.deepEqual(metrics.proseImportance, ["Top", "High", "Mid", "Low", "NA", "Unknown", "Bottom"]);
-                    assert.ok(metrics.bplus && metrics.fits && metrics.headersIntact);
+                    assert.deepEqual(metrics, {rows: 20, records: 48, enhanced: true, unknown: true, countsHidden: true, from: '2002', firstYear: 2009, pies: 2, footer: true, sizesUnlinked: true, fits: true});
                     if ([320, 1440].includes(width)) {
-                        const filtered = await evaluate(`(() => {
-                            const root = document;
-                            const host = root.querySelector('[data-quality-analysis]');
-                            const grade = host.querySelector('[data-analysis-grade-filter]');
-                            grade.value = 'Bplus';
-                            grade.dispatchEvent(new Event('change', {bubbles: true}));
-                            const selected = [...host.querySelectorAll('[data-analysis-row]:not([hidden])')];
-                            const count = selected.length;
-                            const allBplus = selected.every(row => row.dataset.grade === 'Bplus');
-                            const search = host.querySelector('[data-analysis-search]');
-                            search.value = 'does not exist';
-                            search.dispatchEvent(new Event('input', {bubbles: true}));
-                            const empty = !host.querySelector('[data-analysis-no-matches]').hidden;
+                        const interaction = await evaluate(`(() => {
+                            const host = document.querySelector('[data-quality-analysis]'), form = document.querySelector('[data-quality-matrix]');
+                            const original = window.fetch; let requests = 0;
+                            window.fetch = (...args) => {requests++; return original(...args);};
+                            const total = () => Number(document.querySelector('[data-matrix-total]').textContent.replaceAll(',', ''));
+                            const initial = total();
+                            for (const code of ['B','BL','C','CL']) form.querySelector('[data-matrix-grade="'+code+'"]').click();
+                            const expanded = total() > initial;
+                            const from = form.querySelector('[data-matrix-from]'); from.value = '2026'; from.dispatchEvent(new Event('change'));
+                            const unknown = form.querySelector('[data-matrix-unknown]'); unknown.click();
+                            const ranged = host.analysisRows.filter(row => row.dataset.cohort === '1').every(row => row.dataset.year === '2026');
+                            const chart = document.querySelector('[data-chart-year="2026"][data-chart-value="B"]');
+                            chart.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));
+                            const dialog = document.getElementById('analysis-chart-articles');
+                            const expected = host.analysisRows.filter(row => row.dataset.cohort === '1' && row.dataset.grade === 'B' && row.dataset.year === '2026').length;
+                            const exact = dialog.open && dialog.querySelectorAll('[data-chart-article]').length === expected && expected > 0;
+                            dialog.close(); from.value = '2002'; from.dispatchEvent(new Event('change')); unknown.click();
+                            form.querySelector('[data-matrix-all]').click();
+                            if (total() !== 48) form.querySelector('[data-matrix-all]').click();
+                            host.querySelector('[data-analysis-next]').click();
+                            const visible = [...host.querySelectorAll('[data-analysis-row]')];
+                            const pagination = visible.length === 20 && visible.every((row,index) => Number(row.cells[0].textContent) === 21 + index);
+                            const author = host.querySelector('[data-analysis-author]'); author.value = 'Author_B'; author.dispatchEvent(new Event('input'));
+                            const rank = host.querySelector('[data-analysis-author-rank]'); rank.value = '1'; rank.dispatchEvent(new Event('change'));
+                            const first = host.querySelectorAll('[data-analysis-row]').length;
+                            rank.value = '2'; rank.dispatchEvent(new Event('change'));
+                            const second = host.querySelectorAll('[data-analysis-row]').length;
                             host.querySelector('[data-analysis-reset]').click();
-                            const reset = host.querySelectorAll('[data-analysis-row]:not([hidden])').length;
-                            host.querySelector('[data-analysis-size]').value = 'all';
-                            host.querySelector('[data-analysis-size]').dispatchEvent(new Event('change', {bubbles: true}));
-                            const complete = host.querySelectorAll('[data-analysis-row]:not([hidden])').length;
-                            host.querySelectorAll('thead th')[6].querySelector('button').click();
-                            const words = [...host.querySelectorAll('[data-analysis-row]:not([hidden])')].map(row => row.cells[6].dataset.sort);
-                            const numeric = words.filter(value => value !== '').map(Number);
-                            return {count, allBplus, empty, reset, complete,
-                                zeroFirst: numeric[0] === 0,
-                                sorted: numeric.every((value, index) => !index || value >= numeric[index-1]),
-                                unknownLast: words.slice(-5).every(value => value === ''),
-                                sameDocument: root === document};
+                            const totalsOnly = [...document.querySelectorAll('[data-matrix-author]')].every(row => row.cells[2].querySelectorAll('a').length === 1);
+                            const defaultGrades = JSON.parse(form.dataset.metadata).grades.filter(item => item.checked).map(item => item.value);
+                            for (const input of form.querySelectorAll('[data-matrix-cell]')) input.checked = defaultGrades.includes(input.dataset.grade);
+                            form.querySelector('[data-matrix-cell]').dispatchEvent(new Event('change'));
+                            window.fetch = original;
+                            return {expanded,ranged,exact,pagination,rank:second > first,totalsOnly,requests};
                         })()`);
-                        assert.deepEqual(filtered, {count: 6, allBplus: true, empty: true, reset: 20, complete: 36, zeroFirst: true, sorted: true, unknownLast: true, sameDocument: true});
-                        const importanceInteraction = await evaluate(`(() => {
-                            const originalDocument = document;
-                            const host = document.querySelector('[data-quality-analysis]');
-                            const links = [...document.querySelectorAll('[data-analysis-importance]')];
-                            const first = links[0];
-                            const expected = first.dataset.analysisImportance;
-                            const control = host.querySelector('[data-analysis-importance-filter]');
-                            const originalFetch = window.fetch;
-                            let requests = 0;
-                            window.fetch = (...args) => { requests++; return originalFetch(...args); };
-                            try {
-                                first.click();
-                                const visible = [...host.querySelectorAll('[data-analysis-row]:not([hidden])')];
-                                const selected = control.value === expected && visible.length > 0 && visible.every(row => row.dataset.importance === expected);
-                                const modified = new MouseEvent('click', {button: 0, ctrlKey: true, bubbles: true, cancelable: true});
-                                const allowed = links[1].dispatchEvent(modified);
-                                const preserved = allowed && !modified.defaultPrevented && control.value === expected;
-                                host.querySelector('[data-analysis-reset]').click();
-                                return {selected, preserved, requests, sameDocument: document === originalDocument};
-                            } finally { window.fetch = originalFetch; }
-                        })()`);
-                        assert.deepEqual(importanceInteraction, {selected: true, preserved: true, requests: 0, sameDocument: true});
+                        assert.deepEqual(interaction, {expanded:true,ranged:true,exact:true,pagination:true,rank:true,totalsOnly:true,requests:0});
+                        for (const section of ['distribution','years']) {
+                            await evaluate(`document.getElementById('analysis-${section}').scrollIntoView()`);
+                            const shot = await call('Page.captureScreenshot', {format:'png',captureBeyondViewport:false},sessionId);
+                            fs.writeFileSync(path.join(outputRoot, `${locale}-quality-analysis-${section}-${width}.png`), Buffer.from(shot.data,'base64'));
+                        }
+                        await evaluate('window.scrollTo(0,0)');
                     }
-                }
-                if (surface === "quality-analysis" && [320, 1440].includes(width)) {
-                    const combined = await evaluate(`(async () => {
-                        const input = document.querySelector('[name=count_b]');
-                        const form = input.form;
-                        const results = document.querySelector('[data-quality-results]');
-                        const originalDocument = document;
-                        const settle = async () => {
-                            const deadline = performance.now() + 6000;
-                            while (results.hasAttribute('aria-busy')) {
-                                if (performance.now() > deadline) throw new Error('Combined quality toggle timed out');
-                                await new Promise(resolve => setTimeout(resolve, 20));
-                            }
-                        };
-                        const total = () => Number(document.querySelector('.analysis-summary dd').textContent.replaceAll(',', ''));
-                        const authors = () => document.querySelector('section[aria-labelledby="quality-authors"] tbody').rows.length;
-                        const initial = {total: total(), authors: authors()};
-                        const sectionIds = ['analysis-overview', 'analysis-articles', 'quality-authors'];
-                        const sections = sectionIds.every(id => document.getElementById(id));
-                        const columns = document.querySelector('[data-quality-analysis] table thead').rows[0].cells.length;
-                        const noOrdinalSort = [...document.querySelectorAll('[data-quality-analysis], [data-quality-authorship-table]')]
-                            .every(host => !host.querySelector('thead th:first-child button'));
-                        const labels = [...document.querySelectorAll('[data-analysis-row] > td:nth-child(2) > a:first-child')];
-                        const displayTitles = labels.every(link => !link.textContent.includes('_'));
-                        const identityTitles = labels.some(link => new URL(link.href).pathname.includes('_'));
-                        const importanceColors = [...document.querySelectorAll('[data-analysis-pie="importance"] .analysis-pie-slice')].map(mark => mark.getAttribute('fill'));
-                        input.focus(); input.click(); await settle();
-                        const included = {total: total(), authors: authors(), b: Boolean(document.querySelector('[data-analysis-row][data-grade="B"]')),
-                            bl: Boolean(document.querySelector('[data-analysis-row][data-grade="BL"]')), selected: results.dataset.countB};
-                        const focus = document.activeElement === input;
-                        const languages = [...document.querySelectorAll('.language-switcher a[hreflang]')]
-                            .every(link => new URL(link.href).searchParams.get('count_b') === '1');
-                        input.click(); await settle();
-                        const excluded = total() === initial.total && authors() === initial.authors && results.dataset.countB === '0';
-                        input.click(); input.click(); await settle();
-                        const latest = total() === initial.total && !input.checked;
-                        const originalFetch = window.fetch;
-                        window.fetch = async () => new Response('', {status: 503, headers: {'content-type': 'text/html'}});
-                        try { input.click(); await settle(); } finally { window.fetch = originalFetch; }
-                        const failedSafely = !input.checked && total() === initial.total &&
-                            Boolean(form.querySelector('[data-quality-analysis-status]').textContent);
-                        form.querySelector('[data-quality-analysis-status]').textContent = '';
-                        const host = document.querySelector('[data-quality-analysis]');
-                        host.querySelector('[data-analysis-size]').value = '20';
-                        host.querySelector('[data-analysis-size]').dispatchEvent(new Event('change', {bubbles: true}));
-                        host.querySelector('[data-analysis-next]').click();
-                        const numbers = [...host.querySelectorAll('[data-analysis-row]:not([hidden])')].map(row => Number(row.cells[0].textContent));
-                        const sequential = numbers.every((value, index) => value === 21 + index);
-                        return {initial, included, sections, columns, noOrdinalSort, displayTitles, identityTitles,
-                            colors: importanceColors.every(Boolean) && new Set(importanceColors).size >= 4,
-                            focus, languages, excluded, latest, failedSafely, sequential,
-                            noReload: originalDocument === document};
-                    })()`);
-                    assert.deepEqual(combined, {initial: {total: 36, authors: 1}, included: {total: 48, authors: 2, b: true, bl: true, selected: '1'},
-                        sections: true, columns: 8, noOrdinalSort: true, displayTitles: true, identityTitles: true, colors: true,
-                        focus: true, languages: true, excluded: true, latest: true, failedSafely: true, sequential: true, noReload: true},
-                        'one current-cohort switch governs charts, article rows and authors while preserving native semantics and identities');
-                    const details = await evaluate(`(() => {
-                        const trigger = [...document.querySelectorAll('.analysis-authorship-info')].find(link => {
-                            const dialog = document.getElementById(link.getAttribute('aria-controls'));
-                            return !link.closest('tr').hidden && dialog.querySelector('.analysis-editor-table');
-                        });
-                        trigger.focus(); trigger.click();
-                        const dialog = document.getElementById(trigger.getAttribute('aria-controls'));
-                        const names = [...dialog.querySelectorAll('.analysis-editor-table tbody th')].map(cell => cell.textContent);
-                        return {open: dialog.open, focused: dialog.contains(document.activeElement),
-                            rangeLinks: dialog.querySelectorAll('.analysis-authorship-evidence a[href*="oldid="]').length,
-                            editors: names.length, boundaryExcluded: !names.includes('Boundary_Editor'),
-                            anonymous: [...dialog.querySelectorAll('.analysis-editor-table a')].some(link =>
-                                link.textContent === '192.0.2.1' && decodeURIComponent(new URL(link.href).pathname).includes('Special:Contributions/192.0.2.1')),
-                            tableFit: dialog.querySelector('.analysis-editor-table').getBoundingClientRect().width <=
-                                dialog.querySelector('.analysis-editor-table').parentElement.clientWidth + 1,
-                            fit: dialog.scrollWidth <= dialog.clientWidth + 1};
-                    })()`);
-                    assert.deepEqual(details, {open: true, focused: true, rangeLinks: 2, editors: 3, boundaryExcluded: true, anonymous: true, tableFit: true, fit: true},
-                        'article evidence opens a bounded dialog with the exact revision range and only editors above ten percent');
-                    const attributionShot = await call('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false}, sessionId);
-                    fs.writeFileSync(path.join(outputRoot, `${locale}-quality-article-attribution-${width}.png`), Buffer.from(attributionShot.data, 'base64'));
-                    await press('Escape', 27);
-                    assert.equal(await evaluate("new Promise(resolve => requestAnimationFrame(() => resolve(document.activeElement.matches('.analysis-authorship-info'))))"), true, 'article evidence dialog restores focus to its visible info link');
-                    await evaluate("document.getElementById('analysis-articles').scrollIntoView()");
-                    const articleShot = await call('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false}, sessionId);
-                    fs.writeFileSync(path.join(outputRoot, `${locale}-quality-article-list-${width}.png`), Buffer.from(articleShot.data, 'base64'));
-                    for (const section of ["distribution", "years", "lengths"]) {
-                        await evaluate(`document.getElementById('analysis-${section}').scrollIntoView()`);
-                        const chart = await call("Page.captureScreenshot", {format: "png", captureBeyondViewport: false}, sessionId);
-                        fs.writeFileSync(path.join(outputRoot, `${locale}-quality-analysis-${section}-${width}.png`), Buffer.from(chart.data, "base64"));
-                    }
-                    await evaluate("window.scrollTo(0, 0)");
                 }
                 if (surface === "quality-authorship") {
                     const directory = await evaluate(`(() => {
@@ -2357,14 +2228,14 @@ async function checkInterface(assetRoot) {
                             pies: document.querySelectorAll('[data-analysis-pie]').length,
                             noMethod: !document.getElementById('analysis-method'),
                             columns: document.querySelectorAll('[data-analysis-year]').length,
-                            proseGroups: document.querySelectorAll('[data-analysis-length-group]').length,
+                            proseGroups: document.querySelectorAll('.analysis-mini-violin').length,
                             pageFits: document.documentElement.scrollWidth <= innerWidth + 1};
                     })()`);
-                    assert.equal(native.rows, 36);
+                    assert.equal(native.rows, 20);
                     assert.equal(native.pies, 2);
                     assert.ok(native.noMethod);
                     assert.ok(native.columns >= 17);
-                    assert.equal(native.proseGroups, 13);
+                    assert.equal(native.proseGroups, 11);
                     assert.ok(native.controlsHidden && native.bplus && native.pageFits);
                 }
                 if (surface === "quality-authorship") {

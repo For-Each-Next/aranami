@@ -80,7 +80,17 @@ def _validate(frame: pl.DataFrame) -> None:
             pl.col("page_id").is_null()
             | (pl.col("page_id") <= 0)
             | pl.col("class").is_null()
-            | ~pl.col("class").is_in(["乙", "乙级列表"])
+            | ~pl.col("class").is_in([
+                "乙",
+                "乙级列表",
+                "丙",
+                "丙级列表",
+                "初",
+                "列表",
+                "小作品",
+                "小列表",
+                "未评",
+            ])
             | pl.col("parser_version").is_null()
             | pl.col("observed_at").is_null()
             | pl.col("title").is_null()

@@ -19,7 +19,18 @@ from webservice.presentation import (
 )
 
 _QUALITY_GRADES = ("FA", "FL", "A", "AL", "GA", "Bplus")
-_GRADES = (*_QUALITY_GRADES, "B", "BL")
+_GRADES = (
+    *_QUALITY_GRADES,
+    "B",
+    "BL",
+    "C",
+    "CL",
+    "Start",
+    "List",
+    "Stub",
+    "SL",
+    "Unassessed",
+)
 _DAY_SECONDS = 24 * 60 * 60
 
 
@@ -169,9 +180,7 @@ def quality_authorship_context(
             "featured_popup_id": f"quality-author-{index}-featured",
             "quality_popup_id": f"quality-author-{index}-quality",
             "dialog_title": interface.text(
-                "quality_authorship.author_developed"
-                if include_b
-                else "quality_authorship.author_articles",
+                "quality_authorship.author_all_articles",
                 name=source["name"],
             ),
             "summary": summary,
@@ -240,6 +249,14 @@ def quality_authorship_context(
             "include_b": include_b,
             "b_unavailable": bool(data.get("b_unavailable")),
             "b_coverage": data.get("b_coverage"),
+            "b_missing_articles": [
+                {
+                    "title": display_title(row["title"], interface.locale),
+                    "url": title_url(row["title"]),
+                    "talk_url": title_url(f"Talk:{row['title']}"),
+                }
+                for row in data.get("b_missing_articles", [])
+            ],
             "b_coverage_label": interface.text(
                 "quality_authorship.b_coverage",
                 **data["b_coverage"],

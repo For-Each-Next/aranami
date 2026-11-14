@@ -2292,6 +2292,7 @@ class PresentationTests(unittest.TestCase):
                     "maintenance",
                     "quality_authorship",
                     "quality_analysis",
+                    "quality_matrix",
                 )
             ),
         }

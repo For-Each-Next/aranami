@@ -219,6 +219,18 @@ class QualityAnalysisStoreTests(TestCase):
                         "Bplus": 1,
                         "B": 0,
                         "BL": 0,
+                        **dict.fromkeys(
+                            (
+                                "C",
+                                "CL",
+                                "Start",
+                                "List",
+                                "Stub",
+                                "SL",
+                                "Unassessed",
+                            ),
+                            0,
+                        ),
                     },
                 },
             ]

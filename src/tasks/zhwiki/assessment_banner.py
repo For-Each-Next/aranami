@@ -3,7 +3,7 @@
 The Video games banner/class mask (92848131/92848137), WPBannerMeta
 (91444890), banner shell (95284439), and PJBSClass modules
 (95173400/95173398) define child precedence and header inheritance.
-Literal project and shell classes precede complete B criteria.
+Explicit B takes precedence over complete B criteria, which precede C.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 CONTRACT = (
     "zh-vg-b-listing:92848131:92848137:95173241:91444890:"
-    "95284439:95173400:95173398:3"
+    "95284439:95173400:95173398:4"
 )
 _DEFAULT_SHELL = ("Template:WikiProject banner shell",)
 
@@ -231,8 +231,8 @@ def banner_class(
         or none for dynamic, ambiguous or unsupported evidence. Explicit
         nonblank project classes win; only missing/blank values inherit
         a single literal shell from the page header, wherever placed.
-        With both grades missing, six yes/y criteria establish B;
-        otherwise the banner is unassessed or remains ambiguous.
+        Explicit B remains B regardless of criteria. Six yes/y criteria
+        establish B before a literal C or unassessed value.
     """
     if text is None or site.dbName() != "zhwiki":
         return None
@@ -254,14 +254,14 @@ def banner_class(
         value = (
             _literal_class(shells[0], case_insensitive=True) if shells else ""
         )
-        if value is not None and not value:
-            criteria = _all_b_criteria(candidates[0])
-            if criteria is None:
-                return None
-            value = "B" if criteria else "Unassessed"
-    label = (
-        assessment_profile("zhwiki", "电子游戏").resolve(value, "class")
-        if value
-        else None
-    )
+    profile = assessment_profile("zhwiki", "电子游戏")
+    label = profile.resolve(value, "class") if value else None
+    if value is not None and (not value or (label and label.code == "C")):
+        criteria = _all_b_criteria(candidates[0])
+        if criteria is None:
+            return None
+        if criteria:
+            label = profile.resolve("B", "class")
+        elif not value:
+            label = profile.resolve("Unassessed", "class")
     return label.raw_value if label is not None else None
