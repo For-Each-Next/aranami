@@ -262,11 +262,18 @@ facts retain their independent daily cadence.
 
 B/BL listing dates use the first talk revision of the latest continuous
 literal B/BL banner range, including page creation when fully visible.
+Historical grading first uses an explicit Video games project class, then a
+literal banner-shell class when the project value is missing or blank. If both
+are absent, six literal `b1`–`b6` values of `yes` or `y` establish B for this
+historical inference; missing grades without a complete checklist are unassessed.
+Hidden text, conflicting banners and dynamic grades remain unknown.
 Authorship uses the exact article revision at or before that UTC timestamp.
 The same greatest-contributor or 33% rule applies. Dates link to the entry talk
 revision. Parquet retains exact talk identities, timestamps, article cutoffs
 and contributor evidence; unchanged talk/parser keys reuse saved results even
-after article edits. Changed talk identities invalidate reuse. This operational
+after article edits. Compatible parser updates retain completed proofs and
+reuse article cutoffs only when their exact proved listing boundaries match.
+Changed talk identities or listing boundaries invalidate reuse. This operational
 listing date does not assert a formally reviewed effective-class promotion.
 A collected/total count distinguishes pending history and revisions from observed
 authorship; missing revision evidence never claims that an article has no

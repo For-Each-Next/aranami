@@ -7,6 +7,7 @@ The established a34 report store owns locking and atomic generations.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -187,11 +188,30 @@ def load(runtime: Path = Path()) -> dict[str, pl.DataFrame]:
     return {"inference": _read(ReportStore(runtime / _STORE_ROOT))}
 
 
+def _valid_parser_migration(value: object) -> bool:
+    """Validate one caller-certified pair of distinct parser hashes.
+
+    Returns:
+        Whether the pair contains two complete lowercase SHA-256 keys.
+    """
+    if not isinstance(value, tuple):
+        return False
+    try:
+        previous, current = value
+    except ValueError:
+        return False
+    return previous != current and all(
+        isinstance(item, str) and re.fullmatch(r"[0-9a-f]{64}", item)
+        for item in value
+    )
+
+
 def checkpoint(
     runtime: Path,
     *,
     members: pl.DataFrame | None = None,
     update: pl.DataFrame | None = None,
+    completed_parser_migration: tuple[str, str] | None = None,
 ) -> pl.DataFrame:
     """Atomically retain the cohort or one bounded history attempt.
 
@@ -199,13 +219,25 @@ def checkpoint(
         runtime: Runtime owner for the a34 report store.
         members: Complete current B/BL cohort, or none to retain it.
         update: Partial or completed progress for one exact member.
+        completed_parser_migration: Old and new parser hashes whose
+            completed proofs the acquisition owner certifies compatible.
+            Only matching cohort identities or newer-head anchors reuse
+            those proofs; incomplete progress is never migrated.
 
     Returns:
         Complete selected range state after validation.
 
     Raises:
-        ValueError: A stale attempt no longer matches its cohort.
+        ValueError: A stale attempt or invalid migration was supplied.
     """
+    if completed_parser_migration is not None and (
+        members is None
+        or not _valid_parser_migration(completed_parser_migration)
+    ):
+        message = (
+            "Completed proof migration requires two cohort parser hashes."
+        )
+        raise ValueError(message)
     store = ReportStore(runtime / _STORE_ROOT)
     with store.locked(_KEY):
         frame = _read(store, locked=True)
@@ -224,22 +256,43 @@ def checkpoint(
                 how="left",
                 validate="1:1",
             )
-            exact = pl.all_horizontal(
+            complete = (pl.col("old_banner_transition_status") == "proven") | (
+                pl.col("old_reason") == "earliest_visible"
+            )
+            compatible = (
+                (
+                    complete
+                    & (
+                        pl.col("old_parser_version")
+                        == completed_parser_migration[0]
+                    )
+                    & (
+                        pl.col("parser_version")
+                        == completed_parser_migration[1]
+                    )
+                )
+                if completed_parser_migration is not None
+                else pl.lit(value=False)
+            )
+            parser_matches = (
+                pl.col("parser_version").eq(
+                    pl.col("old_parser_version"),
+                )
+                | compatible
+            )
+            exact = parser_matches & pl.all_horizontal(
                 pl.col(name).eq_missing(pl.col(f"old_{name}"))
                 for name in KEY
-                if name != "page_id"
+                if name not in {"page_id", "parser_version"}
             )
             context = (
                 pl.col("talk_page_id").is_not_null()
                 & pl.col("talk_page_id").eq(pl.col("old_talk_page_id"))
-                & pl.col("parser_version").eq(pl.col("old_parser_version"))
+                & parser_matches
                 & (
                     pl.col("scanned_talk_rev_id")
                     > pl.col("old_scanned_talk_rev_id")
                 )
-            )
-            complete = (pl.col("old_banner_transition_status") == "proven") | (
-                pl.col("old_reason") == "earliest_visible"
             )
             anchor_fields = {
                 "anchor_talk_rev_id": "scanned_talk_rev_id",

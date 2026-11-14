@@ -18,6 +18,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
+from operator import itemgetter
 from typing import TYPE_CHECKING
 
 import polars as pl
@@ -514,12 +515,14 @@ def _homepage_date_target(
     )
 
 
-def _source_homepage_rows(
+def _source_homepage_rows(  # ruff: ignore[too-many-arguments]
     rows: object,
     prototype: str,
     *,
     section: str,
     sources: list[dict] | None = None,
+    forecasts: list[dict] | None = None,
+    complete: bool = True,
 ) -> str:
     """Fill only the source column's article-list body.
 
@@ -528,15 +531,22 @@ def _source_homepage_rows(
         prototype: Source bullet with title and date slots.
         section: Homepage section selecting its call-page link target.
         sources: Saved anniversary source titles and permanent URLs.
+        forecasts: Separately retained scheduled or estimated subjects.
+        complete: Whether actual source coverage spans the full period.
 
     Returns:
         Source-formatted bullets or observed empty/unavailable text.
     """
-    if rows is None:
-        return _UNAVAILABLE
+    observed = rows is not None and complete
+    records = [
+        *(rows or []),
+        *({**row, "_forecast": True} for row in forecasts or []),
+    ]
+    if not records:
+        return "* （無）" if observed else _UNAVAILABLE
     labels = {"fa": "典範條目", "fl": "特色列表", "ga": "優良條目"}
     lines, linked = [], set()
-    for row in rows:
+    for row in records:
         date = (
             "期初已在首頁，首次日期不詳"
             if row.get("date_kind") == "window_start"
@@ -544,7 +554,13 @@ def _source_homepage_rows(
         )
         if section == "recognized":
             date += labels.get(row.get("kind"), "")
-        target = _homepage_date_target(row, section, sources or [])
+        if row.get("_forecast"):
+            date = "預計" + date
+        target = (
+            None
+            if row.get("_forecast")
+            else _homepage_date_target(row, section, sources or [])
+        )
         if target and (section not in {"dyk", "news"} or target not in linked):
             date = _link(target, date)
             linked.add(target)
@@ -554,15 +570,24 @@ def _source_homepage_rows(
                 {"title": _link(row["title"]), "date": date},
             ),
         )
-    return "\n".join(lines) or "* （無）"
+    body = "\n".join(lines)
+    return body if observed else body + "\n" + _UNAVAILABLE
 
 
-def _recognized_homepage_rows(homepage: Mapping, prototype: str) -> str:
+def _recognized_homepage_rows(
+    homepage: Mapping,
+    prototype: str,
+    *,
+    forecasts: list[dict] | None = None,
+    sources: Mapping | None = None,
+) -> str:
     """Combine featured and good appearances in chronological order.
 
     Args:
         homepage: Separately retained homepage observations.
         prototype: Source bullet with title and date slots.
+        forecasts: Separate future featured and good subjects.
+        sources: Per-section actual coverage observations.
 
     Returns:
         Typed bullets with an unavailable source notice when needed,
@@ -582,10 +607,34 @@ def _recognized_homepage_rows(homepage: Mapping, prototype: str) -> str:
         .sort("date", "title", "kind")
         .to_dicts()
     )
-    body = _source_homepage_rows(rows, prototype, section="recognized")
-    if featured is None or good is None:
-        return body + "\n" + _UNAVAILABLE if rows else _UNAVAILABLE
-    return body
+    return _source_homepage_rows(
+        rows,
+        prototype,
+        section="recognized",
+        forecasts=forecasts,
+        complete=featured is not None
+        and good is not None
+        and all(
+            ((sources or {}).get(section) or {}).get("complete", True)
+            for section in ("featured", "good")
+        ),
+    )
+
+
+def _homepage_forecast_rows(facts: Mapping, sections: set[str]) -> list[dict]:
+    """Select future preview rows without changing actual observations.
+
+    Returns:
+        Requested forecast sections in chronological display order.
+    """
+    return sorted(
+        (
+            row
+            for row in facts.get("homepage_forecasts") or []
+            if row["section"] in sections
+        ),
+        key=itemgetter("date", "title", "kind"),
+    )
 
 
 def _source_awards(facts: Mapping, layout: Mapping) -> str:
@@ -729,6 +778,8 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
             values["homepage:" + kind] = _recognized_homepage_rows(
                 facts.get("homepage") or {},
                 prototype,
+                forecasts=_homepage_forecast_rows(facts, {"featured", "good"}),
+                sources=facts.get("homepage_sources"),
             )
             continue
         rows = (
@@ -736,12 +787,14 @@ def _announcements(issue: Issue, facts: Mapping[str, object]) -> str:
             if kind == "dyk"
             else (facts.get("homepage") or {}).get(kind)
         )
-        history = (facts.get("homepage_sources") or {}).get("history") or {}
+        history = (facts.get("homepage_sources") or {}).get(kind) or {}
         values["homepage:" + kind] = _source_homepage_rows(
             rows,
             prototype,
             section=kind,
             sources=history.get("sources"),
+            forecasts=_homepage_forecast_rows(facts, {kind}),
+            complete=history.get("complete", True),
         )
     newcomers = facts.get("newcomers")
     if newcomers:

@@ -47,7 +47,7 @@ timestamps remain separate from register reads and draft preparation times.
 | Stock counts, classes, importance | Committed project population at the selected boundary |
 | Curated new-article counts | Register and year archive, restricted to completed dates within the issue |
 | Quality/DYK/reviews | Exact talk histories, nomination/archive sources and durable milestones |
-| Homepage appearances | Dated daily call pages, news and anniversary source revisions |
+| Homepage appearances | Shared durable appearance evidence and saved homepage observations |
 | Authorship | Retained listing-revision token attribution and explicit source roles |
 | Popularity | Durable detailed daily Pageviews and exact calendar periods |
 | Revision counts | Replica aggregation of available edits in the half-open year |

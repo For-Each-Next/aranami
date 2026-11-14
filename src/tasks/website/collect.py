@@ -298,7 +298,10 @@ def _report_plan(
             if name == "consistency"
             else "zh:all-access:user:top1000:limit12:lookback7:script-extracts"
             if name == "pageviews"
-            else "quarterly-newsletter:current-new-article-observation"
+            else (
+                "quarterly-newsletter:current-new-article-observation:"
+                "shared-homepage:1"
+            )
             if name == "newsletter"
             else f"days:{days}:complete-extracts:showcase-window"
             if name == "recognized"
@@ -433,6 +436,22 @@ def _dashboard_snapshot(
     }
 
 
+def _shared_homepage(plan: dict) -> dict:
+    """Reuse this pass's saved homepage reports without requests.
+
+    Returns:
+        A detached homepage mapping independent of the in-flight report
+        status, which may not yet have a retained newsletter record.
+    """
+    displays = {}
+    for name in APPEARANCE_SECTIONS:
+        record = plan["caches"].get(name)
+        data = record.get("data") if record else None
+        if data is not None:
+            displays.update(data.get("homepage") or {})
+    return {"homepage": displays}
+
+
 def _retained_events(
     membership: pl.DataFrame,
     cache: dict[str, pl.DataFrame],
@@ -495,6 +514,7 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
     history_path: Path | None = None,
     today_history_path: Path | None = None,
     article_history_cache: dict[str, pl.DataFrame],
+    shared_homepage: dict | None = None,
 ) -> object:
     """Collect and validate one complete independent source result.
 
@@ -530,6 +550,8 @@ def _collect_report(  # ruff: ignore[too-many-arguments]
                 all_members=True,
             ),
             today_history_path=today_history_path,
+            homepage_path=history_path,
+            shared_homepage=shared_homepage,
         )
     elif name == "reviews":
         data = reviews.collect_reviews(
@@ -807,6 +829,9 @@ def collect_dashboard(  # ruff: ignore[too-many-arguments, too-many-statements, 
                     history_path=history_path,
                     today_history_path=today_history_path,
                     article_history_cache=article_history_cache,
+                    shared_homepage=_shared_homepage(plan)
+                    if name == "newsletter"
+                    else None,
                 )
                 report_progress("preparing")
                 if extracts is not None:

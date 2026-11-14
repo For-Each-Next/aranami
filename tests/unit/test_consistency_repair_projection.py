@@ -74,6 +74,90 @@ class TestSection0Projection(TestCase):
     """Apply prepared changes to complete checked leads."""
 
     @staticmethod
+    def test_requested_hook_uses_aligned_block_style() -> None:
+        """Keep the complete hook in the requested canonical block."""
+        hook = (
+            "'''[[仓田真白|哪個《BanG Dream!》角色]]'''為作中"
+            "-{zh-cn:乐队;zh-hk:樂隊;zh-tw:樂團;}-Morfonica的主唱\uff1f"
+        )
+        source = (
+            "{{Article history\n|dyk1date=2026-10-05|dyk1entry=" + hook + "}}"
+        )
+        record = _record(source)
+        record["parameters"] = {
+            "dyk1date": "2026-10-05",
+            "dyk1entry": hook,
+        }
+        record["id"] = repair_identity(record)
+        assert render_section0_repair(record) == (
+            "{{Article history\n"
+            "| dyk1date  = 2026-10-05\n"
+            "| dyk1entry = " + hook + "\n}}"
+        )
+
+    @staticmethod
+    def test_formatting_preserves_complex_parameter_values() -> None:
+        """Reformat boundaries while retaining all parameter content."""
+        value = (
+            "first <!-- preserve this comment -->\n"
+            "* {{nowrap|[[Game|name]]}}\n\nlast"
+        )
+        source = "{{Article history|currentstatus=GA|notes=" + value + "}}\n"
+        result = render_section0_repair(_record(source))
+        template = mwparserfromhell.parse(result).filter_templates()[0]
+        assert str(template.get("notes").value).strip() == value
+        assert str(template.get("currentstatus").value).strip() == "GA"
+        assert "\n| currentstatus = GA\n" in result
+        assert "\n| maindateGA    = 2020-08-07\n}}\n" in result
+
+    @staticmethod
+    def test_legacy_conversion_removes_only_adjacent_blank_lines() -> None:
+        """Keep one newline around history and preserve other gaps."""
+        before = "\n\n{{Talk header}}"
+        after = (
+            "{{WikiProject Video games|class=GA}}\n\n"
+            "<!-- unrelated spacing -->\n\n{{Archives}}\n"
+        )
+        source = (
+            before
+            + "\n\n\n  {{DYKtalk|date=2020-08-13|entry=Which [[Game]]?}}\n"
+            + "\n\n"
+            + after
+        )
+        result = render_section0_repair(_record(source))
+        assert result.startswith(before + "\n{{Article history\n")
+        assert "\n}}\n" + after in result
+        assert result.endswith(after)
+        assert "DYKtalk" not in result
+
+    @staticmethod
+    def test_indented_removed_line_does_not_corrupt_insertion_boundary() -> (
+        None
+    ):
+        """Map an insertion within a removed line's indentation."""
+        source = (
+            " \n  {{DYKtalk|date=2020-08-13|entry=Which [[Game]]?}}\n\n"
+            "{{WikiProject Video games|class=GA}}\n"
+        )
+        result = render_section0_repair(_record(source))
+        assert result.startswith("{{Article history\n")
+        assert result.endswith("\n}}\n{{WikiProject Video games|class=GA}}\n")
+        assert "\n\n" not in result
+
+    @staticmethod
+    def test_significant_positional_whitespace_is_not_silently_changed() -> (
+        None
+    ):
+        """Reject implicit values with significant whitespace."""
+        record = _record("{{Article history| keep spaces |currentstatus=GA}}")
+        rejected = False
+        try:
+            render_section0_repair(record)
+        except ValueError:
+            rejected = True
+        assert rejected
+
+    @staticmethod
     def test_exact_spans_preserve_quotes_unrelated_fields_and_tail() -> None:
         """Update the active target and preserve quoted examples."""
         history = "{{Article history|action1=GAN|action1result=listed}}"
@@ -93,8 +177,8 @@ class TestSection0Projection(TestCase):
         )
         active = mwparserfromhell.parse(result).filter_templates()[0]
         assert str(active.name).strip() == "Article history"
-        assert str(active.get("action1").value) == "GAN"
-        assert str(active.get("action1result").value) == "listed"
+        assert str(active.get("action1").value).strip() == "GAN"
+        assert str(active.get("action1result").value).strip() == "listed"
         assert str(active.get("maindateGA").value).strip() == "2020-08-07"
 
     @staticmethod
@@ -162,7 +246,7 @@ class TestSection0Projection(TestCase):
             assert projects in result
             assert result.count("{{Article history") == 1
             template = mwparserfromhell.parse(result).filter_templates()[1]
-            assert str(template.get("action1result").value) == "listed"
+            assert str(template.get("action1result").value).strip() == "listed"
 
     @staticmethod
     def test_history_precedes_unfamiliar_project_banners() -> None:
@@ -216,7 +300,7 @@ class TestSection0Projection(TestCase):
         assert (
             str(template.get("dyk1entry").value).strip() == "Which [[Game]]?"
         )
-        assert str(template.get("action1").value) == "GAN"
+        assert str(template.get("action1").value).strip() == "GAN"
 
     @staticmethod
     def test_invalid_source_identity_is_not_projected() -> None:

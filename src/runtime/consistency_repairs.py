@@ -14,7 +14,12 @@ from typing import TYPE_CHECKING
 
 from data.caching import consistency as consistency_cache
 from data.consistency import MAX_REPAIR_INPUT_BYTES, valid_result
-from data.website import MAX_SNAPSHOT_BYTES, save_snapshot
+from data.website import (
+    MAX_SNAPSHOT_BYTES,
+    save_snapshot,
+    validate_dashboard_snapshot,
+)
+from shared.support.files import read_json_object
 from updater.services.zhwiki.consistency_repairs import (
     render_section0_repair,
     section0_edit_summary,
@@ -170,3 +175,70 @@ def save_dashboard_snapshot(path: Path, snapshot: dict) -> None:
             {"data": complete},
         )
     save_snapshot(path, prepare_snapshot_repairs(snapshot))
+
+
+def _saved_repair_snapshot(path: Path) -> dict | None:
+    """Read a matching complete proposal generation without collecting.
+
+    Returns:
+        The validated dashboard with complete saved plans, or none when
+        the observations are invalid or do not share the same identity.
+    """
+    snapshot = read_json_object(path, MAX_SNAPSHOT_BYTES)
+    if not validate_dashboard_snapshot(snapshot):
+        _LOGGER.warning("Saved dashboard cannot refresh repair proposals.")
+        return None
+    consistency = snapshot.get("consistency")
+    if not isinstance(consistency, dict):
+        return None
+    record = consistency_cache.read(
+        path.with_name("consistency-repairs.parquet"),
+    )
+    complete = record.get("data")
+    if (
+        not valid_result(complete)
+        or complete["checked_at"] != consistency.get("checked_at")
+        or not set(consistency.get("repair_inputs", {})).issubset(
+            complete.get("repair_inputs", {}),
+        )
+    ):
+        _LOGGER.warning("Saved repair proposals do not match the dashboard.")
+        return None
+    return {**snapshot, "consistency": complete}
+
+
+def refresh_saved_repairs(path: Path) -> bool:
+    """Reproject matching saved plans before startup source work begins.
+
+    Call only while holding the dashboard output lease. This reads the
+    complete saved sidecar so compact dashboard capacity cannot reduce
+    proposal coverage. Observation times and source facts stay intact.
+
+    Args:
+        path: Existing dashboard destination owned by the caller.
+
+    Returns:
+        Whether matching saved plans were reprojected. Missing, invalid
+        or stale observations remain unchanged. Failures are logged and
+        do not prevent the hub from starting.
+    """
+    try:
+        snapshot = _saved_repair_snapshot(path)
+        if snapshot is None:
+            return False
+        save_dashboard_snapshot(path, snapshot)
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        RecursionError,
+        OverflowError,
+    ):
+        _LOGGER.warning(
+            "Could not refresh saved repair proposals at startup.",
+            exc_info=True,
+        )
+        return False
+    _LOGGER.info("Refreshed saved repair proposals before source collection.")
+    return True

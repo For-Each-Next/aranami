@@ -262,6 +262,19 @@ def _load(path: Path | None) -> pl.DataFrame:
     return frame
 
 
+def retained_sources(path: Path | None) -> pl.DataFrame:
+    """Read already collected daily subjects without source acquisition.
+
+    Args:
+        path: Existing anniversary cache, or none for no observations.
+
+    Returns:
+        Validated retained source rows. Missing or corrupt caches leave
+        coverage unknown and never trigger a request.
+    """
+    return _load(path)
+
+
 class DailyHistoryArchive:
     """Reuse daily source revisions independently of article scope."""
 

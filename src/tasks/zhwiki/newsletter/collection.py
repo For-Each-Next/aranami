@@ -305,6 +305,7 @@ def _apply_article_history(  # ruff: ignore[too-many-arguments]
             through,
             url=url,
         )
+        facts["homepage_sources"]["news"]["complete"] = True
     facts["available"] = True
 
 
@@ -567,6 +568,11 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
     article_history: pl.DataFrame | None,
     quality_history: pl.DataFrame | None,
     today_history_path: Path | None,
+    homepage_appearances: pl.DataFrame | None,
+    homepage_archive_through: dt.date | None,
+    homepage_anniversaries: pl.DataFrame | None,
+    shared_homepage: Mapping | None,
+    homepage_list_titles: set[str] | None,
     overview_at: (
         Callable[[dt.date], tuple[Mapping[str, int | None], str] | None] | None
     ),
@@ -765,6 +771,12 @@ def _issue_facts(  # ruff: ignore[complex-structure, too-many-arguments, too-man
                 member_ids=member_ids,
                 now=now,
                 history_path=today_history_path,
+                appearances=homepage_appearances,
+                archive_through=homepage_archive_through,
+                anniversary_sources=homepage_anniversaries,
+                saved_homepage=shared_homepage,
+                prior=prior,
+                list_titles=homepage_list_titles,
             ),
         )
         facts["available"] |= any(
@@ -813,6 +825,11 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
     article_history: pl.DataFrame | None = None,
     quality_history: pl.DataFrame | None = None,
     today_history_path: Path | None = None,
+    homepage_appearances: pl.DataFrame | None = None,
+    homepage_archive_through: dt.date | None = None,
+    homepage_anniversaries: pl.DataFrame | None = None,
+    shared_homepage: Mapping | None = None,
+    homepage_list_titles: set[str] | None = None,
     overview_at: (
         Callable[[dt.date], tuple[Mapping[str, int | None], str] | None] | None
     ) = None,
@@ -840,7 +857,12 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
         quality_history: Full Parquet-backed milestone inventory for
             annual recognition counts, including former project members.
             Defaults to supplied article_history for existing callers.
-        today_history_path: Separate wiki-wide daily-source archive.
+        today_history_path: Legacy shared anniversary cache location.
+        homepage_appearances: Already retained actual homepage ledger.
+        homepage_archive_through: Completed shared FA/GA archive date.
+        homepage_anniversaries: Saved daily anniversary subjects.
+        shared_homepage: Current saved homepage snapshot, without reads.
+        homepage_list_titles: Known current list identities.
         overview_at: Read retained database counts for an exclusive UTC
             date boundary with their actual observation timestamp.
             Missing snapshots leave their counts unknown.
@@ -913,6 +935,11 @@ def collect_source_facts(  # ruff: ignore[too-many-arguments]
             article_history=article_history,
             quality_history=quality_history,
             today_history_path=today_history_path,
+            homepage_appearances=homepage_appearances,
+            homepage_archive_through=homepage_archive_through,
+            homepage_anniversaries=homepage_anniversaries,
+            shared_homepage=shared_homepage,
+            homepage_list_titles=homepage_list_titles,
             overview_at=overview_at,
             current_assessments=current_assessments,
             current_observed_at=observed,

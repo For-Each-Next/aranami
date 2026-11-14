@@ -324,7 +324,8 @@ def _homepage_slots(
         old_body = _homepage_date_text(_without_cutoff_memos(columns[2]))
         bullet = re.search(
             r"^(\*\s*)(\[\[[^\r\n]+?\]\])(<small[^>]*>（)"
-            r"(?:\d{1,2}月\d{1,2}日(?:典範條目|特色列表|優良條目)?"
+            r"(?:(?:預計)?\d{1,2}月\d{1,2}日"
+            r"(?:典範條目|特色列表|優良條目)?"
             r"|期初已在首頁，首次日期不詳)(）</small>)$",
             old_body,
             re.MULTILINE,

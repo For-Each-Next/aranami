@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from data import project_assessments, project_data
+from data.articles import history_store, homepage_archive
 from data.newsletter import schema
 from data.newsletter.historical import (
     FrameFigureSource,
@@ -27,6 +28,7 @@ from shared.sources.quarry.projects import (
     project_revision_counts,
     query_project_intersections,
 )
+from tasks.articles.history_archive import retained_sources
 from tasks.zhwiki.legacy.newsletter_figures import (
     audited_source,
     import_historical_data,
@@ -138,7 +140,7 @@ def _assessments_at(
     )
 
 
-def collect_newsletter(  # ruff: ignore[too-many-arguments]
+def collect_newsletter(  # ruff: ignore[too-many-arguments,too-many-locals]
     read: WikiReader,
     membership: pl.DataFrame,
     *,
@@ -147,6 +149,8 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments]
     article_history: pl.DataFrame,
     quality_history: pl.DataFrame,
     today_history_path: Path | None,
+    homepage_path: Path | None = None,
+    shared_homepage: dict | None = None,
 ) -> dict:
     """Collect newsletter facts and retain complete observations.
 
@@ -157,7 +161,9 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments]
         observations_path: Durable observations, or none for memory.
         article_history: Current-member article recognition evidence.
         quality_history: All retained article recognition evidence.
-        today_history_path: Disposable exact-revision anniversary cache.
+        today_history_path: Existing shared anniversary subject cache.
+        homepage_path: Existing durable actual appearance ledger.
+        shared_homepage: Saved current homepage and schedules.
 
     Returns:
         Complete prepared facts after successful durable capture, where
@@ -178,6 +184,29 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments]
         else None
     )
     observed = membership_observed_at(read.site.dbName(), "电子游戏") or now
+    appearances = (
+        history_store.read_homepage(homepage_path)
+        if homepage_path is not None
+        else None
+    )
+    archive_through = (
+        homepage_archive.read(
+            homepage_path.with_name("homepage-archives.parquet"),
+        )[1]
+        if homepage_path is not None
+        else None
+    )
+    anniversaries = retained_sources(today_history_path)
+    profile = assessment_profile(read.site.dbName(), "电子游戏")
+    list_titles = set(
+        membership.filter(
+            profile.expression(
+                "pa_class",
+                "class",
+                preserve_unknown=False,
+            ).is_in(["FL", "AL", "BL", "CL", "SL", "List"]),
+        )["full_title"].to_list(),
+    )
     providers = None
     popularity = None
     monthly_popularity = None
@@ -253,6 +282,11 @@ def collect_newsletter(  # ruff: ignore[too-many-arguments]
             article_history=article_history,
             quality_history=quality_history,
             today_history_path=today_history_path,
+            homepage_appearances=appearances,
+            homepage_archive_through=archive_through,
+            homepage_anniversaries=anniversaries,
+            shared_homepage=shared_homepage,
+            homepage_list_titles=list_titles,
         )
     if observations_path is not None:
         save_observation(observations_path, facts, schema.valid_newsletter)

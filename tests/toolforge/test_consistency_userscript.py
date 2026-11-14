@@ -238,8 +238,9 @@ class TestConsistencyUserscript(TestCase):
             )
             assert "// ==UserScript==" in response.text
             assert "@connect      aranami.toolforge.org" in response.text
-            assert "controls.preview.click()" in response.text
-            assert "wpPreview" in response.text
+            assert "controls.diff.click()" in response.text
+            assert "wpDiff" in response.text
+            assert "wpPreview" not in response.text
             assert "wpSave" not in response.text
             assert (
                 "form-action 'self'"

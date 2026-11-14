@@ -399,7 +399,8 @@ def checkpoint(
         runtime: Toolforge runtime containing the separate current
             store.
         members: Complete B/BL cohort, or none to retain it. Cached
-            listing cutoffs survive only identical talk/parser keys.
+            article cutoffs survive identical nonnull talk, class and
+            listing boundaries, including a parser-provenance refresh.
         evidence: Successful exact-revision evidence, when available.
         attempted: Page and revision identity attempted in this pass.
 
@@ -417,16 +418,21 @@ def checkpoint(
                     "page_id",
                     "talk_page_id",
                     "grade",
-                    "banner_contract",
                     "listing_talk_revision",
                     "listing_timestamp",
                 ]
-                cached = tables["members"].select(
-                    *cutoff_key,
-                    *(
-                        pl.col(name).alias(f"{name}_cached")
-                        for name in ("revision_id", "article_timestamp")
-                    ),
+                cached = (
+                    tables["members"]
+                    .filter(
+                        pl.all_horizontal(pl.col(cutoff_key).is_not_null()),
+                    )
+                    .select(
+                        *cutoff_key,
+                        *(
+                            pl.col(name).alias(f"{name}_cached")
+                            for name in ("revision_id", "article_timestamp")
+                        ),
+                    )
                 )
                 members = (
                     members

@@ -93,6 +93,25 @@ class TestNewsletterCollection(test_section_cache.DashboardFixture):
             self.article_history.return_value,
         )
 
+    def test_newsletter_reuses_the_same_saved_homepage_slots(self) -> None:
+        """Reuse collected slots without another source request."""
+        upcoming = {
+            "title": "Game",
+            "url": "https://zh.wikipedia.org/wiki/Game",
+            "date": "2026-10-20",
+            "kind": "ga",
+            "date_kind": "scheduled",
+        }
+        self.collectors["upcoming"].return_value = [upcoming]
+        snapshot = self._collect()
+        passed = self.newsletter.call_args.kwargs["shared_homepage"]
+        assert (
+            passed["homepage"]["upcoming"] == snapshot["homepage"]["upcoming"]
+        )
+        assert passed["homepage"]["upcoming"][0]["date_kind"] == "scheduled"
+        for key in ("featured", "good", "upcoming", "dyk", "history", "news"):
+            self.collectors[key].assert_called_once()
+
     def test_midnight_updates_newsletter_before_interval_expires(self) -> None:
         """Close each UTC day even after a late successful refresh."""
         self.clock = dt.datetime(2026, 10, 30, 23, 59, 59, tzinfo=dt.UTC)

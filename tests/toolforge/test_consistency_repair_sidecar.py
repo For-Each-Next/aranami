@@ -1,7 +1,7 @@
 """Keep all prepared corrections beyond the compact dashboard."""
 
 # Protocol bounds and private HTTP helpers are regression assertions.
-# ruff: file-ignore[magic-value-comparison,private-member-access]
+# ruff: file-ignore[magic-value-comparison,private-member-access,pytest-unittest-raises-assertion]
 
 from __future__ import annotations
 
@@ -11,15 +11,22 @@ from http import HTTPStatus
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from starlette.testclient import TestClient
 from test_consistency_presentation import consistency_snapshot
 
 from data.caching import consistency as consistency_cache
 from data.consistency import repair_identity, review_repair, valid_result
-from data.website import MAX_SNAPSHOT_BYTES
+from data.website import (
+    APPEARANCE_SECTIONS,
+    MAX_SNAPSHOT_BYTES,
+    REPORT_KEYS,
+    save_snapshot,
+    validate_dashboard_snapshot,
+)
 from runtime import consistency_repairs as coordinator
+from runtime.dashboard import DashboardUpdater
 from webservice import server
 
 
@@ -70,6 +77,45 @@ def _snapshot(count: int = 1) -> dict:
     )
     assert valid_result(result)
     return {"consistency": result}
+
+
+def _dashboard(data: dict) -> dict:
+    """Place checked consistency data in a validated public envelope.
+
+    Returns:
+        Complete dashboard metadata with other reports unavailable.
+    """
+    stamp = data["checked_at"]
+    snapshot = {
+        "schema": 2,
+        "period": {
+            "label": "fixture",
+            "start": "2026-11-02",
+            "end": "2026-11-03",
+        },
+        "updated_at": stamp,
+        "reports": {
+            name: {
+                "config_id": "a" * 64,
+                "refresh_interval_seconds": 3600,
+                "failed": False,
+                "last_success_at": stamp,
+                "last_attempt_at": stamp,
+            }
+            for name in REPORT_KEYS
+        },
+        "homepage": {
+            key: None
+            for values in APPEARANCE_SECTIONS.values()
+            for key in values
+        },
+        **dict.fromkeys(REPORT_KEYS),
+        "consistency": data,
+        "sources": [],
+        "errors": [],
+    }
+    assert validate_dashboard_snapshot(snapshot)
+    return snapshot
 
 
 class TestConsistencyRepairSidecar(TestCase):
@@ -131,6 +177,106 @@ class TestConsistencyRepairSidecar(TestCase):
                 assert page.status_code == HTTPStatus.OK
                 assert "aranami-check-job=" + identity in page.text
             assert sorted(runtime.rglob("*")) == before
+
+    def test_startup_reprojection_keeps_full_maps_and_source_guards(
+        self,
+    ) -> None:
+        """Reformat every saved plan under the existing output lease."""
+        snapshot = _dashboard(_snapshot(768)["consistency"])
+        empty = copy.deepcopy(snapshot)
+        empty["consistency"].update(repair_inputs={}, section0_repairs={})
+        for item in empty["consistency"]["items"]:
+            item.pop("repair_id")
+        baseline = len(json.dumps(empty, separators=(",", ":")).encode())
+        snapshot["payload"] = "x" * (MAX_SNAPSHOT_BYTES - baseline - 300_000)
+        with TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            path = runtime / "cache/toolforge/dashboard.json"
+            coordinator.save_dashboard_snapshot(path, snapshot)
+            sidecar = path.with_name("consistency-repairs.parquet")
+            full = consistency_cache.read(sidecar)["data"]
+            compact = json.loads(path.read_text())
+            expected = copy.deepcopy(full["section0_repairs"])
+            for data in (full, compact["consistency"]):
+                for proposal in data["section0_repairs"].values():
+                    proposal["text"] = (
+                        proposal["text"]
+                        .replace("\n| ", "|")
+                        .replace("\n}}", "}}")
+                    )
+            assert full["section0_repairs"] != expected
+            consistency_cache.save(sidecar, {"data": full})
+            save_snapshot(path, compact)
+            collect = Mock()
+            updater = DashboardUpdater(
+                path,
+                collect,
+                coordinator.save_dashboard_snapshot,
+                log_dir=runtime / "logs",
+                runtime=runtime,
+            )
+            updater.start()
+            try:
+                other = DashboardUpdater(
+                    path,
+                    collect,
+                    coordinator.save_dashboard_snapshot,
+                    log_dir=runtime / "logs",
+                    runtime=runtime,
+                )
+                with self.assertRaises(RuntimeError):
+                    other.start()
+                assert coordinator.refresh_saved_repairs(path)
+            finally:
+                updater.stop()
+            retained = consistency_cache.read(sidecar)["data"]
+            assert retained["section0_repairs"] == expected
+            assert retained["repair_inputs"] == full["repair_inputs"]
+            assert len(retained["section0_repairs"]) == 768
+            updated = json.loads(path.read_text())
+            assert len(updated["consistency"]["section0_repairs"]) < 768
+            assert updated["updated_at"] == compact["updated_at"]
+            assert updated["reports"] == compact["reports"]
+            assert validate_dashboard_snapshot(updated)
+            collect.assert_not_called()
+
+    @staticmethod
+    def test_startup_keeps_unavailable_cache_without_writes() -> None:
+        """Keep unavailable saved generations unchanged."""
+        for state in ("missing", "invalid", "stale", "invalid-dashboard"):
+            with TemporaryDirectory() as directory:
+                path = Path(directory) / "dashboard.json"
+                coordinator.save_dashboard_snapshot(
+                    path,
+                    _dashboard(_snapshot()["consistency"]),
+                )
+                sidecar = path.with_name("consistency-repairs.parquet")
+                if state == "missing":
+                    sidecar.unlink()
+                elif state == "invalid":
+                    sidecar.write_bytes(b"broken parquet")
+                elif state == "stale":
+                    data = consistency_cache.read(sidecar)["data"]
+                    data["checked_at"] = "2026-11-04T00:05:00Z"
+                    consistency_cache.save(sidecar, {"data": data})
+                else:
+                    path.write_text('{"schema": 2}')
+                before = {
+                    file.name: file.read_bytes()
+                    for file in Path(directory).iterdir()
+                    if file.is_file()
+                }
+                with patch.object(
+                    coordinator,
+                    "save_dashboard_snapshot",
+                ) as save:
+                    assert not coordinator.refresh_saved_repairs(path)
+                    save.assert_not_called()
+                assert {
+                    file.name: file.read_bytes()
+                    for file in Path(directory).iterdir()
+                    if file.is_file()
+                } == before
 
     @staticmethod
     def test_source_and_prepared_cache_have_independent_limits() -> None:

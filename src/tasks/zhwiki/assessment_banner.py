@@ -3,7 +3,7 @@
 The Video games banner/class mask (92848131/92848137), WPBannerMeta
 (91444890), banner shell (95284439), and PJBSClass modules
 (95173400/95173398) define child precedence and header inheritance.
-Automatic subject-page classifications are deliberately left unknown.
+Literal project and shell classes precede complete B criteria.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import mwparserfromhell
-from mwparserfromhell.nodes import Template
+from mwparserfromhell.nodes import Template, Text
 from pywikibot import Page
 from pywikibot.exceptions import InvalidTitleError
 from pywikibot.site import Namespace
@@ -26,9 +26,69 @@ if TYPE_CHECKING:
 
 CONTRACT = (
     "zh-vg-b-listing:92848131:92848137:95173241:91444890:"
-    "95284439:95173400:95173398:2"
+    "95284439:95173400:95173398:3"
 )
 _DEFAULT_SHELL = ("Template:WikiProject banner shell",)
+
+
+def _legacy_check_suffix(name: Wikicode) -> bool:
+    """Recognize the historical Bckeck substitution in a banner name.
+
+    Returns:
+        Whether the suffix contains only literal criteria substitutions
+        and whitespace, without an arbitrary dynamic template name.
+    """
+    checks = False
+    for node in name.nodes[1:]:
+        if isinstance(node, Text) and not str(node).strip():
+            continue
+        if not isinstance(node, Template):
+            return False
+        prefix, separator, target = str(node.name).strip().partition(":")
+        if (
+            not separator
+            or prefix.casefold() != "subst"
+            or target.strip() != "Bckeck"
+            or any(
+                str(parameter.name).strip()
+                not in {"1", "2", "3", "4", "5", "6"}
+                or parameter.value.filter_templates()
+                or parameter.value.filter_tags()
+                or parameter.value.filter_arguments()
+                for parameter in node.params
+            )
+        ):
+            return False
+        checks = True
+    return checks
+
+
+def _all_b_criteria(template: Template) -> bool | None:
+    """Check all six literal B criteria without overriding a class.
+
+    Returns:
+        True for six yes/y values, false for absent or negative flags,
+        or none for duplicated or dynamic supplied criteria.
+    """
+    criteria = {"b1": [], "b2": [], "b3": [], "b4": [], "b5": [], "b6": []}
+    for parameter in template.params:
+        name = str(parameter.name).strip()
+        if name in criteria:
+            criteria[name].append(parameter.value)
+    if any(not values for values in criteria.values()):
+        return False
+    unknown = False
+    for values in criteria.values():
+        if (
+            len(values) != 1
+            or values[0].filter_templates()
+            or values[0].filter_tags()
+            or values[0].filter_arguments()
+        ):
+            unknown = True
+        elif str(values[0]).strip().casefold() not in {"yes", "y"}:
+            return False
+    return None if unknown else True
 
 
 def _literal_class(
@@ -106,7 +166,7 @@ def _matching_templates(
         literal, separator, _ = name.partition("{{")
         candidate = _template_page(site, literal.strip())
         if candidate in names:
-            if separator:
+            if separator and not _legacy_check_suffix(template.name):
                 dynamic = True
             else:
                 matches.append(template)
@@ -171,6 +231,8 @@ def banner_class(
         or none for dynamic, ambiguous or unsupported evidence. Explicit
         nonblank project classes win; only missing/blank values inherit
         a single literal shell from the page header, wherever placed.
+        With both grades missing, six yes/y criteria establish B;
+        otherwise the banner is unassessed or remains ambiguous.
     """
     if text is None or site.dbName() != "zhwiki":
         return None
@@ -187,9 +249,16 @@ def banner_class(
             site,
             shell_aliases,
         )
-        if dynamic_shell or len(shells) != 1:
+        if dynamic_shell or len(shells) > 1:
             return None
-        value = _literal_class(shells[0], case_insensitive=True)
+        value = (
+            _literal_class(shells[0], case_insensitive=True) if shells else ""
+        )
+        if value is not None and not value:
+            criteria = _all_b_criteria(candidates[0])
+            if criteria is None:
+                return None
+            value = "B" if criteria else "Unassessed"
     label = (
         assessment_profile("zhwiki", "电子游戏").resolve(value, "class")
         if value

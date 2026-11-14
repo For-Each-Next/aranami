@@ -38,6 +38,29 @@ if TYPE_CHECKING:
     from pywikibot.site import BaseSite
 
 _LOG = logging.getLogger(__name__)
+# This revision only interprets formerly unknown source more precisely.
+# Existing known grades, completed transitions and visible births agree.
+_COMPLETED_PROOF_PREVIOUS_CONTRACT = (
+    "zh-vg-b-listing:92848131:92848137:95173241:91444890:"
+    "95284439:95173400:95173398:2"
+)
+_COMPLETED_PROOF_CURRENT_CONTRACT = (
+    _COMPLETED_PROOF_PREVIOUS_CONTRACT.removesuffix(":2") + ":3"
+)
+
+
+def _parser_identity(
+    contract: str,
+    metadata: tuple,
+) -> str:
+    """Bind parser semantics to exact template and assessment metadata.
+
+    Returns:
+        The complete identity used for current and compatible old facts.
+    """
+    return hashlib.sha256(
+        json.dumps([contract, *metadata]).encode(),
+    ).hexdigest()
 
 
 def _members(
@@ -200,16 +223,29 @@ def refresh_b_listings(  # ruff: ignore[too-many-arguments] - Explicit source, r
             site,
             "Template:WikiProject banner shell",
         )
-        parser = hashlib.sha256(
-            json.dumps([
-                CONTRACT,
-                sorted(aliases),
-                sorted(shell_aliases),
-                asdict(assessment_profile("zhwiki", "电子游戏")),
-            ]).encode(),
-        ).hexdigest()
+        metadata = (
+            sorted(aliases),
+            sorted(shell_aliases),
+            asdict(assessment_profile("zhwiki", "电子游戏")),
+        )
+        parser = _parser_identity(CONTRACT, metadata)
+        migration = (
+            (
+                _parser_identity(
+                    _COMPLETED_PROOF_PREVIOUS_CONTRACT,
+                    metadata,
+                ),
+                parser,
+            )
+            if CONTRACT == _COMPLETED_PROOF_CURRENT_CONTRACT
+            else None
+        )
         members = _members(membership, parser, dt.datetime.now(dt.UTC))
-        frame = store.checkpoint(runtime, members=members)
+        frame = store.checkpoint(
+            runtime,
+            members=members,
+            completed_parser_migration=migration,
+        )
         pending = (
             frame
             .join(members.select("page_id"), on="page_id", how="semi")

@@ -18,6 +18,7 @@ import polars as pl
 
 from data.runtime.logs import open_run_log
 from runtime import hub
+from runtime.dashboard import DashboardUpdater
 from shared.sources.cycle import read_membership, read_top_pageviews
 from shared.sources.pageviews import TopPageviews
 
@@ -321,6 +322,72 @@ class TestHubLifecycle(TestCase):
         scanner = patch.object(hub, "RedirectScanner")
         scanner.start()
         self.addCleanup(scanner.stop)
+
+    def test_saved_repairs_refresh_under_the_lease_before_scheduler_start(
+        self,
+    ) -> None:
+        """Own the output before cached formatting or dispatch."""
+        order = []
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "dashboard.json"
+            scheduler = Mock()
+
+            def reproject(destination: Path) -> bool:
+                """Check exclusive output ownership without collection.
+
+                Returns:
+                    False to simulate an unavailable saved generation.
+                """
+                assert destination == path
+
+                competing = DashboardUpdater(
+                    path,
+                    Mock(),
+                    Mock(),
+                    log_dir=root / "logs",
+                    runtime=root,
+                )
+                with self.assertRaises(RuntimeError):
+                    competing.start()
+                order.append("repair")
+                return False
+
+            def start(**_options: object) -> Mock:
+                """Observe construction after cached projection.
+
+                Returns:
+                    The inert scheduler fixture.
+                """
+                order.append("scheduler")
+                return scheduler
+
+            scheduler.resume.side_effect = lambda: order.append("resume")
+            with (
+                patch.object(hub.signal, "signal"),
+                patch.object(hub, "DashboardHTTPServer"),
+                patch.object(
+                    hub,
+                    "refresh_saved_repairs",
+                    side_effect=reproject,
+                ),
+                patch.object(hub.monitor, "start", side_effect=start),
+                patch.object(hub, "_schedule_collections"),
+                patch.object(
+                    hub,
+                    "_start_redirect_scanner",
+                    return_value=None,
+                ),
+                patch.object(
+                    hub,
+                    "_serve_until_stopped",
+                    side_effect=KeyboardInterrupt,
+                ),
+                patch.object(hub, "collect_dashboard") as collect,
+            ):
+                hub.run(hub.HubConfig(output=path, log_dir=root / "logs"))
+            assert order == ["repair", "scheduler", "resume"]
+            collect.assert_not_called()
 
     @staticmethod
     def test_website_diagnostics_survive_until_outputs_close() -> None:

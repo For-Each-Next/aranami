@@ -5,6 +5,21 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.4 (2026-11-14 01:08 UTC)
+
+Overview: Made talk-page corrections readable and reviewable as source diffs,
+clarified historical B-Class evidence, and reused shared homepage observations
+for newsletter facts and upcoming estimates.
+
+- Rendered Article history in aligned block style without extra blank lines
+  around the corrected template, preserving parameter content.
+- Filled prepared section-zero code and summaries, then opened Wikipedia's
+  native diff without invoking page preview or saving the edit.
+- Applied explicit project-class, inherited shell-class and complete yes/y
+  checklist precedence, distinguishing unassessed history from unknown text.
+- Reused shared saved homepage facts and upcoming estimates in newsletters,
+  keeping estimates separate from proven appearances without template API calls.
+
 ### 0.9.3 (2026-11-13 23:05 UTC)
 
 Overview: Corrected the saved talk-page prefill workflow, placed Article history

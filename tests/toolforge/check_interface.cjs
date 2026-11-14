@@ -939,12 +939,12 @@ async function checkInterface(assetRoot) {
                         assert.deepEqual(adjacent, {shared: true, contained: true, desktopRow: true, label: interfaceMessages['consistency.prefill'][locale]},
                             'auto-fill sits beside Copy before its status, with contained mobile wrapping');
                         const userscriptSource = fs.readFileSync(path.join(assetRoot, 'consistency-repair.user.js'), 'utf8');
-                        const nativePreview = await evaluate(`(async () => {
+                        const nativeDiff = await evaluate(`(async () => {
                             const form = document.createElement('form');
                             form.id = 'editform';
                             form.hidden = true;
                             form.action = 'https://zh.wikipedia.org/w/index.php?title=Talk%3AGame%2001&action=submit';
-                            form.innerHTML = '<textarea id="wpTextbox1" name="wpTextbox1"></textarea><input id="wpSummary" name="wpSummary"><input name="wpSection" value="0"><input name="editRevId" value="201"><input name="wpEdittime" value="20261102140000"><button id="wpPreview" name="wpPreview">Preview</button>';
+                            form.innerHTML = '<textarea id="wpTextbox1" name="wpTextbox1"></textarea><input id="wpSummary" name="wpSummary"><input name="wpSection" value="0"><input name="editRevId" value="201"><input name="wpEdittime" value="20261102140000"><button id="wpDiff" name="wpDiff">Diff</button><button id="wpPreview" name="wpPreview">Preview</button><button id="wpSave" name="wpSave">Save</button>';
                             document.body.append(form);
                             const original = '<!-- keep -->\\n{{Article history|currentstatus=GA}}\\n';
                             const fixed = original.replace('|currentstatus=GA', '|currentstatus=GA|maindateGA=2026-10-30');
@@ -955,9 +955,13 @@ async function checkInterface(assetRoot) {
                             const config = {wgNamespaceNumber: 1, wgPageName: 'Talk:Game_01', wgCurRevisionId: 201, wgArticleId: 101, wgUserLanguage: document.documentElement.lang};
                             const requests = [];
                             let clicks = 0;
+                            let previews = 0;
+                            let saves = 0;
                             let cleared = false;
                             form.addEventListener('submit', event => event.preventDefault());
-                            form.querySelector('#wpPreview').addEventListener('click', event => {event.preventDefault(); clicks++;});
+                            form.querySelector('#wpDiff').addEventListener('click', event => {event.preventDefault(); clicks++;});
+                            form.querySelector('#wpPreview').addEventListener('click', event => {event.preventDefault(); previews++;});
+                            form.querySelector('#wpSave').addEventListener('click', event => {event.preventDefault(); saves++;});
                             const handoffURL = new URL('https://zh.wikipedia.org/wiki/Talk:Game_01?action=edit&section=0&aranami-check-job=' + id);
                             new Function('location', 'history', 'unsafeWindow', 'GM_xmlhttpRequest', ${JSON.stringify(userscriptSource)})(handoffURL,
                                 {state: null, replaceState: (_state, _title, url) => {cleared = !new URL(url).searchParams.has('aranami-check-job');}},
@@ -966,15 +970,15 @@ async function checkInterface(assetRoot) {
                                     id, title: 'Talk:Game 01', revision_id: 201, talk_page_id: 101, timestamp: '2026-11-02T14:00:00Z', original_text: original, text: fixed, edit_summary: summary,
                                 }}});});
                             await new Promise(resolve => setTimeout(resolve, 20));
-                            const result = {clicks, requests: requests.length, source: form.querySelector('#wpTextbox1').value === fixed,
+                            const result = {clicks, previews, saves, requests: requests.length, source: form.querySelector('#wpTextbox1').value === fixed,
                                 summary: form.querySelector('#wpSummary').value === summary, section: form.elements.wpSection.value,
                                 revision: form.elements.editRevId.value, cleared};
                             form.remove();
                             delete document.documentElement.dataset.aranamiRepair;
                             return result;
                         })()`);
-                        assert.deepEqual(nativePreview, {clicks: 1, requests: 1, source: true, summary: true, section: '0', revision: '201', cleared: true},
-                            'the userscript fills real native source controls and clicks preview while preserving section and conflict guards');
+                        assert.deepEqual(nativeDiff, {clicks: 1, previews: 0, saves: 0, requests: 1, source: true, summary: true, section: '0', revision: '201', cleared: true},
+                            'the userscript fills real native source controls and clicks the diff while preserving section and conflict guards');
                         assert.ok(evidence.direct, 'homepage cards retain their labeled article semantics');
                         assert.equal(evidence.listTags, 0, 'homepage cards have no list wrappers');
                         assert.deepEqual(evidence.ordinals, Array.from({length: 10}, (_, index) => `${index + 1}.`), 'homepage card headings retain ordered numbering');

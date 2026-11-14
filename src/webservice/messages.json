@@ -4505,9 +4505,9 @@
     "zh-hant": "自動預填內容"
   },
   "consistency.userscript_note": {
-    "en": "With this Tampermonkey script installed, Auto-fill content loads the prepared talk-page lead from Aranami in a new tab and opens a preview. Review and save it in Wikipedia.",
-    "zh-hans": "安装此 Tampermonkey 脚本后，点击“自动预填内容”会在新标签页从 Aranami 载入预先生成的讨论页序言及编辑摘要，并自动预览。请检查后在维基百科保存。",
-    "zh-hant": "安裝此 Tampermonkey 指令碼後，點選「自動預填內容」會在新分頁從 Aranami 載入預先產生的討論頁序言及編輯摘要，並自動預覽。請檢查後在維基百科儲存。"
+    "en": "With this Tampermonkey script installed, Auto-fill content loads the prepared talk-page lead from Aranami in a new tab and opens the diff. Review and save it in Wikipedia.",
+    "zh-hans": "安装此 Tampermonkey 脚本后，点击“自动预填内容”会在新标签页从 Aranami 载入预先生成的讨论页序言及编辑摘要，并自动显示差异。请检查后在维基百科保存。",
+    "zh-hant": "安裝此 Tampermonkey 指令碼後，點選「自動預填內容」會在新分頁從 Aranami 載入預先產生的討論頁序言及編輯摘要，並自動顯示差異。請檢查後在維基百科儲存。"
   },
   "consistency.userscript_install": {
     "en": "Install / download script",

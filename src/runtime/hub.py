@@ -35,7 +35,10 @@ from data.runtime.logs import open_run_log
 from data.runtime.status import get_boot_id, read_status
 from runtime import monitor
 from runtime.collection_status import collection_run
-from runtime.consistency_repairs import save_dashboard_snapshot
+from runtime.consistency_repairs import (
+    refresh_saved_repairs,
+    save_dashboard_snapshot,
+)
 from runtime.dashboard import (
     DashboardHTTPServer,
     DashboardUpdater,
@@ -561,6 +564,7 @@ def run(config: HubConfig) -> None:
             server.timeout = 0.25
             updater.start()
             resources.callback(updater.stop)
+            refresh_saved_repairs(config.output)
 
         scheduler = monitor.start(
             dry=config.dry,

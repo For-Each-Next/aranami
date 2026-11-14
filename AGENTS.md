@@ -74,7 +74,7 @@ The root instructions remain in force throughout the repository.
 
 ## Change management
 
-The final archived source is v0.9.3. Further development belongs in a fork
+The final archived source is v0.9.4. Further development belongs in a fork
 with a new explicit version. Toolforge operation remains independent of
 GitHub's read-only archive status.
 

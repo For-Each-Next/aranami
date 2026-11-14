@@ -78,7 +78,10 @@ lazy from data.newsletter.historical import (
     prepare_dyk_series,
     read_historical_data,
 )
-lazy from data.newsletter.schema import read_newsletter_data
+lazy from data.newsletter.schema import (
+    read_newsletter_data,
+    with_homepage_forecasts,
+)
 lazy from updater.services.newsletter import render_issue
 lazy from updater.services.newsletter_editorial import render_annual_feature
 lazy from webservice import pages
@@ -1150,6 +1153,21 @@ class _PublicViews:
                 HTTPStatus.SERVICE_UNAVAILABLE,
             )
         if durable_facts is not None:
+            state = (
+                ((retained or {}).get("lifecycle") or {})
+                .get("states", {})
+                .get(issue.value)
+            )
+            if (
+                day is None
+                and not durable_facts.get("complete")
+                and state not in {"published", "cancelled"}
+            ):
+                durable_facts = with_homepage_forecasts(
+                    durable_facts,
+                    self._dashboard() or {},
+                    now=dt.datetime.now(dt.UTC),
+                )
             value = render_issue(issue, durable_facts)
             generated_at = durable_facts["updated_at"]
             day = _newsletter_current_day(issue, durable_facts, dates)

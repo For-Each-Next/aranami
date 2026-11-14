@@ -33,7 +33,7 @@ async function run(options = {}) {
   Object.assign(fields, options.fields || {});
   if (options.formAction) form.action = options.formAction;
   if (options.wrongForm) controls.wpTextbox1.form = {};
-  if (options.disabledPreview) controls.wpPreview.disabled = true;
+  if (options.disabledDiff) controls.wpDiff.disabled = true;
   const config = {wgNamespaceNumber: 1, wgPageName: "Talk:Game", wgCurRevisionId: 201, wgArticleId: 2, wgUserLanguage: "en", ...options.config};
   let effectiveText = controls.wpTextbox1.value;
   const jquery = textbox => ({textSelection: (action, value) => {
@@ -75,18 +75,18 @@ test("only explicit current talk-page section-zero links activate", async () => 
     "?title=Talk%3AGame&action=edit&section=0&aranami-check-job=untrusted"]) {
     const {calls} = await run({url: "https://zh.wikipedia.org/w/index.php" + tail});
     assert.equal(calls.requests.length, 0);
-    assert.equal(calls.diff, 0);
+    assert.equal(calls.preview, 0);
   }
   for (const options of [{config: {wgNamespaceNumber: 0}}, {missingEditor: true}, {wrongForm: true},
-    {disabledPreview: true}, {fields: {wpSection: {value: "1"}}}]) {
+    {disabledDiff: true}, {fields: {wpSection: {value: "1"}}}]) {
     const {calls} = await run(options);
     assert.equal(calls.requests.length, 0);
-    assert.equal(calls.diff, 0);
-    assert.equal(calls.preview + calls.save, 0);
+    assert.equal(calls.preview, 0);
+    assert.equal(calls.diff + calls.save, 0);
   }
 });
 
-test("ready repair fills complete code and summary, and opens only the native preview", async () => {
+test("ready repair fills complete code and summary, and opens only the native diff", async () => {
   for (const textSelection of [false, true]) {
     const {calls, controls, fields} = await run({textSelection});
     assert.equal(calls.requests.length, 1);
@@ -98,8 +98,8 @@ test("ready repair fills complete code and summary, and opens only the native pr
     assert.equal(fields.wpSection.value, "0");
     assert.equal(fields.editRevId.value, "201");
     assert.deepEqual(calls.changes, ["input", "change", "input", "change"]);
-    assert.equal(calls.diff, 0);
-    assert.equal(calls.preview, 1);
+    assert.equal(calls.preview, 0);
+    assert.equal(calls.diff, 1);
     assert.equal(calls.save, 0);
     assert.equal(new URL(calls.replaced).searchParams.has("aranami-check-job"), false);
     assert.equal(new URL(controls.editform.action).searchParams.has("aranami-check-job"), false);
@@ -119,8 +119,8 @@ test("saved source guards reject stale heads, wrong destinations and modified dr
   ]) {
     const {calls, controls} = await run(options);
     assert.equal(calls.changes.length, 0);
-    assert.equal(calls.diff, 0);
-    assert.equal(calls.preview + calls.save, 0);
+    assert.equal(calls.preview, 0);
+    assert.equal(calls.diff + calls.save, 0);
     assert.notEqual(controls.wpTextbox1.value, fixed);
   }
 });
@@ -128,7 +128,7 @@ test("saved source guards reject stale heads, wrong destinations and modified dr
 test("only CRLF and one native appended newline are source equivalents", async () => {
   for (const initialText of [original.replaceAll("\n", "\r\n"), original + "\n"]) {
     const {calls, controls} = await run({initialText});
-    assert.equal(calls.preview, 1);
+    assert.equal(calls.diff, 1);
     assert.equal(controls.wpTextbox1.value, fixed);
   }
 });
@@ -142,22 +142,25 @@ test("invalid saved API responses and transport failures cannot fill or submit",
   for (const value of invalid) {
     const {calls, controls} = await run({payload: value || {schema: 1}});
     assert.equal(calls.changes.length, 0);
-    assert.equal(calls.diff, 0);
-    assert.equal(calls.preview + calls.save, 0);
+    assert.equal(calls.preview, 0);
+    assert.equal(calls.diff + calls.save, 0);
     assert.equal(controls.wpTextbox1.value, original);
   }
   for (const options of [{status: 404}, {requestFailure: "onerror"}, {requestFailure: "ontimeout"}, {requestFailure: "onabort"}]) {
     const {calls} = await run(options);
-    assert.equal(calls.changes.length + calls.diff + calls.preview + calls.save, 0);
+    assert.equal(calls.changes.length + calls.preview + calls.diff + calls.save, 0);
   }
 });
 
-test("the source has no automatic diff or save control", () => {
-  assert.equal(source.includes("wpDiff"), false);
+test("the source has no automatic page-preview or save control", () => {
+  assert.equal(source.includes("@version      0.9.4"), true);
+  assert.equal(source.includes("const mw = window.mw;"), true);
+  assert.equal(source.includes("wpDiff"), true);
+  assert.equal(source.includes("wpPreview"), false);
   assert.equal(source.includes("wpSave"), false);
 });
 
-test("pretty talk URLs fetch the saved job and preview its entire lead", async () => {
+test("pretty talk URLs fetch the saved job and show the entire lead diff", async () => {
   for (const title of ["Talk:Game", "Talk:海岛大亨系列", "讨论:海岛大亨系列", "討論:海岛大亨系列"]) {
     const repair = {...payload().repair, title: title.replace(/^[^:]+:/, "Talk:")};
     const {calls, controls} = await run({
@@ -169,8 +172,8 @@ test("pretty talk URLs fetch the saved job and preview its entire lead", async (
     assert.equal(calls.requests.length, 1);
     assert.equal(calls.requests[0].url, `https://aranami.toolforge.org/api/consistency-repair?repair=${id}`);
     assert.equal(controls.wpTextbox1.value, fixed);
-    assert.equal(calls.preview, 1);
-    assert.equal(calls.diff + calls.save, 0);
+    assert.equal(calls.diff, 1);
+    assert.equal(calls.preview + calls.save, 0);
   }
 });
 
@@ -184,6 +187,6 @@ test("URL titles cannot redirect a saved correction to a different page", async 
   ]) {
     const {calls, controls} = await run(options);
     assert.equal(controls.wpTextbox1.value, original);
-    assert.equal(calls.changes.length + calls.preview + calls.diff + calls.save, 0);
+    assert.equal(calls.changes.length + calls.diff + calls.preview + calls.save, 0);
   }
 });

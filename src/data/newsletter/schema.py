@@ -26,6 +26,13 @@ if TYPE_CHECKING:
 
 STAT_KEYS = ("total", "fa", "fl", "ga", "dyk", "bplus", "topics")
 _HOMEPAGE_KEYS = {"featured", "good", "news", "history"}
+_FORECAST_KINDS = {
+    "featured": {"fa", "fl"},
+    "good": {"ga"},
+    "dyk": {"dyk"},
+    "news": {"itn"},
+    "history": {"otd"},
+}
 _MAX_TEXT = 250_000
 _MAX_ROWS = 5000
 _MAX_SOURCES = 1600
@@ -230,19 +237,15 @@ def _homepage_facts(  # ruff: ignore[too-many-return-statements]
         return False
     for section, rows in sections.items():
         evidence = sources[section]
-        if (
-            rows is None
-            or not _rows(
-                rows,
-                lambda row, section=section: _homepage_row(
-                    row,
-                    section,
-                    issue,
-                    through,
-                ),
-            )
-            or not isinstance(evidence, dict)
-        ):
+        if not _rows(
+            rows,
+            lambda row, section=section: _homepage_row(
+                row,
+                section,
+                issue,
+                through,
+            ),
+        ) or not isinstance(evidence, dict):
             return False
         if (
             evidence.get("period")
@@ -253,7 +256,151 @@ def _homepage_facts(  # ruff: ignore[too-many-return-statements]
             or not all(_source(source) for source in evidence["sources"])
         ):
             return False
+        if rows is None and evidence["sources"]:
+            return False
+        if "complete" in evidence and type(evidence["complete"]) is not bool:
+            return False
     return True
+
+
+def _forecast_row(row: object, issue: Issue, as_of: dt.date) -> bool:
+    """Keep scheduled records separate from observed quarter history.
+
+    Returns:
+        Whether a bounded forecast belongs to the next two UTC dates.
+    """
+    if not isinstance(row, dict) or set(row) != {
+        "section",
+        "title",
+        "url",
+        "date",
+        "kind",
+        "status",
+    }:
+        return False
+    try:
+        day = dt.date.fromisoformat(row["date"])
+        limit = as_of + dt.timedelta(days=2)
+    except KeyError, TypeError, ValueError, OverflowError:
+        return False
+    section = row.get("section")
+    return (
+        isinstance(section, str)
+        and section in _FORECAST_KINDS
+        and _title(row.get("title"))
+        and _source({"label": row["title"], "url": row.get("url")})
+        and issue.start <= day < issue.end
+        and as_of < day <= limit
+        and row["date"] == day.isoformat()
+        and isinstance(row.get("kind"), str)
+        and row["kind"] in _FORECAST_KINDS[section]
+        and isinstance(row.get("status"), str)
+        and row["status"] in {"scheduled", "estimated"}
+    )
+
+
+def _homepage_forecasts(facts: dict, issue: Issue) -> bool:
+    """Validate optional preview forecasts without changing old facts.
+
+    Returns:
+        Whether both forecast fields are absent or agree completely.
+    """
+    fields = {"homepage_forecasts", "homepage_forecast_as_of"}
+    if not fields.intersection(facts):
+        return True
+    if not fields.issubset(facts):
+        return False
+    try:
+        stamp = dt.datetime.fromisoformat(facts["homepage_forecast_as_of"])
+    except TypeError, ValueError:
+        return False
+    rows = facts["homepage_forecasts"]
+    return (
+        stamp.utcoffset() == dt.timedelta()
+        and facts["homepage_forecast_as_of"]
+        == stamp.isoformat(timespec="seconds")
+        and isinstance(rows, list)
+        and _rows(rows, lambda row: _forecast_row(row, issue, stamp.date()))
+    )
+
+
+def with_homepage_forecasts(
+    facts: dict,
+    homepage: dict,
+    *,
+    now: dt.datetime,
+) -> dict:
+    """Add next-two-day forecasts from an already saved dashboard.
+
+    Args:
+        facts: Selected issue fields with actual observations.
+        homepage: Saved dashboard snapshot with flattened homepage rows.
+        now: Aware preview clock selecting the next two UTC dates.
+
+    Returns:
+        Detached issue fields with optional scheduled or estimated rows.
+        Actual homepage history, DYK records and statistics stay intact.
+        Missing sections remove stale forecasts without source reads.
+
+    Raises:
+        ValueError: The issue or preview clock is invalid.
+    """
+    if now.tzinfo is None or now.utcoffset() is None:
+        message = "Newsletter forecasts require an aware preview clock."
+        raise ValueError(message)
+    issue = Issue.parse(facts["issue"])
+    stamp = now.astimezone(dt.UTC).replace(microsecond=0)
+    result = {
+        key: value
+        for key, value in facts.items()
+        if key not in {"homepage_forecasts", "homepage_forecast_as_of"}
+    }
+    saved = homepage.get("homepage")
+    if not isinstance(saved, dict) or not any(
+        isinstance(saved.get(section), list)
+        for section in ("upcoming", "dyk", "news", "history")
+    ):
+        return result
+    forecasts = {}
+    for source in ("upcoming", "dyk", "news", "history"):
+        rows = saved.get(source)
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            kind = row.get("kind")
+            section = (
+                (
+                    "featured"
+                    if isinstance(kind, str) and kind in {"fa", "fl"}
+                    else "good"
+                )
+                if source == "upcoming"
+                else source
+            )
+            record = {
+                "section": section,
+                "title": row.get("title"),
+                "url": row.get("url"),
+                "date": row.get("date"),
+                "kind": {"dyk": "dyk", "news": "itn", "history": "otd"}.get(
+                    source,
+                    kind,
+                ),
+                "status": row.get("date_kind"),
+            }
+            if _forecast_row(record, issue, stamp.date()):
+                key = (
+                    section,
+                    record["date"],
+                    record["title"],
+                    record["kind"],
+                )
+                forecasts.setdefault(key, record)
+    result.update(
+        homepage_forecasts=[forecasts[key] for key in sorted(forecasts)],
+        homepage_forecast_as_of=stamp.isoformat(timespec="seconds"),
+    )
+    return result
 
 
 def _valid_observation_stamp(
@@ -760,6 +907,7 @@ def _valid_issue(key: str, facts: object) -> bool:
             None,
         )
         and _homepage_facts(facts, issue, observation_end)
+        and _homepage_forecasts(facts, issue)
         and _valid_year_review(
             facts.get("year_review"),
             issue,

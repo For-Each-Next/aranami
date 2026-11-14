@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -13,6 +14,7 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 from pywikibot.page import Revision
+from pywikibot.site import Namespace, NamespacesDict
 from wiki_fixtures import OfflineSite
 
 from data.articles import b_listings as store
@@ -262,6 +264,16 @@ class BListingTests(TestCase):
     def test_chinese_classes_and_exact_project_redirects() -> None:
         """Resolve Chinese classes through exact verified redirects."""
         site = OfflineSite("zh", "wikipedia")
+        site._namespaces = NamespacesDict({
+            **dict(site.namespaces.items()),
+            10: Namespace(
+                10,
+                canonical_name="Template",
+                custom_name="模板",
+                aliases=["模版"],
+                case="first-letter",
+            ),
+        })
         profile = assessment_profile("zhwiki", "电子游戏")
         assert profile.resolve("乙", "class").code == "B"
         assert profile.resolve("乙級列表", "class").code == "BL"
@@ -343,6 +355,204 @@ class BListingTests(TestCase):
             }
 
     @staticmethod
+    def test_completed_old_parser_proofs_reuse_identical_metadata() -> None:
+        """Keep completed dates across the parser upgrade."""
+        for revisions, reason in (
+            (
+                (_revision(5, "乙"), _revision(4, "丙")),
+                "contiguous_transition",
+            ),
+            (
+                (HistoricalRevision(5, 0, _NOW, "{{VG|class=B}}"),),
+                "earliest_visible",
+            ),
+        ):
+            with (
+                TemporaryDirectory() as temporary,
+                patch.object(
+                    collector,
+                    "template_aliases",
+                    return_value=_ALIASES,
+                ),
+                patch.object(
+                    collector,
+                    "read_talk_revisions",
+                    return_value=revisions,
+                ) as read,
+            ):
+                runtime, site = Path(temporary), OfflineSite("zh", "wikipedia")
+                with patch.object(
+                    collector,
+                    "CONTRACT",
+                    collector._COMPLETED_PROOF_PREVIOUS_CONTRACT,
+                ):
+                    collector.refresh_b_listings(
+                        site,
+                        _membership(),
+                        runtime=runtime,
+                    )
+                before = store.load(runtime)["inference"].row(0, named=True)
+                collector.refresh_b_listings(
+                    site,
+                    _membership(),
+                    runtime=runtime,
+                )
+                after = store.load(runtime)["inference"].row(0, named=True)
+                read.assert_called_once()
+                assert before["parser_version"] != after["parser_version"]
+                assert after["reason"] == before["reason"] == reason
+                for key in (
+                    "banner_entry_talk_rev_id",
+                    "banner_entry_timestamp",
+                    "banner_prior_talk_rev_id",
+                ):
+                    assert after[key] == before[key]
+
+    @staticmethod
+    def test_old_unknown_parser_proof_reopens_at_unchanged_head() -> None:
+        """Reopen the stopped scan when parser semantics change."""
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(collector, "template_aliases", return_value=_ALIASES),
+            patch.object(
+                collector,
+                "read_talk_revisions",
+                return_value=(
+                    _revision(5, "乙"),
+                    HistoricalRevision(4, 3, _NOW, None),
+                ),
+            ) as read,
+        ):
+            runtime, site = Path(temporary), OfflineSite("zh", "wikipedia")
+            with patch.object(
+                collector,
+                "CONTRACT",
+                collector._COMPLETED_PROOF_PREVIOUS_CONTRACT,
+            ):
+                collector.refresh_b_listings(
+                    site,
+                    _membership(),
+                    runtime=runtime,
+                )
+            assert (
+                store.load(runtime)["inference"]["reason"].item()
+                == "unknown_interval"
+            )
+            read.return_value = (
+                _revision(5, "乙"),
+                HistoricalRevision(4, 3, _NOW, "{{VG}}"),
+            )
+            collector.refresh_b_listings(site, _membership(), runtime=runtime)
+            assert read.call_count == 2
+            assert read.call_args.kwargs["start_revision"] == 5
+            after = store.load(runtime)["inference"].row(0, named=True)
+            assert after["banner_transition_status"] == "proven"
+            assert after["banner_prior_talk_rev_id"] == 4
+
+    @staticmethod
+    def test_parser_migration_rejects_changed_alias_or_profile_metadata() -> (
+        None
+    ):
+        """Do not transfer proof across unrelated metadata changes."""
+        base_profile = assessment_profile("zhwiki", "电子游戏")
+        for change in ("aliases", "shells", "profile"):
+            aliases = list(_ALIASES)
+            shells = list(_SHELL_ALIASES)
+            with (
+                TemporaryDirectory() as temporary,
+                patch.object(
+                    collector,
+                    "template_aliases",
+                    side_effect=lambda _site, title, vg=aliases, hdr=shells: (
+                        tuple(
+                            hdr if title.endswith("banner shell") else vg,
+                        )
+                    ),
+                ),
+                patch.object(
+                    collector,
+                    "read_talk_revisions",
+                    return_value=(_revision(5, "乙"), _revision(4, "丙")),
+                ) as read,
+            ):
+                runtime, site = Path(temporary), OfflineSite("zh", "wikipedia")
+                with patch.object(
+                    collector,
+                    "CONTRACT",
+                    collector._COMPLETED_PROOF_PREVIOUS_CONTRACT,
+                ):
+                    collector.refresh_b_listings(
+                        site,
+                        _membership(),
+                        runtime=runtime,
+                    )
+                if change == "aliases":
+                    aliases.append("Template:电子游戏专题")
+                elif change == "shells":
+                    shells.append("Template:多个专题")
+                revised_profile = (
+                    replace(base_profile, identifier="different-profile")
+                    if change == "profile"
+                    else base_profile
+                )
+                read.return_value = ()
+                with patch.object(
+                    collector,
+                    "assessment_profile",
+                    return_value=revised_profile,
+                ):
+                    collector.refresh_b_listings(
+                        site,
+                        _membership(),
+                        runtime=runtime,
+                    )
+                assert read.call_count == 2
+                assert read.call_args.kwargs["stop_revision"] is None
+                assert (
+                    store.load(runtime)["inference"][
+                        "banner_entry_talk_rev_id"
+                    ].item()
+                    is None
+                )
+
+    @staticmethod
+    def test_migrated_completed_proof_keeps_new_head_anchor() -> None:
+        """Scan only new revisions above a compatible completed head."""
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(collector, "template_aliases", return_value=_ALIASES),
+            patch.object(
+                collector,
+                "read_talk_revisions",
+                return_value=(_revision(5, "乙"), _revision(4, "丙")),
+            ) as read,
+        ):
+            runtime, site = Path(temporary), OfflineSite("zh", "wikipedia")
+            with patch.object(
+                collector,
+                "CONTRACT",
+                collector._COMPLETED_PROOF_PREVIOUS_CONTRACT,
+            ):
+                collector.refresh_b_listings(
+                    site,
+                    _membership(),
+                    runtime=runtime,
+                )
+            read.return_value = (_revision(6, "乙"),)
+            collector.refresh_b_listings(
+                site,
+                _membership().with_columns(pl.lit(6).alias("talk_revision")),
+                runtime=runtime,
+            )
+            assert read.call_count == 2
+            assert read.call_args.kwargs["stop_revision"] == 5
+            after = store.load(runtime)["inference"].row(0, named=True)
+            assert after["scanned_talk_rev_id"] == 6
+            assert after["banner_entry_talk_rev_id"] == 5
+            assert after["banner_prior_talk_rev_id"] == 4
+            assert after["banner_transition_status"] == "proven"
+
+    @staticmethod
     def test_header_shell_inheritance_obeys_verified_child_precedence() -> (
         None
     ):
@@ -358,17 +568,122 @@ class BListingTests(TestCase):
             ("{{WPBS|class=B}}{{VG|class=no_input}}", "乙"),
             ("{{:Template:VG|class=B}}", "乙"),
             ("{{:Template:WPBS|class=BL}}{{:Template:VG}}", "乙级列表"),
-            ("{{VG}}\n== Later ==\n{{WPBS|class=B}}", None),
-            ("{{VG}}{{DYKEntry/archive}}{{WPBS|class=B}}", None),
-            ("<!-- {{WPBS|class=B}} -->{{VG}}", None),
-            ("<nowiki>{{WPBS|class=B}}</nowiki>{{VG}}", None),
+            ("{{VG}}\n== Later ==\n{{WPBS|class=B}}", "未评"),
+            ("{{VG}}{{DYKEntry/archive}}{{WPBS|class=B}}", "未评"),
+            ("<!-- {{WPBS|class=B}} -->{{VG}}", "未评"),
+            ("<nowiki>{{WPBS|class=B}}</nowiki>{{VG}}", "未评"),
             ("{{WPBS|class=B}}{{WPBS|class=B}}{{VG}}", None),
             ("{{WPBS|class=B|class=C}}{{VG}}", None),
             ("{{WPBS|class={{x}}}}{{VG}}", None),
             ("{{WPBS|class=B}}{{VG|class={{x}}}}", None),
             ("{{WPBS|class=B}}{{VG|class=B|class=C}}", None),
             ("{{WPBS|class=B}}{{Other project}}", "not-listed"),
-            ("{{WPBS|class=B}}{{VG {{subst:Bckeck|y|y}}}}", None),
+            ("{{WPBS|class=B}}{{VG {{subst:Bckeck|y|y}}}}", "乙"),
+        )
+        for text, expected in cases:
+            assert (
+                banner_class(
+                    text,
+                    site,
+                    _ALIASES,
+                    shell_aliases=_SHELL_ALIASES,
+                )
+                == expected
+            ), text
+
+    @staticmethod
+    def test_explicit_classes_precede_the_complete_criteria_fallback() -> None:
+        """Keep explicit classes ahead of the criteria fallback."""
+        site = OfflineSite("zh", "wikipedia")
+        criteria = "|b1=yes|b2=no|b3=y|b4=n|b5=|b6={{unknown}}"
+        for text, expected in (
+            ("{{VG}}", "未评"),
+            ("{{VG|class=}}", "未评"),
+            ("{{WPBS}}{{VG}}", "未评"),
+            ("{{WPBS|class=}}{{VG|class=}}", "未评"),
+            ("{{VG" + criteria + "}}", "未评"),
+            ("{{VG|class=B" + criteria + "}}", "乙"),
+            ("{{WPBS|class=B}}{{VG" + criteria + "}}", "乙"),
+            ("{{WPBS|class=B}}{{VG|class=C" + criteria + "}}", "丙"),
+            ("{{WPBS|class=C}}{{VG|class=B" + criteria + "}}", "乙"),
+        ):
+            assert (
+                banner_class(
+                    text,
+                    site,
+                    _ALIASES,
+                    shell_aliases=_SHELL_ALIASES,
+                )
+                == expected
+            ), text
+
+    @staticmethod
+    def test_complete_criteria_accept_yes_y_and_mixed_case() -> None:
+        """Require six literal positives when both grades are absent."""
+        site = OfflineSite("zh", "wikipedia")
+        positive = "|b1=yes|b2=y|b3=YES|b4=Y|b5= yes |b6= y "
+        for flags in (
+            "|b1=yes|b2=yes|b3=yes|b4=yes|b5=yes|b6=yes",
+            "|b1=y|b2=y|b3=y|b4=y|b5=y|b6=y",
+            positive,
+        ):
+            assert banner_class("{{VG" + flags + "}}", site, _ALIASES) == "乙"
+            assert (
+                banner_class(
+                    "{{WPBS|class=}}{{VG|class=" + flags + "}}",
+                    site,
+                    _ALIASES,
+                    shell_aliases=_SHELL_ALIASES,
+                )
+                == "乙"
+            )
+            assert (
+                banner_class(
+                    "{{WPBS|class=C}}{{VG" + flags + "}}",
+                    site,
+                    _ALIASES,
+                    shell_aliases=_SHELL_ALIASES,
+                )
+                == "丙"
+            )
+            assert (
+                banner_class(
+                    "{{WPBS|class=B}}{{VG|class=C" + flags + "}}",
+                    site,
+                    _ALIASES,
+                    shell_aliases=_SHELL_ALIASES,
+                )
+                == "丙"
+            )
+        for flags, expected in (
+            ("", "未评"),
+            ("|b1=y|b2=y|b3=y|b4=y|b5=y", "未评"),
+            (positive.replace("b3=YES", "b3=no"), "未评"),
+            (positive.replace("b3=YES", "b3={{unknown}}"), None),
+            (positive + "|b3=yes", None),
+        ):
+            assert (
+                banner_class(
+                    "{{VG" + flags + "}}",
+                    site,
+                    _ALIASES,
+                )
+                == expected
+            )
+
+    @staticmethod
+    def test_only_known_legacy_criteria_names_can_inherit_shell_class() -> (
+        None
+    ):
+        """Accept Bckeck without accepting arbitrary dynamic names."""
+        site = OfflineSite("zh", "wikipedia")
+        cases = (
+            ("{{WPBS|class=B}}{{VG {{subst:Bckeck|y|y|y|y|y|y}}}}", "乙"),
+            ("{{WPBS|class=C}}{{VG {{subst:Bckeck|y|n}}|class=B}}", "乙"),
+            ("{{WPBS|class=B}}{{VG {{subst:Bckeck|y|n}}|class={{x}}}}", None),
+            ("{{WPBS|class=B}}{{VG {{unknown}}}}", None),
+            ("{{WPBS|class=B}}{{VG {{subst:Bckeck|{{unknown}}}}}}", None),
+            ("{{WPBS|class=B}}{{VG {{subst:Bckeck|y}} extra}}", None),
         )
         for text, expected in cases:
             assert (

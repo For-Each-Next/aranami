@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Aranami consistency corrections
 // @namespace    https://aranami.toolforge.org/
-// @version      0.9.3
-// @description  Fill a saved talk-page lead correction and preview it.
+// @version      0.9.4
+// @description  Fill a saved talk-page lead correction and show its diff.
 // @match        https://zh.wikipedia.org/w/index.php*
 // @match        https://zh.wikipedia.org/wiki/*
 // @connect      aranami.toolforge.org
@@ -57,21 +57,21 @@
         editor: "Aranami：請使用原始碼編輯器開啟討論頁第 0 節。",
         stale: "Aranami：討論頁已更新，這項修正需要重新檢查。",
         changed: "Aranami：編輯內容或摘要已變更，未填入修正。",
-        opening: "Aranami：已填入修正，正在預覽。",
+        opening: "Aranami：已填入修正，正在開啟差異。",
     } : {
         loading: "Aranami：正在载入修正…",
         unavailable: "Aranami：这项修正已不可用。请回到维护信息检查页重新选择。",
         editor: "Aranami：请使用源代码编辑器打开讨论页第 0 节。",
         stale: "Aranami：讨论页已更新，这项修正需要重新检查。",
         changed: "Aranami：编辑内容或摘要已变更，未填入修正。",
-        opening: "Aranami：已填入修正，正在预览。",
+        opening: "Aranami：已填入修正，正在打开差异。",
     }) : {
         loading: "Aranami: loading the correction…",
         unavailable: "Aranami: this correction is unavailable. Choose it again from the maintenance checks.",
         editor: "Aranami: open talk-page section 0 in the source editor.",
         stale: "Aranami: the talk page has changed. This correction needs a fresh check.",
         changed: "Aranami: the text or summary changed; the correction was not filled.",
-        opening: "Aranami: correction filled; opening the preview.",
+        opening: "Aranami: correction filled; opening the diff.",
     };
 
     let notice;
@@ -91,15 +91,15 @@
         const form = document.getElementById("editform");
         const textbox = document.getElementById("wpTextbox1");
         const summary = document.getElementById("wpSummary");
-        const preview = document.getElementById("wpPreview");
-        if (!form || !textbox || !summary || !preview || preview.disabled ||
-                textbox.form !== form || summary.form !== form || preview.form !== form) return null;
+        const diff = document.getElementById("wpDiff");
+        if (!form || !textbox || !summary || !diff || diff.disabled ||
+                textbox.form !== form || summary.form !== form || diff.form !== form) return null;
         const field = name => form.elements.namedItem(name)?.value;
         const action = new URL(form.action, location.href);
         if (field("wpSection") !== "0" || !/^\d+$/.test(field("editRevId") || "") ||
                 !/^\d{14}$/.test(field("wpEdittime") || "") ||
                 action.origin !== location.origin || action.pathname !== "/w/index.php") return null;
-        return {form, textbox, summary, preview, field};
+        return {form, textbox, summary, diff, field};
     }
 
     /** Wait briefly for the source form, disconnecting the observer on exit. */
@@ -168,7 +168,7 @@
         return text === saved || (saved !== "" && text === saved + "\n");
     }
 
-    /** Fill one verified lead, keeping native conflict fields, then preview. */
+    /** Fill one verified lead, keeping native conflict fields, then diff. */
     async function run() {
         try {
             if (config("wgNamespaceNumber") !== 1) throw new Error("editor");
@@ -202,14 +202,14 @@
             controls.summary.dispatchEvent(new Event("change", {bubbles: true}));
             repair = null;
 
-            // Clear the explicit handoff before the native preview request.
+            // Clear the explicit handoff before the native diff request.
             pageURL.searchParams.delete("aranami-check-job");
             history.replaceState(history.state, "", pageURL.href);
             const formURL = new URL(controls.form.action, location.href);
             formURL.searchParams.delete("aranami-check-job");
             controls.form.action = formURL.href;
             show(messages.opening);
-            controls.preview.click();
+            controls.diff.click();
         } catch (error) {
             show(messages[error.message] || messages.unavailable);
         }

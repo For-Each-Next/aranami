@@ -82,3 +82,8 @@ recreate a missing historical endpoint. The
 [Collection contracts](../tasks/newsletter.md) explain cutoffs, storage and
 migration. [Saved data](../data/storage.md) defines the independent
 project, traffic and event datasets behind the interface.
+
+Current draft previews reuse the homepage's saved next-two-day estimates and
+mark them as expected appearances. They make no independent wiki/API requests
+and never add forecasts to proven appearance counts. Frozen and dated issue
+views retain their own saved observations.

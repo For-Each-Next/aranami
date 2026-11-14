@@ -236,6 +236,83 @@ class CurrentAuthorshipStoreTests(TestCase):
             ].to_list() == [30]
 
     @staticmethod
+    def test_new_parser_provenance_keeps_the_same_proved_article_cutoff() -> (
+        None
+    ):
+        """Keep revision evidence across a parser metadata refresh."""
+        with TemporaryDirectory() as temporary:
+            runtime = Path(temporary)
+            membership = _membership()
+            original = _members(membership, _NOW)
+            store.checkpoint(runtime, members=original, evidence=_evidence())
+            revised = original.with_columns(
+                pl.lit("new-parser:identical-boundary").alias(
+                    "banner_contract",
+                ),
+                pl.lit(None, dtype=pl.Int64).alias("revision_id"),
+                pl.lit(None, dtype=pl.Datetime("us", "UTC")).alias(
+                    "article_timestamp",
+                ),
+            )
+            store.checkpoint(runtime, members=revised)
+            tables = store.load(runtime)
+            assert tables["members"]["revision_id"].item() == 30
+            assert tables["members"][
+                "article_timestamp"
+            ].item() == _NOW - dt.timedelta(days=1)
+            assert (
+                tables["members"]["banner_contract"].item()
+                == "new-parser:identical-boundary"
+            )
+            assert store.pending(tables).is_empty()
+            _articles, coverage = prepare_current_b_articles(
+                tables,
+                _assessments(membership),
+            )
+            assert coverage == {"collected": 1, "total": 1}
+
+    @staticmethod
+    def test_changed_or_unknown_boundary_never_reuses_the_article_cutoff() -> (
+        None
+    ):
+        """Invalidate old cutoffs when any defining identity changes."""
+        variants = (
+            pl.lit(999, dtype=pl.Int64).alias("talk_page_id"),
+            pl.lit("BL").alias("grade"),
+            pl.lit(199, dtype=pl.Int64).alias("listing_talk_revision"),
+            pl.lit(_NOW - dt.timedelta(seconds=1)).alias("listing_timestamp"),
+            pl.lit(None, dtype=pl.Int64).alias("listing_talk_revision"),
+        )
+        for variant in variants:
+            with TemporaryDirectory() as temporary:
+                runtime = Path(temporary)
+                original = _members(_membership(), _NOW)
+                store.checkpoint(
+                    runtime,
+                    members=original,
+                    evidence=_evidence(),
+                )
+                revised = original.with_columns(
+                    variant,
+                    pl.lit("new-parser").alias("banner_contract"),
+                    pl.lit(None, dtype=pl.Int64).alias("revision_id"),
+                    pl.lit(None, dtype=pl.Datetime("us", "UTC")).alias(
+                        "article_timestamp",
+                    ),
+                )
+                if revised["listing_talk_revision"].item() is None:
+                    revised = revised.with_columns(
+                        pl.lit(None, dtype=pl.Datetime("us", "UTC")).alias(
+                            "listing_timestamp",
+                        ),
+                    )
+                store.checkpoint(runtime, members=revised)
+                after = store.load(runtime)
+                assert after["members"]["revision_id"].item() is None
+                assert after["members"]["article_timestamp"].item() is None
+                assert after["evidence"]["revision_id"].to_list() == [30]
+
+    @staticmethod
     def test_durable_retry_order_moves_past_failed_members() -> None:
         """Give unattempted pages priority after a process restart."""
         with TemporaryDirectory() as temporary:

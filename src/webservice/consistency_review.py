@@ -2,7 +2,7 @@
 
 Only an exact saved repair ID enters the Wikipedia URL. The optional
 Tampermonkey script reads the ready correction through Aranami's query
-API, checks the native edit form and opens a preview without saving.
+API, checks the native edit form and opens a diff without saving.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ def repair_links(repair: dict | None, interface: Interface) -> list[dict]:
         interface: Language for the visible prefill action.
 
     Returns:
-        One preview link, or no action without complete saved code.
+        One diff link, or no action without complete saved code.
     """
     if repair is None:
         return []

@@ -202,7 +202,7 @@ Install or update the Tampermonkey script linked on `/checks/`, then select
 finding. A new tab opens the talk page's source editor at section 0, with
 `aranami-check-job=<id>` selecting a saved proposal on Toolforge. The script
 fetches that proposal, replaces the complete lead and edit summary, and opens
-Wikipedia's native preview. Review and save the edit in Wikipedia.
+Wikipedia's native diff. Review and save the edit in Wikipedia.
 
 The query carries an opaque repair ID. The fixed Toolforge API resolves it
 to the already prepared source; neither wikitext nor an endpoint enters the link.
@@ -211,11 +211,15 @@ revision and timestamp. The script checks these against the current editor and
 original text, including existing drafts. Changed or unavailable observations
 remain untouched. It supports the native textarea and WikiEditor's textSelection
 integration on both `/wiki/Talk:...` and `/w/index.php` source-edit URLs.
-It invokes Preview once and leaves publication to the editor.
+It invokes Diff once and leaves publication to the editor. Prepared
+Article history calls use one parameter per line with aligned equals signs;
+the corrected template has no adjacent empty lines.
 
 Collection retains one bounded exact header and repair plan per checked talk
 revision. Runtime delegates span-based projection to updater before saving the
-website snapshot. The web layer only reads that result. Missing or ambiguous
+website snapshot. At startup, the hub reprojects matching saved plans while
+holding the output lease, so formatting upgrades need no new wiki requests.
+The web layer only reads that result. Missing or ambiguous
 destinations, targets outside section 0 and legacy notices whose metadata cannot
 be preserved do not receive an automatic action. Parameter snippets remain
 available for manual review. A separate bounded Parquet projection retains ready source and output pairs,

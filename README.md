@@ -1,8 +1,10 @@
 # Aranami
 
-This repository preserves the final Aranami v0.9.3 source. The v0.9.2 archive
+This repository preserves the final Aranami v0.9.4 source. The v0.9.2 archive
 consolidated unpublished development after v0.8.8; v0.9.3 adds the corrected
-consistency prefill workflow, direct pagination and memory display. Toolforge
+consistency prefill workflow, direct pagination and memory display. Version
+0.9.4 refines correction diffs, historical B-Class attribution and shared
+newsletter homepage data. Toolforge
 operation remains independent of this read-only GitHub archive.
 
 Aranami (荒波, “rough waves”) maintains Wikipedia project reports and provides
@@ -81,7 +83,7 @@ refetched. Project snapshots always come from new complete queries.
 [Architecture](docs/architecture.md) defines ownership, data and migration.
 The [documentation index](docs/README.md) links component references.
 
-The final source is retained on `trunk` and tagged `v0.9.3` in
+The final source is retained on `trunk` and tagged `v0.9.4` in
 [aranami-old](https://github.com/For-Each-Next/aranami-old).
 [CHANGELOG](CHANGELOG.md) records the completed releases.
 Historical records remain available through normal data readers after old-format
