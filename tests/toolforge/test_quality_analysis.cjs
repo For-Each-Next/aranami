@@ -5,6 +5,7 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 const root = path.join(__dirname, "../../src/webservice/public_html");
+const interfaceMessages = JSON.parse(fs.readFileSync(path.join(root, "../messages.json"), "utf8"));
 const shared = fs.readFileSync(path.join(root, "quality_authorship.js"), "utf8")
     .replaceAll("export function", "function");
 const analysis = fs.readFileSync(path.join(root, "quality_analysis.js"), "utf8")
@@ -146,6 +147,14 @@ test("external catalog origins are rejected before fetching and legacy inline da
 
 function detailFixture() {
     const handlers = {}, dialogs = new Map(), attempts = [];
+    class StatusElement {
+        constructor() {this.childNodes = []; this.attributes = new Map(); this.text = "";}
+        setAttribute(name, value) {this.attributes.set(name, value);}
+        getAttribute(name) {return this.attributes.get(name);}
+        replaceChildren(...nodes) {this.text = ""; this.childNodes = nodes;}
+        set textContent(value) {this.text = value; this.childNodes = [];}
+        get textContent() {return this.text + this.childNodes.map(node => node.textContent).join("");}
+    }
     class Dialog {
         constructor(id, invalid = false) {this.id = id; this.nodeName = "DIALOG"; this.dataset = {}; this.invalid = invalid; this.open = false;}
         querySelector() {return this.invalid ? {} : null;}
@@ -163,7 +172,7 @@ function detailFixture() {
             querySelectorAll: () => [],
             getElementById: id => dialogs.get(id),
             addEventListener(type, handler) {(handlers[type] ||= []).push(handler);},
-            createElement: () => ({setAttribute() {}, textContent: ""}),
+            createElement: () => new StatusElement(),
             body: {append(dialog) {dialogs.set(dialog.id, dialog);}},
         },
         DOMParser: class {parseFromString(value) {return {getElementById: id => value.id === id ? value : null};}},
@@ -172,7 +181,7 @@ function detailFixture() {
     function link(id) {
         return {
             href: `https://aranami.example/quality-analysis/resources/${id}.html#${id}`,
-            dataset: {qualityDetail: id}, isConnected: true, attributes: new Map(),
+            dataset: {qualityDetail: id}, textContent: "40 articles", isConnected: true, attributes: new Map(),
             hasAttribute(name) {return this.attributes.has(name);},
             setAttribute(name, value) {this.attributes.set(name, value);},
             removeAttribute(name) {this.attributes.delete(name);},
@@ -204,9 +213,17 @@ test("detail links preserve modified clicks, target navigation and missing-dialo
 test("detail loading is deduplicated, opens only the latest intent and restores focus", async () => {
     const view = detailFixture();
     const first = view.link("author-1"), second = view.link("author-2");
-    const click1 = view.click(first), repeated = view.click(first), click2 = view.click(second);
+    const click1 = view.click(first), repeated = view.click(first);
+    assert.equal(view.attempts.length, 1);
+    assert.equal(first.hasAttribute("aria-busy"), true);
+    assert.equal(first.qualityDetailStatus.childNodes.length, 2);
+    assert.equal(first.qualityDetailStatus.childNodes[0].className, "quality-detail-loading");
+    const click2 = view.click(second);
     assert.equal(view.attempts.length, 2);
     assert.equal(click1.event.prevented, true);
+    assert.equal(first.hasAttribute("aria-busy"), false);
+    assert.equal(first.qualityDetailStatus.textContent, "");
+    assert.equal(second.hasAttribute("aria-busy"), true);
     view.attempts[0].resolve(response(new view.Dialog("author-1"), "text/html"));
     await Promise.all([click1.complete, repeated.complete]);
     assert.equal(view.dialogs.size, 0);
@@ -215,6 +232,7 @@ test("detail loading is deduplicated, opens only the latest intent and restores 
     assert.equal(view.dialogs.get("author-2").open, true);
     assert.equal(view.dialogs.has("author-1"), false);
     assert.equal(second.hasAttribute("aria-busy"), false);
+    assert.equal(second.qualityDetailStatus.childNodes.length, 0);
     second.focused = false;
     view.handlers.close[0]({target: view.dialogs.get("author-2")});
     assert.equal(second.focused, true);
@@ -229,7 +247,9 @@ test("invalid detail HTML stays out of the document and the original link retrie
     await first.complete;
     assert.equal(view.dialogs.size, 0);
     assert.match(link.qualityDetailStatus.textContent, /could not load/);
+    assert.equal(link.qualityDetailStatus.childNodes.length, 0);
     const retry = view.click(link);
+    assert.equal(link.qualityDetailStatus.childNodes[0].className, "quality-detail-loading");
     view.attempts[1].resolve(response(new view.Dialog("author-1"), "text/html"));
     await retry.complete;
     assert.equal(view.dialogs.get("author-1").open, true);
@@ -240,10 +260,32 @@ test("Escape cancels a pending detail opening without inserting its response", a
     const view = detailFixture(), link = view.link("author-1");
     const pending = view.click(link);
     view.handlers.keydown[0]({key: "Escape"});
+    assert.equal(link.hasAttribute("aria-busy"), false);
+    assert.equal(link.qualityDetailStatus.childNodes.length, 0);
     view.attempts[0].resolve(response(new view.Dialog("author-1"), "text/html"));
     await pending.complete;
     assert.equal(view.dialogs.size, 0);
     assert.equal(link.qualityDetailStatus.textContent, "");
+});
+
+test("pending details keep the article count unchanged and show a spinner with a hidden localized announcement", async () => {
+    const view = detailFixture(), link = view.link("author-1");
+    link.textContent = "40条目";
+    link.dataset.loading = "正在加载作者详情…";
+    const pending = view.click(link);
+    assert.equal(link.textContent, "40条目");
+    assert.equal(link.hasAttribute("aria-busy"), true);
+    const [spinner, announcement] = link.qualityDetailStatus.childNodes;
+    assert.equal(link.qualityDetailStatus.getAttribute("role"), "status");
+    assert.equal(spinner.className, "quality-detail-loading");
+    assert.equal(spinner.getAttribute("aria-hidden"), "true");
+    assert.equal(spinner.textContent, "");
+    assert.equal(announcement.className, "visually-hidden");
+    assert.equal(announcement.textContent, "正在加载作者详情…");
+    view.attempts[0].resolve(response(new view.Dialog("author-1"), "text/html"));
+    await pending.complete;
+    assert.equal(link.textContent, "40条目");
+    assert.equal(link.qualityDetailStatus.childNodes.length, 0);
 });
 
 test("newly loaded details inherit the current cohort before table enhancement", () => {
@@ -383,6 +425,14 @@ test("catalog rows rebuild the prepared table's chips, talk links, evidence and 
     assert.equal(row.cells[6].className, "analysis-number");
     assert.equal(row.cells[6].textContent, "1,234 characters");
     assert.equal(row.cells[7].textContent, "12.5 kB");
+    article.listed_date = article.date_label = article.listed_oldid = article.review_url = null;
+    record.cells[4].dataset.sort = "";
+    metadata.labels.unknown_listing = "未取得日期";
+    const missingDate = view.context.articleElement(record).cells[4];
+    assert.equal(missingDate.textContent, "未取得日期");
+    assert.equal(missingDate.dataset.sort, "");
+    assert.equal(missingDate.childNodes[0].className, "context");
+    assert.equal(missingDate.cloneNode(true).textContent, "未取得日期");
 });
 
 test("contribution types match only explicit main or proven significant names, never arbitrary editors", () => {
@@ -483,21 +533,27 @@ test("violin quartiles use exact counted lengths and preserve the existing perce
     assert.equal(result.quantiles.length, 5);
     assert.equal(result.pages, 5);
     assert.equal(result.measured, 4);
-    assert.equal(context.violinSummary(result, "Total {pages}; measured {measured}; P25 {p25}; P50 {p50}; P75 {p75}"),
-        "Total 5; measured 4; P25 0.75; P50 1.5; P75 2.25");
+    assert.equal(result.minimum, 0);
+    assert.equal(result.maximum, 3);
+    assert.equal(context.violinSummary(result, "Total {pages}; measured {measured}; minimum {minimum}; P25 {p25}; P50 {p50}; P75 {p75}; maximum {maximum}"),
+        "Total 5; measured 4; minimum 0; P25 1; P50 2; P75 2; maximum 3");
 });
 
 test("violin missing measurements remain unknown while zero and constant quartiles stay observed", () => {
     const missing = context.combineCells([{pages: 2, measured: 0, histogram: [], density: []}]);
     assert.equal(missing.quartiles[0], null);
     assert.equal(missing.quartiles[1], null);
-    assert.equal(context.violinSummary(missing, "{pages}/{measured} P25 {p25} P50 {p50} P75 {p75}"), "2/0 P25 — P50 — P75 —");
+    assert.equal(missing.minimum, null);
+    assert.equal(missing.maximum, null);
+    assert.equal(context.violinSummary(missing, "{pages}/{measured} minimum {minimum} P25 {p25} P50 {p50} P75 {p75} maximum {maximum}"), "2/0 minimum — P25 — P50 — P75 — maximum —");
     for (const value of [0, 1200]) {
         const constant = context.combineCells([{pages: 3, measured: 3, histogram: [{value, count: 3}], density: []}]);
         assert.equal(constant.quartiles[0], value);
         assert.equal(constant.quantiles[2], value);
         assert.equal(constant.quartiles[1], value);
-        assert.doesNotMatch(context.violinSummary(constant, "P25 {p25} P50 {p50} P75 {p75}"), /—/);
+        assert.equal(constant.minimum, value);
+        assert.equal(constant.maximum, value);
+        assert.doesNotMatch(context.violinSummary(constant, "minimum {minimum} P25 {p25} P50 {p50} P75 {p75} maximum {maximum}"), /—/);
     }
 });
 
@@ -530,4 +586,134 @@ test("chart sorting handles title, grade, importance and default dates with stab
     const tied = context.orderChartArticles([same1, same2], 4, true, "en");
     assert.equal(tied[0], same1);
     assert.equal(tied[1], same2);
+});
+
+function chartPaginationFixture(locale, total) {
+    const {context, Element} = attributionFixture();
+    const body = new Element("tbody"), count = new Element("p"), heading = new Element("h3");
+    const status = new Element("span"), size = new Element("select"), pager = new Element("nav");
+    const dialog = new Element("dialog"), headings = Array.from({length: 6}, () => new Element("th"));
+    const controls = Object.fromEntries(["first", "prev", "next", "last"].map(name => [name, new Element("button")]));
+    const listeners = {};
+    size.value = "20";
+    pager.dataset.pageStatus = interfaceMessages["reports.page_status"][locale];
+    count.dataset.label = interfaceMessages["quality_analysis.chart_article_count"][locale];
+    pager.querySelector = selector => selector === "[data-chart-size]" ? size :
+        selector === "[data-chart-page-status]" ? status : controls[selector.match(/data-chart-(.+)\]/)[1]];
+    dialog.querySelector = selector => ({"[data-chart-article-rows]": body, "[data-chart-article-count]": count, "[data-chart-pager]": pager})[selector];
+    dialog.querySelectorAll = () => headings;
+    dialog.isConnected = true;
+    dialog.showModal = () => {dialog.open = true;};
+    context.document.documentElement.lang = locale;
+    context.document.getElementById = id => id === "analysis-chart-articles" ? dialog : heading;
+    context.document.querySelector = () => ({dataset: {sortCaption: "Sort by {caption}"}});
+    context.document.addEventListener = (name, handler) => {(listeners[name] ||= []).push(handler);};
+    const rows = Array.from({length: total}, (_, index) => {
+        const record = new Element("tr");
+        record.dataset = {title: `Article ${index + 1}`, grade: "GA", cohort: "1", year: "2026"};
+        for (const value of [index + 1, `Article ${index + 1}`, 4, 1, `2026-01-${String(index + 1).padStart(2, "0")}`, "Contributor", index + 1, 100]) {
+            const cell = new Element("td");
+            cell.dataset.sort = String(value);
+            cell.textContent = String(value);
+            record.append(cell);
+        }
+        return record;
+    });
+    context.initializeChartArticles(rows);
+    function open(grade = "GA") {
+        const link = {dataset: {chartGroup: "grade", chartValue: grade, chartLabel: grade}, focus() {}};
+        listeners.click[0]({target: {closest: () => link}, preventDefault() {}, stopPropagation() {}});
+    }
+    return {body, status, count, size, headings, controls, open};
+}
+
+test("four sector articles use each actual translated item-range template after size and sort changes", () => {
+    const expected = {en: "Showing results 1–4 of 4", "zh-hans": "第1–4项，共4项", "zh-hant": "第1–4項，共4項"};
+    for (const [locale, label] of Object.entries(expected)) {
+        const view = chartPaginationFixture(locale, 4);
+        view.open();
+        assert.equal(view.body.childNodes.length, 4);
+        assert.equal(view.status.textContent, label);
+        assert.equal(view.controls.next.disabled, true);
+        assert.doesNotMatch(view.status.textContent, /\{[^}]+\}/);
+        view.size.value = "50";
+        view.size.handlers.change[0]();
+        assert.equal(view.status.textContent, label);
+        view.headings[5].childNodes[0].handlers.click[0]();
+        assert.equal(view.status.textContent, label);
+        assert.equal(view.body.childNodes[0].cells[5].dataset.sort, "1");
+        view.headings[5].childNodes[0].handlers.click[0]();
+        assert.equal(view.status.textContent, label);
+        assert.equal(view.body.childNodes[0].cells[5].dataset.sort, "4");
+        view.open("B");
+        assert.equal(view.body.childNodes.length, 0);
+        const empty = {en: "Showing results 0–0 of 0", "zh-hans": "第0–0项，共0项", "zh-hant": "第0–0項，共0項"};
+        assert.equal(view.status.textContent, empty[locale]);
+    }
+});
+
+test("sector pagination reports the tail article range and sorting resets to its first item", () => {
+    const view = chartPaginationFixture("zh-hans", 24);
+    view.open();
+    assert.equal(view.status.textContent, "第1–20项，共24项");
+    view.controls.next.handlers.click[0]();
+    assert.equal(view.status.textContent, "第21–24项，共24项");
+    assert.equal(view.body.childNodes.length, 4);
+    assert.equal(view.body.childNodes[0].cells[0].textContent, "21");
+    view.headings[5].childNodes[0].handlers.click[0]();
+    assert.equal(view.status.textContent, "第1–20项，共24项");
+    assert.equal(view.body.childNodes[0].cells[0].textContent, "1");
+    assert.equal(view.body.childNodes[0].cells[5].dataset.sort, "1");
+    view.size.value = "50";
+    view.size.handlers.change[0]();
+    assert.equal(view.status.textContent, "第1–24项，共24项");
+    assert.equal(view.controls.next.disabled, true);
+    view.open();
+    assert.equal(view.headings[4].getAttribute("aria-sort"), "descending");
+    assert.equal(view.status.textContent, "第1–24项，共24项");
+});
+
+test("actual localized violin templates interpolate every count and digit-containing percentile token", () => {
+    for (const locale of ["en", "zh-hans", "zh-hant"]) {
+        const template = interfaceMessages["quality_analysis.violin_summary"][locale];
+        const summary = context.violinSummary({pages: 4, measured: 3, minimum: 0, maximum: 12345, quartiles: [.25, 2.75], quantiles: [null, null, 1.5]}, template);
+        assert.doesNotMatch(summary, /\{[^}]+\}/);
+        assert.equal(summary, template.replace("{pages}", "4").replace("{measured}", "3")
+            .replace("{minimum}", "0").replace("{p25}", "0").replace("{p50}", "2").replace("{p75}", "3").replace("{maximum}", "12,000"));
+        assert.match(summary, /12,000/);
+        const repeated = context.violinSummary({pages: 0, measured: 0, minimum: null, maximum: null, quartiles: [null, null], quantiles: [null, null, null]}, `${template} {p50}/{p50}`);
+        assert.doesNotMatch(repeated, /\{[^}]+\}/);
+        assert.ok(repeated.endsWith("—/—"));
+    }
+});
+
+test("violin extrema use observed lengths rather than density bounds or central percentiles", () => {
+    const result = context.combineCells([
+        {pages: 3, measured: 3, histogram: [{value: 0, count: 1}, {value: 1000, count: 2}], density: [{position: -100, density: .1}, {position: 15000, density: .1}]},
+        {pages: 2, measured: 2, histogram: [{value: 1000, count: 1}, {value: 12345, count: 1}, {value: 99999, count: 0}], density: []},
+    ]);
+    assert.equal(result.minimum, 0);
+    assert.equal(result.maximum, 12345);
+    assert.ok(result.quantiles[0] > result.minimum);
+    assert.ok(result.quantiles[4] < result.maximum);
+    assert.equal(context.violinSummary(result, "{minimum}/{p25}/{p50}/{p75}/{maximum}"), "0/1,000/1,000/1,000/12,000");
+});
+
+test("five-number tooltip rounds half lengths upward without changing the saved marker values", () => {
+    const statistics = {pages: 4, measured: 4, minimum: 0, maximum: 1234.5,
+        quartiles: [.5, 2.5], quantiles: [null, null, 1.5]};
+    assert.equal(context.violinSummary(statistics, "{minimum}/{p25}/{p50}/{p75}/{maximum}"), "0/1/2/3/1,200");
+    assert.deepEqual(statistics.quartiles, [.5, 2.5]);
+    assert.equal(statistics.quantiles[2], 1.5);
+    assert.equal(statistics.maximum, 1234.5);
+});
+
+test("tooltip lengths use two significant digits with integer display while article counts stay exact", () => {
+    const statistics = {pages: 15412, measured: 654, minimum: .5, maximum: 15412,
+        quartiles: [75.5, 654], quantiles: [null, null, 995]};
+    assert.equal(context.violinSummary(statistics, "{pages}/{measured}: {minimum}/{p25}/{p50}/{p75}/{maximum}"),
+        "15,412/654: 1/76/1,000/650/15,000");
+    assert.deepEqual(statistics.quartiles, [75.5, 654]);
+    assert.equal(statistics.maximum, 15412);
+    assert.equal(statistics.quantiles[2], 995);
 });

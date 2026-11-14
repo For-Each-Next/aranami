@@ -29,22 +29,8 @@
 .analysis-filters label:first-child { flex: 1 1 15rem; }
 .analysis-filters input, .analysis-filters select { min-height: 2.75rem; max-width: 100%; box-sizing: border-box; }
 .analysis-filters input { width: 100%; }
-.analysis-directory table td:nth-child(2) { min-width: 12rem; overflow-wrap: anywhere; }
-.analysis-directory table td:nth-child(5) { min-width: 8rem; }
-.analysis-directory table td:nth-child(6) { min-width: 10rem; overflow-wrap: anywhere; }
-/* Give ordinal columns room for three digits without taking article space. */
-.analysis-directory .ui-table__table th:first-child,
-.quality-authorship-table .ui-table__table th:first-child,
-.page-updates .analysis-chart-article-table th:first-child {
-    inline-size: 4em;
-    min-inline-size: 4em;
-    box-sizing: border-box;
-    text-align: end;
-    white-space: nowrap;
-}
-.analysis-directory .ui-table__table td:first-child,
-.quality-authorship-table .ui-table__table td:first-child,
-.page-updates .analysis-chart-article-table td:first-child { white-space: nowrap; }
+.analysis-directory .analysis-assessment-label { max-inline-size: 100%; }
+.analysis-directory td.analysis-number:not(:first-child) { white-space: normal; overflow-wrap: normal; }
 .analysis-talk, .analysis-review { white-space: nowrap; font-size: .9em; }
 .analysis-authorship-info { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5rem; min-height: 1.5rem; vertical-align: middle; border-radius: 50%; }
 .analysis-authorship-evidence { margin-block: 1rem 1.5rem; }
@@ -111,3 +97,6 @@
 .analysis-count { display: grid; grid-template-columns: minmax(6ch, 1fr) 6ch; gap: .5rem; align-items: baseline; justify-items: end; }
 .analysis-count small { color: #52696e; }
 [data-authorship-basis] { margin: -.5rem 0 1.5rem; }
+.quality-detail-loading { display: inline-block; inline-size: .9em; block-size: .9em; margin-inline-start: .4em; vertical-align: -.1em; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; animation: quality-detail-spin .8s linear infinite; }
+@keyframes quality-detail-spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .quality-detail-loading { animation: none; } }

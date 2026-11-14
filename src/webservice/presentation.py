@@ -268,7 +268,7 @@ class Interface:
         locale = self.message_locale
         message = translations.get(locale, translations["en"])
         return re.sub(
-            r"\{([a-z_]+)\}",
+            r"\{([a-z_][a-z0-9_]*)\}",
             lambda match: str(parameters.get(match[1], match[0])),
             message,
         )

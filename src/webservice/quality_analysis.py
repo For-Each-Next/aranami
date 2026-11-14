@@ -10,7 +10,7 @@ presentation values without acquiring sources or recalculating metrics.
 from __future__ import annotations
 
 from ipaddress import ip_address
-from math import ceil, cos, pi, sin
+from math import ceil, cos, floor, log10, pi, sin
 from operator import itemgetter
 from urllib.parse import quote
 
@@ -327,9 +327,11 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
                 "quality_analysis.violin_summary",
                 pages=_number(row.get("pages")),
                 measured=_number(row.get("measured")),
+                minimum=_percentile_label(points.get("minimum")),
                 p25=_percentile_label(points.get("p25")),
                 p50=_percentile_label(median),
                 p75=_percentile_label(points.get("p75")),
+                maximum=_percentile_label(points.get("maximum")),
             ),
             "violin_path": _violin_path(
                 row.get("density", []),
@@ -346,12 +348,17 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
 
 
 def _percentile_label(value: float | None) -> str:
-    """Format fractional percentiles separately from whole count labels.
+    """Round lengths to two significant digits without decimal places.
 
     Returns:
-        Up to two decimal places, or an explicit unknown marker.
+        A grouped integer with half values rounded up, or unknown.
     """
-    return "—" if value is None else f"{value:,.2f}".rstrip("0").rstrip(".")
+    if value is None:
+        return "—"
+    if value == 0:
+        return "0"
+    step = 10 ** max(0, floor(log10(value)) - 1)
+    return f"{floor(value / step + 0.5) * step:,}"
 
 
 def _articles(data: dict, interface: Interface) -> list[dict]:

@@ -81,23 +81,31 @@ export function combineCells(cells) {
         for (const item of cell.histogram) histogram.set(item.value, (histogram.get(item.value) || 0) + item.count);
         for (const item of cell.density) points.set(item.position, (points.get(item.position) || 0) + item.density);
     }
-    const maximum = Math.max(0, ...points.values()) || 1;
+    const peakDensity = Math.max(0, ...points.values()) || 1;
+    const observed = [...histogram].filter(([, count]) => count > 0).map(([value]) => value);
     return {
         pages, measured,
+        minimum: observed.length ? Math.min(...observed) : null,
+        maximum: observed.length ? Math.max(...observed) : null,
         quantiles: [.025, .16, .5, .84, .975].map(p => histogramQuantile(histogram, p)),
         quartiles: [.25, .75].map(p => histogramQuantile(histogram, p)),
-        density: [...points].sort((a, b) => a[0] - b[0]).map(([x, y]) => [x, y / maximum]),
+        density: [...points].sort((a, b) => a[0] - b[0]).map(([x, y]) => [x, y / peakDensity]),
     };
 }
 
-/** Explain both the population and exact length percentiles for every violin. */
+/** Keep article counts exact while rounding the five length statistics for display. */
 export function violinSummary(statistics, template) {
-    const number = value => value === null ? "—" : value.toLocaleString("en-US", {maximumFractionDigits: 2});
-    const values = {
-        pages: number(statistics.pages), measured: number(statistics.measured),
-        p25: number(statistics.quartiles[0]), p50: number(statistics.quantiles[2]), p75: number(statistics.quartiles[1]),
+    const length = value => {
+        if (value === null) return "—";
+        const step = value > 0 ? 10 ** Math.max(0, Math.floor(Math.log10(value)) - 1) : 1;
+        return (Math.round(value / step) * step).toLocaleString("en-US", {maximumFractionDigits: 0});
     };
-    return template.replace(/\{(pages|measured|p25|p50|p75)\}/g, (_, key) => values[key]);
+    const values = {
+        pages: statistics.pages.toLocaleString("en-US"), measured: statistics.measured.toLocaleString("en-US"),
+        minimum: length(statistics.minimum), maximum: length(statistics.maximum),
+        p25: length(statistics.quartiles[0]), p50: length(statistics.quantiles[2]), p75: length(statistics.quartiles[1]),
+    };
+    return template.replace(/\{(pages|measured|minimum|p25|p50|p75|maximum)\}/g, (_, key) => values[key]);
 }
 
 /** Keep year-table columns selected and the legend limited to plotted categories. */
@@ -337,7 +345,7 @@ export function initializeQualityMatrix() {
             swatch.append(svgNode("rect", {width: 12, height: 12, fill: option.color})); caption.append(swatch, label); heading.append(caption);
             const statistics = combineCells(selected.filter(cell => cell[dimension] === option.value));
             const maximum = Math.max(1, ...statistics.density.map(point => point[0]), ...statistics.quantiles.filter(value => value !== null));
-            const summary = violinSummary(statistics, data.labels.violin_summary || "Total: {pages}; measured: {measured}; P25: {p25}; P50: {p50}; P75: {p75}");
+            const summary = violinSummary(statistics, data.labels.violin_summary || "Total: {pages}; measured: {measured}; minimum: {minimum}; P25: {p25}; P50: {p50}; P75: {p75}; maximum: {maximum}");
             const mini = svgNode("svg", {viewBox:"-10 0 1020 60", preserveAspectRatio:"none", class:"analysis-mini-violin", "data-analysis-violin":option.value, role:"img", "aria-label":`${option.label}: ${summary}`});
             mini.append(svgNode("title", {}, summary), svgNode("line", {x1:0,x2:1000,y1:30,y2:30,class:"analysis-violin-track"}));
             if (statistics.density.length) {

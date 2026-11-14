@@ -70,11 +70,14 @@ Miniature horizontal violin charts occupy the third column of the quality
 and importance distribution tables, beside each count and percentage. Horizontal
 position represents prose length; the mirrored upper and lower contours show
 density. Two dots mark P25 and P75, and the center line marks the median P50.
-Hover text and accessible labels give total and measured article counts and
-all three percentile lengths. Percentiles use linear interpolation over known
-length observations; missing lengths do not become zero. Initial and filtered
-charts use the same calculation. NA and Bottom importance groups are omitted, and A/AL groups
-hide when their current count is zero. Central
+Hover text and accessible labels give total and measured article counts, the
+observed minimum and maximum, and all three percentile lengths. Percentiles
+use linear interpolation over known length observations. Displayed lengths
+use two significant digits, rounded to integers with thousands separators;
+article counts and plotted positions retain their exact values. Missing
+lengths do not become zero. Initial and filtered charts use the same calculation.
+NA and Bottom importance groups are omitted, and A/AL groups hide when their
+current count is zero. Central
 68% and 95% intervals are linear empirical 16th–84th and 2.5th–97.5th
 percentiles. They describe the measured current cohort rather than minimum
 assessment requirements. Measured zero differs from an unknown measurement.
@@ -191,4 +194,7 @@ button styling. Contributor tables display one total article count without
 quality-subset parentheses. Three-column article-contribution dialogs use a
 narrower width. Article, author and chart-dialog ordinal columns use about
 four em, with enough space for three-digit ranks. Page-size values are plain
-text.
+text. Ordinals align right; compact assessment and length columns reserve
+more space for article titles. Missing rating dates are labeled as not obtained,
+including contributor details. Detail downloads keep the count link and show
+a compact spinner with accessible loading status and visible failure feedback.

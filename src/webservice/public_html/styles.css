@@ -1581,14 +1581,6 @@ ul.consistency-cards {
     min-inline-size: 0;
 }
 
-.quality-authorship-table .ui-table__table {
-    min-inline-size: 38rem;
-}
-
-.quality-authorship-table .ui-table__table th:first-child {
-    inline-size: 3rem;
-}
-
 .quality-authorship-table td {
     overflow-wrap: anywhere;
 }
@@ -1628,6 +1620,66 @@ ul.consistency-cards {
 
 .page-updates th, .page-updates td, .page-updates time {
     white-space: normal;
+}
+
+/* Reserve compact metadata columns and give titles the remaining space. */
+table.quality-data-table {
+    table-layout: fixed;
+    min-inline-size: 40rem;
+}
+
+table.quality-article-directory {
+    min-inline-size: 72em;
+}
+
+table.quality-chart-articles {
+    min-inline-size: 52rem;
+}
+
+.quality-data-table .quality-column-ordinal {
+    inline-size: 4em;
+}
+
+.quality-data-table .quality-column-grade,
+.quality-data-table .quality-column-importance,
+.quality-data-table .quality-column-size {
+    inline-size: 6.5em;
+}
+
+.quality-data-table .quality-column-listed {
+    inline-size: 10em;
+}
+
+.quality-data-table .quality-column-authors {
+    inline-size: 10.5em;
+}
+
+.quality-data-table .quality-column-prose,
+.quality-data-table .quality-column-count {
+    inline-size: 8em;
+}
+
+.quality-author-articles .quality-column-listed,
+.quality-data-table .quality-column-active {
+    inline-size: 12em;
+}
+
+.quality-data-table th:first-child {
+    inline-size: 4em;
+    min-inline-size: 4em;
+    box-sizing: border-box;
+    text-align: end;
+}
+
+.quality-data-table th:first-child,
+.quality-data-table td:first-child {
+    white-space: nowrap;
+    text-align: end;
+}
+
+.quality-data-table th,
+.quality-data-table td {
+    overflow-wrap: anywhere;
 }
 
 .table-hint {

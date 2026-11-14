@@ -56,8 +56,17 @@ export function initializeQualityDetails() {
     if (detailHandlersInstalled) return;
     detailHandlersInstalled = true;
     let intent = 0;
+    let pendingIndicator = null;
     const openers = new WeakMap();
-    document.addEventListener("keydown", event => {if (event.key === "Escape") intent++;});
+    function clearPendingIndicator() {
+        if (!pendingIndicator) return;
+        pendingIndicator.link.removeAttribute("aria-busy");
+        pendingIndicator.status.textContent = "";
+        pendingIndicator = null;
+    }
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape") {intent++; clearPendingIndicator();}
+    });
     document.addEventListener("close", event => {
         const opener = openers.get(event.target);
         if (opener?.isConnected) opener.focus();
@@ -73,6 +82,7 @@ export function initializeQualityDetails() {
         if (url.origin !== location.origin) return;
         event.preventDefault();
         event.stopPropagation();
+        clearPendingIndicator();
         const request = ++intent;
         const id = link.dataset.qualityDetail;
         link.setAttribute("aria-busy", "true");
@@ -84,7 +94,15 @@ export function initializeQualityDetails() {
             link.after(status);
             link.qualityDetailStatus = status;
         }
-        status.textContent = ` ${link.dataset.loading || "Loading details…"}`;
+        const indicator = document.createElement("span");
+        indicator.className = "quality-detail-loading";
+        indicator.setAttribute("aria-hidden", "true");
+        const announcement = document.createElement("span");
+        announcement.className = "visually-hidden";
+        announcement.textContent = link.dataset.loading || "Loading details…";
+        status.replaceChildren(indicator, announcement);
+        pendingIndicator = {link, status, request};
+        let opened = false;
         try {
             const incoming = await loadQualityDetail(url.href, id);
             if (request !== intent || !link.isConnected) return;
@@ -101,12 +119,16 @@ export function initializeQualityDetails() {
             openers.set(dialog, link);
             link.focus();
             if (!dialog.open) dialog.showModal();
+            opened = true;
         } catch {
             if (request === intent && link.isConnected)
                 status.textContent = ` ${link.dataset.loadFailed || "Details could not load. Try again or open the link in a new tab."}`;
         } finally {
-            link.removeAttribute("aria-busy");
-            if (request !== intent || document.getElementById(id)?.open) status.textContent = "";
+            if (request === intent) {
+                link.removeAttribute("aria-busy");
+                if (opened || !link.isConnected) status.textContent = "";
+                if (pendingIndicator?.request === request) pendingIndicator = null;
+            }
         }
     }, true);
     // Legacy pages retain inline dialogs; enhance each only when it is opened.

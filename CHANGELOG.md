@@ -5,6 +5,22 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.10 (2026-11-14 10:25 UTC)
+
+Overview: Corrected article-statistics pagination and percentile labels, and
+gave article titles more room in tables and dialogs.
+
+- Displayed item ranges and article totals in chart dialogs instead of
+  unresolved placeholders and page totals.
+- Resolved numbered percentile placeholders in localized chart tooltips,
+  showing five length statistics with two significant digits and exact counts.
+- Widened article titles while keeping assessment and length columns compact
+  across directories, chart dialogs and contributor details, with aligned ranks.
+- Replaced visible author-detail loading text with a compact spinner while
+  retaining accessible status and visible failure feedback.
+- Labeled unavailable rating dates explicitly instead of presenting current
+  revision attribution as a date.
+
 ### 0.9.9 (2026-11-14 09:49 UTC)
 
 Overview: Reduced the initial article-statistics payload and loaded contributor

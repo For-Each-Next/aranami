@@ -109,10 +109,11 @@ def quartiles(
     grades: list[str],
     last_year: int,
 ) -> list[dict]:
-    """Derive default-cohort quartiles from saved weighted histograms.
+    """Derive cohort quartiles and extrema from saved histograms.
 
     Returns:
-        P25 and P75 for each measured grade and importance group.
+        P25, P75 and exact observed minimum/maximum for each measured
+        grade and importance group.
         Missing histograms produce no percentile observations.
     """
     if not saved:
@@ -152,6 +153,8 @@ def quartiles(
             )
             .group_by(dimension)
             .agg(
+                pl.col("value").min().alias("minimum"),
+                pl.col("value").max().alias("maximum"),
                 _weighted_quantile(0.25).alias("p25"),
                 _weighted_quantile(0.75).alias("p75"),
             )

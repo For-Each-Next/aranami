@@ -11,6 +11,7 @@ import unittest
 from hashlib import sha256
 from html import unescape
 from http import HTTPStatus
+from math import isclose
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -24,7 +25,7 @@ from test_quality_authorship import (
 from data.articles import quality_pages
 from data.articles.quality_selection import quartiles
 from webservice.http import encoded_response
-from webservice.pages import render_quality_analysis
+from webservice.pages import render_quality_analysis, render_quality_authorship
 from webservice.presentation import Interface
 from webservice.quality_analysis import (
     main_author_directory,
@@ -96,6 +97,52 @@ def _resource(content: str) -> str:
 
 class QualityResourcePresentationTests(unittest.TestCase):
     """Keep saved results while deferring optional payloads."""
+
+    @staticmethod
+    def test_missing_listing_dates_are_unlinked_in_every_directory() -> None:
+        """Never replace a missing rating date with a revision link."""
+        data = _catalog_fixture()
+        data["analysis"]["selection"]["articles"][0]["listed_date"] = None
+        data["authorship"]["authors"][0]["articles"][0]["date"] = None
+        for locale, label in (
+            ("en", "Date not obtained"),
+            ("zh-hans", "未取得日期"),
+            ("zh-hant", "未取得日期"),
+        ):
+            resources = {}
+            output = render_quality_analysis(
+                data,
+                None,
+                None,
+                locale,
+                _NOW,
+                resources=resources,
+            )
+            detail = next(
+                content
+                for name, content in resources.items()
+                if name.startswith("author-quality-author-1-")
+            )
+            legacy = render_quality_authorship(
+                data["authorship"],
+                None,
+                None,
+                locale,
+                _NOW,
+            )
+            missing_cell = (
+                '<td data-sort=""><span class="context">' + label + "</span>"
+            )
+            assert missing_cell in output
+            assert missing_cell in detail
+            assert missing_cell in legacy
+            assert 'oldid=777"' not in detail
+            catalog = next(
+                json.loads(content)
+                for name, content in resources.items()
+                if name.endswith(".json")
+            )
+            assert catalog["labels"]["unknown_listing"] == label
 
     @staticmethod
     def test_catalog_and_author_details_leave_the_initial_document() -> None:
@@ -498,7 +545,7 @@ class QualityResourcePresentationTests(unittest.TestCase):
     def test_quartiles_use_weighted_selected_histograms_and_keep_zero() -> (
         None
     ):
-        """Preserve weighted quartiles, zero and missing values."""
+        """Keep exact extrema, weighted quartiles and missing data."""
         cells = [
             {
                 "grade": "FA",
@@ -534,12 +581,17 @@ class QualityResourcePresentationTests(unittest.TestCase):
             },
         ]
         observed = {
-            (row["group"], row[row["group"]]): (row["p25"], row["p75"])
+            (row["group"], row[row["group"]]): (
+                row["minimum"],
+                row["p25"],
+                row["p75"],
+                row["maximum"],
+            )
             for row in quartiles(cells, ["FA", "GA", "FL"], 2026)
         }
-        assert observed["grade", "FA"] == (7.5, 25.0)
-        assert observed["importance", "High"] == (7.5, 25.0)
-        assert observed["grade", "GA"] == (0.0, 0.0)
+        assert observed["grade", "FA"] == (0, 7.5, 25.0, 40)
+        assert observed["importance", "High"] == (0, 7.5, 25.0, 40)
+        assert observed["grade", "GA"] == (0, 0.0, 0.0, 0)
         assert ("grade", "FL") not in observed
         assert ("grade", "B") not in observed
         data = analysis_fixture()
@@ -558,7 +610,11 @@ class QualityResourcePresentationTests(unittest.TestCase):
                 "pages": 5,
                 "measured": 4,
                 "median_characters": 15.0,
-                "central_95_high": 40,
+                "central_95_high": 35,
+                "density": [
+                    {"position": 5, "density": 0.2},
+                    {"position": 80, "density": 0.1},
+                ],
             },
         ]
         for locale in ("en", "zh-hans", "zh-hant"):
@@ -566,17 +622,19 @@ class QualityResourcePresentationTests(unittest.TestCase):
             result = quality_analysis_context(data, interface)
             length = result["quality_analysis"]["lengths"][0]
             assert length["quartiles"] == [
-                {"percentile": 25, "value": 7.5, "x": 187.5},
-                {"percentile": 75, "value": 25.0, "x": 625.0},
+                {"percentile": 25, "value": 7.5, "x": 93.75},
+                {"percentile": 75, "value": 25.0, "x": 312.5},
             ]
-            assert length["median_x"] == 375
+            assert isclose(length["median_x"], 187.5)
             assert length["summary"] == interface.text(
                 "quality_analysis.violin_summary",
                 pages="5",
                 measured="4",
-                p25="7.5",
+                minimum="0",
+                p25="8",
                 p50="15",
                 p75="25",
+                maximum="40",
             )
             data["selection"]["defaults"][0].update(
                 {
@@ -592,8 +650,114 @@ class QualityResourcePresentationTests(unittest.TestCase):
             output = render_quality_analysis(data, None, None, locale, _NOW)
             assert 'data-percentile="25"' in output
             assert 'data-percentile="75"' in output
-            assert 'x1="375.0" x2="375.0"' in output
+            assert 'x1="187.5" x2="187.5"' in output
             assert length["summary"] in output
+
+    @staticmethod
+    def test_length_labels_round_half_up_without_changing_quantiles() -> None:
+        """Round labels and retain exact marker observations."""
+        for lower in (0, 75):
+            data = analysis_fixture()
+            data["selection"] = {
+                "cells": [
+                    {
+                        "grade": "FA",
+                        "importance": "High",
+                        "year": 2026,
+                        "histogram": [
+                            {"value": lower, "count": 1},
+                            {"value": lower + 1, "count": 1},
+                        ],
+                    },
+                ],
+                "last_year": 2026,
+                "articles": data["articles"],
+                "defaults": [{"articles": data["articles"]}],
+                "authors": [],
+            }
+            data["lengths"] = [
+                {
+                    "group": "grade",
+                    "grade": "FA",
+                    "importance": None,
+                    "pages": 3,
+                    "measured": 2,
+                    "median_characters": lower + 0.5,
+                    "central_95_high": lower + 1,
+                },
+            ]
+            for locale in ("en", "zh-hans", "zh-hant"):
+                interface = Interface(locale)
+                result = quality_analysis_context(data, interface)
+                length = result["quality_analysis"]["lengths"][0]
+                assert [point["value"] for point in length["quartiles"]] == [
+                    lower + 0.25,
+                    lower + 0.75,
+                ]
+                assert isclose(length["median_characters"], lower + 0.5)
+                assert length["summary"] == interface.text(
+                    "quality_analysis.violin_summary",
+                    pages="3",
+                    measured="2",
+                    minimum=str(lower),
+                    p25=str(lower),
+                    p50=str(lower + 1),
+                    p75=str(lower + 1),
+                    maximum=str(lower + 1),
+                )
+
+    @staticmethod
+    def test_five_number_summary_formats_zero_unknown_and_thousands() -> None:
+        """Distinguish unknown extrema, exact zero and known lengths."""
+        for value, label in (
+            (None, "—"),
+            (0, "0"),
+            (654, "650"),
+            (1234, "1,200"),
+            (15412, "15,000"),
+        ):
+            measured = 654 if value is not None else 0
+            data = analysis_fixture()
+            data["selection"] = {
+                "cells": [
+                    {
+                        "grade": "FA",
+                        "importance": "High",
+                        "year": 2026,
+                        "histogram": [{"value": value, "count": measured}]
+                        if value is not None
+                        else [],
+                    },
+                ],
+                "last_year": 2026,
+                "articles": data["articles"],
+                "defaults": [{"articles": data["articles"]}],
+                "authors": [],
+            }
+            data["lengths"] = [
+                {
+                    "group": "grade",
+                    "grade": "FA",
+                    "importance": None,
+                    "pages": 15412,
+                    "measured": measured,
+                    "median_characters": value,
+                },
+            ]
+            for locale in ("en", "zh-hans", "zh-hant"):
+                interface = Interface(locale)
+                result = quality_analysis_context(data, interface)
+                summary = result["quality_analysis"]["lengths"][0]["summary"]
+                assert summary == interface.text(
+                    "quality_analysis.violin_summary",
+                    pages="15,412",
+                    measured=str(measured),
+                    minimum=label,
+                    p25=label,
+                    p50=label,
+                    p75=label,
+                    maximum=label,
+                )
 
 
 class QualityResourceHTTPTests(unittest.TestCase):

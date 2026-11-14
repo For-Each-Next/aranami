@@ -1370,13 +1370,39 @@ class PresentationTests(unittest.TestCase):
         for translations in catalog().values():
             assert list(translations) == ["en", "zh-hans", "zh-hant"]
             parameters = sorted(
-                re.findall(r"\{([a-z_]+)\}", translations["en"]),
+                re.findall(r"\{([a-z_][a-z0-9_]*)\}", translations["en"]),
             )
             for message in translations.values():
                 assert message
                 assert (
-                    sorted(re.findall(r"\{([a-z_]+)\}", message)) == parameters
+                    sorted(re.findall(r"\{([a-z_][a-z0-9_]*)\}", message))
+                    == parameters
                 )
+
+    def test_percentile_placeholders_accept_digits_and_preserve_values(
+        self,
+    ) -> None:
+        """Replace percentile names while preserving supplied values."""
+        values = {
+            "pages": 4,
+            "measured": 3,
+            "minimum": "0",
+            "p25": "0",
+            "p50": "1,234.5",
+            "p75": "—",
+            "maximum": "9,876",
+        }
+        key = "quality_analysis.violin_summary"
+        for locale in ("en", "zh-hans", "zh-hant"):
+            with self.subTest(locale=locale):
+                interface = Interface(locale)
+                assert interface.text(key, **values) == catalog()[key][
+                    locale
+                ].format(**values)
+                assert interface.text(key) == catalog()[key][locale]
+                partial = interface.text(key, p50="<span>{p75}</span>")
+                assert "<span>{p75}</span>" in partial
+                assert "{p25}" in partial
 
     def test_safe_html_and_links(self) -> None:
         """Escape data once and reject executable source links."""

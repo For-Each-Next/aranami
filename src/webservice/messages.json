@@ -4620,9 +4620,9 @@
     "zh-hant": "全選"
   },
   "quality_analysis.unknown_listing": {
-    "en": "Not obtained",
-    "zh-hans": "未获取",
-    "zh-hant": "未取得"
+    "en": "Date not obtained",
+    "zh-hans": "未取得日期",
+    "zh-hant": "未取得日期"
   },
   "quality_authorship.author_all_articles": {
     "en": "Articles by {name}",
@@ -4695,9 +4695,9 @@
     "zh-hant": "重大貢獻者"
   },
   "quality_analysis.violin_summary": {
-    "en": "Total articles: {pages}; measured: {measured}. P25: {p25} characters (longer than about 25%); P50: {p50} characters (median); P75: {p75} characters (longer than about 75%).",
-    "zh-hans": "条目总数：{pages}；已测量：{measured}。P25：{p25}字（比约25%的已测量条目长）；P50：{p50}字（中位数）；P75：{p75}字（比约75%的已测量条目长）。",
-    "zh-hant": "條目總數：{pages}；已測量：{measured}。P25：{p25}字（比約25%的已測量條目長）；P50：{p50}字（中位數）；P75：{p75}字（比約75%的已測量條目長）。"
+    "en": "{pages} articles in total; lengths collected for {measured} articles: shortest length: {minimum} characters; lower quartile (P25): {p25} characters; median (P50): {p50} characters; upper quartile (P75): {p75} characters; longest length: {maximum} characters.",
+    "zh-hans": "共{pages}篇条目，{measured}篇条目已采集字数：最短字数：{minimum}；下四分位字数：{p25}；中位字数：{p50}；上四分位字数：{p75}；最长字数：{maximum}。",
+    "zh-hant": "共{pages}篇條目，{measured}篇條目已採集字數：最短字數：{minimum}；下四分位字數：{p25}；中位字數：{p50}；上四分位字數：{p75}；最長字數：{maximum}。"
   },
   "quality_analysis.anonymous_user": {
     "en": "Anonymous user",

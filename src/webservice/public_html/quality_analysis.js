@@ -239,19 +239,23 @@ function initializeChartArticles(rows) {
     function render() {
         const size = Number(sizeControl.value), pages = pageCount();
         page = Math.max(1, Math.min(page, pages));
+        const start = (page - 1) * size;
         const ordered = orderChartArticles(selected, column, descending, document.documentElement.lang);
-        body.replaceChildren(...ordered.slice((page - 1) * size, page * size).map((source, index) => {
+        body.replaceChildren(...ordered.slice(start, start + size).map((source, index) => {
             const row = document.createElement("tr");
             row.dataset.chartArticle = source.dataset.title;
             const original = articleElement(source);
             for (const column of [0, 1, 2, 3, 4, 6]) {
                 const cell = original.cells[column].cloneNode(true);
-                if (!column) cell.textContent = String((page - 1) * size + index + 1);
+                if (!column) cell.textContent = String(start + index + 1);
                 row.append(cell);
             }
             return row;
         }));
-        pager.querySelector("[data-chart-page-status]").textContent = pager.dataset.pageStatus.replace("{page}", String(page)).replace("{total}", String(pages));
+        pager.querySelector("[data-chart-page-status]").textContent = pager.dataset.pageStatus
+            .replace("{start}", String(selected.length ? start + 1 : 0))
+            .replace("{end}", String(Math.min(start + size, selected.length)))
+            .replace("{total}", String(selected.length));
         for (const key of Object.keys(actions)) pager.querySelector(`[data-chart-${key}]`).disabled = ["first", "prev"].includes(key) ? page === 1 : page === pages;
         headings.forEach((heading, index) => {
             if (index) heading.setAttribute("aria-sort", index === column ? (descending ? "descending" : "ascending") : "none");
