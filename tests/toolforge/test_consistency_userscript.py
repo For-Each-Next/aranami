@@ -29,7 +29,7 @@ class TestConsistencyUserscript(TestCase):
 
     @staticmethod
     def test_query_links_select_only_the_current_talk_lead() -> None:
-        """Put an opaque repair ID in a native section-zero edit URL."""
+        """Put the checked talk revision in a section-zero edit URL."""
         snapshot = consistency_snapshot()
         result = snapshot["consistency"]
         repair_id = next(iter(result["section0_repairs"]))
@@ -47,7 +47,7 @@ class TestConsistencyUserscript(TestCase):
             assert parse_qs(target.query) == {
                 "action": ["edit"],
                 "section": ["0"],
-                "aranami-check-job": [repair_id],
+                "aranami-check-job": [str(repair["revision_id"])],
             }
             assert action["label"] == interface.text("consistency.prefill")
         assert repair_links(None, Interface("en")) == []
@@ -149,7 +149,11 @@ class TestConsistencyUserscript(TestCase):
                 client = TestClient(server.create_app(runtime))
                 response = client.get(
                     "/api/consistency-repair",
-                    params={"repair": repair_id},
+                    params={
+                        "repair": str(
+                            result["repair_inputs"][repair_id]["revision_id"],
+                        ),
+                    },
                 )
                 assert response.status_code == HTTPStatus.OK
                 assert response.json() == {"schema": 1, "repair": expected}
@@ -160,13 +164,21 @@ class TestConsistencyUserscript(TestCase):
                 )
                 head = client.head(
                     "/api/consistency-repair",
-                    params={"repair": repair_id},
+                    params={
+                        "repair": str(
+                            result["repair_inputs"][repair_id]["revision_id"],
+                        ),
+                    },
                 )
                 assert head.status_code == HTTPStatus.OK
                 assert head.content == b""
                 denied = client.post(
                     "/api/consistency-repair",
-                    params={"repair": repair_id},
+                    params={
+                        "repair": str(
+                            result["repair_inputs"][repair_id]["revision_id"],
+                        ),
+                    },
                 )
                 assert denied.status_code == HTTPStatus.METHOD_NOT_ALLOWED
                 assert saved.call_count == 2
@@ -174,8 +186,8 @@ class TestConsistencyUserscript(TestCase):
 
     @staticmethod
     def test_query_rejects_caller_payloads_and_duplicate_selectors() -> None:
-        """Accept one lower-hex identity before reading saved data."""
-        repair_id = "a" * 64
+        """Accept one decimal revision before reading saved data."""
+        repair_id = "201"
         with (
             TemporaryDirectory() as directory,
             patch.object(server._PublicViews, "_dashboard") as saved,
@@ -185,7 +197,12 @@ class TestConsistencyUserscript(TestCase):
                 "",
                 "repair=",
                 "repair=bad",
-                "repair=" + "z" * 64,
+                "repair=" + "a" * 64,
+                "repair=0",
+                "repair=0201",
+                "repair=-1",
+                "repair=1.0",
+                "repair=" + str(2**63),
                 f"repair={repair_id}&repair={repair_id}",
                 f"repair={repair_id}&text=untrusted",
                 f"repair={repair_id}&url=https://example.com",
@@ -212,17 +229,19 @@ class TestConsistencyUserscript(TestCase):
         ):
             client = TestClient(server.create_app(Path(directory)))
             unknown = client.get(
-                "/api/consistency-repair?repair=" + "a" * 64,
+                "/api/consistency-repair?repair=999",
             )
             assert unknown.status_code == HTTPStatus.NOT_FOUND
             result["section0_repairs"][repair_id]["edit_summary"] = ""
             invalid = client.get(
-                "/api/consistency-repair?repair=" + repair_id,
+                "/api/consistency-repair?repair="
+                + str(result["repair_inputs"][repair_id]["revision_id"]),
             )
             assert invalid.status_code == HTTPStatus.NOT_FOUND
             result["section0_repairs"] = {}
             pending = client.get(
-                "/api/consistency-repair?repair=" + repair_id,
+                "/api/consistency-repair?repair="
+                + str(result["repair_inputs"][repair_id]["revision_id"]),
             )
             assert pending.status_code == HTTPStatus.NOT_FOUND
 

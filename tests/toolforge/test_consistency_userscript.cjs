@@ -8,7 +8,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "../../src/webservice/public_html/consistency-repair.user.js"), "utf8");
-const id = "a".repeat(64);
+const id = "201";
 const original = "{{WikiProject Video games|class=GA}}\n<!-- keep -->\n{{Article history|currentstatus=GA}}\n";
 const fixed = original.replace("|currentstatus=GA", "|currentstatus=GA|maindateGA=2026-11-02");
 const payload = () => ({schema: 1, repair: {
@@ -72,7 +72,9 @@ test("only explicit current talk-page section-zero links activate", async () => 
   for (const tail of ["", `?title=Talk%3AGame&action=edit&section=1&aranami-check-job=${id}`,
     `?title=Talk%3AGame&action=edit&section=0&oldid=201&aranami-check-job=${id}`,
     `?title=Talk%3AGame&action=edit&section=0&aranami-check-job=${id}&aranami-check-job=${id}`,
-    "?title=Talk%3AGame&action=edit&section=0&aranami-check-job=untrusted"]) {
+    "?title=Talk%3AGame&action=edit&section=0&aranami-check-job=untrusted",
+    ...["0", "0201", "-201", "201.0", "2e2", "9007199254740992", "1".repeat(20), "a".repeat(64)].map(value =>
+      `?title=Talk%3AGame&action=edit&section=0&aranami-check-job=${value}`)]) {
     const {calls} = await run({url: "https://zh.wikipedia.org/w/index.php" + tail});
     assert.equal(calls.requests.length, 0);
     assert.equal(calls.preview, 0);
@@ -125,17 +127,34 @@ test("saved source guards reject stale heads, wrong destinations and modified dr
   }
 });
 
-test("only CRLF and one native appended newline are source equivalents", async () => {
-  for (const initialText of [original.replaceAll("\n", "\r\n"), original + "\n"]) {
+test("CRLF, native section trimming and one appended newline are source equivalents", async () => {
+  for (const initialText of [original.replaceAll("\n", "\r\n"), original + "\n", original.trimEnd()]) {
     const {calls, controls} = await run({initialText});
     assert.equal(calls.diff, 1);
     assert.equal(controls.wpTextbox1.value, fixed);
   }
 });
 
+test("native section extraction removes saved boundary whitespace without accepting altered drafts", async () => {
+  const saved = original + " \t\n\n";
+  for (const initialText of [original.trimEnd(), original.trimEnd() + "\n", saved, saved + "\n"]) {
+    const repair = {...payload().repair, original_text: saved};
+    const {calls, controls} = await run({initialText, payload: {schema: 1, repair}});
+    assert.equal(calls.diff, 1);
+    assert.equal(controls.wpTextbox1.value, fixed);
+    assert.equal(calls.save, 0);
+  }
+  for (const initialText of [" " + original.trimEnd(), original.trimEnd() + " ", original.trimEnd().replace("<!-- keep -->", "<!-- changed -->")]) {
+    const repair = {...payload().repair, original_text: saved};
+    const {calls, controls} = await run({initialText, payload: {schema: 1, repair}});
+    assert.equal(calls.changes.length + calls.diff + calls.save, 0);
+    assert.equal(controls.wpTextbox1.value, initialText);
+  }
+});
+
 test("invalid saved API responses and transport failures cannot fill or submit", async () => {
   const invalid = [null, {}, {...payload(), schema: 2}, ...[
-    {id: "b".repeat(64)}, {revision_id: "201"}, {talk_page_id: 0}, {title: "Talk:Other"},
+    {id: "202"}, {revision_id: 202}, {revision_id: "201"}, {talk_page_id: 0}, {title: "Talk:Other"},
     {timestamp: "bad"}, {text: null}, {text: ""}, {text: original}, {original_text: "wrong"}, {edit_summary: ""},
     {edit_summary: "x".repeat(256)}, {text: "x".repeat(131073)},
   ].map(repair => ({schema: 1, repair: {...payload().repair, ...repair}}))];
@@ -153,7 +172,7 @@ test("invalid saved API responses and transport failures cannot fill or submit",
 });
 
 test("the source has no automatic page-preview or save control", () => {
-  assert.equal(source.includes("@version      0.9.4"), true);
+  assert.equal(source.includes("@version      0.9.5"), true);
   assert.equal(source.includes("const mw = window.mw;"), true);
   assert.equal(source.includes("wpDiff"), true);
   assert.equal(source.includes("wpPreview"), false);

@@ -25,6 +25,7 @@ _MAX_TIMESTAMP = 64
 _MAX_URL = 4096
 _MAX_SUGGESTED_PARAMETERS = 3000
 _MAX_LEGACY_DYK_TEMPLATES = 1000
+_MAX_REPAIR_BANNERS = 256
 _MAX_APPEARANCES = 1000
 MAX_REPAIR_INPUTS = 2048
 MAX_REPAIR_INPUT_BYTES = 4 * 1024 * 1024
@@ -443,6 +444,27 @@ def _repair_span(value: object, original: str) -> bool:
     )
 
 
+def _repair_banner_order(value: dict, original: str) -> bool:
+    """Validate exact banner spans and the history sequence slot.
+
+    Returns:
+        Whether the bounded ordering plan refers to literal source.
+    """
+    banners = value.get("banner_order", [])
+    return (
+        isinstance(banners, list)
+        and len(banners) <= _MAX_REPAIR_BANNERS
+        and all(_repair_span(span, original) for span in banners)
+        and (
+            "history_order" not in value
+            or (
+                type(value["history_order"]) is int
+                and 0 <= value["history_order"] <= len(banners)
+            )
+        )
+    )
+
+
 def valid_repair_input(value: object) -> bool:
     """Validate one prepared lead repair without reading source formats.
 
@@ -455,6 +477,9 @@ def valid_repair_input(value: object) -> bool:
     if not isinstance(value, dict) or set(value) not in (
         _REPAIR_FIELDS,
         _REPAIR_FIELDS | {"history_insertion"},
+        _REPAIR_FIELDS | {"banner_order", "history_order"},
+        _REPAIR_FIELDS
+        | {"history_insertion", "banner_order", "history_order"},
     ):
         return False
     try:
@@ -465,6 +490,7 @@ def valid_repair_input(value: object) -> bool:
         )
         if not (
             _repair_text(original)
+            and _repair_banner_order(value, original)
             and _text(value["title"])
             and _timestamp(value["timestamp"])
             and all(
@@ -486,7 +512,11 @@ def valid_repair_input(value: object) -> bool:
         ):
             return False
         spans = sorted(
-            [*legacy, *([history] if history is not None else [])],
+            [
+                *value.get("banner_order", []),
+                *legacy,
+                *([history] if history is not None else []),
+            ],
             key=itemgetter("start"),
         )
         insertion = value.get("history_insertion")
@@ -586,22 +616,31 @@ def review_repair(result: dict, repair_id: str) -> dict | None:
 
     Args:
         result: Consistency observations already validated as a whole.
-        repair_id: User-selected exact source-and-proposal identity.
+        repair_id: Talk revision ID or internal source/proposal digest.
 
     Returns:
         Complete projected lead and original source guards, or none.
         This validates the selected records, not the whole worklist.
     """
-    if (
-        not isinstance(repair_id, str)
-        or re.fullmatch(r"[0-9a-f]{64}", repair_id) is None
-    ):
+    if not isinstance(repair_id, str):
         return None
     inputs, outputs = (
         result.get("repair_inputs", {}),
         result.get("section0_repairs", {}),
     )
     if not isinstance(inputs, dict) or not isinstance(outputs, dict):
+        return None
+    if re.fullmatch(r"[1-9][0-9]{0,18}", repair_id) is not None:
+        matches = [
+            key
+            for key, value in inputs.items()
+            if isinstance(value, dict)
+            and str(value.get("revision_id")) == repair_id
+        ]
+        if len(matches) != 1:
+            return None
+        repair_id = matches[0]
+    elif re.fullmatch(r"[0-9a-f]{64}", repair_id) is None:
         return None
     record, projected = inputs.get(repair_id), outputs.get(repair_id)
     if (
@@ -611,7 +650,7 @@ def review_repair(result: dict, repair_id: str) -> dict | None:
     ):
         return None
     return {
-        "id": repair_id,
+        "id": str(record["revision_id"]),
         "title": record["title"],
         "revision_id": record["revision_id"],
         "timestamp": record["timestamp"],

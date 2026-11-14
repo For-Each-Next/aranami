@@ -175,8 +175,11 @@ class TestSection0Projection(TestCase):
         assert (
             record["original_text"] + tail == before + history + after + tail
         )
-        active = mwparserfromhell.parse(result).filter_templates()[0]
-        assert str(active.name).strip() == "Article history"
+        active = next(
+            template
+            for template in mwparserfromhell.parse(result).filter_templates()
+            if str(template.name).strip() == "Article history"
+        )
         assert str(active.get("action1").value).strip() == "GAN"
         assert str(active.get("action1result").value).strip() == "listed"
         assert str(active.get("maindateGA").value).strip() == "2020-08-07"
@@ -266,6 +269,87 @@ class TestSection0Projection(TestCase):
         assert "{{WikiProject Video games|class=GA}}\n" in result
 
     @staticmethod
+    def test_chinese_guideline_orders_banners_and_categories() -> None:
+        """Apply the local ordered groups and Biography precedence."""
+        expected = [
+            "{{GA nominee|status=keep}}",
+            "{{跳至討論}}",
+            "{{討論頁重定向|Talk:Other}}",
+            "{{Talk header}}",
+            "{{Notice|text=keep}}",
+            "{{Warning|1=keep}}",
+            "{{FAQ|1=keep}}",
+            "{{Old moves|1=keep}}",
+            "{{Article history}}",
+            "{{WikiProject Biography|living=yes}}",
+            "{{WikiProject Taiwan|class=GA}}",
+            "{{WikiProject Video games|class=GA}}",
+            "{{Image requested}}",
+            "{{Connected contributor|User=Example}}",
+            "{{To do|1=keep}}",
+            "{{Reliable sources for medical articles}}",
+            "{{Translated page|en|Game}}",
+            "{{Section sizes}}",
+            "{{Archives}}",
+            "[[Category:Example|Sort key]]",
+        ]
+        reversed_groups = list(reversed(expected))
+        first = reversed_groups.index("{{WikiProject Video games|class=GA}}")
+        second = reversed_groups.index("{{WikiProject Taiwan|class=GA}}")
+        reversed_groups[first], reversed_groups[second] = (
+            reversed_groups[second],
+            reversed_groups[first],
+        )
+        source = "\n".join(reversed_groups) + "\n"
+        result = render_section0_repair(_record(source))
+        positions = [
+            result.index(
+                value
+                if value != "{{Article history}}"
+                else "{{Article history\n",
+            )
+            for value in expected
+        ]
+        assert positions == sorted(positions)
+        assert result.count("{{Article history") == 1
+
+    @staticmethod
+    def test_unknown_source_slots_and_equal_rank_banners_are_preserved() -> (
+        None
+    ):
+        """Keep unknown nodes fixed while known template calls move."""
+        untouched = "\n<!-- Keep this comment -->\n{{Mystery|x={{nested}}}}\n"
+        source = (
+            "{{Archives}}"
+            + untouched
+            + "{{WikiProject Video games}}\n"
+            + "{{Talk header}}\n"
+            + "{{Notice|1=First}}\n{{Notice|1=Second}}\n"
+            + "{{Article history|notes=Keep <!-- note -->}}\n"
+        )
+        result = render_section0_repair(_record(source))
+        assert result.startswith("{{Talk header}}" + untouched)
+        assert result.index("{{Notice|1=First}}") < result.index(
+            "{{Notice|1=Second}}",
+        )
+        assert result.index("{{Article history") < result.index(
+            "{{WikiProject Video games}}",
+        )
+        assert result.endswith("{{Archives}}\n")
+        assert "Keep <!-- note -->" in result
+
+    @staticmethod
+    def test_old_saved_plans_keep_their_original_projection_contract() -> None:
+        """Project older saved inputs without collecting new sources."""
+        record = _record("{{Talk header}}\n{{Article history}}\n")
+        record.pop("banner_order")
+        record.pop("history_order")
+        record["history_insertion"] = len("{{Talk header}}")
+        record["id"] = repair_identity(record)
+        result = render_section0_repair(record)
+        assert result.startswith("{{Talk header}}\n{{Article history\n")
+
+    @staticmethod
     def test_quoted_and_nested_notices_cannot_move_history() -> None:
         """Keep quoted rules inert and preserve unknown wrappers."""
         source = (
@@ -316,11 +400,115 @@ class TestSection0Projection(TestCase):
         assert rejected
 
     @staticmethod
+    def test_dc_notices_follow_history_without_changing_parameters() -> None:
+        """Keep contest content intact below Article history."""
+        notices = (
+            "{{DC24/talk|topic=撰|type=达|media=1|spoken=1|pic=1|video=1}}",
+            "{{DC16/talk|topic=文|type=GA|improve=1|unknown=Keep}}",
+        )
+        source = (
+            notices[0]
+            + "\n{{WikiProject Video games}}\n"
+            + notices[1]
+            + "\n{{Article history}}\n{{Talk header}}\n"
+        )
+        record = _record(source)
+        assert not any(key.startswith("DC") for key in record["parameters"])
+        result = render_section0_repair(record)
+        positions = [
+            result.index(value)
+            for value in (
+                "{{Talk header}}",
+                "{{Article history",
+                *notices,
+                "{{WikiProject Video games}}",
+            )
+        ]
+        assert positions == sorted(positions)
+        for notice in notices:
+            assert result.count(notice) == 1
+        assert "legacy_dc_templates" not in record
+
+
+class TestHeaderPreservation(TestCase):
+    """Keep unrelated source intact across current and saved plans."""
+
+    @staticmethod
+    def test_reordered_history_preserves_preformatted_prose() -> None:
+        """Keep source indentation after moving the history slot."""
+        for indentation in (" ", "\t", " \t"):
+            prose = indentation + "preformatted source  \t"
+            source = (
+                "{{WikiProject Video games}}\n"
+                + prose
+                + "\n{{Article history}}\n"
+            )
+            result = render_section0_repair(_record(source))
+            assert result.startswith("{{Article history\n")
+            assert "\n}}\n" + prose + "\n" in result
+            assert result.endswith("{{WikiProject Video games}}\n")
+
+    @staticmethod
+    def test_boundary_cleanup_keeps_nonblank_line_whitespace() -> None:
+        """Keep content-line spaces in current and saved plans."""
+        before = "prose before  \t"
+        after = " \tpreformatted prose after  \t"
+        for newline in ("\n", "\r\n", "\r"):
+            source = (
+                before
+                + newline
+                + " \t"
+                + newline
+                + "{{Article history}}"
+                + newline
+                + " \t"
+                + newline
+                + after
+                + newline
+            )
+            for legacy in (False, True):
+                record = _record(source)
+                if legacy:
+                    record.pop("banner_order")
+                    record.pop("history_order")
+                    record["history_insertion"] = record["history_template"][
+                        "start"
+                    ]
+                    record["id"] = repair_identity(record)
+                result = render_section0_repair(record)
+                assert result.startswith(before + "\n{{Article history\n")
+                assert "\n}}\n" + after + newline in result
+                assert "\n}}\n\n" not in result
+
+    @staticmethod
+    def test_saved_history_preserves_indented_following_prose() -> None:
+        """Keep indentation when projecting older cached plans."""
+        source = "{{Article history}}\n\n \tpreformatted source\n"
+        record = _record(source)
+        record.pop("banner_order")
+        record.pop("history_order")
+        record["id"] = repair_identity(record)
+        result = render_section0_repair(record)
+        assert "\n}}\n \tpreformatted source\n" in result
+
+    @staticmethod
+    def test_verified_dc_aliases_keep_their_literal_call() -> None:
+        """Keep a verified contest alias literal while ordering."""
+        notice = "{{第十七次動員令/討論|topic=女|type=特|other=Unchanged}}"
+        source = notice + "\n{{Article history}}\n"
+        record = _record(
+            source,
+            banner_aliases={"DC17/talk": ("Template:第十七次動員令/討論",)},
+        )
+        result = render_section0_repair(record)
+        assert result.index("{{Article history") < result.index(notice)
+        assert result.endswith(notice + "\n")
+
+    @staticmethod
     def test_summary_is_complete_and_bounded() -> None:
-        """Retain the purpose and bounded tool attribution."""
+        """Describe the manual repair without a tool suffix."""
         summary = section0_edit_summary()
-        assert "homepage history" in summary
-        assert summary.endswith("([[toolforge:aranami|Aranami]])")
+        assert summary == "Update talk-page article history."
         assert len(summary.encode()) <= MAX_EDIT_SUMMARY_BYTES
 
 

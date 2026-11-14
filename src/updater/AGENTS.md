@@ -26,6 +26,8 @@ updater owns no scheduler or acquisition workflow.
   and useful compact changes. Reserve the
   exact suffix ` ([[toolforge:aranami|Aranami]])` and stay within 255 UTF-8 bytes.
   Shorten complete clauses/links, never characters or link syntax.
+  Manual consistency repairs prepared for the userscript omit this attribution;
+  the editor reviews and saves those edits in Wikipedia.
 - `dry=True` never saves or requests delegated refreshes. Runtime/data retain
   the proposed edit and preview artifacts without advancing production state.
 - Depend on data and shared contracts. Acquisition tasks, runtime lifecycle and

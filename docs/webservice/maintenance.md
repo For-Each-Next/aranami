@@ -200,12 +200,13 @@ or report rendering.
 Install or update the Tampermonkey script linked on `/checks/`, then select
 **Auto-fill content** beside **Copy wikitext** on a ready homepage-history
 finding. A new tab opens the talk page's source editor at section 0, with
-`aranami-check-job=<id>` selecting a saved proposal on Toolforge. The script
-fetches that proposal, replaces the complete lead and edit summary, and opens
-Wikipedia's native diff. Review and save the edit in Wikipedia.
+`aranami-check-job=<talk revision ID>` selecting a saved proposal on Toolforge.
+The script fetches that proposal, replaces the complete lead and edit summary,
+and opens Wikipedia's native diff. Review and save the edit in Wikipedia.
 
-The query carries an opaque repair ID. The fixed Toolforge API resolves it
-to the already prepared source; neither wikitext nor an endpoint enters the link.
+The query carries the checked talk page's decimal revision ID. The fixed
+Toolforge API resolves it to the already prepared source; neither wikitext
+nor an endpoint enters the link.
 The read-only API returns only a validated ready proposal and its source title,
 revision and timestamp. The script checks these against the current editor and
 original text, including existing drafts. Changed or unavailable observations
@@ -213,7 +214,8 @@ remain untouched. It supports the native textarea and WikiEditor's textSelection
 integration on both `/wiki/Talk:...` and `/w/index.php` source-edit URLs.
 It invokes Diff once and leaves publication to the editor. Prepared
 Article history calls use one parameter per line with aligned equals signs;
-the corrected template has no adjacent empty lines.
+the corrected template has no adjacent empty lines. Manual repair summaries
+omit the Aranami attribution suffix.
 
 Collection retains one bounded exact header and repair plan per checked talk
 revision. Runtime delegates span-based projection to updater before saving the
@@ -228,16 +230,19 @@ Checks and the repair API read that projection only when its observation matches
 the dashboard; missing or invalid proposals remain unavailable.
 
 The collector resolves Chinese banner names and redirects, including simplified
-and traditional forms, before choosing the Article history insertion point.
-Following the [talk-page layout reference](https://en.wikipedia.org/wiki/Wikipedia:Talk_page_layout#Lead_(bannerspace)),
-it places history after active nominations, talk headers and guideline notices,
-and before project banners, attribution and archives. Unrelated source remains
-unchanged. Verified local roots include
-[Talk header](https://zh.wikipedia.org/w/index.php?title=Template:Talk_header&oldid=95576082),
-[WikiProject banner shell](https://zh.wikipedia.org/w/index.php?title=Template:WikiProject_banner_shell&oldid=95284439),
-[WikiProject Video games](https://zh.wikipedia.org/w/index.php?title=Template:WikiProject_Video_games&oldid=92848131),
-and [GA nominee](https://zh.wikipedia.org/w/index.php?title=Template:GA_nominee&oldid=88861323).
-Ambiguous layouts require manual review.
+and traditional forms, and orders recognized top-level source slots using
+[Wikipedia:讨论页版面布局](https://zh.wikipedia.org/w/index.php?title=Wikipedia:讨论页版面布局&oldid=95581636).
+Nominations and navigation precede talk headers, notices and content guidelines;
+history and milestones precede project banners, requests, contributor notices,
+tasks, attribution, metadata and archives. Biography banners lead other
+standalone project banners, and manual categories follow the banners. Verified
+`DC8/talk` through `DC24/talk` notices follow Article history, retaining every
+literal parameter and their independent category behavior. Equal-rank
+calls retain their source order. Unknown templates, comments and prose stay in
+their source slots; shell parameter contents and nested banners remain intact.
+The corrected Article history follows this order even when an existing layout
+has conflicting known groups. New ordering plans require a normal source
+collection; older saved plans retain their checked insertion boundaries.
 
 ## Quarterly fill suggestions
 

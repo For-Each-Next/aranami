@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aranami consistency corrections
 // @namespace    https://aranami.toolforge.org/
-// @version      0.9.4
+// @version      0.9.5
 // @description  Fill a saved talk-page lead correction and show its diff.
 // @match        https://zh.wikipedia.org/w/index.php*
 // @match        https://zh.wikipedia.org/wiki/*
@@ -21,7 +21,8 @@
     const requested = pageURL.searchParams.getAll("aranami-check-job");
     if (location.origin !== "https://zh.wikipedia.org" ||
             (location.pathname !== "/w/index.php" && !location.pathname.startsWith("/wiki/")) || requested.length !== 1 ||
-            !/^[a-f0-9]{64}$/.test(requested[0]) ||
+            !/^[1-9]\d{0,18}$/.test(requested[0]) ||
+            !Number.isSafeInteger(Number(requested[0])) ||
             pageURL.searchParams.getAll("action").join() !== "edit" ||
             pageURL.searchParams.getAll("section").join() !== "0" ||
             ["oldid", "undo", "undoafter", "wpSection"].some(key => pageURL.searchParams.has(key))) {
@@ -138,7 +139,8 @@
                         const repair = result?.repair;
                         const bytes = new TextEncoder();
                         if (result.schema !== 1 || repair?.id !== repairID ||
-                                !positiveID(repair.revision_id) || !positiveID(repair.talk_page_id) ||
+                                !positiveID(repair.revision_id) || String(repair.revision_id) !== repairID ||
+                                !positiveID(repair.talk_page_id) ||
                                 typeof repair.title !== "string" || repair.title.length > 512 ||
                                 typeof repair.text !== "string" || typeof repair.original_text !== "string" ||
                                 !repair.text.trim() || repair.text === repair.original_text ||
@@ -161,11 +163,15 @@
         });
     }
 
-    /** Preserve whitespace except CRLF and MediaWiki's appended newline. */
+    /** Match MediaWiki's section extraction without trimming a user's draft. */
     function sameSource(actual, original) {
         const text = actual.replaceAll("\r\n", "\n");
         const saved = original.replaceAll("\r\n", "\n");
-        return text === saved || (saved !== "" && text === saved + "\n");
+        // Parser::getSection applies PHP rtrim to the extracted section.
+        // The native textarea can additionally append one final newline.
+        const section = saved.replace(/[ \t\n\r\0\v]+$/, "");
+        return [saved, section].some(source =>
+            text === source || (source !== "" && text === source + "\n"));
     }
 
     /** Fill one verified lead, keeping native conflict fields, then diff. */

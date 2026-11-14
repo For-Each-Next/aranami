@@ -167,12 +167,17 @@ class TestSection0Inputs(TestCase):
         assert facts["parameters"] == {"maindateGA": "2026-11-02"}
 
     @staticmethod
-    def test_conflicting_banner_order_withholds_the_prepared_repair() -> None:
-        """Withhold repairs for conflicting known banner groups."""
-        _suggestions, facts = _prepare(
-            "{{WikiProject Video games}}\n{{Talk header}}\n" + _HISTORY,
-        )
-        assert facts is None
+    def test_conflicting_banner_order_retains_a_ranked_repair_plan() -> None:
+        """Prepare known conflicting groups for guideline reordering."""
+        original = "{{WikiProject Video games}}\n{{Talk header}}\n" + _HISTORY
+        _suggestions, facts = _prepare(original)
+        assert facts is not None
+        assert facts["original_text"] == original
+        assert [span["text"] for span in facts["banner_order"]] == [
+            "{{Talk header}}",
+            "{{WikiProject Video games}}",
+        ]
+        assert facts["history_order"] == 1
 
     @staticmethod
     def test_collector_shares_one_exact_head_input_between_findings() -> None:
@@ -234,6 +239,8 @@ class TestRepairRecords(TestCase):
         assert ready["original_text"] == value["original_text"]
         assert ready["text"].endswith("<!-- fixed -->")
         assert ready["revision_id"] == 3
+        assert ready["id"] == "3"
+        assert records.review_repair(result, "3") == ready
         assert ready["talk_page_id"] == 2
         assert ready["edit_summary"] == "Update recorded homepage appearances."
         assert records.review_repair(result, "missing") is None
@@ -250,6 +257,22 @@ class TestRepairRecords(TestCase):
             value["id"],
         )
         assert records.review_repair(result, "a" * 64) is None
+
+    @staticmethod
+    def test_revision_lookup_rejects_ambiguous_or_changed_saved_plans() -> (
+        None
+    ):
+        """Reject changed sources and ambiguous revision matches."""
+        value = _input()
+        result = _report(value)
+        value["title"] = "Talk:Changed"
+        assert records.review_repair(result, "3") is None
+        value = _input()
+        result = _report(value)
+        duplicate = {**value, "title": "Talk:Other"}
+        duplicate["id"] = records.repair_identity(duplicate)
+        result["repair_inputs"][duplicate["id"]] = duplicate
+        assert records.review_repair(result, "3") is None
 
     @staticmethod
     def test_source_identity_spans_and_proposal_fields_are_validated() -> None:
@@ -275,6 +298,34 @@ class TestRepairRecords(TestCase):
         value["history_template"]["end"] -= 1
         value["id"] = records.repair_identity(value)
         assert not records.valid_repair_input(value)
+
+    @staticmethod
+    def test_banner_layout_requires_exact_disjoint_paired_fields() -> None:
+        """Reject incomplete, overlapping or unbounded banner plans."""
+        _suggestions, facts = _prepare("{{Talk header}}\n" + _HISTORY + "\n")
+        assert facts is not None
+        base = {**_input(), **facts}
+        base["id"] = records.repair_identity(base)
+        assert records.valid_repair_input(base)
+        invalid = [
+            {"history_order": -1},
+            {"history_order": True},
+            {"history_order": len(base["banner_order"]) + 1},
+            {"banner_order": [base["history_template"]]},
+            {"banner_order": base["banner_order"] * 2},
+            {"banner_order": base["banner_order"] * 257},
+            {"banner_order": [{"start": 0, "end": 1, "text": "wrong"}]},
+        ]
+        for changes in invalid:
+            record = {**base, **changes}
+            record["id"] = records.repair_identity(record)
+            assert not records.valid_repair_input(record)
+        for omitted in ("banner_order", "history_order"):
+            record = {
+                key: value for key, value in base.items() if key != omitted
+            }
+            record["id"] = records.repair_identity(record)
+            assert not records.valid_repair_input(record)
 
     @staticmethod
     def test_complete_repair_maps_can_retain_more_than_256_headers() -> None:

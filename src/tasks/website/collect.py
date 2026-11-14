@@ -293,7 +293,7 @@ def _report_plan(
             else (
                 "zhwiki-video-games-consistency:article-history-projection:"
                 "numbered-notices:archive-hooks:quality-history-actions:3:"
-                "section0-repairs:3:banner-order:full-cache"
+                "section0-repairs:4:banner-order:2:full-cache"
             )
             if name == "consistency"
             else "zh:all-access:user:top1000:limit12:lookback7:script-extracts"

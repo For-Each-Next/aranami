@@ -5,6 +5,20 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.5 (2026-11-14 02:44 UTC)
+
+Overview: Corrected native talk-editor prefill checks and revision links,
+cleaned up talk-header ordering, and simplified manually reviewed summaries.
+
+- Accepted MediaWiki's section-boundary whitespace normalization without
+  weakening revision, page, destination or modified-draft checks.
+- Used decimal talk revision IDs in correction links and API lookups while
+  preserving existing saved-plan integrity and proposal availability.
+- Ordered recognized talk-header notices using the Chinese layout guideline,
+  keeping original DC notices immediately below Article history.
+- Removed the Aranami suffix from manual repair summaries and refreshed
+  saved ordering plans through the normal startup collection.
+
 ### 0.9.4 (2026-11-14 01:08 UTC)
 
 Overview: Made talk-page corrections readable and reviewable as source diffs,

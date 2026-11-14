@@ -15,10 +15,11 @@ import datetime as dt
 import re
 from dataclasses import dataclass, field, replace
 from functools import cache
+from operator import itemgetter
 from typing import TYPE_CHECKING
 
 import mwparserfromhell
-from mwparserfromhell.nodes import Comment, Tag, Template, Text
+from mwparserfromhell.nodes import Comment, Tag, Template, Text, Wikilink
 from opencc import OpenCC
 from pywikibot import Page
 from pywikibot.exceptions import InvalidTitleError
@@ -49,8 +50,12 @@ _QUOTED_TAGS = {
     "blockquote",
     "q",
 }
-# Audited local banner sources on November 14, 2026. The collector
-# resolves redirects and script variants for these identities.
+# Wikipedia:讨论页版面布局 revision 95581636 (2026-11-14).
+# The collector resolves redirects and script variants for these roots.
+_HISTORY_BANNER_RANK = 80
+_PROJECT_BANNER_RANK = 90
+_CATEGORY_RANK = 180
+_MAX_LAYOUT_SPANS = 256
 HISTORY_BANNER_TEMPLATES = {
     **dict.fromkeys(
         (
@@ -61,12 +66,19 @@ HISTORY_BANNER_TEMPLATES = {
             "GA reassessment",
             "Peer review",
             "DYK Invite",
-            "跳至討論",
-            "跳至頁尾",
-            "Talk header",
-            "Notice",
-            "BLP",
-            "Warning",
+        ),
+        10,
+    ),
+    **dict.fromkeys(("跳至討論", "跳至頁尾"), 20),
+    "討論頁重定向": 30,
+    "Talk header": 40,
+    **dict.fromkeys(
+        ("Notice", "高風險主題/討論頁通告", "BLP others", "BLP"),
+        50,
+    ),
+    **dict.fromkeys(("COI editnotice", "Warning"), 60),
+    **dict.fromkeys(
+        (
             "Censor",
             "Controversial",
             "Controversial-issues",
@@ -76,24 +88,44 @@ HISTORY_BANNER_TEMPLATES = {
             "Policy-civil",
             "NoteTA",
         ),
-        -1,
+        70,
     ),
     **dict.fromkeys(
+        ("Old vfd multi", "Old moves", "Old peer review", "ITN talk"),
+        _HISTORY_BANNER_RANK,
+    ),
+    **dict.fromkeys((f"DC{edition}/talk" for edition in range(8, 25)), 81),
+    "WikiProject Biography": _PROJECT_BANNER_RANK - 1,
+    **dict.fromkeys(
+        ("WikiProject banner shell", "WikiProject Video games"),
+        _PROJECT_BANNER_RANK,
+    ),
+    **dict.fromkeys(("Image requested", "Infobox requested"), 100),
+    **dict.fromkeys(("Connected contributor", "Press", "High traffic"), 110),
+    **dict.fromkeys(("Refideas", "To do", "Consensus"), 120),
+    "Reliable sources for medical articles": 130,
+    **dict.fromkeys(
         (
-            "WikiProject banner shell",
-            "WikiProject Video games",
-            "Image requested",
-            "To do",
-            "Consensus",
-            "Translated page",
+            "Copied",
+            "ConfirmationVRT",
             "VRT-talk",
+            "Split article",
+            "Merged-from",
+            "Merged-to",
+            "Translated page",
+        ),
+        140,
+    ),
+    "Section sizes": 150,
+    **dict.fromkeys(
+        (
             "Archive box",
             "Archive box collapsible",
             "Archives",
             "Archive auto search",
             "Talk archive",
         ),
-        1,
+        170,
     ),
 }
 _MAX_OLDID = 2**63 - 1
@@ -816,15 +848,19 @@ def prepare_section0_repair(  # ruff: ignore[too-many-arguments]
         offset += len(text)
     if set(targets) != wanted:
         return None
-    insertion = _history_insertion(
+    layout = _banner_layout(
         sections[0] if sections else code,
         banner_aliases or {},
         site,
+        wanted,
     )
-    if insertion is None:
+    if layout is None:
         return None
+    insertion, banners, history_order = layout
     return {
         "history_insertion": insertion,
+        "banner_order": banners,
+        "history_order": history_order,
         "original_text": original,
         "history_template": targets[id(histories[0])] if histories else None,
         "legacy_dyk_templates": [targets[id(template)] for template in legacy],
@@ -853,47 +889,81 @@ def _banner_identity(value: str, site: BaseSite) -> str | None:
     return _banner_converter().convert(identity) if identity else None
 
 
-def _history_insertion(
+def _banner_layout(
     code: Wikicode,
     aliases: Mapping[str, Iterable[str]],
     site: BaseSite,
-) -> int | None:
-    """Place history after notices and before projects or archives.
+    excluded: set[int],
+) -> tuple[int, list[dict], int] | None:
+    """Order recognized top-level slots using the Chinese layout guide.
 
-    Unknown calls and quoted examples retain their relative order.
-    Conflicting known banner groups withhold the automatic replacement.
+    Only verified banner aliases, literal WikiProject names and manual
+    categories participate. Unknown templates, prose and comments keep
+    their source slots. Equal-ranked banners retain their source order.
 
     Returns:
-        A top-level source boundary, or none for conflicting groups.
+        An insertion boundary, desired literal span order and history
+        position, or none when the bounded layout would be exceeded.
     """
     identities = {
         _banner_identity(alias, site): position
         for name, position in HISTORY_BANNER_TEMPLATES.items()
-        for alias in aliases.get(name, (name,))
+        for alias in (name, *aliases.get(name, ()))
     }
-    before, after = 0, len(str(code))
-    offset = 0
+    ranked = []
+    insertion = offset = 0
     leading = True
     for node in code.nodes:
-        end = offset + len(str(node))
+        text = str(node)
+        end = offset + len(text)
         if isinstance(node, Comment) or (
-            isinstance(node, Text) and not str(node).strip()
+            isinstance(node, Text) and not text.strip()
         ):
             if leading:
-                before = end
+                insertion = end
         else:
             leading = False
-        if isinstance(node, Template):
-            position = identities.get(_banner_identity(str(node.name), site))
-            if position == -1:
-                before = end
-            elif position == 1:
-                after = min(after, offset)
+        rank = (
+            None
+            if id(node) in excluded
+            else _banner_rank(node, identities, site)
+        )
+        if rank is not None:
+            ranked.append((rank, {"start": offset, "end": end, "text": text}))
         offset = end
-    if before > after:
+    if len(ranked) > _MAX_LAYOUT_SPANS:
         return None
-    # Start of the interval also precedes unfamiliar project banners.
-    return before
+    ranked.sort(key=itemgetter(0))
+    history_order = sum(rank <= _HISTORY_BANNER_RANK for rank, _span in ranked)
+    return insertion, [span for _rank, span in ranked], history_order
+
+
+def _banner_rank(
+    node: object,
+    identities: Mapping[str | None, int],
+    site: BaseSite,
+) -> int | None:
+    """Classify a literal top-level banner or manual category.
+
+    Returns:
+        Its local guideline rank, or none for an unknown source node.
+    """
+    if isinstance(node, Template):
+        identity = _banner_identity(str(node.name), site)
+        rank = identities.get(identity)
+        if rank is not None:
+            return rank
+        if identity and identity.startswith("WikiProject "):
+            return _PROJECT_BANNER_RANK
+    elif isinstance(node, Wikilink):
+        title = str(node.title).strip()
+        if not title.startswith(":"):
+            try:
+                if Page(site, title).namespace() == Namespace.CATEGORY:
+                    return _CATEGORY_RANK
+            except InvalidTitleError:
+                pass
+    return None
 
 
 def extract_dyk_archive_entry(

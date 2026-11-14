@@ -13,6 +13,7 @@ import datetime as dt
 import json
 import logging
 import os
+import re
 from contextlib import ExitStack, asynccontextmanager, suppress
 from http import HTTPStatus
 from pathlib import Path
@@ -103,7 +104,6 @@ _ASSETS = resource_root("webservice") / "public_html"
 _MAX_BYTES = 8 * 1024 * 1024
 _MAX_QUERY_BYTES = 4096
 _MAX_QUERY_FIELDS = 12
-_REPAIR_ID_LENGTH = 64
 _MAX_HEADER_BYTES = 64 * 1024
 _MAX_PORT = 65535
 _CHUNK_BYTES = 64 * 1024
@@ -1413,7 +1413,7 @@ class _PublicViews:
         """Return one saved correction without source acquisition.
 
         Returns:
-            A bounded JSON correction selected only by its saved hash,
+            A bounded JSON correction selected by its talk revision ID,
             or a missing/invalid query response.
         """
         try:
@@ -1429,11 +1429,8 @@ class _PublicViews:
         if (
             set(parameters) != {"repair"}
             or len(selected) != 1
-            or len(selected[0]) != _REPAIR_ID_LENGTH
-            or any(
-                character not in "0123456789abcdef"
-                for character in selected[0]
-            )
+            or re.fullmatch(r"[1-9][0-9]{0,18}", selected[0]) is None
+            or int(selected[0]) >= 2**63
         ):
             return _error(HTTPStatus.BAD_REQUEST)
         snapshot = self._with_consistency_repairs(self._dashboard())

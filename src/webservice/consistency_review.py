@@ -1,6 +1,6 @@
 """Link saved lead corrections to a source-editor userscript handoff.
 
-Only an exact saved repair ID enters the Wikipedia URL. The optional
+Only the checked talk revision ID enters the Wikipedia URL. The optional
 Tampermonkey script reads the ready correction through Aranami's query
 API, checks the native edit form and opens a diff without saving.
 """

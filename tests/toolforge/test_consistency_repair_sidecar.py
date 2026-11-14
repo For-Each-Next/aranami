@@ -46,6 +46,7 @@ def _snapshot(count: int = 1) -> dict:
             **copy.deepcopy(source),
             "page_id": index,
             "talk_page_id": index + 1000,
+            "revision_id": index + 200,
             "title": f"Talk:Game {index:03}",
             "original_text": source["original_text"]
             + "<!-- preserved source "
@@ -60,6 +61,7 @@ def _snapshot(count: int = 1) -> dict:
             "page_id": index,
             "title": f"Game {index:03}",
             "checked_title": record["title"],
+            "checked_revision": record["revision_id"],
             "repair_id": record["id"],
         })
     result.update(
@@ -166,7 +168,12 @@ class TestConsistencyRepairSidecar(TestCase):
                 client = TestClient(server.create_app(runtime))
                 response = client.get(
                     "/api/consistency-repair",
-                    params={"repair": identity},
+                    params={
+                        "repair": review_repair(
+                            prepared,
+                            identity,
+                        )["id"],
+                    },
                 )
                 assert response.status_code == HTTPStatus.OK
                 assert response.json()["repair"] == review_repair(
@@ -175,7 +182,11 @@ class TestConsistencyRepairSidecar(TestCase):
                 )
                 page = client.get("/checks/?page=77&lang=en")
                 assert page.status_code == HTTPStatus.OK
-                assert "aranami-check-job=" + identity in page.text
+                assert (
+                    "aranami-check-job="
+                    + str(prepared["repair_inputs"][identity]["revision_id"])
+                    in page.text
+                )
             assert sorted(runtime.rglob("*")) == before
 
     def test_startup_reprojection_keeps_full_maps_and_source_guards(
@@ -365,7 +376,12 @@ class TestConsistencyRepairSidecar(TestCase):
                         consistency_cache.save(sidecar, {"data": stale})
                     response = client.get(
                         "/api/consistency-repair",
-                        params={"repair": identity},
+                        params={
+                            "repair": review_repair(
+                                compact["consistency"],
+                                identity,
+                            )["id"],
+                        },
                     )
                     assert response.status_code == HTTPStatus.OK
                     assert response.json()["repair"] == review_repair(

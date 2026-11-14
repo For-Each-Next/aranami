@@ -916,7 +916,8 @@ async function checkInterface(assetRoot) {
                             return {install: new URL(install.href).pathname,
                                 actions: actions.length, origin: target.origin, path: target.pathname,
                                 title: decodeURIComponent(target.pathname.slice('/wiki/'.length)).replaceAll('_', ' '), action: target.searchParams.get('action'),
-                                section: target.searchParams.get('section'), id: /^[a-f0-9]{64}$/.test(target.searchParams.get('aranami-check-job')),
+                                section: target.searchParams.get('section'), id: /^[1-9][0-9]{0,18}$/.test(target.searchParams.get('aranami-check-job'))
+                                    && Number.isSafeInteger(Number(target.searchParams.get('aranami-check-job'))),
                                 fields: [...target.searchParams.keys()].sort(),
                                 inactive: !document.getElementById('aranami-repair-status')};
                         })()`);
@@ -946,10 +947,11 @@ async function checkInterface(assetRoot) {
                             form.action = 'https://zh.wikipedia.org/w/index.php?title=Talk%3AGame%2001&action=submit';
                             form.innerHTML = '<textarea id="wpTextbox1" name="wpTextbox1"></textarea><input id="wpSummary" name="wpSummary"><input name="wpSection" value="0"><input name="editRevId" value="201"><input name="wpEdittime" value="20261102140000"><button id="wpDiff" name="wpDiff">Diff</button><button id="wpPreview" name="wpPreview">Preview</button><button id="wpSave" name="wpSave">Save</button>';
                             document.body.append(form);
-                            const original = '<!-- keep -->\\n{{Article history|currentstatus=GA}}\\n';
+                            const original = '<!-- keep -->\\n{{Article history|currentstatus=GA}}\\n \\t\\n\\n';
                             const fixed = original.replace('|currentstatus=GA', '|currentstatus=GA|maindateGA=2026-10-30');
                             const summary = 'Update recorded homepage appearances.';
-                            form.querySelector('#wpTextbox1').value = original + '\\n';
+                            // MediaWiki strips section-boundary whitespace before filling the native textarea.
+                            form.querySelector('#wpTextbox1').value = original.trimEnd();
                             form.querySelector('#wpSummary').value = '/* */ ';
                             const id = new URL(document.querySelector('.consistency-review-action').href).searchParams.get('aranami-check-job');
                             const config = {wgNamespaceNumber: 1, wgPageName: 'Talk:Game_01', wgCurRevisionId: 201, wgArticleId: 101, wgUserLanguage: document.documentElement.lang};
