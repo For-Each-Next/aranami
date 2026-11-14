@@ -11,7 +11,7 @@ import unittest
 from hashlib import sha256
 from html import unescape
 from http import HTTPStatus
-from math import isclose
+from math import isclose, isfinite
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -29,6 +29,7 @@ from webservice.pages import render_quality_analysis, render_quality_authorship
 from webservice.presentation import Interface
 from webservice.quality_analysis import (
     main_author_directory,
+    prose_length_position,
     quality_analysis_context,
 )
 from webservice.server import create_app
@@ -97,6 +98,67 @@ def _resource(content: str) -> str:
 
 class QualityResourcePresentationTests(unittest.TestCase):
     """Keep saved results while deferring optional payloads."""
+
+    @staticmethod
+    def test_length_scale_anchors_and_endpoints() -> None:
+        """Keep logarithmic anchors and clamp only display positions."""
+        expected = {
+            0: 0,
+            1: 0,
+            50: 50,
+            500: 350,
+            5000: 650,
+            50_000: 950,
+            100_000: 1000,
+        }
+        for length, position in expected.items():
+            assert isclose(prose_length_position(length), position)
+        lengths = [0, 1, 20, 25, 50, 500, 5000, 7000, 9000, 50_000, 10**9]
+        positions = [prose_length_position(length) for length in lengths]
+        assert all(
+            isfinite(value) and 0 <= value <= 1000 for value in positions
+        )
+        assert positions == sorted(positions)
+        assert isclose(prose_length_position(7000), 693.8384107)
+        assert isclose(prose_length_position(9000), 726.5817515)
+        assert prose_length_position(70_000) < 1000
+        assert prose_length_position(74_000) == 1000
+
+    @staticmethod
+    def test_length_coordinates_do_not_follow_group_maxima() -> None:
+        """Keep 5,000 at 65% when another group is removed."""
+        data = analysis_fixture()
+        data["lengths"] = [
+            {
+                "group": "grade",
+                "grade": grade,
+                "importance": None,
+                "pages": 3,
+                "measured": 3,
+                "median_characters": 5000,
+                "density": [
+                    {"position": 5000, "density": 1.0},
+                    {"position": maximum, "density": 0.25},
+                ],
+            }
+            for grade, maximum in (("FA", 9000), ("GA", 50_000))
+        ]
+        interface = Interface("en")
+        together = quality_analysis_context(data, interface)[
+            "quality_analysis"
+        ]
+        assert [row["median_x"] for row in together["lengths"]] == [650, 650]
+        assert together["lengths"][0]["violin_path"].startswith(
+            "M 650.00 6.00 L 726.58 24.00",
+        )
+        assert together["lengths"][1]["violin_path"].startswith(
+            "M 650.00 6.00 L 950.00 24.00",
+        )
+        data["lengths"] = data["lengths"][:1]
+        filtered = quality_analysis_context(data, interface)[
+            "quality_analysis"
+        ]
+        assert filtered["lengths"] == together["lengths"][:1]
 
     @staticmethod
     def test_missing_listing_dates_are_unlinked_in_every_directory() -> None:
@@ -622,10 +684,10 @@ class QualityResourcePresentationTests(unittest.TestCase):
             result = quality_analysis_context(data, interface)
             length = result["quality_analysis"]["lengths"][0]
             assert length["quartiles"] == [
-                {"percentile": 25, "value": 7.5, "x": 93.75},
-                {"percentile": 75, "value": 25.0, "x": 312.5},
+                {"percentile": 25, "value": 7.5, "x": 0.0},
+                {"percentile": 75, "value": 25.0, "x": 0.0},
             ]
-            assert isclose(length["median_x"], 187.5)
+            assert isclose(length["median_x"], 0)
             assert length["summary"] == interface.text(
                 "quality_analysis.violin_summary",
                 pages="5",
@@ -650,7 +712,9 @@ class QualityResourcePresentationTests(unittest.TestCase):
             output = render_quality_analysis(data, None, None, locale, _NOW)
             assert 'data-percentile="25"' in output
             assert 'data-percentile="75"' in output
-            assert 'x1="187.5" x2="187.5"' in output
+            assert 'x1="0" x2="0"' in output
+            assert 'aria-describedby="analysis-violin-note"' in output
+            assert interface.text("quality_analysis.violin_note") in output
             assert length["summary"] in output
 
     @staticmethod

@@ -68,8 +68,12 @@ new character units.
 
 Miniature horizontal violin charts occupy the third column of the quality
 and importance distribution tables, beside each count and percentage. Horizontal
-position represents prose length; the mirrored upper and lower contours show
-density. Two dots mark P25 and P75, and the center line marks the median P50.
+position follows `5 + 30 * log10(characters / 50)` percent, clamped to
+0–100%. The fixed anchors are 50 → 5%, 500 → 35%, 5,000 → 65% and
+50,000 → 95%, shared by every group and filter state. Zero sits at the left
+endpoint. Tooltips retain actual lengths even when positions are clipped.
+The mirrored upper and lower contours show density in the original character
+units. Two dots mark P25 and P75, and the center line marks the median P50.
 Hover text and accessible labels give total and measured article counts, the
 observed minimum and maximum, and all three percentile lengths. Percentiles
 use linear interpolation over known length observations. Displayed lengths

@@ -1,33 +1,31 @@
-"""Verify flat report publication, migration and predecessor reads."""
+"""Verify flat report publication and predecessor retention."""
 
 # Small fixture cardinalities deliberately describe two generations.
 # ruff: file-ignore[magic-value-comparison]
 
 import datetime as dt
-import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 import polars as pl
 
-from data.layout_migration import migrate_layout
-from data.reports import ReportResult, ReportStore, report_storage_key
+from data.reports import ReportResult, ReportStore
 
 
 class FlatLayoutTests(TestCase):
-    """Preserve complete generations across the layout migration."""
+    """Preserve complete flat generations across publication."""
 
     @staticmethod
-    def test_flat_migration_preserves_readable_generations() -> None:
-        """Preserve migrated facts when publishing a new generation."""
+    def test_flat_publication_preserves_readable_generations() -> None:
+        """Keep the latest and previous facts after each publication."""
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            old = ReportStore(root / "legacy")
+            store = ReportStore(root / "data/parsed")
             key = "articles/example/zhwiki-video-games"
             start = dt.datetime(2026, 11, 14, tzinfo=dt.UTC)
             for offset in range(2):
-                old.write(
+                store.write(
                     key,
                     ReportResult(
                         "example",
@@ -38,18 +36,6 @@ class FlatLayoutTests(TestCase):
                     started_at=start + dt.timedelta(seconds=offset),
                     target={"site": "zhwiki", "title": "Fixture"},
                 )
-            legacy = root / "data/hourly" / report_storage_key(key)
-            legacy.parent.mkdir(parents=True)
-            shutil.copytree(old.data_path(key), legacy)
-            receipt = migrate_layout(
-                root,
-                lambda source, target: (
-                    target.parent.mkdir(parents=True, exist_ok=True),
-                    shutil.copyfile(source, target),
-                ),
-            )
-            assert receipt["complete"]
-            store = ReportStore(root / "data/parsed")
             assert store.read(key).tables["members"]["page_id"].to_list() == [
                 2,
             ]
@@ -80,8 +66,3 @@ class FlatLayoutTests(TestCase):
             assert all(
                 path.is_file() for path in (root / "data/parsed").iterdir()
             )
-            assert (root / "data/hourly").is_dir()
-            assert not (root / "deployment-backups/data-layout-v3").exists()
-            assert (legacy / "latest.json").read_bytes() == (
-                old.data_path(key) / "latest.json"
-            ).read_bytes()

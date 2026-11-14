@@ -1,7 +1,7 @@
 # Historical-source retirement checklist
 
 Use this checklist before removing a historical source adapter or its saved
-inputs. It tracks remaining dependencies after the 1.0 launch; routine source
+inputs. It tracks remaining dependencies after the flat-storage rollout; source
 promotion belongs in [Administration](administration.md), and completed launch
 outcomes belong in [CHANGELOG](../CHANGELOG.md). Removal depends on verified
 replacement coverage and remaining consumers.
@@ -20,9 +20,9 @@ are retired; historical observations remain available to normal readers.
 
 | Component or input | Replacement and removal gate |
 |---|---|
-| Assessment compatibility view and `data/daily/assessments/` | Full daily `project_data` files serve current reports. Retain historical readers until all required earlier observations have a verified lossless replacement. The old daily writer is retired. |
+| Assessment compatibility view and `data/parsed/assessments--*` | Full daily `project_data` files serve current reports. Retain historical readers until all required earlier observations have a verified lossless replacement. The old daily writer is retired. |
 | `tasks.zhwiki.legacy.homepage_displays` | Canonical homepage inventory must retain required source formats and dates, and initialization/recovery must work without source interpretation. |
-| `data/daily/legacy/quality-register.parquet` | Accept through the canonical milestone writer, verify readback and retain `quality-register-import.json` before deleting staging. Interrupted acceptance must retry safely. |
+| Temporary `legacy/quality-register.parquet` beside the milestone store | Accept through the canonical milestone writer, verify readback and retain `quality-register-import.json` before deleting staging. Interrupted acceptance must retry safely. |
 | Packaged `tasks.zhwiki.legacy.newsletter_figures.json` | Canonical historical `figures.parquet` must cover required measures and periods; affected issues and archives must render with the packaged provider disabled. |
 | Historical `HOT`/`HOT-v2` parser in `tasks.zhwiki.legacy.newsletter_popularity` | Validated saved period aggregates or detailed traffic must cover each dependent issue, including delayed and annual issues, without old-format acquisition. |
 | Legacy sparse Pageviews cache fallback | Durable `daily`, `members` and `coverage` tables must cover required dates and populations; incomplete or empty traffic cannot establish replacement parity. |
@@ -30,13 +30,13 @@ are retired; historical observations remain available to normal readers.
 
 Article history, milestones, authorship evidence, prepared report bundles and
 newsletter archives remain durable records. Their age or original writer does
-not make them disposable. Alpha suspends new automatic age-only evidence
-purges, including 365-day pruning.
+not make them disposable. Automatic age-only evidence purges, including
+365-day pruning, remain suspended.
 
 ## Verify historical coverage
 
-Inspect `data/daily/historical-import.json` and
-`data/daily/newsletter/historical/import-receipt.json` before deciding which
+Inspect `data/parsed/historical-import.json` and
+`data/parsed/newsletter--historical--import-receipt.json` before deciding which
 adapter can retire. The accepted initial import contained 109 figure rows and
 33 popularity periods, including the 2024/2025 annual reports. February, April
 and June 2024 lacked audited exact-month sources; unavailable periods remain

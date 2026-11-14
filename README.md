@@ -1,7 +1,7 @@
 # Aranami
 
-Aranami v0.9.12 improves article-statistics performance from the preserved
-v0.9.8 release. The [CHANGELOG](CHANGELOG.md) records completed work.
+Aranami v0.9.13 retires completed migration tooling and uses a logarithmic
+article-length scale. The [CHANGELOG](CHANGELOG.md) records completed work.
 The original v0.9.8 release remains available in its Git tag.
 
 Aranami (荒波, “rough waves”) maintains Wikipedia project reports and provides

@@ -220,19 +220,20 @@ continuous history fetches only a missing tail, while gaps require a full
 window. Readiness still checks site-hour coverage and leading article probes.
 No current page list substitutes for an absent historical population.
 
-## Migration and recovery
+## Retained migration evidence and recovery
 
-Deployment drains writers, runs `python -m data.migration`, verifies the receipt,
-then promotes source and restarts services. The first migration preserves missing
-historical fields as nulls and converts prepared JSON to Parquet. The v0.9.8 step
-copies cadence folders into flat source/parsed owners and verifies every digest.
-Original folders remain in place until both service rollouts succeed, then move
-into `deployment-backups/data-layout-v3/`; failed activation leaves them readable.
-Redundant taskforce files remain only in that rollback backup. Receipts in
-`state/data-layout-v2.json` and `state/data-layout-v3.json` make interrupted
-migration resumable; a conflicting destination fails before source selection.
-No migration downloads old revisions to manufacture missing historical evidence.
-Protect the midnight maintenance window.
+The v0.9.8 rollout completed the flat-storage conversion. Current deployments
+validate and replace source without rerunning historical data conversions.
+They reject old `reports/data`, `reports/records`, `cache/toolforge` and cadence
+data directories before setup; restore older installations with the migration
+tooling archived at Git tag `v0.9.8` and verify receipts before upgrading.
+
+Retain `state/data-layout-v2.json`, `state/data-layout-v3.json` and archived
+originals as conversion evidence. The saved-data viewer still resolves
+historical activity links through these receipts. Historical null fields remain
+unknown, and current queries cannot reconstruct missing old observations.
+Redundant taskforce files and old cadence owners remain in recovery backups.
+Protect the midnight maintenance window during recovery.
 
 `data/parsed/authorship-corrections.parquet` retains independently
 proved reference-cleanup corrections alongside unchanged raw observations.

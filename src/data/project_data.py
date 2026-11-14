@@ -72,51 +72,6 @@ _MAX_SNAPSHOTS = 40_000
 _SCHEMA_VERSION = 2
 
 
-def read_file(
-    path: Path,
-    site_name: str,
-    project: str,
-    boundary_date: dt.date,
-) -> ReportBundle | None:
-    """Validate a historical project file for an explicit migration.
-
-    Returns:
-        Verified facts in the current reader model, with unknowns null.
-    """
-    return _read(path, site_name, project, boundary_date)
-
-
-def migrate_snapshot(bundle: ReportBundle, destination: Path) -> ReportBundle:
-    """Write a validated historical observation in the current schema.
-
-    Returns:
-        Converted snapshot preserving its original dates and generation.
-    """
-    manifest = json.loads(json.dumps(dict(bundle.manifest)))
-    site_name = manifest["target"]["site"]
-    project = manifest["target"]["title"]
-    boundary = dt.date.fromisoformat(manifest["metadata"]["boundary_date"])
-    _safe_directories(
-        destination.parent,
-        next(
-            (
-                parent.parent
-                for parent in destination.parents
-                if parent.name == "data"
-            ),
-            destination.parent,
-        ),
-    )
-    return _save(
-        destination,
-        bundle.tables["members"],
-        manifest,
-        site_name=site_name,
-        project=project,
-        boundary_date=boundary,
-    )
-
-
 def _root(site_name: str, project: str, *, dry: bool = False) -> Path:
     """Select archive storage only for the full Chinese project table.
 

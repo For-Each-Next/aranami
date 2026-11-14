@@ -17,8 +17,8 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
-from data.migration import destination
 from data.parquet_preview import preview_path, read_preview
+from data.paths import storage_key
 from data.project_data import snapshot_path
 from data.reports import report_key
 from shared.support.files import read_regular
@@ -26,6 +26,7 @@ from shared.support.files import read_regular
 if TYPE_CHECKING:
     from pathlib import Path
 
+_CHINESE_PROJECT = storage_key("projects/zhwiki/电子游戏")
 _MAX_SELECTOR = 1500
 _FIRST_PRINTABLE = 32
 _PROJECT_PATH_PARTS = 7
@@ -102,6 +103,63 @@ def _flat_filename(filename: str, runtime: Path) -> str:
     return filename
 
 
+def _historical_destination(relative: PurePosixPath) -> PurePosixPath:  # ruff: ignore[too-many-return-statements]
+    """Resolve historical activity links without running a migration.
+
+    Returns:
+        Runtime-relative destination preserving all logical identities.
+    """
+    parts = relative.parts
+    if parts[:2] == ("cache", "toolforge"):
+        target = PurePosixPath("data/hourly", *parts[2:])
+        if relative.name in {
+            f"{name}.json"
+            for name in (
+                "dashboard",
+                "reviews",
+                "recognized",
+                "dyk",
+                "pageviews",
+                "news_history",
+                "backlog",
+                "newsletter",
+            )
+        }:
+            if relative.stem in {"pageviews", "newsletter"}:
+                target = PurePosixPath("data/daily") / target.name
+            return target.with_suffix(".parquet")
+        return target
+    if parts[:3] == ("reports", "records", "newsletter"):
+        target = PurePosixPath("data/daily/newsletter-drafts", *parts[3:])
+        return (
+            target.with_suffix(".parquet")
+            if target.suffix == ".json"
+            else target
+        )
+    if parts[:2] == ("reports", "records"):
+        return PurePosixPath("data/daily", *parts[2:])
+    if parts[:2] != ("reports", "data"):
+        return relative
+    key = PurePosixPath(*parts[2:])
+    if (
+        key.parts[:2] == ("newsletter", "observations")
+        and key.suffix == ".json"
+    ):
+        return (PurePosixPath("data/daily") / key).with_suffix(".parquet")
+    if key.as_posix().startswith(_CHINESE_PROJECT + "/") or (
+        key.as_posix().startswith("projects/zhwiki/电子游戏/")
+    ):
+        return PurePosixPath("data/archive") / key.name
+    if key.parts[0] == "articles":
+        leaf = {
+            "history.parquet": "article-history.parquet",
+            "authorship.parquet": "article-authorship.parquet",
+            "milestones.parquet": "article-milestones.parquet",
+        }.get(key.name, key.name)
+        return PurePosixPath("data/hourly", *key.parts[1:-1], leaf)
+    return PurePosixPath("data/daily") / key
+
+
 def _legacy_filename(filename: str, runtime: Path) -> str:
     """Resolve saved activity links through the migration receipt.
 
@@ -122,7 +180,9 @@ def _legacy_filename(filename: str, runtime: Path) -> str:
                 filename = row["destination"]
                 break
         if filename.startswith(("reports/", "cache/toolforge/")):
-            filename = destination(PurePosixPath(filename)).as_posix()
+            filename = _historical_destination(
+                PurePosixPath(filename),
+            ).as_posix()
     filename = _flat_filename(filename, runtime)
     parts = PurePosixPath(filename).parts
     if (

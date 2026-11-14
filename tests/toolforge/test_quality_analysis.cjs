@@ -539,6 +539,37 @@ test("violin quartiles use exact counted lengths and preserve the existing perce
         "Total 5; measured 4; minimum 0; P25 1; P50 2; P75 2; maximum 3");
 });
 
+test("violin length scale uses fixed logarithmic anchors and clamps its endpoints", () => {
+    const position = context.proseLengthPosition;
+    for (const [length, expected] of [[0, 0], [1, 0], [50, 50], [500, 350], [5000, 650], [50000, 950], [100000, 1000]]) {
+        assert.ok(Math.abs(position(length) - expected) < 1e-10);
+    }
+    const lengths = [0, 1, 20, 25, 50, 500, 5000, 7000, 9000, 50000, 1e9];
+    const positions = lengths.map(position);
+    assert.ok(positions.every(value => Number.isFinite(value) && value >= 0 && value <= 1000));
+    assert.ok(positions.slice(1).every((value, index) => value >= positions[index]));
+    assert.ok(Math.abs(position(7000) - 693.8384107) < 1e-6);
+    assert.ok(Math.abs(position(9000) - 726.5817515) < 1e-6);
+    assert.ok(position(70000) < 1000);
+    assert.equal(position(74000), 1000);
+});
+
+test("violin length positions stay fixed when other groups and long articles are filtered", () => {
+    const cell = maximum => ({pages: 3, measured: 3,
+        histogram: [{value: 0, count: 1}, {value: 5000, count: 1}, {value: maximum, count: 1}],
+        density: [{position: 5000, density: 1}, {position: maximum, density: .25}]});
+    for (const selected of [[cell(9000)], [cell(50000)], [cell(9000), cell(50000)], [cell(500000)]]) {
+        const statistics = context.combineCells(selected);
+        assert.equal(context.proseLengthPosition(statistics.quantiles[2]), 650);
+        const anchor = statistics.density.find(([length]) => length === 5000);
+        assert.equal(context.proseLengthPosition(anchor[0]), 650);
+        assert.equal(anchor[1], 1);
+    }
+    const extreme = context.combineCells([cell(500000)]);
+    assert.equal(context.proseLengthPosition(extreme.maximum), 1000);
+    assert.equal(context.violinSummary(extreme, "{maximum}"), "500,000");
+});
+
 test("violin missing measurements remain unknown while zero and constant quartiles stay observed", () => {
     const missing = context.combineCells([{pages: 2, measured: 0, histogram: [], density: []}]);
     assert.equal(missing.quartiles[0], null);

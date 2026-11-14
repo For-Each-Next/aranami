@@ -93,6 +93,16 @@ export function combineCells(cells) {
     };
 }
 
+/**
+ * Map 50/500/5,000/50,000 characters to 5%/35%/65%/95% on every chart.
+ * Zero and lengths outside the scale sit at its endpoints; labels retain observations.
+ * Density heights remain estimates in the original character units.
+ */
+export function proseLengthPosition(characters) {
+    if (characters <= 0) return 0;
+    return Math.min(1000, Math.max(0, 50 + 300 * Math.log10(characters / 50)));
+}
+
 /** Keep article counts exact while rounding the five length statistics for display. */
 export function violinSummary(statistics, template) {
     const length = value => {
@@ -344,21 +354,20 @@ export function initializeQualityMatrix() {
             const caption = node("span", undefined, "analysis-assessment-label"), swatch = svgNode("svg", {viewBox: "0 0 12 12", width: 12, height: 12, class: "analysis-swatch", "aria-hidden": "true"});
             swatch.append(svgNode("rect", {width: 12, height: 12, fill: option.color})); caption.append(swatch, label); heading.append(caption);
             const statistics = combineCells(selected.filter(cell => cell[dimension] === option.value));
-            const maximum = Math.max(1, ...statistics.density.map(point => point[0]), ...statistics.quantiles.filter(value => value !== null));
             const summary = violinSummary(statistics, data.labels.violin_summary || "Total: {pages}; measured: {measured}; minimum: {minimum}; P25: {p25}; P50: {p50}; P75: {p75}; maximum: {maximum}");
-            const mini = svgNode("svg", {viewBox:"-10 0 1020 60", preserveAspectRatio:"none", class:"analysis-mini-violin", "data-analysis-violin":option.value, role:"img", "aria-label":`${option.label}: ${summary}`});
+            const mini = svgNode("svg", {viewBox:"-10 0 1020 60", preserveAspectRatio:"none", class:"analysis-mini-violin", "data-analysis-violin":option.value, role:"img", "aria-label":`${option.label}: ${summary}`, "aria-describedby":"analysis-violin-note"});
             mini.append(svgNode("title", {}, summary), svgNode("line", {x1:0,x2:1000,y1:30,y2:30,class:"analysis-violin-track"}));
             if (statistics.density.length) {
-                const upper = statistics.density.map(([x,y]) => `${x / maximum * 1000} ${30 - y * 24}`), lower = [...statistics.density].reverse().map(([x,y]) => `${x / maximum * 1000} ${30 + y * 24}`);
+                const upper = statistics.density.map(([x,y]) => `${proseLengthPosition(x)} ${30 - y * 24}`), lower = [...statistics.density].reverse().map(([x,y]) => `${proseLengthPosition(x)} ${30 + y * 24}`);
                 mini.append(svgNode("path", {d:`M ${[...upper,...lower].join(" L ")} Z`,fill:option.color,class:"analysis-violin-density"}));
             }
             if (statistics.quantiles[2] !== null) {
-                const median = statistics.quantiles[2] / maximum * 1000;
+                const median = proseLengthPosition(statistics.quantiles[2]);
                 mini.append(svgNode("line", {x1:median,x2:median,y1:17,y2:43,class:"analysis-violin-median"}));
             }
             for (const [index, value] of statistics.quartiles.entries()) {
                 if (value === null) continue;
-                const x = value / maximum * 1000;
+                const x = proseLengthPosition(value);
                 mini.append(svgNode("line", {x1:x,x2:x,y1:30,y2:30,class:"analysis-violin-quartile","data-percentile":index ? "75" : "25"}));
             }
             const miniCell = node("td", undefined, "analysis-mini-cell"), miniLink = chartLink(dimension, option.value, option.label);

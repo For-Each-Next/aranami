@@ -223,7 +223,24 @@ def _years(data: dict, interface: Interface) -> dict:
     }
 
 
-def _violin_path(points: list[dict], maximum: float) -> str | None:
+def prose_length_position(characters: float) -> float:
+    """Map prose length onto the fixed logarithmic SVG scale.
+
+    Every tenfold increase advances 30%: 50 characters map to 5%,
+    500 to 35%, 5,000 to 65%, and 50,000 to 95%. Zero and values
+    outside the visible range sit at the nearest endpoint; labels
+    retain actual observations. Saved density heights remain in the
+    original character units.
+
+    Returns:
+        SVG coordinate between zero and 1,000, inclusive.
+    """
+    if characters <= 0:
+        return 0
+    return min(1000, max(0, 50 + 300 * log10(characters / 50)))
+
+
+def _violin_path(points: list[dict]) -> str | None:
     """Map saved density points into a mirrored horizontal SVG shape.
 
     Returns:
@@ -232,23 +249,23 @@ def _violin_path(points: list[dict], maximum: float) -> str | None:
     if not points:
         return None
     upper = [
-        f"{point['position'] / maximum * 1000:.2f} "
+        f"{prose_length_position(point['position']):.2f} "
         f"{30 - point['density'] * 24:.2f}"
         for point in points
     ]
     lower = [
-        f"{point['position'] / maximum * 1000:.2f} "
+        f"{prose_length_position(point['position']):.2f} "
         f"{30 + point['density'] * 24:.2f}"
         for point in reversed(points)
     ]
     return "M " + " L ".join([*upper, *lower]) + " Z"
 
 
-def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
+def _lengths(data: dict, interface: Interface) -> list[dict]:
     """Position saved percentile intervals on a shared visual scale.
 
     Returns:
-        Localized ranges and the common maximum label.
+        Localized ranges on the fixed compressed character scale.
     """
     selection = data.get("selection") or {}
     quartile_lookup = {
@@ -274,19 +291,6 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
             )
         )
     ]
-    range_maximum = (
-        max(
-            (
-                max(
-                    (point["position"] for point in row.get("density", [])),
-                    default=row.get("central_95_high") or 0,
-                )
-                for row in visible
-            ),
-            default=1,
-        )
-        or 1
-    )
     lengths = []
     for row in visible:
         low, high = row.get("central_68_low"), row.get("central_68_high")
@@ -305,18 +309,19 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
             "median_label": _number(median),
             "range_68": _range(row, "central_68"),
             "range_95": _range(row, "central_95"),
-            "low": round((low or 0) / range_maximum * 1000, 2),
+            "low": round(prose_length_position(low or 0), 2),
             "width": round(
-                ((high or 0) - (low or 0)) / range_maximum * 1000,
+                prose_length_position(high or 0)
+                - prose_length_position(low or 0),
                 2,
             ),
-            "median_x": round((median or 0) / range_maximum * 1000, 2),
+            "median_x": round(prose_length_position(median or 0), 2),
             "quartiles": [
                 {
                     "percentile": percentile,
                     "value": points[f"p{percentile}"],
                     "x": round(
-                        points[f"p{percentile}"] / range_maximum * 1000,
+                        prose_length_position(points[f"p{percentile}"]),
                         2,
                     ),
                 }
@@ -333,10 +338,7 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
                 p75=_percentile_label(points.get("p75")),
                 maximum=_percentile_label(points.get("maximum")),
             ),
-            "violin_path": _violin_path(
-                row.get("density", []),
-                range_maximum,
-            ),
+            "violin_path": _violin_path(row.get("density", [])),
             "color": _PROFILE.color(
                 row["grade"] or row["importance"],
                 "class" if row["group"] == "grade" else "importance",
@@ -344,7 +346,7 @@ def _lengths(data: dict, interface: Interface) -> tuple[list[dict], str]:
             if (row["grade"] or row["importance"]) != "Unknown"
             else "#72989c",
         })
-    return lengths, _number(range_maximum)
+    return lengths
 
 
 def _percentile_label(value: float | None) -> str:
@@ -668,7 +670,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
         total,
         interface,
     )
-    lengths, range_maximum = _lengths(data, interface)
+    lengths = _lengths(data, interface)
     length_lookup = {
         (row["group"], row["grade"] or row["importance"]): row
         for row in lengths
@@ -823,7 +825,6 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
             "importance_lengths": [
                 row for row in lengths if row["group"] == "importance"
             ],
-            "range_maximum": range_maximum,
             "articles": _articles({**data, "articles": shown}, interface),
             "grade_options": matrix["grades"]
             if matrix

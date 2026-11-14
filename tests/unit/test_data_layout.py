@@ -1,4 +1,4 @@
-"""Verify migration, completed periods and shared SQL capture."""
+"""Verify saved observations, completed periods and shared SQL."""
 
 # Exercise exact persisted contracts and historical identities.
 # ruff: file-ignore[pytest-unittest-raises-assertion]
@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 import polars as pl
 from wiki_fixtures import OfflineSite
 
-from data import migration, project_data
+from data import project_data
 from data.caching import project_observations
 from shared.config import PROJECT_DATA_TASKFORCES
 from shared.sources.quarry import freshness
@@ -133,8 +133,8 @@ class TestDataLayout(TestCase):
             assert fetch.call_args.args[1].is_select
 
     @staticmethod
-    def test_migration_preserves_unknown_talk_revision() -> None:
-        """Migrate an archive with a missing revision field."""
+    def test_historical_read_preserves_unknown_talk_revision() -> None:
+        """Read historical nulls without rewriting archived evidence."""
         source = pl.DataFrame({
             "page_id": [1],
             "page_namespace": [0],
@@ -182,25 +182,23 @@ class TestDataLayout(TestCase):
             manifest["sha256"] = hashlib.sha256(
                 decode_assessments(encoded).write_json().encode(),
             ).hexdigest()
-            legacy = (
-                root
-                / "reports/data/projects/zhwiki/电子游戏/2026/20261113.parquet"
-            )
-            legacy.parent.mkdir(parents=True)
             encoded.write_parquet(
-                legacy,
+                current.path,
                 metadata={"aranami": json.dumps(manifest)},
             )
-            original = legacy.read_bytes()
-            current.path.unlink()
-            receipt = migration.migrate(root)
-            assert receipt["complete"]
-            assert legacy.read_bytes() == original
-            converted = pl.read_parquet(root / "data/archive/20261113.parquet")
-            assert converted["talk_page_latest"].to_list() == [None]
-            assert converted["page_rev_timestamp"].to_list() == [None]
-            assert converted["talk_page_id"].to_list() == [2]
-            assert migration.migrate(root) == receipt
+            original = current.path.read_bytes()
+            saved = project_data.read_snapshot(
+                "zhwiki",
+                "电子游戏",
+                _NOW.date(),
+                runtime=root,
+            )
+            assert saved is not None
+            assert current.path.read_bytes() == original
+            members = saved.tables["members"]
+            assert members["talk_page_rev"].to_list() == [None]
+            assert members["page_rev_timestamp"].to_list() == [None]
+            assert members["talk_page_id"].to_list() == [2]
 
     @staticmethod
     def test_hour_labels_name_completed_hour() -> None:

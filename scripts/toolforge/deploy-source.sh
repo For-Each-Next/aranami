@@ -21,6 +21,16 @@ validator="$stage/scripts/toolforge/validate-source.py"
 # No jobs, source directories, or runtime data change before this succeeds.
 python3 "$validator" verify "$stage"
 cd "$tool_dir"
+# The completed layout conversion belongs to retained v0.9.8 recovery tooling.
+# Reject old runtime owners before setup instead of silently ignoring their facts.
+for obsolete in reports/data reports/records cache/toolforge \
+    data/daily data/hourly data/imports data/conversion data/wikitext \
+    data/.wikitext-locks data/.page-staging; do
+    if [ -e "$obsolete" ] || [ -L "$obsolete" ]; then
+        printf 'Retire verified legacy data before deployment: %s\n' "$obsolete" >&2
+        exit 1
+    fi
+done
 for path in deployment-backups deployment-envs; do
     test ! -L "$path"
     if [ -e "$path" ]; then test -d "$path"; fi
@@ -148,10 +158,6 @@ for service in aranami-web aranami-hub; do
 done
 # Drain before selection or pod deletion; Kubernetes' grace timer has not begun.
 if [ -f "$backup/aranami-hub.replicas" ]; then drain_hub; fi
-# Preserve the old layout for rollback while installing verified data copies.
-toolforge jobs run "aranami-data-$token" --image python3.13 --mount=all \
-    --command "env PYTHONPATH=$stage/src PYTHONDONTWRITEBYTECODE=1 $environment/bin/python -m data.migration --receipt $backup/data-success.json" --wait 1800
-python3 -c 'import json, os, sys; proof=json.load(open(sys.argv[1])); assert proof["complete"] and os.path.samefile(proof["source"], sys.argv[2])' "$backup/data-success.json" "$stage"
 # app is the only selection pointer. Keep every uploaded source at its path.
 python3 "$validator" select "$stage"
 selected=true
@@ -177,7 +183,6 @@ for service in aranami-web aranami-hub; do
     fi
     kubectl rollout status "deployment/$service" --timeout=180s
 done
-python3 "$validator" retire-data "$stage"
 printf '%s\n' 'Validated code activated; existing services replaced. Missing or paused services were not started.' \
     "Backup: $backup" \
     "First website start: toolforge jobs run aranami-web --image python3.13 --continuous --mount=all --port 8000 --publish --command 'exec sh $tool_dir/app/scripts/toolforge/run-web.sh'" \

@@ -349,7 +349,7 @@ async function checkInterface(assetRoot) {
                     const label = svg.getAttribute('aria-label') || '';
                     const markers = median ? dots.length === 2 && dots.map(dot => dot.dataset.percentile).join(',') === '25,75' && dots.every(dot => dot.getAttribute('x1') === dot.getAttribute('x2') && dot.getAttribute('y1') === dot.getAttribute('y2') && getComputedStyle(dot).strokeLinecap === 'round') && Number(dots[0].getAttribute('x1')) <= Number(median.getAttribute('x1')) && Number(median.getAttribute('x1')) <= Number(dots[1].getAttribute('x1')) : dots.length === 0;
                     const form = document.querySelector('[data-quality-matrix]'), metadata = form.qualityMetadata;
-                    let values = true;
+                    let values = true, coordinates = true;
                     if (metadata) {
                         const checked = new Set([...form.querySelectorAll('[data-matrix-cell]:checked')].map(input => input.dataset.grade + '/' + input.dataset.importance));
                         const group = svg.closest('a').dataset.chartGroup, code = svg.dataset.analysisViolin;
@@ -361,8 +361,10 @@ async function checkInterface(assetRoot) {
                         const percentile = p => { if (!sample.length) return null; const position = (sample.length - 1) * p; return sample[Math.floor(position)] + (sample[Math.ceil(position)] - sample[Math.floor(position)]) * (position % 1); };
                         const expected = metadata.labels.violin_summary.replace('{pages}', count(cells.reduce((total, cell) => total + cell.pages, 0))).replace('{measured}', count(cells.reduce((total, cell) => total + cell.measured, 0))).replace('{minimum}', number(sample.length ? sample[0] : null)).replace('{p25}', number(percentile(.25))).replace('{p50}', number(percentile(.5))).replace('{p75}', number(percentile(.75))).replace('{maximum}', number(sample.length ? sample.at(-1) : null));
                         values = title.endsWith(expected) && label.endsWith(expected);
+                        const coordinate = value => value <= 0 ? 0 : Math.min(1000, Math.max(0, 50 + 300 * Math.log10(value / 50)));
+                        coordinates = sample.length ? median && Math.abs(Number(median.getAttribute('x1')) - coordinate(percentile(.5))) <= .011 && dots.every(dot => Math.abs(Number(dot.getAttribute('x1')) - coordinate(percentile(Number(dot.dataset.percentile) / 100))) <= .011) : !median && !dots.length;
                     }
-                    return {markers, caption: values && Boolean(title && label)};
+                    return {markers: markers && coordinates, caption: values && Boolean(title && label) && svg.getAttribute('aria-describedby') === 'analysis-violin-note' && Boolean(document.querySelector('#analysis-violin-note')?.textContent)};
                 });
                 return {counts: counts.length > 0 && counts.every(Boolean), violins: violins.length > 0 && violins.every(item => item.markers && item.caption), fits: document.documentElement.scrollWidth <= innerWidth + 1};
             })()`);

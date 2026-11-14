@@ -4395,9 +4395,9 @@
     "zh-hant": "按作者統計"
   },
   "quality_analysis.violin_note": {
-    "en": "Wider shapes show more articles near that prose length. The vertical mark is the median; the dark line spans the central 68%. Widths are normalized within each group; measured and total article counts appear beside each label.",
-    "zh-hans": "图形越宽，表示该正文长度附近的条目越密集。竖线为中位数，深色横线为中央68%区间。各组宽度分别归一化；标签下方显示已测量数和总条目数。",
-    "zh-hant": "圖形越寬，表示該正文長度附近的條目越密集。豎線為中位數，深色橫線為中央68%區間。各組寬度分別歸一化；標籤下方顯示已測量數和總條目數。"
+    "en": "Logarithmic length scale: 50 / 500 / 5,000 / 50,000 characters at 5% / 35% / 65% / 95%. Values outside the scale sit at its endpoints; hover for actual lengths. The dark line is the median; dots mark P25/P75.",
+    "zh-hans": "对数字数刻度：50 / 500 / 5,000 / 50,000字对应5% / 35% / 65% / 95%。范围外贴边显示，悬停查看实际字数。深色竖线为中位数，圆点为P25和P75。",
+    "zh-hant": "對數字數刻度：50 / 500 / 5,000 / 50,000字對應5% / 35% / 65% / 95%。範圍外貼邊顯示，懸停查看實際字數。深色豎線為中位數，圓點為P25和P75。"
   },
   "quality_analysis.total_column": {
     "en": "Total",

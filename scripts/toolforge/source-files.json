@@ -37,8 +37,6 @@
     "src/data/dyk.py",
     "src/data/enwiki.py",
     "src/data/key_articles.py",
-    "src/data/layout_migration.py",
-    "src/data/migration.py",
     "src/data/new_pages.py",
     "src/data/newsletter/__init__.py",
     "src/data/newsletter/archive.py",

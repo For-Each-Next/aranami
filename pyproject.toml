@@ -1,6 +1,6 @@
 [project]
 name = "aranami"
-version = "0.9.12"
+version = "0.9.13"
 description = "Wikipedia reports and a read-only dashboard with Django."
 readme = "README.md"
 authors = [

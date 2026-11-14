@@ -5,6 +5,20 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.13 (2026-11-14 11:09 UTC)
+
+Overview: Removed completed migration machinery and made article-length
+violins comparable on a fixed logarithmic scale.
+
+- Retired one-off flat-storage conversion code and deployment jobs after
+  verified migration; retained historical report links and active evidence readers.
+- Applied the same logarithmic length axis to initial and filtered charts,
+  placing 50, 500, 5,000 and 50,000 characters at 5%, 35%, 65% and 95%.
+- Kept actual percentile and length labels when endpoint positions are clipped,
+  and explained the shared scale in all three interface languages.
+- Archived obsolete server generations, environments and legacy files with a
+  recovery receipt, preserving every file and all historical evidence.
+
 ### 0.9.12 (2026-11-14 10:52 UTC)
 
 Overview: Retired the completed redirect-recovery workflow from the website

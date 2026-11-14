@@ -19,7 +19,6 @@ import polars as pl
 from polars.testing import assert_frame_equal
 
 from data import project_data as snapshots
-from data.migration import migrate
 from runtime.project_observations import project_cycle
 from shared.sources.quarry import projects
 from shared.support.activity import activity_observer
@@ -602,44 +601,6 @@ class TestUnicodeProjectData(_ProjectDataFixture):
                     == saved.manifest
                 )
                 load.assert_called_once_with(project)
-
-    def test_legacy_unicode_daily_capture_remains_first_complete_write(
-        self,
-    ) -> None:
-        """Reuse historical bytes before making a new ASCII file."""
-        project = "电子游戏"
-        saved = snapshots.ensure_snapshot(
-            "enwiki",
-            project,
-            _DAY,
-            load_members=lambda _: _members().rename({
-                "page_revision": "rev_id",
-                "talk_revision": "talk_page_rev",
-            }),
-            runtime=self.root,
-            observed_at=_NOW,
-        )
-        current = saved.path
-        legacy = self.root / (
-            "reports/data/projects/enwiki/电子游戏/2026/20261102.parquet"
-        )
-        legacy.parent.mkdir(parents=True)
-        current.rename(legacy)
-        original = legacy.read_bytes()
-
-        migrate(self.root)
-        reused = snapshots.ensure_snapshot(
-            "enwiki",
-            project,
-            _DAY,
-            load_members=Mock(side_effect=AssertionError("Duplicate read")),
-            runtime=self.root,
-            observed_at=_NOW + dt.timedelta(hours=2),
-        )
-        assert reused.path == current
-        assert reused.manifest == saved.manifest
-        assert legacy.read_bytes() == original
-        assert current.exists()
 
 
 class TestSavedProjectActivity(_ProjectDataFixture):
