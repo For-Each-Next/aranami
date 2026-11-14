@@ -150,23 +150,39 @@ function initializeChartArticles(rows) {
     const body = dialog.querySelector("[data-chart-article-rows]");
     const count = dialog.querySelector("[data-chart-article-count]");
     const heading = document.getElementById("analysis-chart-articles-heading");
+    const pager = dialog.querySelector("[data-chart-pager]");
+    const sizeControl = pager.querySelector("[data-chart-size]");
+    let selected = [], page = 1;
+    const pageCount = () => Math.max(1, Math.ceil(selected.length / Number(sizeControl.value)));
+    const actions = {first: () => 1, prev: () => page - 1, next: () => page + 1, last: pageCount};
+    function render() {
+        const size = Number(sizeControl.value), pages = pageCount();
+        page = Math.max(1, Math.min(page, pages));
+        body.replaceChildren(...selected.slice((page - 1) * size, page * size).map((source, index) => {
+            const row = document.createElement("tr"), cached = source.element;
+            row.dataset.chartArticle = source.dataset.title;
+            const original = articleElement(source);
+            for (const column of [0, 1, 2, 3, 4, 6]) {
+                const cell = original.cells[column].cloneNode(true);
+                if (!column) cell.textContent = String((page - 1) * size + index + 1);
+                row.append(cell);
+            }
+            if (source.article && !cached) delete source.element;
+            return row;
+        }));
+        pager.querySelector("[data-chart-page-status]").textContent = pager.dataset.pageStatus.replace("{page}", String(page)).replace("{total}", String(pages));
+        for (const key of Object.keys(actions)) pager.querySelector(`[data-chart-${key}]`).disabled = ["first", "prev"].includes(key) ? page === 1 : page === pages;
+    }
+    for (const [key, destination] of Object.entries(actions)) pager.querySelector(`[data-chart-${key}]`).addEventListener("click", () => {page = destination(); render();});
+    sizeControl.addEventListener("change", () => {page = 1; render();});
     document.addEventListener("click", event => {
         const link = event.target.closest?.("[data-chart-group]");
         if (!link || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         event.stopPropagation();
-        const selected = rows.filter(row => chartArticleMatches(row, link.dataset))
+        selected = rows.filter(row => chartArticleMatches(row, link.dataset))
             .sort((left, right) => compareAnalysisRows(left, right, 4, true, document.documentElement.lang));
-        body.replaceChildren(...selected.map((source, index) => {
-            const row = document.createElement("tr");
-            row.dataset.chartArticle = source.dataset.title;
-            for (const column of [0, 1, 2, 3, 4, 6]) {
-                const cell = articleElement(source).cells[column].cloneNode(true);
-                if (!column) cell.textContent = String(index + 1);
-                row.append(cell);
-            }
-            return row;
-        }));
+        page = 1; render();
         heading.textContent = link.dataset.chartLabel;
         count.textContent = count.dataset.label.replace("{count}", String(selected.length));
         link.focus();

@@ -4410,14 +4410,14 @@
     "zh-hant": "沒有符合篩選條件的條目。"
   },
   "quality_analysis.prose": {
-    "en": "Prose characters",
-    "zh-hans": "正文字数",
-    "zh-hant": "正文字數"
+    "en": "Prose",
+    "zh-hans": "正文",
+    "zh-hant": "正文"
   },
   "quality_analysis.source_size": {
-    "en": "Page size",
-    "zh-hans": "页面大小",
-    "zh-hant": "頁面大小"
+    "en": "Size",
+    "zh-hans": "大小",
+    "zh-hant": "大小"
   },
   "routine.quality-authorship": {
     "en": "Quality author statistics",

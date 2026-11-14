@@ -113,7 +113,12 @@ export function articleElement(record) {
         }
         dialog.replaceChildren(header, body); details.focus(); dialog.showModal();
     });
-    row.cells[5].append(details); row.cells[6].textContent = format(article.prose_characters); row.cells[7].textContent = article.source_bytes === null ? "—" : `${(article.source_bytes / 1000).toFixed(1)} kB`;
+    row.cells[5].append(details);
+    row.cells[6].textContent = format(article.prose_characters);
+    row.cells[7].textContent = article.source_bytes === null ? "—" : (article.source_bytes / 1000).toLocaleString(document.documentElement.lang, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    for (const column of [0, 6, 7]) row.cells[column].classList.add("analysis-number");
+    if (article.prose_characters !== null) {if (document.documentElement.lang === "en") row.cells[6].append(document.createTextNode(" ")); row.cells[6].append(node("small", metadata.labels.words));}
+    if (article.source_bytes !== null) row.cells[7].append(document.createTextNode(" "), node("small", "kB"));
     record.element = row; return row;
 }
 

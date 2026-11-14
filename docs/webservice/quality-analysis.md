@@ -133,7 +133,8 @@ Only the initial twenty article rows are emitted as table markup. Remaining
 rows use a compact saved catalog; the browser creates the visible page and
 prepares the preceding and following two pages during idle time. It evicts
 other generated rows. Filtering, sorting, chart dialogs and adjacent-page
-preloading do not contact upstream APIs or replicas. Author filters use saved
+preloading do not contact upstream APIs or replicas. Chart dialogs likewise
+materialize only their visible page and share the standard pagination footer. Author filters use saved
 WikiWho contribution ranks: first, top two, top three or all; tied shares
 receive the same minimum rank.
 

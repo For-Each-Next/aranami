@@ -1519,6 +1519,16 @@ async function checkInterface(assetRoot) {
                             host.querySelector('[data-analysis-next]').click();
                             const visible = [...host.querySelectorAll('[data-analysis-row]')];
                             const pagination = visible.length === 20 && visible.every((row,index) => Number(row.cells[0].textContent) === 21 + index);
+                            const headings = [...host.querySelectorAll('thead th')].slice(-2).map(item => item.textContent);
+                            const shortHeaders = document.documentElement.lang === 'en' || headings.join('/') === '正文/大小';
+                            const compactUnits = visible.filter(row => row.dataset.measured === '1').every(row => row.cells[6].querySelector('small') && (document.documentElement.lang === 'en' || !row.cells[6].textContent.includes(' 字')));
+                            const oldImportance = host.analysisRows.map(row => row.dataset.importance);
+                            host.analysisRows.forEach(row => row.dataset.importance = 'High');
+                            document.querySelector('[data-chart-group="importance"][data-chart-value="High"]').dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true}));
+                            const firstChartPage = dialog.querySelectorAll('[data-chart-article]').length === 20;
+                            dialog.querySelector('[data-chart-next]').click();
+                            const chartPagination = firstChartPage && dialog.querySelectorAll('[data-chart-article]').length === 20 && dialog.querySelector('[data-chart-article] td').textContent === '21';
+                            dialog.close(); host.analysisRows.forEach((row,index) => row.dataset.importance = oldImportance[index]);
                             const author = host.querySelector('[data-analysis-author]'); author.value = 'Author_B'; author.dispatchEvent(new Event('input'));
                             const rank = host.querySelector('[data-analysis-author-rank]'); rank.value = '1'; rank.dispatchEvent(new Event('change'));
                             const first = host.querySelectorAll('[data-analysis-row]').length;
@@ -1530,9 +1540,9 @@ async function checkInterface(assetRoot) {
                             for (const input of form.querySelectorAll('[data-matrix-cell]')) input.checked = defaultGrades.includes(input.dataset.grade);
                             form.querySelector('[data-matrix-cell]').dispatchEvent(new Event('change'));
                             window.fetch = original;
-                            return {expanded,ranged,exact,pagination,rank:second > first,totalsOnly,requests};
+                            return {expanded,ranged,exact,pagination,shortHeaders,compactUnits,chartPagination,rank:second > first,totalsOnly,requests};
                         })()`);
-                        assert.deepEqual(interaction, {expanded:true,ranged:true,exact:true,pagination:true,rank:true,totalsOnly:true,requests:0});
+                        assert.deepEqual(interaction, {expanded:true,ranged:true,exact:true,pagination:true,shortHeaders:true,compactUnits:true,chartPagination:true,rank:true,totalsOnly:true,requests:0});
                         for (const section of ['distribution','years']) {
                             await evaluate(`document.getElementById('analysis-${section}').scrollIntoView()`);
                             const shot = await call('Page.captureScreenshot', {format:'png',captureBeyondViewport:false},sessionId);

@@ -536,6 +536,7 @@ def quality_analysis_context(data: dict, interface: Interface) -> dict:
                     "authorship_note",
                     "editor_share",
                     "editor_bytes",
+                    "words",
                 )
             },
             "last_year": selection["last_year"],

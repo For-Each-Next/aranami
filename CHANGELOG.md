@@ -16,7 +16,7 @@ Parquet layout, while unifying quality analysis and fixing newsletter grouping.
 - Prepared hourly current and listing-version authorship, contribution-rank
   filtering, exact endpoint links and WikiWho visual-analysis links.
 - Limited article-table rendering to visible and adjacent pages, unified site
-  pagination footers and simplified author totals and contribution dialogs.
+  pagination footers, shortened column labels and simplified author dialogs.
 - Recognized explicit B and all six B criteria independently, with complete
   criteria taking precedence over C and all article grades using talk history.
 - Embedded miniature length violins in distribution tables, hid unsupported
