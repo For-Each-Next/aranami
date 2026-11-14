@@ -228,13 +228,31 @@ async function checkInterface(assetRoot) {
                 const date = columns.findIndex(column => column.classList.contains('quality-column-listed'));
                 const missing = date < 0 ? [] : [...table.tBodies[0].rows].filter(row => !row.hidden && !row.cells[date].dataset.sort).map(row => row.cells[date].textContent.trim());
                 const scroller = table.closest('.table-scroll'), dialog = table.closest('dialog');
+                let authorDirectory = null;
+                if (table.classList.contains('quality-author-directory')) {
+                    const font = parseFloat(getComputedStyle(table).fontSize), originalWidth = table.getBoundingClientRect().width;
+                    const row = [...table.tBodies[0].rows].find(row => !row.hidden), cell = row?.cells[title], link = cell?.querySelector('a');
+                    let wraps = false;
+                    if (link) {
+                        const original = link.textContent; link.textContent = 'LongUnbrokenEditorName'.repeat(12);
+                        const range = document.createRange(); range.selectNodeContents(link);
+                        const lines = [...range.getClientRects()], box = cell.getBoundingClientRect();
+                        wraps = lines.length > 1 && lines.every(line => line.left >= box.left - 1 && line.right <= box.right + 1);
+                        link.textContent = original;
+                    }
+                    authorDirectory = {width:originalWidth, editorWidth:widths[title], cap:font * 44, editorCap:font * 20,
+                        countWidth:widths[columns.findIndex(column => column.classList.contains('quality-column-count'))], countTarget:font * 8,
+                        wraps, stable:Math.abs(table.getBoundingClientRect().width - originalWidth) <= 1};
+                }
                 return {kind:table.className, widths, widerTitle: compact.every(width => widths[title] > width * 1.2),
                     localScroll: table.getBoundingClientRect().width <= scroller.clientWidth + 1 || ['auto', 'scroll'].includes(getComputedStyle(scroller).overflowX),
                     fits: document.documentElement.scrollWidth <= innerWidth + 1 && (!dialog || dialog.scrollWidth <= dialog.clientWidth + 1),
-                    missing, missingLabel: ${JSON.stringify(interfaceMessages['quality_analysis.unknown_listing'][locale])}, misleadingLabel: ${JSON.stringify(interfaceMessages['quality_authorship.current_revision'][locale])}};
+                    missing, authorDirectory, missingLabel: ${JSON.stringify(interfaceMessages['quality_analysis.unknown_listing'][locale])}, misleadingLabel: ${JSON.stringify(interfaceMessages['quality_authorship.current_revision'][locale])}};
             }))()`);
             assert.ok(tables.length > 0 && tables.every(table => table.widerTitle && table.localScroll && table.fits), 'article/user names need more room than compact columns and overflow must stay in table scrollers: ' + JSON.stringify(tables));
             assert.ok(tables.every(table => table.missing.every(text => text.includes(table.missingLabel) && !text.includes(table.misleadingLabel))), 'missing listing dates must use the localized unavailable date label: ' + JSON.stringify(tables));
+            const directories = tables.flatMap(table => table.authorDirectory ? [table.authorDirectory] : []);
+            assert.ok(directories.every(table => table.width <= table.cap + 1 && table.editorWidth <= table.editorCap + 1 && Math.abs(table.countWidth - table.countTarget) <= 1 && table.wraps && table.stable), 'author directories must bound short-name space, wrap long names and preserve count width: ' + JSON.stringify(directories));
         };
         const checkQualityText = async phase => {
             const unresolved = await evaluate(`(() => {

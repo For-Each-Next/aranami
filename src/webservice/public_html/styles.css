@@ -1636,6 +1636,10 @@ table.quality-chart-articles {
     min-inline-size: 52rem;
 }
 
+table.quality-author-directory {
+    max-inline-size: 44em;
+}
+
 .quality-data-table .quality-column-ordinal {
     inline-size: 4em;
 }

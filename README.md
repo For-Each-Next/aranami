@@ -1,6 +1,6 @@
 # Aranami
 
-Aranami v0.9.10 improves article-statistics performance from the preserved
+Aranami v0.9.11 improves article-statistics performance from the preserved
 v0.9.8 release. The [CHANGELOG](CHANGELOG.md) records completed work.
 The original v0.9.8 release remains available in its Git tag.
 

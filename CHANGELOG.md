@@ -5,6 +5,13 @@ v0.8.8 was consolidated into the v0.9.2 release.
 
 ## Until 0.10
 
+### 0.9.11 (2026-11-14 10:49 UTC)
+
+Overview: Kept the editor directory compact on wide screens.
+
+- Limited author tables to a readable width so editor names no longer absorb
+  all remaining page space, preserving metadata columns and narrow-screen scrolling.
+
 ### 0.9.10 (2026-11-14 10:25 UTC)
 
 Overview: Corrected article-statistics pagination and percentile labels, and
